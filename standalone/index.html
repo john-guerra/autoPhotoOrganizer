@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Context Menu</title>
+  <link rel="stylesheet" type="text/css" href="albumChart.css">
+</head>
+<body>
+<h1>Files</h1>
+
+<label for="files">Input files: </label><input type="file" id="files" name="files[]" multiple />
+
+<br>
+<label for="output">Output folder: </label><input type="file" id="output" name="output"/>
+<br>
+<label for="inputPrefix">Prefix: </label><input type="text" id="inputPrefix" value="Album">
+<br>
+<button id="btnAutoAlbums">autoAlbums</button>
+<button id="btnCopy">copyFiles</button>
+<div id="copyProgress"></div>
+<br>
+<output id="list"></output>
+<br>
+<br>
+File Count: <div id="fileCount">0</div>
+Avg separation: <div id="avgSeparation">0</div>
+
+
+<div id="chart"></div>
+<h2>Albums</h2>
+<div id="albums"></div>
+
+
+
+
+<script src="http://d3js.org/d3.v3.min.js" charset="utf-8"></script>
+<script src="albumsChart.js"></script>
+<script src="photoTimelineChart.js"></script>
+<script src="main.js"></script>
+
+</body>
+</html>

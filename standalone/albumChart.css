@@ -1,0 +1,14 @@
+.albumPhoto {
+	width: 10px;
+	height: 50px;
+}
+
+.albumPhoto.showPhoto {
+	width: auto;
+	height: 50px;
+}
+.albumPhoto.noShowPhoto {
+	width: auto;
+	height: 50px;
+	background-color: #aaa;
+}

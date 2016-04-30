@@ -1,0 +1,7 @@
+{
+  "name": "helloworld",
+  "main": "index.html",
+  "dependencies": {
+    "exif-js": "^2.1.1"
+  }
+}
