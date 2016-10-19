@@ -3,5 +3,8 @@
   "main": "index.html",
   "dependencies": {
     "exif-js": "^2.1.1"
+  },
+  "window": {
+    "toolbar": true
   }
 }

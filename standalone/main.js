@@ -6,15 +6,16 @@
     var fs = require('fs');
     var fse = require('fs-extra');
     var EXIF = require('exif-js');
+    var path = require('path');
 
 
     var fmt = d3.time.format("%Y:%m:%d %H:%M:%S");
-    var path = process.argv.length > 2 ? process.argv[2] : "/Users/aguerra/Pictures/fotos/2015/2015_12Dic_27_La_Pastora_selected_peq/";
+    var inputPath = process.argv.length > 2 ? process.argv[2] : "/Users/aguerra/Pictures/fotos/2015/2015_12Dic_27_La_Pastora_selected_peq/";
     var photosByDate = [];
     var albums = [];
     var avgSeparation = 0; //What's the average separation between photos
 
-    // path = "/Volumes/EOS_DIGITAL/DCIM/101CANON/";
+    // inputPath = "/Volumes/EOS_DIGITAL/DCIM/101CANON/";
 
     var albumsC = albumsChart();
     var timelineC = photoTimelineChart()
@@ -38,6 +39,9 @@
                 filePart = file;
             }
 
+            // Default date is the file's date
+            var date = file.lastModifiedDate;
+
             var binaryReader = new FileReader();
 
             binaryReader.onload = function (e) {
@@ -45,27 +49,28 @@
                     EXIF.getData(binaryReader.result, function() {
                             // console.log(EXIF.pretty(this));
                             try {
-                                var date =  fmt.parse(this.exifdata.DateTime);
+                                date =  fmt.parse(this.exifdata.DateTime);
                                 // console.log(date);
-                                result.push({id:file.path,
-                                    url:file.path,
-                                    thumb:this.exifdata["Composite:ThumbnailImage"],
-                                    createDate:fmt.parse(this.exifdata.DateTime)
-                                });
                             } catch (error) {
                                 console.log("Error parsing image");
                                 console.log(error);
                                 console.log(this.exifdata);
                             }
-                            done();
-
                         });
                        // var fileDate = EXIF.getTag(e.target.result, "CreateDate");
                 } catch (error) {
                     console.log("error getting exif");
                     console.log(error);
-                    done();
+                    // done();
                 }
+
+                result.push({id:file.path,
+                    url:file.path,
+                    // thumb:this.exifdata["Composite:ThumbnailImage"],
+                    createDate:date
+                });
+                done();
+
             };
             // binaryReader.onload
 
@@ -158,6 +163,7 @@
             //When finished processing call a batch it again
             update(newresult);
             processFileQueue(queue, newresult);
+            detectAutoAlbums();
         });
 
     }
@@ -184,6 +190,8 @@
 
     function updateAlbums(_albums) {
         if (_albums) albums = _albums;
+
+        updateAlbumNames();
 
         var temp = d3.select("#albums")
             .datum(albums);
@@ -218,14 +226,14 @@
         // Loop through the FileList and remove the files that aren't images
         for (i = 0; f = files[i]; i++) {
             // Only process image files.
-            if (!f.type.match('image.*')) {
+            if (!f.type.match('image.*') && !f.type.match('video.*')) {
                 continue;
             }
             filesList.push(f);
 
         }
 
-        filesList = filesList.filter(function (d) { return  d.type.match('image.*'); });
+        // filesList = filesList.filter(function (d) { return  d.type.match('image.*'); });
 
         //Reorder the list to hopefully cover the time range faster
         filesList = reorderPhotos(filesList);
@@ -238,6 +246,17 @@
 
         // var resultList = [];
         processFileQueue(filesQueue, photosByDate);
+
+
+        if (files[0]) {
+            // Set output directory to the input directory by default
+            var fl = new FileList();
+            fl.append(new File(
+                    path.dirname(files[0].path),
+                    ""
+                ));
+            document.getElementById("output").files = fl;
+        }
 
     } // handleFileSelect
 
@@ -304,6 +323,7 @@
             currentRegion.photos.push(photosByDate[i]);
             if (separations[i] > (avgs + stdvs*2)) {
                 currentRegion.end = photosByDate[i].createDate;
+                setNameForAlbum(currentRegion);
                 albums.push(currentRegion);
                 currentRegion = createRegion(i+1);
             }
@@ -320,18 +340,50 @@
         d3.select("#avgSeparation").text(avgs+ "-" + stdvs);
     }
 
-    function copyAlbums() {
-        var copyAlbum = function (album) {
-            var photosCopiedCount = 0;
-            photos.forEach( function (photo) {
-                fse.copy(url, output, function (err) {
-                    if (err) {
+    function setNameForAlbum(album, i) {
+        var dateFmt = d3.time.format(document.getElementById("inputDateFmt").value);
+        var prefix = document.getElementById("inputPrefix").value;
+        album.name = dateFmt(album.start) + "_" + prefix + "_" + (i+1);
+        return album.name;
+    }
 
-                    }
-                    photosCopiedCount += 1;
-                    d3.select("#copyProgress")
-                        .text("Album: " + albumOutput + "  copying " + photosCopiedCount + " of " + album.photos.length)
-                })
+    function updateAlbumNames() {
+        albums.forEach(setNameForAlbum);
+    }
+
+    function copyAlbums() {
+        var outputFolder = document.getElementById("output").value;
+        if (albums.length ===0) {
+            alert("Run autoalbums first");
+        }
+        if (!output.value) {
+            alert("Select an output folder first");
+            return;
+        }
+        var copyAlbum = function (album, i) {
+            if (!album || !album.photos || album.photos.length === 0) {
+                alert("Requested to copy an empty album");
+                return;
+            }
+            var photosCopiedCount = 0;
+            var albumOutput = path.join(output.value, album.name);
+
+            var callbackCopy = function (err) {
+                if (err) {
+                    alert("Error copying/moving the file");
+                }
+                photosCopiedCount += 1;
+                d3.select("#copyProgress")
+                    .text("Album: " + albumOutput + "  copying " + photosCopiedCount + " of " + album.photos.length);
+            };
+
+            album.photos.forEach( function (photo) {
+                if (document.getElementById("chMoveOrCopy").checked) {
+                    fse.move(photo.url, path.join(albumOutput, path.basename(photo.url)), callbackCopy );
+                } else {
+                    fse.copy(photo.url, path.join(albumOutput, path.basename(photo.url)), callbackCopy );
+
+                }
             });
         };
         albums.forEach(copyAlbum);
@@ -341,6 +393,9 @@
     // d3.select("#files").on("change", handleFileSelect);
     d3.select("#btnAutoAlbums").on("click", detectAutoAlbums);
     d3.select("#btnCopy").on("click", copyAlbums);
+    d3.select("#inputPrefix").on("change", updateAlbums);
+    d3.select("#inputDateFmt").on("change", updateAlbums);
+
 
 
 })();

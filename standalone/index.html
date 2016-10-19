@@ -10,12 +10,17 @@
 <label for="files">Input files: </label><input type="file" id="files" name="files[]" multiple />
 
 <br>
-<label for="output">Output folder: </label><input type="file" id="output" name="output"/>
+<label for="output">Output folder: </label><input type="file" nwdirectory id="output" name="output"/>
 <br>
 <label for="inputPrefix">Prefix: </label><input type="text" id="inputPrefix" value="Album">
 <br>
+<label for="inputDateFmt">Date Format: </label><input type="text" id="inputDateFmt" value="%Y_%m%b_%d">
+<br>
 <button id="btnAutoAlbums">autoAlbums</button>
+<br>
+<input type="checkbox" name="chMoveOrCopy" id="chMoveOrCopy" ><label for="chMoveOrCopy" alt="Select if you want the files to be moved" title="Select if you want the files to be moved">Move files?</label>
 <button id="btnCopy">copyFiles</button>
+
 <div id="copyProgress"></div>
 <br>
 <output id="list"></output>
