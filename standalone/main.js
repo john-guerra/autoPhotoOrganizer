@@ -47,9 +47,14 @@
             binaryReader.onload = function (e) {
                 try {
                     EXIF.getData(binaryReader.result, function() {
-                            // console.log(EXIF.pretty(this));
                             try {
-                                date =  fmt.parse(this.exifdata.DateTime);
+                                var tmpdate =  fmt.parse(this.exifdata.DateTime);
+                                if (tmpdate) {
+                                    date = tmpdate;
+                                } else {
+                                    console.log("Error parsing date ");
+                                    console.log(EXIF.pretty(this));
+                                }
                                 // console.log(date);
                             } catch (error) {
                                 console.log("Error parsing image");
@@ -64,6 +69,9 @@
                     // done();
                 }
 
+                if (date === undefined || date === null) {
+                    alert("Date === undefined \n" + file.path );
+                }
                 result.push({id:file.path,
                     url:file.path,
                     // thumb:this.exifdata["Composite:ThumbnailImage"],
@@ -341,6 +349,7 @@
     }
 
     function setNameForAlbum(album, i) {
+
         var dateFmt = d3.time.format(document.getElementById("inputDateFmt").value);
         var prefix = document.getElementById("inputPrefix").value;
         album.name = dateFmt(album.start) + "_" + prefix + "_" + (i+1);
@@ -348,6 +357,7 @@
     }
 
     function updateAlbumNames() {
+        console.log(albums);
         albums.forEach(setNameForAlbum);
     }
 
@@ -370,7 +380,9 @@
 
             var callbackCopy = function (err) {
                 if (err) {
-                    alert("Error copying/moving the file");
+                    alert("Error copying/moving the file " + err);
+                    console.log(err);
+                    return;
                 }
                 photosCopiedCount += 1;
                 d3.select("#copyProgress")
