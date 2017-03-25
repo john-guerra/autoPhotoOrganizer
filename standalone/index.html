@@ -2,7 +2,20 @@
 <html>
 <head>
   <title>Context Menu</title>
+  <link href="https://fonts.googleapis.com/css?family=Bitter|Raleway|Roboto" rel="stylesheet">
   <link rel="stylesheet" type="text/css" href="albumChart.css">
+  <style>
+  	html, button {
+  		font-family: 'Raleway', sans-serif;
+  	}
+  	input {
+  		font-family: 'Roboto', sans-serif;
+  	}
+  	h1, h2, h3, h4, h5, h6 {
+  		font-family: 'Bitter', serif;
+
+  	}
+  </style>
 </head>
 <body>
 <h1>Files</h1>
@@ -24,10 +37,23 @@
 <div id="copyProgress"></div>
 <br>
 <output id="list"></output>
+<label for="chIncludeAllFiles">Include all files</label>
+<input id="chIncludeAllFiles" type="checkbox" aria-label="Include all files"></input>
+<div>File Count: <div id="fileCount">0</div></div>
 <br>
-<br>
-File Count: <div id="fileCount">0</div>
-Avg separation: <div id="avgSeparation">0</div>
+<div>Average time separation  <input type="text" disabled="true" id="inAvgTime"></input></div>
+<div>Standard deviation  <input type="text" disabled="true" id="inStDevTime"></input></div>
+<label for="chAutoCompute">Auto Compute Time separation</label>
+<input id="chAutoCompute" checked="true" type="checkbox" aria-label="auto compute time separation"></input>
+<input type="text" id="inSeparation" placeholder="separation" aria-label="Min time to separate photos" value="1"></input>
+<select name="selTimeRange" id="selTimeRange" aria-label="Time period">
+	<option value="seconds">seconds</option>
+	<option value="minutes">minutes</option>
+	<option value="hours">hours</option>
+	<option value="days" selected="true">days</option>
+	<option value="months">months</option>
+	<option value="years" >years</option>
+</select>
 
 
 <div id="chart"></div>

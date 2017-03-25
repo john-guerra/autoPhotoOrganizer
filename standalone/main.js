@@ -8,20 +8,30 @@
     var EXIF = require('exif-js');
     var path = require('path');
 
+    var gui = require('nw.gui');
+    if (process.platform === "darwin") {
+      var mb = new gui.Menu({type: 'menubar'});
+      mb.createMacBuiltin('RoboPaint', {
+        hideEdit: false,
+      });
+      gui.Window.get().menu = mb;
+    }
+
 
     var fmt = d3.time.format("%Y:%m:%d %H:%M:%S");
     var inputPath = process.argv.length > 2 ? process.argv[2] : "/Users/aguerra/Pictures/fotos/2015/2015_12Dic_27_La_Pastora_selected_peq/";
     var photosByDate = [];
     var albums = [];
     var avgSeparation = 0; //What's the average separation between photos
+    var stDevSeparation = 0; // The standard deviation of the separation between photos
+    var separation = 0; // What should we use to separate
+    var separations = []; // A list of the separations between photos
 
     // inputPath = "/Volumes/EOS_DIGITAL/DCIM/101CANON/";
 
     var albumsC = albumsChart();
     var timelineC = photoTimelineChart()
         .x(function (d) { return d.createDate;});
-
-
 
 
     function getExif3(result, done) {
@@ -171,7 +181,7 @@
             //When finished processing call a batch it again
             update(newresult);
             processFileQueue(queue, newresult);
-            detectAutoAlbums();
+            detectAlbums();
         });
 
     }
@@ -234,7 +244,8 @@
         // Loop through the FileList and remove the files that aren't images
         for (i = 0; f = files[i]; i++) {
             // Only process image files.
-            if (!f.type.match('image.*') && !f.type.match('video.*')) {
+            if (!d3.select("#chIncludeAllFiles").property("checked") &&
+                !f.type.match('image.*') && !f.type.match('video.*')) {
                 continue;
             }
             filesList.push(f);
@@ -268,20 +279,59 @@
 
     } // handleFileSelect
 
+    // Converts time using the selected range
+    function convertToFrom(time, toFrom) {
+        var range = d3.select("#selTimeRange").property("value");
+        var timeConverted=time;
+        if (toFrom==="to") {
+            switch(range) {
+                case "seconds": timeConverted = time; break;
+                case "minutes": timeConverted = time/(1000*60); break;
+                case "hours": timeConverted = time/(1000*60*60); break;
+                case "days": timeConverted = time/(1000*60*60*24); break;
+                case "months": timeConverted = time/(1000*60*60*24*30); break;
+                case "years": timeConverted = time/(1000*60*60*24*365); break;
+            }
+        } else {
+            switch(range) {
+                case "seconds": timeConverted = time; break;
+                case "minutes": timeConverted = time*(1000*60); break;
+                case "hours": timeConverted = time*(1000*60*60); break;
+                case "days": timeConverted = time*(1000*60*60*24); break;
+                case "months": timeConverted = time*(1000*60*60*24*30); break;
+                case "years": timeConverted = time*(1000*60*60*24*365); break;
+            }
+        }
+        return timeConverted;
 
-    function detectAutoAlbums() {
-        // function computeAvgSeparation(photos) {
-        //     var avg = 0;
-        //     var stdv = 0;
-        //     for (var i=0; i < photos.length-1; i+=1) {
-        //         avg += (photos[i+1].createDate - photos[i].createDate);
-        //     }
-        //     if (photos.length>0) avg/=(photos.length-1);
-        //     return avg;
-        // }
+    }
+    // Receives time in seconds and displays it in the appropriate format
+    function setTime(time, id) {
+        var timeConverted = convertToFrom(time, "to");
+        d3.select(id).property("value", timeConverted);
+    }
+
+    // Returns the current time separation
+    function getTime() {
+        var time = d3.select(id).property("value", timeConverted);
+        var timeConverted=convertToFrom(time, "from");
+        return timeConverted;
+    }
+
+    function getSeparation() {
+        return d3.select("#chAutoCompute").property("checked")?
+            avgSeparation+2*stDevSeparation :
+            convertToFrom(+d3.select("#inSeparation").property("value"), "from");
+    }
+    function updateTimes() {
+        separation = getSeparation();
+        setTime(separation, "#inSeparation");
+        setTime(avgSeparation, "#inAvgTime");
+        setTime(stDevSeparation, "#inStDevTime");
+    }
 
 
-
+    function computeSeparations() {
         function average(data){
           var sum = data.reduce(function(sum, value){
             return sum + value;
@@ -305,7 +355,7 @@
         var avgs = 0;
         var i;
         var stdvs = 0;
-        var separations = [];
+        separations=[];
         for (i=0; i < photosByDate.length-1; i+=1) {
             separations.push(photosByDate[i+1].createDate - photosByDate[i].createDate);
         }
@@ -313,10 +363,15 @@
         avgs = average(separations);
         stdvs = standardDeviation(separations, avgs);
         console.log("avgs computation time = " + (new Date() - before));
-        albums = [];
-        var currentRegion = createRegion(0);
 
 
+        avgSeparation=avgs;
+        stDevSeparation=stdvs;
+        separation = 2*stdvs;
+        updateTimes();
+    }
+
+    function detectAlbums() {
         //Creates a region starting in photo i
         function createRegion(i) {
             return {
@@ -326,10 +381,14 @@
                 id: albums.length
             };
         }
+        albums = [];
 
-        for (i=0; i < separations.length-1; i+=1) {
+        computeSeparations();
+
+        var currentRegion = createRegion(0);
+        for (var i=0; i < separations.length-1; i+=1) {
             currentRegion.photos.push(photosByDate[i]);
-            if (separations[i] > (avgs + stdvs*2)) {
+            if (separations[i] > getSeparation()) {
                 currentRegion.end = photosByDate[i].createDate;
                 setNameForAlbum(currentRegion);
                 albums.push(currentRegion);
@@ -344,10 +403,7 @@
 
         timelineC.updateRegions(albums);
         updateAlbums(albums);
-
-        d3.select("#avgSeparation").text(avgs+ "-" + stdvs);
     }
-
     function setNameForAlbum(album, i) {
 
         var dateFmt = d3.time.format(document.getElementById("inputDateFmt").value);
@@ -403,7 +459,10 @@
 
     document.getElementById('files').addEventListener('change', handleFileSelect, false);
     // d3.select("#files").on("change", handleFileSelect);
-    d3.select("#btnAutoAlbums").on("click", detectAutoAlbums);
+    d3.select("#selTimeRange").on("change", detectAlbums)
+    d3.select("#btnAutoAlbums").on("click", detectAlbums);
+    d3.select("#inSeparation").on("change", detectAlbums);
+    d3.select("#chAutoCompute").on("change", detectAlbums);
     d3.select("#btnCopy").on("click", copyAlbums);
     d3.select("#inputPrefix").on("change", updateAlbums);
     d3.select("#inputDateFmt").on("change", updateAlbums);

@@ -2,7 +2,8 @@
   "name": "helloworld",
   "main": "index.html",
   "dependencies": {
-    "exif-js": "^2.1.1"
+    "exif-js": "^2.1.1",
+    "nwjs": "^1.4.3"
   },
   "window": {
     "toolbar": true
