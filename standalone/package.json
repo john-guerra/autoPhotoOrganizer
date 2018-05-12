@@ -2,10 +2,22 @@
   "name": "helloworld",
   "main": "index.html",
   "dependencies": {
-    "exif-js": "^2.1.1",
-    "nwjs": "^1.4.3"
+    "d3": "^3.5.17",
+    "exif-js": "^2.3.0",
+    "fs-extra": "^5.0.0",
+    "htmlimage": "^1.1.0",
+    "nwjs": "^1.4.4"
   },
   "window": {
     "toolbar": true
-  }
+  },
+  "version": "1.0.0",
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
 }

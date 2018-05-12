@@ -20,8 +20,10 @@
 <body>
 <h1>Files</h1>
 
-<label for="files">Input files: </label><input type="file" id="files" name="files[]" multiple />
-
+<label for="files">Input files: </label><input type="file" id="files" name="files[]" multiple/>
+<!-- <br>
+<label for="folders">Input folders: </label><input type="file" id="folders" name="files[]" nwdirectory directory multiple/>
+ -->
 <br>
 <label for="output">Output folder: </label><input type="file" nwdirectory id="output" name="output"/>
 <br>
@@ -38,7 +40,7 @@
 <br>
 <output id="list"></output>
 <label for="chIncludeAllFiles">Include all files</label>
-<input id="chIncludeAllFiles" type="checkbox" aria-label="Include all files"></input>
+<input id="chIncludeAllFiles" type="checkbox" checked="true" aria-label="Include all files"></input>
 <div>File Count: <div id="fileCount">0</div></div>
 <br>
 <div>Average time separation  <input type="text" disabled="true" id="inAvgTime"></input></div>

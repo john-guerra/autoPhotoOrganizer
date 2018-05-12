@@ -1,20 +1,19 @@
-/* global require:true */
+/* global require:true, d3 */
+/* eslint indent : ["error", 4] */
 (function () {
     "use strict";
 
     var glob = require("glob");
-    var fs = require('fs');
-    var fse = require('fs-extra');
-    var EXIF = require('exif-js');
-    var path = require('path');
+    var fs = require("fs");
+    var fse = require("fs-extra");
+    var EXIF = require("exif-js");
+    var path = require("path");
 
-    var gui = require('nw.gui');
+    var gui = require("nw.gui");
     if (process.platform === "darwin") {
-      var mb = new gui.Menu({type: 'menubar'});
-      mb.createMacBuiltin('RoboPaint', {
-        hideEdit: false,
-      });
-      gui.Window.get().menu = mb;
+        var mb = new gui.Menu({type: "menubar"}); 
+        mb.createMacBuiltin("RoboPaint", {hideEdit: false});
+        gui.Window.get().menu = mb;
     }
 
 
@@ -22,7 +21,7 @@
     var inputPath = process.argv.length > 2 ? process.argv[2] : "/Users/aguerra/Pictures/fotos/2015/2015_12Dic_27_La_Pastora_selected_peq/";
     var photosByDate = [];
     var albums = [];
-    var avgSeparation = 0; //What's the average separation between photos
+    var avgSeparation = 0; //What"s the average separation between photos
     var stDevSeparation = 0; // The standard deviation of the separation between photos
     var separation = 0; // What should we use to separate
     var separations = []; // A list of the separations between photos
@@ -33,10 +32,15 @@
     var timelineC = photoTimelineChart()
         .x(function (d) { return d.createDate;});
 
+    function getDateFromStr(str) {
+        var m = str.match(/(\d{4})(?:-|\/|)(\d{2})(?:-|\/|)(\d{2}).*/);
+        if (!m) return m;
+        return new Date(+m[1], +m[2] - 1, +m[3]);
+    }
 
     function getExif3(result, done) {
         return function(file) {
-            // console.log("get exif3" + file);
+            console.log("get exif3", file);
             var filePart;
 
             if (file.slice) {
@@ -49,30 +53,34 @@
                 filePart = file;
             }
 
-            // Default date is the file's date
-            var date = file.lastModifiedDate;
-
+            var date;
+            // Check if the name contains a date
+            date = getDateFromStr(file.name);
+            if (!date) {
+                // If not get the latest modified date
+                date = file.lastModifiedDate;                
+            }
             var binaryReader = new FileReader();
 
             binaryReader.onload = function (e) {
                 try {
                     EXIF.getData(binaryReader.result, function() {
-                            try {
-                                var tmpdate =  fmt.parse(this.exifdata.DateTime);
-                                if (tmpdate) {
-                                    date = tmpdate;
-                                } else {
-                                    console.log("Error parsing date ");
-                                    console.log(EXIF.pretty(this));
-                                }
-                                // console.log(date);
-                            } catch (error) {
-                                console.log("Error parsing image");
-                                console.log(error);
-                                console.log(this.exifdata);
+                        try {
+                            var tmpdate =  fmt.parse(this.exifdata.DateTime);
+                            if (tmpdate) {
+                                date = tmpdate;
+                            } else {
+                                console.log("Error parsing date ");
+                                console.log(EXIF.pretty(this));
                             }
-                        });
-                       // var fileDate = EXIF.getTag(e.target.result, "CreateDate");
+                            // console.log(date);
+                        } catch (error) {
+                            console.log("Error parsing image");
+                            console.log(error);
+                            console.log(this.exifdata);
+                        }
+                    });
+                    // var fileDate = EXIF.getTag(e.target.result, "CreateDate");
                 } catch (error) {
                     console.log("error getting exif");
                     console.log(error);
@@ -123,7 +131,7 @@
     //             // console.log(e);
     //             // delete e;
     //         } catch (error) {
-    //             console.log('Error: ' + error.message);
+    //             console.log("Error: " + error.message);
     //             done();
     //         }
     //     };
@@ -135,7 +143,7 @@
     //         try {
     //             var e = new ExifImage({ image : url }, function (error, exifData) {
     //                 if (error) {
-    //                     console.log('Error: ' + error.message);
+    //                     console.log("Error: " + error.message);
     //                     done();
     //                     return;
     //                 }
@@ -151,7 +159,7 @@
     //             // console.log(e);
     //             // delete e;
     //         } catch (error) {
-    //             console.log('Error: ' + error.message);
+    //             console.log("Error: " + error.message);
     //             done();
     //         }
     //     };
@@ -238,29 +246,27 @@
 
 
     function handleFileSelect(evt) {
-        var files = evt.target.files; // FileList object
-        var filesList = [];
-        var i, f;
-        // Loop through the FileList and remove the files that aren't images
-        for (i = 0; f = files[i]; i++) {
+        var files = evt.target.files; // FileList object 
+        var filesList = []; var i, f;
+        // Loop through the FileList and remove the files that aren"t images
+        for (i = 0; (f = files[i]); i++) {
             // Only process image files.
             if (!d3.select("#chIncludeAllFiles").property("checked") &&
-                !f.type.match('image.*') && !f.type.match('video.*')) {
+                !f.type.match("image.*") && !f.type.match("video.*")) {
                 continue;
             }
             filesList.push(f);
-
         }
 
-        // filesList = filesList.filter(function (d) { return  d.type.match('image.*'); });
+        // filesList = filesList.filter(function (d) { return  d.type.match("image.*"); });
 
         //Reorder the list to hopefully cover the time range faster
         filesList = reorderPhotos(filesList);
 
         var filesQueue = [];
-        var step=50;
-        for (i=0; i < filesList.length ; i+=50) {
-            filesQueue.push(filesList.slice(i, i+50));
+        var step = 50;
+        for (i=0; i < filesList.length ; i+=step) {
+            filesQueue.push(filesList.slice(i, i+step));
         }
 
         // var resultList = [];
@@ -271,9 +277,9 @@
             // Set output directory to the input directory by default
             var fl = new FileList();
             fl.append(new File(
-                    path.dirname(files[0].path),
-                    ""
-                ));
+                path.dirname(files[0].path),
+                ""
+            ));
             document.getElementById("output").files = fl;
         }
 
@@ -333,19 +339,19 @@
 
     function computeSeparations() {
         function average(data){
-          var sum = data.reduce(function(sum, value){
-            return sum + value;
-          }, 0);
+            var sum = data.reduce(function(sum, value){
+                return sum + value;
+            }, 0);
 
-          var avg = sum / data.length;
-          return avg;
+            var avg = sum / data.length;
+            return avg;
         }
 
         function standardDeviation(data, avg) {
             var squareDiffs = data.map(function(value){
-              var diff = value - avg;
-              var sqr = diff * diff;
-              return sqr;
+                var diff = value - avg;
+                var sqr = diff * diff;
+                return sqr;
             });
 
             return Math.sqrt(average(squareDiffs));
@@ -386,7 +392,7 @@
         computeSeparations();
 
         var currentRegion = createRegion(0);
-        for (var i=0; i < separations.length-1; i+=1) {
+        for (var i=0; i < separations.length; i+=1) {
             currentRegion.photos.push(photosByDate[i]);
             if (separations[i] > getSeparation()) {
                 currentRegion.end = photosByDate[i].createDate;
@@ -418,11 +424,11 @@
     }
 
     function copyAlbums() {
-        var outputFolder = document.getElementById("output").value;
+        var outputFolder = document.getElementById("output").files;
         if (albums.length ===0) {
             alert("Run autoalbums first");
         }
-        if (!output.value) {
+        if (!outputFolder) {
             alert("Select an output folder first");
             return;
         }
@@ -432,7 +438,7 @@
                 return;
             }
             var photosCopiedCount = 0;
-            var albumOutput = path.join(output.value, album.name);
+            var albumOutput = path.join(outputFolder[0].path, album.name);
 
             var callbackCopy = function (err) {
                 if (err) {
@@ -457,9 +463,9 @@
         albums.forEach(copyAlbum);
     }
 
-    document.getElementById('files').addEventListener('change', handleFileSelect, false);
+    document.getElementById("files").addEventListener("change", handleFileSelect, false);
     // d3.select("#files").on("change", handleFileSelect);
-    d3.select("#selTimeRange").on("change", detectAlbums)
+    d3.select("#selTimeRange").on("change", detectAlbums);
     d3.select("#btnAutoAlbums").on("click", detectAlbums);
     d3.select("#inSeparation").on("change", detectAlbums);
     d3.select("#chAutoCompute").on("change", detectAlbums);

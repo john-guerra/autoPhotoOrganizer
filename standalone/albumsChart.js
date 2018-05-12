@@ -58,7 +58,7 @@ function albumsChart() {
         })
         .attr("src", function (d, i) {
 
-          return i === 0 || i === (photos.data().length - 1) ? d.url : "";
+          return i === 0 || i === (photos.data().length - 1) ? "file://" + d.url : "";
         });
 
       photos
