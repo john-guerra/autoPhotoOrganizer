@@ -1,17 +1,17 @@
-/* global require:true, d3 */
-/* eslint indent : ["error", 4] */
+/* global  d3 */
 (function () {
     "use strict";
 
-    var glob = require("glob");
-    var fs = require("fs");
+
+    // var glob = require("glob");
+    // var fs = require("fs");
     var fse = require("fs-extra");
     var EXIF = require("exif-js");
     var path = require("path");
 
     var gui = require("nw.gui");
     if (process.platform === "darwin") {
-        var mb = new gui.Menu({type: "menubar"}); 
+        var mb = new gui.Menu({type: "menubar"});
         mb.createMacBuiltin("RoboPaint", {hideEdit: false});
         gui.Window.get().menu = mb;
     }
@@ -58,7 +58,7 @@
             date = getDateFromStr(file.name);
             if (!date) {
                 // If not get the latest modified date
-                date = file.lastModifiedDate;                
+                date = file.lastModifiedDate;
             }
             var binaryReader = new FileReader();
 
@@ -246,7 +246,7 @@
 
 
     function handleFileSelect(evt) {
-        var files = evt.target.files; // FileList object 
+        var files = evt.target.files; // FileList object
         var filesList = []; var i, f;
         // Loop through the FileList and remove the files that aren"t images
         for (i = 0; (f = files[i]); i++) {

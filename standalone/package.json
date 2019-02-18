@@ -1,5 +1,5 @@
 {
-  "name": "helloworld",
+  "name": "autogallery",
   "main": "index.html",
   "dependencies": {
     "d3": "^3.5.17",
@@ -9,7 +9,14 @@
     "nwjs": "^1.4.4"
   },
   "window": {
-    "toolbar": true
+    "title": "Autogallery",
+    "icon": "link.png",
+    "toolbar": true,
+    "width": 800,
+    "height": 800,
+    "position": "mouse",
+    "min_width": 400,
+    "min_height": 200
   },
   "version": "1.0.0",
   "devDependencies": {},
