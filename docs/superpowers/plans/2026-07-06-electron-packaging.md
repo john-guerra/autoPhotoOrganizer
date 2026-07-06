@@ -14,7 +14,7 @@
 ## Global Constraints
 
 - Server stays loopback-only (`127.0.0.1`) — never change this bind, even when embedded in Electron.
-- `electron/main.cjs` and `electron/preload.cjs` MUST be CommonJS (`.cjs` extension, `require`/`module.exports`), even though the repo root `package.json` has `"type": "module"` — Node resolves module type by file extension, and this sidesteps known ESM-in-sandboxed-preload issues. `server/` and `ui/` stay ESM, unchanged.
+- `electron/main.js` and `electron/preload.js` are ES modules (`import`/`export`), consistent with the repo root `package.json`'s `"type": "module"` and with `server/`/`ui/`. Verify after any change to these files that `npm run electron:dev` still boots and `window.autogallery` is still exposed in the renderer — Electron's sandboxed preload (`sandbox: true`, required by this plan) has historically been the one spot where ESM support lagged, so this is a real thing to confirm, not an assumption.
 - Every `BrowserWindow`'s `webPreferences` MUST set `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. Never repeat `legacy/2024-electron-standalone/main.js`'s `nodeIntegration: true` / no-isolation pattern (flagged as insecure in `CLAUDE.md`). No `remote` module.
 - The only renderer-exposed native API surface is `window.autogallery.pickFolder()` via `contextBridge`. Do not add other IPC surface without updating the design doc first.
 - `server/` and `ui/` source are modified only where a task explicitly says so — this is an additive packaging layer, not a refactor.
@@ -26,8 +26,8 @@
 ## File structure
 
 New files:
-- `electron/main.cjs` — main process: creates the `BrowserWindow`, starts the embedded Express server in production, handles the `pick-folder` IPC call.
-- `electron/preload.cjs` — `contextBridge` surface exposed to the renderer.
+- `electron/main.js` — main process: creates the `BrowserWindow`, starts the embedded Express server in production, handles the `pick-folder` IPC call.
+- `electron/preload.js` — `contextBridge` surface exposed to the renderer.
 - `.github/workflows/release.yml` — CI matrix build (Mac/Windows/Linux) + publish on version tags.
 - `server/library.js` — persisted "recently scanned folders" store (mirrors `server/coverChoices.js`).
 
@@ -458,7 +458,7 @@ git commit -m "feat: add a library dropdown of recently-scanned folders"
 
 **Interfaces:**
 - Consumes: `createApp()` from `server/index.js` (existing, unmodified).
-- Produces: `electron/main.cjs` (Electron entry point, referenced by `package.json`'s `"main"` field), `electron/preload.cjs` (empty `contextBridge` scaffold, filled in by Task 4).
+- Produces: `electron/main.js` (Electron entry point, referenced by `package.json`'s `"main"` field), `electron/preload.js` (empty `contextBridge` scaffold, filled in by Task 4).
 
 - [ ] **Step 1: Add dependencies and scripts to `package.json`**
 
@@ -565,28 +565,33 @@ git add package.json package-lock.json electron/main.cjs electron/preload.cjs
 git commit -m "feat: add an Electron shell wrapping the existing server/UI unchanged"
 ```
 
+**Post-implementation amendments (both applied after the steps above, before Task 4):**
+1. A task review found `startEmbeddedServer()`/`createWindow()` had no error handling — a failed embedded-server startup would hang the window with no visible error. Fixed by wrapping `app.whenReady().then(createWindow)` in a try/catch that shows `dialog.showErrorBox` and calls `app.quit()` on failure.
+2. Per updated guidance, `electron/main.cjs`/`electron/preload.cjs` were converted to ES modules (`electron/main.js`/`electron/preload.js`, `import`/`export`) instead of CommonJS, matching the Global Constraints update above. All code shown in this task's steps above is superseded by this — Tasks 4 and 7 below already reflect the ESM form.
+
 ---
 
 ### Task 4: Native folder picker (closes #7)
 
 **Files:**
-- Modify: `electron/main.cjs`
-- Modify: `electron/preload.cjs`
+- Modify: `electron/main.js`
+- Modify: `electron/preload.js`
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
 - Produces: `window.autogallery.pickFolder(): Promise<string|null>` (renderer-facing, via `contextBridge`).
 - Consumes (in `App.svelte`): the above, feature-detected.
+- Consumes (in `electron/main.js`): the existing `app`, `BrowserWindow`, `createWindow`, `isDev` and the try/catch-wrapped `app.whenReady().then(...)` block added as Task 3's error-handling amendment — add to that block, don't replace it.
 
-- [ ] **Step 1: Add the IPC handler in `electron/main.cjs`**
+- [ ] **Step 1: Add the IPC handler in `electron/main.js`**
 
 Add `dialog` and `ipcMain` to the top import:
 
 ```js
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 ```
 
-Add, after the `createWindow` function definition (before `app.whenReady().then(createWindow);`):
+Add, after the `createWindow` function definition (before `app.whenReady().then(...)`):
 
 ```js
 ipcMain.handle("pick-folder", async (event) => {
@@ -599,14 +604,12 @@ ipcMain.handle("pick-folder", async (event) => {
 });
 ```
 
-- [ ] **Step 2: Expose it in `electron/preload.cjs`**
+- [ ] **Step 2: Expose it in `electron/preload.js`**
 
 Replace the file's contents entirely with:
 
 ```js
-"use strict";
-
-const { contextBridge, ipcRenderer } = require("electron");
+import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("autogallery", {
   pickFolder: () => ipcRenderer.invoke("pick-folder"),
@@ -657,7 +660,7 @@ automated GUI driving.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add electron/main.cjs electron/preload.cjs ui/src/App.svelte
+git add electron/main.js electron/preload.js ui/src/App.svelte
 git commit -m "feat: add a native folder picker via Electron's dialog API"
 ```
 
@@ -827,10 +830,22 @@ git commit -m "ci: add a tag-triggered release build for mac/win/linux"
 
 **Files:**
 - Modify: `package.json`
-- Modify: `electron/main.cjs`
+- Modify: `electron/main.js`
 
 **Interfaces:**
 - Consumes: the `publish` config from Task 5 (`package.json`'s `"build".publish`).
+- Consumes: the current shape of `electron/main.js`'s `app.whenReady()` block, which (after Task 3's error-handling amendment) is:
+
+```js
+app.whenReady().then(async () => {
+  try {
+    await createWindow();
+  } catch (err) {
+    dialog.showErrorBox("AutoGallery failed to start", String(err));
+    app.quit();
+  }
+});
+```
 
 - [ ] **Step 1: Add the dependency**
 
@@ -842,26 +857,25 @@ Add to `"dependencies"` (not `devDependencies` — this runs in the packaged app
 
 Run: `npm install`
 
-- [ ] **Step 2: Wire it into `electron/main.cjs`**
+- [ ] **Step 2: Wire it into `electron/main.js`**
 
 Add near the top imports:
 
 ```js
-const { autoUpdater } = require("electron-updater");
+import { autoUpdater } from "electron-updater";
 ```
 
-Replace the existing:
-
-```js
-app.whenReady().then(createWindow);
-```
-
-with:
+Replace the existing (shown in Interfaces above) with:
 
 ```js
 app.whenReady().then(async () => {
-  await createWindow();
-  if (!isDev) autoUpdater.checkForUpdatesAndNotify();
+  try {
+    await createWindow();
+    if (!isDev) autoUpdater.checkForUpdatesAndNotify();
+  } catch (err) {
+    dialog.showErrorBox("AutoGallery failed to start", String(err));
+    app.quit();
+  }
 });
 ```
 
@@ -876,7 +890,7 @@ verified against a published release, which is out of scope here.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add package.json package-lock.json electron/main.cjs
+git add package.json package-lock.json electron/main.js
 git commit -m "feat: wire electron-updater to check GitHub Releases for updates"
 ```
 
