@@ -91,3 +91,43 @@ reviewed on return. Newest entries at the bottom.
   aren't infallible — the subagent pipeline caught this one before it
   reached you, but it's a reminder to actually run the app rather than
   trust the plan looks right on paper.
+- **Part 2 — final whole-branch review caught a genuine Critical bug
+  that no task-scoped review could have seen** (this is the third time
+  this session a final review has caught something task reviews missed —
+  see the `takenAt` bug above and the async-`clientWidth` focus bug from
+  the earlier post-scan-focus-fix work). `stack.id` was derived from
+  `coverId` (`` `burst-${coverId}` ``, in the already-merged Part 1
+  `bursts.js`), but `coverId` changes whenever a rating makes a
+  different member the highest-rated. Since `App.svelte` (Part 2) tracks
+  expand state in a `Set` keyed by `stack.id`, **rating a photo inside an
+  expanded stack silently collapsed it and lost the selection** — the
+  exact "expand a burst, star the best frame" motion the whole feature
+  exists to support. Fixed by anchoring `id` to the chronologically-first
+  member (`cluster[0]`, stable under rating changes) instead of the
+  cover, plus a regression test asserting id stability across a rating
+  change. This is a cross-module bug (root cause in Part 1's `bursts.js`,
+  symptom only visible once Part 2's `expandedStackIds` existed) —
+  exactly the class of defect the whole-branch review step exists for.
+- **Judgment call: deferred, not fixed** — the same review flagged that
+  burst grouping (and therefore stack ids) can also shift while a scan's
+  metadata streams in progressively (`enrichMeta` populates `takenAt` in
+  chunks, each chunk re-running `detectBursts`), which could visibly
+  reflow/regroup stacks — including ones a user has already expanded —
+  while a scan is still settling. The id-stability fix above narrows
+  this to only matter if cluster **membership** itself shifts (not just
+  the cover), which is rarer than the original bug (which fired on
+  nearly every rating). Given the added scope of a "freeze grouping
+  until a run's metadata settles" mechanism, I'm accepting this as a
+  documented reflow-while-scanning limitation for this pass rather than
+  building that mechanism now. **Flag for review** if you want that
+  handled properly — it would need its own small design pass.
+- **Minor findings, recorded not fixed** (per subagent-driven-development
+  process — Minor items aren't bundled into a Critical/Important fix
+  dispatch): (1) `toggleExpand`'s collapse branch is dead code (a
+  `kind:'stack'` entry, the only thing that calls `toggleExpand`, only
+  ever exists while collapsed — collapsing only ever happens via
+  Escape); (2) every rating keystroke re-runs `detectBursts`
+  (O(n log n) sort) and reallocates `resolvedPhotos` (full array) even
+  when the Loupe is closed and nothing consumes it — likely fine at 10k
+  scale (a few ms) but worth gating `resolvedPhotos` on `loupeOpen` if
+  it's ever felt.
