@@ -53,14 +53,9 @@
   $: if (selected && el) el.scrollIntoView({ block: "nearest" });
 </script>
 
-<button
-  bind:this={el}
-  class="thumb"
-  class:selected
-  data-id={item.id}
-  title={item.name}
+<div
+  class="thumb-wrap"
   style={`top:${box.y + pad}px;left:${box.x + pad}px;width:${box.width}px;height:${box.height}px;`}
-  on:click
 >
   {#if src}
     {#each rightPeekItems as peekItem, i (peekItem.id)}
@@ -81,35 +76,55 @@
         style={`transform: translateX(-${(i + 1) * PEEK_STEP_PX}px); z-index: ${leftPeekItems.length - i};`}
       />
     {/each}
-    <img
-      {src}
-      alt={item.name}
-      loading="lazy"
-      class="cover"
-      class:loaded
-      on:load={() => (loaded = true)}
-    />
   {/if}
-  {#if item.rating > 0}
-    <span class="badge"><Stars rating={item.rating} /></span>
-  {/if}
-  {#if stackCount}
-    <span class="stack-badge">×{stackCount}</span>
-  {/if}
-  {#if inExpandedStack}
-    <span
-      class="stack-marker"
-      class:is-cover={isCurrentCover}
-      title={isCurrentCover
-        ? "Current cover for this stack — press C to unset, Escape to collapse"
-        : "Part of a burst — press C to make this the cover, Escape to collapse"}>⚏</span
-    >
-  {/if}
-</button>
+  <button
+    bind:this={el}
+    class="thumb"
+    class:selected
+    data-id={item.id}
+    title={item.name}
+    on:click
+  >
+    {#if src}
+      <img
+        {src}
+        alt={item.name}
+        loading="lazy"
+        class="cover"
+        class:loaded
+        on:load={() => (loaded = true)}
+      />
+    {/if}
+    {#if item.rating > 0}
+      <span class="badge"><Stars rating={item.rating} /></span>
+    {/if}
+    {#if stackCount}
+      <span class="stack-badge">×{stackCount}</span>
+    {/if}
+    {#if inExpandedStack}
+      <span
+        class="stack-marker"
+        class:is-cover={isCurrentCover}
+        title={isCurrentCover
+          ? "Current cover for this stack — press C to unset, Escape to collapse"
+          : "Part of a burst — press C to make this the cover, Escape to collapse"}>⚏</span
+      >
+    {/if}
+  </button>
+</div>
 
 <style>
+  .thumb-wrap {
+    position: absolute;
+    transition:
+      top 0.15s ease,
+      left 0.15s ease,
+      width 0.15s ease,
+      height 0.15s ease;
+  }
   .thumb {
     position: absolute;
+    inset: 0;
     padding: 0;
     border: 2px solid transparent;
     border-radius: 4px;
@@ -117,11 +132,6 @@
     background: #1a1a1a;
     cursor: pointer;
     outline: none;
-    transition:
-      top 0.15s ease,
-      left 0.15s ease,
-      width 0.15s ease,
-      height 0.15s ease;
   }
   .thumb.selected {
     border-color: #4c9aff;
