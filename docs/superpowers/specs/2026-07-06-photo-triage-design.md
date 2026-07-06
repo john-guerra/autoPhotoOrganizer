@@ -109,6 +109,27 @@ Faces, ML ranking, cloud/mobile, and any photo editing.
 - **"Predict my picks" ML** — finished trips are labeled training data
   (`_selected` vs not), so the app can learn to pre-rank likely keepers.
 
+## Rendering strategy (decided 2026-07-06)
+
+Two rendering tiers, one layout contract:
+
+- **Now (culling): virtualized DOM.** A virtualized grid handles the
+  10k–100k linear-scroll case; DOM keeps free image decoding, native
+  scrolling, focus, and accessibility. Millions of photos on screen is not
+  a culling problem.
+- **Phase 2+ (archive exploration): GPU canvas** (regl / pixi.js /
+  deck.gl — chosen when built) for continuous semantic zoom over the whole
+  archive (PhotoMesa-style zoomable walls, timelines, embedding scatters).
+  The hard part is not the GL wrapper but **texture streaming**: the server
+  grows a texture-atlas endpoint (micro-thumbs packed ~4,096 per 4096²
+  sheet via sharp composite; ~250 atlases per million photos) plus an LOD
+  pyramid (micro-thumb → thumbnail → preview) streamed by visibility.
+- **The contract that keeps both cheap: layouts are pure functions** —
+  `layout(items{id, aspectRatio}, viewport) → [{id, x, y, w, h}]`, no DOM,
+  no Svelte, no GL (first implementation: `ui/src/lib/layouts/justified.js`).
+  Future layouts (quantum treemap, zoomable timeline, CLIP-embedding
+  scatter) and future renderers plug into the same interface.
+
 ## Planned MVP dependencies
 
 Not installed in the scaffold — added during the MVP build:
