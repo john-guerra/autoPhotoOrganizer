@@ -27,3 +27,9 @@ export function ratingsFile() {
   mkdirSync(cacheRoot(), { recursive: true });
   return join(cacheRoot(), "ratings.json");
 }
+
+/** @returns {string} Absolute path to the manual cover-choices JSON file. */
+export function coverChoicesFile() {
+  mkdirSync(cacheRoot(), { recursive: true });
+  return join(cacheRoot(), "coverChoices.json");
+}

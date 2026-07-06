@@ -24,6 +24,7 @@ describe("buildDisplayEntries", () => {
       kind: "stack",
       stack,
       coverItem: items[2], // id 3, the cover
+      peekItems: [items[1], items[3]], // ids 2 and 4, excluding the cover
     });
   });
 
@@ -38,6 +39,12 @@ describe("buildDisplayEntries", () => {
     const entries = buildDisplayEntries(items, [stack], new Set());
     const stackEntries = entries.filter((e) => e.kind === "stack");
     expect(stackEntries).toHaveLength(1);
+  });
+
+  it("computes peekItems as the stack's other members, excluding the cover, in memberIds order", () => {
+    const entries = buildDisplayEntries(items, [stack], new Set());
+    const stackEntry = entries.find((e) => e.kind === "stack");
+    expect(stackEntry.peekItems).toEqual([items[1], items[3]]); // ids 2, 4 — not 3 (the cover)
   });
 });
 

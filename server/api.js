@@ -5,6 +5,7 @@ import { extname, join } from "node:path";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { thumbsDir } from "./lib/cachePaths.js";
 import { getAllRatings, setRating } from "./ratings.js";
+import { getAllCoverChoices, setCoverChoice } from "./coverChoices.js";
 import { getMeta, putMeta } from "./metaCache.js";
 
 const processing = new NodeProcessingService();
@@ -66,12 +67,14 @@ export function registerApi(app) {
     const elapsedMs = Math.round(performance.now() - t0);
 
     const ratings = getAllRatings();
+    const coverChoices = getAllCoverChoices();
     const items = session.items.map((it) => ({
       id: it.id,
       name: it.name,
       size: it.size,
       mtimeMs: it.mtimeMs,
       rating: ratings[it.path] ?? 0,
+      preferredCover: coverChoices[it.path] === true,
     }));
     res.json({ root: dir, count: items.length, elapsedMs, items });
   });
@@ -199,6 +202,17 @@ export function registerApi(app) {
     }
     setRating(it.path, rating);
     res.json({ id: it.id, rating });
+  });
+
+  app.post("/api/cover", (req, res) => {
+    const { id, isCover } = req.body ?? {};
+    const it = itemById(Number(id));
+    if (!it) return res.status(404).json({ error: "unknown id" });
+    if (typeof isCover !== "boolean") {
+      return res.status(400).json({ error: "isCover must be a boolean" });
+    }
+    setCoverChoice(it.path, isCover);
+    res.json({ id: it.id, preferredCover: isCover });
   });
 }
 

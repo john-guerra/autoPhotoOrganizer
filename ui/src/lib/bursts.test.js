@@ -73,6 +73,38 @@ describe("detectBursts", () => {
     expect(after[0].id).toBe(stackIdBefore); // but the stack's own id did NOT change
   });
 
+  it("prefers a manually-chosen cover over a higher-rated or COVER-marked member", () => {
+    const items = [
+      { id: 1, name: "PXL_1.BURST-01.COVER.jpg", mtimeMs: 0, rating: 0 },
+      { id: 2, name: "PXL_1.BURST-02.jpg", mtimeMs: 200, rating: 4 },
+      {
+        id: 3,
+        name: "PXL_1.BURST-03.jpg",
+        mtimeMs: 400,
+        rating: 0,
+        preferredCover: true,
+      },
+    ];
+    const stacks = detectBursts(items, { gapMs: 1000 });
+    expect(stacks[0].coverId).toBe(3);
+  });
+
+  it("keeps a stack's id stable when a manual cover choice is set", () => {
+    const items = [
+      { id: 1, name: "a.jpg", mtimeMs: 0 },
+      { id: 2, name: "b.jpg", mtimeMs: 200 },
+      { id: 3, name: "c.jpg", mtimeMs: 400 },
+    ];
+    const before = detectBursts(items, { gapMs: 1000 });
+    const stackIdBefore = before[0].id;
+    expect(before[0].coverId).toBe(1);
+
+    items[2].preferredCover = true; // item id 3
+    const after = detectBursts(items, { gapMs: 1000 });
+    expect(after[0].coverId).toBe(3);
+    expect(after[0].id).toBe(stackIdBefore);
+  });
+
   it("prefers takenAt over mtimeMs for grouping when takenAt is present", () => {
     const items = [
       { id: 1, name: "a.jpg", mtimeMs: 0, takenAt: 0 },

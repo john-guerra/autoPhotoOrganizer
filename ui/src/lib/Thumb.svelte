@@ -1,3 +1,9 @@
+<script context="module">
+  export const PEEK_STEP_PX = 6; // px offset per peeking layer (diagonal: horizontal alternating + vertical), tuned for visibility
+  export const MAX_PEEK_DEPTH = 2; // visual depth cap — peeks beyond this render at the same max offset, keeping the tile's footprint small and neat regardless of actual stack size
+  export const PEEK_VERTICAL_PX = 2; // flat vertical offset for every peek layer (not scaled by depth) — a subtle "slightly offset" cue, kept tiny since it isn't reserved for in the grid layout
+</script>
+
 <script>
   import { onMount, onDestroy } from "svelte";
   import { thumbUrl } from "./api.js";
@@ -10,6 +16,9 @@
   export let selected = false;
   export let stackCount = undefined; // set when this tile is a collapsed stack's cover
   export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
+  export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
+  export let stackPeekItems = []; // this stack's other members (excludes the cover), for the peeking-photos visual
+  export let stackMarginPx = 0; // horizontal margin reserved in the layout for this stack's peek layers (0 for non-stack tiles)
 
   let el;
   let visible = false; // set true once the tile nears the viewport
@@ -22,6 +31,21 @@
   // URL correct.
   $: src = visible ? thumbUrl(item.id, size, item.mtimeMs) : null;
   $: if (src) loaded = false; // re-fade when the source changes
+
+  // Split alternately: chronologically-nearer non-cover members peek out
+  // closer to the cover (right first, then left, then right again, ...).
+  // Sliced to MAX_PEEK_DEPTH per side: every layer beyond that depth
+  // renders at the same clamped offset and is therefore fully occluded
+  // by the layer in front of it (same box, higher z-index) — rendering
+  // them anyway would mean fetching/decoding/compositing a thumbnail
+  // <img> for every extra member of a large burst for zero visible
+  // effect. The ×N badge already carries the true, uncapped count.
+  $: rightPeekItems = stackPeekItems
+    .filter((_, i) => i % 2 === 0)
+    .slice(0, MAX_PEEK_DEPTH);
+  $: leftPeekItems = stackPeekItems
+    .filter((_, i) => i % 2 === 1)
+    .slice(0, MAX_PEEK_DEPTH);
 
   onMount(() => {
     observer = new IntersectionObserver(
@@ -44,38 +68,90 @@
   $: if (selected && el) el.scrollIntoView({ block: "nearest" });
 </script>
 
-<button
-  bind:this={el}
-  class="thumb"
-  class:selected
-  data-id={item.id}
-  title={item.name}
+<div
+  class="thumb-wrap"
   style={`top:${box.y + pad}px;left:${box.x + pad}px;width:${box.width}px;height:${box.height}px;`}
-  on:click
 >
   {#if src}
-    <img
-      {src}
-      alt={item.name}
-      loading="lazy"
-      class:loaded
-      on:load={() => (loaded = true)}
-    />
+    {#each rightPeekItems as peekItem, i (peekItem.id)}
+      <img
+        src={thumbUrl(peekItem.id, size, peekItem.mtimeMs)}
+        alt=""
+        loading="lazy"
+        class="stack-peek"
+        style={`left:${stackMarginPx}px; width:calc(100% - ${2 * stackMarginPx}px); transform: translate(${Math.min(i + 1, MAX_PEEK_DEPTH) * PEEK_STEP_PX}px, ${PEEK_VERTICAL_PX}px); z-index: ${rightPeekItems.length - i};`}
+      />
+    {/each}
+    {#each leftPeekItems as peekItem, i (peekItem.id)}
+      <img
+        src={thumbUrl(peekItem.id, size, peekItem.mtimeMs)}
+        alt=""
+        loading="lazy"
+        class="stack-peek"
+        style={`left:${stackMarginPx}px; width:calc(100% - ${2 * stackMarginPx}px); transform: translate(${-Math.min(i + 1, MAX_PEEK_DEPTH) * PEEK_STEP_PX}px, ${PEEK_VERTICAL_PX}px); z-index: ${leftPeekItems.length - i};`}
+      />
+    {/each}
   {/if}
-  {#if item.rating > 0}
-    <span class="badge"><Stars rating={item.rating} /></span>
-  {/if}
-  {#if stackCount}
-    <span class="stack-badge">×{stackCount}</span>
-  {/if}
-  {#if inExpandedStack}
-    <span class="stack-marker" title="Part of a burst — press Escape to collapse">⚏</span>
-  {/if}
-</button>
+  <button
+    bind:this={el}
+    class="thumb"
+    class:selected
+    data-id={item.id}
+    title={item.name}
+    style={stackMarginPx ? `inset: 0 ${stackMarginPx}px;` : ""}
+    on:click
+  >
+    {#if src}
+      <img
+        {src}
+        alt={item.name}
+        loading="lazy"
+        class="cover"
+        class:loaded
+        on:load={() => (loaded = true)}
+      />
+    {/if}
+    {#if item.rating > 0}
+      <span class="badge"><Stars rating={item.rating} /></span>
+    {/if}
+    {#if stackCount}
+      <span class="stack-badge">×{stackCount}</span>
+    {/if}
+    {#if inExpandedStack}
+      <span
+        class="stack-marker"
+        class:is-cover={isCurrentCover}
+        title={isCurrentCover
+          ? "Current cover for this stack — press C to unset, Escape to collapse"
+          : "Part of a burst — press C to make this the cover, Escape to collapse"}>⚏</span
+      >
+    {/if}
+  </button>
+</div>
 
 <style>
+  .thumb-wrap {
+    position: absolute;
+    transition:
+      top 0.15s ease,
+      left 0.15s ease,
+      width 0.15s ease,
+      height 0.15s ease;
+  }
   .thumb {
     position: absolute;
+    inset: 0;
+    /* Explicit z-index (not auto) so this element establishes its own
+       stacking context: its own border/box-shadow (the selection
+       highlight) and its children (cover z-index:50, badges z-index:100)
+       all paint as one unit above the peek layers (z-index 1..
+       MAX_PEEK_DEPTH, siblings in .thumb-wrap), regardless of DOM order.
+       Without this, .thumb's own border/box-shadow — which has no
+       z-index of its own — was promoted into .thumb-wrap's shared
+       stacking context at the "auto" (effectively 0) level, below the
+       peek layers' explicit positive z-index, and got visually
+       painted over by them. */
+    z-index: 10;
     padding: 0;
     border: 2px solid transparent;
     border-radius: 4px;
@@ -83,26 +159,39 @@
     background: #1a1a1a;
     cursor: pointer;
     outline: none;
-    transition:
-      top 0.15s ease,
-      left 0.15s ease,
-      width 0.15s ease,
-      height 0.15s ease;
   }
   .thumb.selected {
     border-color: #4c9aff;
     box-shadow: 0 0 0 2px rgba(76, 154, 255, 0.35);
   }
-  img {
+  img.cover,
+  .stack-peek {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+  img.cover {
+    /* inherit is correct here: img.cover is a child of .thumb, which
+       has its own border-radius: 4px. */
+    border-radius: inherit;
+    z-index: 50;
     opacity: 0;
     transition: opacity 0.2s ease;
   }
-  img.loaded {
+  img.cover.loaded {
     opacity: 1;
+  }
+  .stack-peek {
+    /* NOT `inherit`: .stack-peek is a sibling of .thumb, a direct child
+       of .thumb-wrap (which has no border-radius of its own) — inherit
+       would resolve to 0 here, not .thumb's 4px. Match .thumb's radius
+       explicitly instead. */
+    border-radius: 4px;
+    filter: brightness(0.75);
+    pointer-events: none;
   }
   .badge {
     position: absolute;
@@ -131,5 +220,13 @@
     font-size: 0.7rem;
     border-radius: 3px;
     pointer-events: none;
+  }
+  .stack-marker.is-cover {
+    background: rgba(255, 196, 0, 0.85);
+  }
+  .badge,
+  .stack-badge,
+  .stack-marker {
+    z-index: 100;
   }
 </style>

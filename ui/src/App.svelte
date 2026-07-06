@@ -11,9 +11,10 @@
   import {
     scan as apiScan,
     setRating as apiSetRating,
+    setCover as apiSetCover,
     fetchMeta,
   } from "./lib/api.js";
-  import Thumb from "./lib/Thumb.svelte";
+  import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
 
   const LS_KEY = "autogallery.lastDir";
@@ -122,6 +123,24 @@
   // aspect ratios in, positioned boxes out. Absolutely-positioned children
   // ignore CSS padding, so the frame inset is applied to the box coordinates.
   const PAD = 12;
+
+  /**
+   * Symmetric horizontal margin (px, at the target row height) reserved for
+   * a collapsed stack's peek layers, so they're visible within the tile's
+   * own box rather than relying entirely on the inter-tile gap. Fixed at
+   * MAX_PEEK_DEPTH * PEEK_STEP_PX regardless of the stack's actual size —
+   * peek layers beyond that depth render at the same clamped offset (see
+   * Thumb.svelte), so every stack's footprint stays small and neat, never
+   * growing for a very large burst. 0 for a non-stack entry or a stack
+   * with no peeks (a 1-member "stack" can't happen per detectBursts'
+   * minimum-cluster-size-2 rule, but guard anyway for clarity).
+   */
+  function stackMarginPx(entry) {
+    return entry.kind === "stack" && entry.peekItems.length > 0
+      ? MAX_PEEK_DEPTH * PEEK_STEP_PX
+      : 0;
+  }
+
   $: stacks = detectBursts(items, { gapMs: burstGapMs });
   $: displayEntries = buildDisplayEntries(items, stacks, expandedStackIds);
   $: resolvedPhotos = displayEntries.map(resolvePhoto); // passed to Loupe
@@ -130,12 +149,19 @@
       ? justifiedLayout(
           displayEntries.map((e) => {
             const photo = resolvePhoto(e);
+            const baseRatio =
+              photo.width && photo.height
+                ? photo.width / photo.height
+                : DEFAULT_RATIO;
+            // Reserve extra width for a collapsed stack's peek layers (see
+            // stackMarginPx) by inflating its aspect ratio at the target
+            // row height — an approximation, not pixel-exact once a row's
+            // uniform scale factor is applied, but close enough for a
+            // cosmetic margin.
+            const marginPx = stackMarginPx(e);
             return {
               id: entryDomId(e),
-              aspectRatio:
-                photo.width && photo.height
-                  ? photo.width / photo.height
-                  : DEFAULT_RATIO,
+              aspectRatio: baseRatio + (2 * marginPx) / rowHeight,
             };
           }),
           {
@@ -176,6 +202,35 @@
     it.rating = rating;
     items = items; // trigger reactivity
     apiSetRating(it.id, rating).catch((e) => (error = e.message));
+  }
+
+  /**
+   * Toggle the manual cover choice for the given display entry: if it's
+   * already the stack's manual pick, clear it (revert to automatic
+   * selection); otherwise make it the pick, clearing any other member of
+   * the same stack that was previously manually chosen. At most one
+   * manual pick per stack is enforced here, in the UI — pickCover's own
+   * fallback (first-in-cluster-order) only matters if that invariant is
+   * ever violated some other way.
+   */
+  function toggleCover(entry) {
+    if (entry?.kind !== "photo" || !entry.stackId) return;
+    const stack = stacks.find((s) => s.id === entry.stackId);
+    if (!stack) return;
+
+    const target = entry.item;
+    const makingManual = !target.preferredCover;
+
+    for (const id of stack.memberIds) {
+      const it = items.find((i) => i.id === id);
+      if (!it) continue;
+      const shouldBeCover = makingManual && id === target.id;
+      if (it.preferredCover !== shouldBeCover) {
+        it.preferredCover = shouldBeCover;
+        apiSetCover(it.id, shouldBeCover).catch((e) => (error = e.message));
+      }
+    }
+    items = items; // trigger reactivity
   }
 
   function openLoupe(index) {
@@ -344,6 +399,19 @@
       return;
     }
 
+    // Manual cover choice: 'C' toggles whether the selected photo is its
+    // stack's manually-chosen cover. Only meaningful for a member of a
+    // currently expanded stack; a no-op otherwise. Works in both grid and
+    // loupe, since both share the same selected index into displayEntries.
+    if (key.toLowerCase() === "c") {
+      const entry = displayEntries[selected];
+      if (entry?.stackId) {
+        e.preventDefault();
+        toggleCover(entry);
+      }
+      return;
+    }
+
     if (loupeOpen) {
       if (key === "Escape") {
         e.preventDefault();
@@ -459,7 +527,12 @@
             size={thumbSize}
             selected={i === selected}
             stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
+            stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
+            stackMarginPx={stackMarginPx(entry)}
             inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
+            isCurrentCover={entry.kind === "photo" &&
+              entry.stackId !== null &&
+              stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
             on:click={() =>
               entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
           />

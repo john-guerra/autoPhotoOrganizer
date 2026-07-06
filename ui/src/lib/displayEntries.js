@@ -16,7 +16,7 @@
  * @param {Set<string>} expandedStackIds
  * @returns {Array<
  *   | { kind: 'photo', item: object, stackId: string|null }
- *   | { kind: 'stack', stack: object, coverItem: object }
+ *   | { kind: 'stack', stack: object, coverItem: object, peekItems: object[] }
  * >}
  */
 export function buildDisplayEntries(items, stacks, expandedStackIds) {
@@ -36,7 +36,16 @@ export function buildDisplayEntries(items, stacks, expandedStackIds) {
       entries.push({ kind: "photo", item, stackId: stack.id });
     } else if (!emittedStackIds.has(stack.id)) {
       emittedStackIds.add(stack.id);
-      entries.push({ kind: "stack", stack, coverItem: byId.get(stack.coverId) });
+      const peekItems = stack.memberIds
+        .filter((id) => id !== stack.coverId)
+        .map((id) => byId.get(id))
+        .filter(Boolean);
+      entries.push({
+        kind: "stack",
+        stack,
+        coverItem: byId.get(stack.coverId),
+        peekItems,
+      });
     }
     // else: a later member of an already-emitted collapsed stack — skip.
   }
