@@ -1,5 +1,6 @@
 <script context="module">
   export const PEEK_STEP_PX = 6; // px offset per peeking layer (diagonal: horizontal alternating + vertical), tuned for visibility
+  export const MAX_PEEK_DEPTH = 2; // visual depth cap — peeks beyond this render at the same max offset, keeping the tile's footprint small and neat regardless of actual stack size
 </script>
 
 <script>
@@ -67,7 +68,7 @@
         alt=""
         loading="lazy"
         class="stack-peek"
-        style={`transform: translate(${(i + 1) * PEEK_STEP_PX}px, ${(i + 1) * PEEK_STEP_PX}px); z-index: ${rightPeekItems.length - i};`}
+        style={`transform: translate(${Math.min(i + 1, MAX_PEEK_DEPTH) * PEEK_STEP_PX}px, ${Math.min(i + 1, MAX_PEEK_DEPTH) * PEEK_STEP_PX}px); z-index: ${rightPeekItems.length - i};`}
       />
     {/each}
     {#each leftPeekItems as peekItem, i (peekItem.id)}
@@ -76,7 +77,7 @@
         alt=""
         loading="lazy"
         class="stack-peek"
-        style={`transform: translate(${-(i + 1) * PEEK_STEP_PX}px, ${(i + 1) * PEEK_STEP_PX}px); z-index: ${leftPeekItems.length - i};`}
+        style={`transform: translate(${-Math.min(i + 1, MAX_PEEK_DEPTH) * PEEK_STEP_PX}px, ${Math.min(i + 1, MAX_PEEK_DEPTH) * PEEK_STEP_PX}px); z-index: ${leftPeekItems.length - i};`}
       />
     {/each}
   {/if}

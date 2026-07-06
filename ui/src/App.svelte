@@ -14,7 +14,7 @@
     setCover as apiSetCover,
     fetchMeta,
   } from "./lib/api.js";
-  import Thumb, { PEEK_STEP_PX } from "./lib/Thumb.svelte";
+  import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
 
   const LS_KEY = "autogallery.lastDir";
@@ -127,13 +127,17 @@
   /**
    * Symmetric horizontal margin (px, at the target row height) reserved for
    * a collapsed stack's peek layers, so they're visible within the tile's
-   * own box rather than relying entirely on the inter-tile gap. 0 for a
-   * non-stack entry. Uses the larger of the two peek groups (right/left
-   * split alternately in Thumb.svelte) so both sides have enough room.
+   * own box rather than relying entirely on the inter-tile gap. Fixed at
+   * MAX_PEEK_DEPTH * PEEK_STEP_PX regardless of the stack's actual size —
+   * peek layers beyond that depth render at the same clamped offset (see
+   * Thumb.svelte), so every stack's footprint stays small and neat, never
+   * growing for a very large burst. 0 for a non-stack entry or a stack
+   * with no peeks (a 1-member "stack" can't happen per detectBursts'
+   * minimum-cluster-size-2 rule, but guard anyway for clarity).
    */
   function stackMarginPx(entry) {
-    return entry.kind === "stack"
-      ? Math.ceil(entry.peekItems.length / 2) * PEEK_STEP_PX
+    return entry.kind === "stack" && entry.peekItems.length > 0
+      ? MAX_PEEK_DEPTH * PEEK_STEP_PX
       : 0;
   }
 
