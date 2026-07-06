@@ -79,6 +79,39 @@
   let focusPending = false; // set after a scan; consumed once `boxes` exists
   let expandedStackIds = new Set(); // stack ids currently expanded inline in the grid
 
+  // Aggregate thumbnail load progress across the whole grid, fed by each
+  // Thumb's attempt/settled events (Map mutations aren't reactive on their
+  // own, hence thumbStatusTick as an explicit dependency). Reset per scan so
+  // a rescan's ids don't inherit a stale previous scan's counts.
+  let thumbStatus = new Map(); // id -> 'pending' | 'ok' | 'error'
+  let thumbStatusTick = 0;
+  function handleThumbAttempt(e) {
+    thumbStatus.set(e.detail.id, "pending");
+    thumbStatusTick++;
+  }
+  function handleThumbSettled(e) {
+    thumbStatus.set(e.detail.id, e.detail.ok ? "ok" : "error");
+    thumbStatusTick++;
+  }
+  $: thumbCounts = (() => {
+    thumbStatusTick; // eslint-disable-line no-unused-expressions
+    let pending = 0,
+      ok = 0,
+      error = 0;
+    for (const s of thumbStatus.values()) {
+      if (s === "pending") pending++;
+      else if (s === "ok") ok++;
+      else error++;
+    }
+    return { pending, ok, error };
+  })();
+  $: thumbProgress =
+    thumbCounts.pending > 0
+      ? `loading thumbnails… ${thumbCounts.ok} loaded${thumbCounts.error ? `, ${thumbCounts.error} failed` : ""}`
+      : thumbCounts.error > 0
+        ? `${thumbCounts.error} thumbnail${thumbCounts.error === 1 ? "" : "s"} failed to load`
+        : "";
+
   onMount(refreshLibrary);
 
   async function doScan() {
@@ -86,6 +119,8 @@
     error = "";
     scanning = true;
     status = "scanning…";
+    thumbStatus = new Map();
+    thumbStatusTick++;
     try {
       const res = await apiScan(dir.trim());
       items = res.items;
@@ -570,6 +605,11 @@
       <span class="burst-gap-value">{(burstGapMs / 1000).toFixed(1)}s</span>
     </label>
     <span class="status" class:err={!!error}>{error || status}</span>
+    {#if thumbProgress}
+      <span class="thumb-progress" class:err={thumbCounts.error > 0}>
+        {thumbProgress}
+      </span>
+    {/if}
   </header>
 
   {#if items.length}
@@ -598,6 +638,8 @@
               stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
             on:click={() =>
               entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
+            on:attempt={handleThumbAttempt}
+            on:settled={handleThumbSettled}
           />
         {/each}
       {/if}
@@ -790,6 +832,14 @@
   }
   .status.err {
     color: #ff6b6b;
+  }
+  .thumb-progress {
+    color: #9a9a9a;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .thumb-progress.err {
+    color: #ff8a80;
   }
   .grid {
     /* Justified layout: children are absolutely positioned by computed boxes;

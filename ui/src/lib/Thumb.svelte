@@ -2,12 +2,15 @@
   export const PEEK_STEP_PX = 6; // px offset per peeking layer (diagonal: horizontal alternating + vertical), tuned for visibility
   export const MAX_PEEK_DEPTH = 2; // visual depth cap — peeks beyond this render at the same max offset, keeping the tile's footprint small and neat regardless of actual stack size
   export const PEEK_VERTICAL_PX = 2; // flat vertical offset for every peek layer (not scaled by depth) — a subtle "slightly offset" cue, kept tiny since it isn't reserved for in the grid layout
+  export const STALL_MS = 12000; // an <img> load has no native timeout; treat a request that neither loads nor errors within this window as stalled
 </script>
 
 <script>
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, createEventDispatcher } from "svelte";
   import { thumbUrl } from "./api.js";
   import Stars from "./Stars.svelte";
+
+  const dispatch = createEventDispatcher();
 
   export let item; // {id, name, rating, mtimeMs}
   export let box; // {x, y, width, height} from the justified layout
@@ -23,14 +26,49 @@
   let el;
   let visible = false; // set true once the tile nears the viewport
   let loaded = false;
+  let failed = false; // server 500'd, or the request stalled past STALL_MS
+  let retryNonce = 0; // bumped by the retry click to force a fresh request past caches
   let observer;
+  let stallTimer;
 
   // Recompute the src whenever the tile is visible OR the item/size changes.
   // Svelte reuses this component across rescans (keyed by id), so `item` can
   // swap to a different file under the same id — the mtime version keeps the
   // URL correct.
-  $: src = visible ? thumbUrl(item.id, size, item.mtimeMs) : null;
-  $: if (src) loaded = false; // re-fade when the source changes
+  $: src = visible
+    ? thumbUrl(item.id, size, item.mtimeMs) +
+      (retryNonce ? `&retry=${retryNonce}` : "")
+    : null;
+  $: if (src) armAttempt(src);
+
+  // Each new attempt (initial load or retry) reports "pending" to the grid's
+  // aggregate progress counter, resets visible state, and arms the stall
+  // timer — a plain <img> has no load timeout of its own, so a request that
+  // never settles (a wedged sharp/exiftool extraction under heavy scan load)
+  // would otherwise leave the tile blank forever with no way to tell "still
+  // loading" apart from "silently broken".
+  function armAttempt(url) {
+    loaded = false; // re-fade in when the source changes
+    failed = false;
+    dispatch("attempt", { id: item.id });
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      if (src === url) settle(false);
+    }, STALL_MS);
+  }
+
+  function settle(ok) {
+    clearTimeout(stallTimer);
+    loaded = ok;
+    failed = !ok;
+    dispatch("settled", { id: item.id, ok });
+  }
+
+  function retry() {
+    retryNonce += 1;
+  }
+
+  onDestroy(() => clearTimeout(stallTimer));
 
   // Split alternately: chronologically-nearer non-cover members peek out
   // closer to the cover (right first, then left, then right again, ...).
@@ -102,14 +140,27 @@
     on:click
   >
     {#if src}
-      <img
-        {src}
-        alt={item.name}
-        loading="lazy"
-        class="cover"
-        class:loaded
-        on:load={() => (loaded = true)}
-      />
+      {#key `${item.id}:${item.mtimeMs}`}
+        <img
+          {src}
+          alt={item.name}
+          loading="lazy"
+          class="cover"
+          class:loaded
+          on:load={() => settle(true)}
+          on:error={() => settle(false)}
+        />
+      {/key}
+    {/if}
+    {#if src && !loaded && !failed}
+      <span class="thumb-spinner" aria-hidden="true"></span>
+    {/if}
+    {#if failed}
+      <button
+        class="thumb-retry"
+        title="Failed to load — click to retry"
+        on:click|stopPropagation={retry}>⟳ Retry</button
+      >
     {/if}
     {#if item.rating > 0}
       <span class="badge"><Stars rating={item.rating} /></span>
@@ -228,5 +279,41 @@
   .stack-badge,
   .stack-marker {
     z-index: 100;
+  }
+  .thumb-spinner {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: rgba(255, 255, 255, 0.7);
+    animation: thumb-spin 0.8s linear infinite;
+    z-index: 60;
+    pointer-events: none;
+  }
+  @keyframes thumb-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .thumb-retry {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: fit-content;
+    height: fit-content;
+    padding: 4px 8px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #ff8a80;
+    border: 1px solid rgba(255, 138, 128, 0.5);
+    border-radius: 4px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    z-index: 60;
+  }
+  .thumb-retry:hover {
+    background: rgba(0, 0, 0, 0.9);
   }
 </style>
