@@ -221,7 +221,7 @@
     return best;
   }
 
-  function onKeydown(e) {
+  async function onKeydown(e) {
     // Never steal keystrokes from a focused input (e.g. typing a folder path
     // with digits in it must not rate photos).
     const tag = e.target?.tagName;
@@ -280,7 +280,10 @@
 
     e.preventDefault();
     selected = next;
-    gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
+    await tick();
+    gridEl
+      ?.querySelector(`[data-id="${items[selected]?.id}"]`)
+      ?.focus({ preventScroll: true });
   }
 </script>
 
