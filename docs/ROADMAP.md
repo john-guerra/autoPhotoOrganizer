@@ -67,6 +67,53 @@ rescan, ingest-from-SD-card flow, RAW embedded-preview extraction
 (exiftool-vendored). Phase 2+: faces/CLIP local search, predict-my-picks,
 WebGL zoomable archive view (see design doc).
 
+## Backlog additions — 2026-07-06 (not yet prioritized)
+
+Captured mid-session while grid virtualization was in review; not yet
+triaged into the ordered v0.2 sequence above.
+
+- **Reconsider the index engine: DuckDB vs. SQLite.** "Key decisions
+  already made" below commits to SQLite (better-sqlite3); John wants to
+  evaluate DuckDB as an alternative before that milestone is built.
+  DuckDB is columnar/OLAP — strong for scanning/filtering large metadata
+  tables ("everything shot in 2019 rated ≥4"), weaker than SQLite's
+  row-store for the frequent single-row point writes a rating UI
+  generates. Needs a real evaluation, not a default swap.
+- **Folder selector UI.** The path input is a raw text field
+  (`ui/src/App.svelte`); replace with a real folder picker.
+- **Multi-folder / recent-folders switching.** Only the last-scanned
+  folder persists today (`localStorage` key `autogallery.lastDir`); add a
+  way to keep several folders bookmarked and flip between them quickly —
+  matches John's real archive being split across multiple external
+  drives, organized by year then album, with not all drives mounted at
+  once (see the SQLite-as-offline-mirror invariant in `CLAUDE.md`).
+- **Recursive folder browsing.** `POST /api/scan` is explicitly
+  non-recursive today. Pointed at a parent folder containing album
+  subfolders (John's `YYYY_MMMon_DD_Name` convention), it should recurse
+  and present the albums as a browsable list/grid to jump into — distinct
+  from backlog item 4 (album *clustering*, which infers album boundaries
+  from timestamps on unsorted photos); this is browsing structure that
+  already exists on disk.
+- **GPU archive-overview view.** Reinforces the "Rendering strategy"
+  decision already recorded in the design doc (regl/pixi/deck.gl,
+  Phase 2+, "archive exploration" tier) — John wants to see thousands of
+  photos at once at varying zoom levels across the whole archive, not
+  just one folder. No new decision needed; this just confirms it's
+  wanted.
+- **Cull-loop filters.** Grid view modes to show only unseen photos,
+  and/or only unrated photos.
+- **Cross-drive deduplication.** The archive spans drives that don't all
+  mount at once, so the same photos can end up duplicated across drives
+  over time. Use the content-hash key the index already plans to use
+  (`CLAUDE.md` invariant 2) to detect and surface duplicates.
+
+## Phase 3 ideas (unscheduled, recorded for later)
+
+- **Google-Photos-style replacement.** Cloud storage optimized for
+  photos, with direct mobile upload/access. Explicitly "way later" per
+  John — the design doc already excludes cloud/mobile from MVP; this
+  just names the concrete long-term shape of that ambition.
+
 ## Working agreements (how John wants the work done)
 
 - **John verifies visually himself** at `localhost:5173` while the dev
