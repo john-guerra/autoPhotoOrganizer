@@ -192,13 +192,28 @@ traced the same wrong conclusion by hand in this session.
 **Also logged mid-testing, not yet acted on:**
 - John noted while testing: "I think this is the first burst
   `PXL_20240822_165336928.MP.jpg`" — a filename he expects to be the
-  chronological start of a real burst in the test folder. Not yet
-  cross-checked against what `detectBursts` actually grouped; worth
-  verifying if burst grouping in this folder is ever in question again.
+  chronological start of a real burst in the test folder. Attempted to
+  verify live but the tile wasn't currently mounted (virtualized out of
+  the visible window in the 10k-photo grid) and John didn't flag an
+  actual discrepancy — just an observation. Not independently
+  cross-checked against `detectBursts`'s actual output; worth revisiting
+  if burst grouping in this folder is ever in question again.
 - John also reported "when I click in the thumb, I see a different
-  photo in the details [Loupe]" — suspected to be a symptom of the
-  peek-containment bug (bug #4 above) making it visually ambiguous
-  which tile was actually being clicked, now that containment is fixed.
-  **Not yet independently re-confirmed** — should be re-tested before
-  merge; if it persists after the containment fix, it's a separate,
-  real click/index bug needing its own investigation.
+  photo in the details [Loupe]" — **investigated live and resolved as
+  NOT a burst-stack bug.** Traced end-to-end via `claude-in-chrome`:
+  opened the Loupe on the exact reported photo/index, closed it, and
+  compared the grid tile at that same selection directly against the
+  Loupe — the tile's `data-id`, `title`, and even its `<img src>`
+  attribute all correctly pointed to the right photo, but the
+  *rendered pixels* showed a different photo entirely. A direct
+  `fetch()` of the same `/api/thumb/:id` URL (bypassing the existing
+  `<img>` element) returned the CORRECT image, and John independently
+  confirmed switching to a different browser also showed the correct
+  image — so the server's id→path mapping and thumbnail cache are
+  provably correct; the staleness was scoped entirely to that one
+  browser tab's own cache/rendered state, almost certainly from the
+  unusually large number of rapid rescans/reloads done during this
+  testing session (not standard usage). Filed as GitHub issue #29 (a
+  general thumbnail-caching question, not burst-stack-specific) rather
+  than fixed on this branch — orthogonal to the feature this branch
+  implements, and not reproduced under normal single-scan usage.
