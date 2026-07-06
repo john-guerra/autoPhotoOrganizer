@@ -453,7 +453,7 @@ git commit -m "feat: add a library dropdown of recently-scanned folders"
 
 **Files:**
 - Modify: `package.json`
-- Create: `electron/main.cjs`
+- Create: `electron/main.js` (originally created as `electron/main.cjs`; converted to ESM — see amendment note below)
 - Create: `electron/preload.cjs`
 
 **Interfaces:**
