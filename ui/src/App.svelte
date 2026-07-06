@@ -502,6 +502,7 @@
             size={thumbSize}
             selected={i === selected}
             stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
+            stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
             inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
             isCurrentCover={entry.kind === "photo" &&
               entry.stackId !== null &&

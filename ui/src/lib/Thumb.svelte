@@ -3,6 +3,8 @@
   import { thumbUrl } from "./api.js";
   import Stars from "./Stars.svelte";
 
+  const PEEK_STEP_PX = 2; // px offset per peeking layer, alternating left/right
+
   export let item; // {id, name, rating, mtimeMs}
   export let box; // {x, y, width, height} from the justified layout
   export let pad = 0; // grid frame inset (abs children ignore CSS padding)
@@ -11,6 +13,7 @@
   export let stackCount = undefined; // set when this tile is a collapsed stack's cover
   export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
   export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
+  export let stackPeekItems = []; // this stack's other members (excludes the cover), for the peeking-photos visual
 
   let el;
   let visible = false; // set true once the tile nears the viewport
@@ -23,6 +26,11 @@
   // URL correct.
   $: src = visible ? thumbUrl(item.id, size, item.mtimeMs) : null;
   $: if (src) loaded = false; // re-fade when the source changes
+
+  // Split alternately: chronologically-nearer non-cover members peek out
+  // closer to the cover (right first, then left, then right again, ...).
+  $: rightPeekItems = stackPeekItems.filter((_, i) => i % 2 === 0);
+  $: leftPeekItems = stackPeekItems.filter((_, i) => i % 2 === 1);
 
   onMount(() => {
     observer = new IntersectionObserver(
@@ -55,10 +63,29 @@
   on:click
 >
   {#if src}
+    {#each rightPeekItems as peekItem, i (peekItem.id)}
+      <img
+        src={thumbUrl(peekItem.id, size, peekItem.mtimeMs)}
+        alt=""
+        loading="lazy"
+        class="stack-peek"
+        style={`transform: translateX(${(i + 1) * PEEK_STEP_PX}px); z-index: ${rightPeekItems.length - i};`}
+      />
+    {/each}
+    {#each leftPeekItems as peekItem, i (peekItem.id)}
+      <img
+        src={thumbUrl(peekItem.id, size, peekItem.mtimeMs)}
+        alt=""
+        loading="lazy"
+        class="stack-peek"
+        style={`transform: translateX(-${(i + 1) * PEEK_STEP_PX}px); z-index: ${leftPeekItems.length - i};`}
+      />
+    {/each}
     <img
       {src}
       alt={item.name}
       loading="lazy"
+      class="cover"
       class:loaded
       on:load={() => (loaded = true)}
     />
@@ -100,16 +127,27 @@
     border-color: #4c9aff;
     box-shadow: 0 0 0 2px rgba(76, 154, 255, 0.35);
   }
-  img {
+  img.cover,
+  .stack-peek {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+    border-radius: inherit;
+  }
+  img.cover {
+    z-index: 50;
     opacity: 0;
     transition: opacity 0.2s ease;
   }
-  img.loaded {
+  img.cover.loaded {
     opacity: 1;
+  }
+  .stack-peek {
+    filter: brightness(0.75);
+    pointer-events: none;
   }
   .badge {
     position: absolute;
@@ -141,5 +179,10 @@
   }
   .stack-marker.is-cover {
     background: rgba(255, 196, 0, 0.85);
+  }
+  .badge,
+  .stack-badge,
+  .stack-marker {
+    z-index: 100;
   }
 </style>
