@@ -48,6 +48,17 @@ state), `node_modules` untracked, v2 scaffold at root, design doc written.
   DOM node count now stays roughly flat regardless of folder size.
 - Design doc: `docs/superpowers/specs/2026-07-06-grid-virtualization-design.md`.
 
+**Post-scan focus fix (done, commits `9b96931`, `cacec04`, closes issue #1)** —
+
+- Focus now moves to the selected photo after a successful scan, so Enter
+  opens the loupe instead of re-triggering a scan.
+- Deferred via a `focusPending` flag consumed once `boxes` is truthy,
+  rather than a fixed `tick()`: Svelte's `bind:clientWidth` resolves its
+  initial value asynchronously (iframe `onload`), so the grid's layout
+  isn't ready within one tick on the *first* scan of a session — only on
+  rescans. Design doc:
+  `docs/superpowers/specs/2026-07-06-post-scan-focus-fix-design.md`.
+
 ## Backlog
 
 Tracked in GitHub Issues (milestones `v0.2`, `Backlog (unprioritized)`,
