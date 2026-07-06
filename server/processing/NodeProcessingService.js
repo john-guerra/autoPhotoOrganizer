@@ -86,8 +86,11 @@ export class NodeProcessingService extends ProcessingService {
   }
 
   /**
-   * Read capture metadata for a batch of files via exifr. Best-effort: files
-   * without EXIF (or that fail to parse) yield a record with createDate omitted.
+   * Read capture metadata for a batch of files: pixel dimensions via a sharp
+   * header read (~0.2 ms/file, works for every supported format) and capture
+   * date via exifr. Width/height are swapped for rotated EXIF orientations so
+   * they describe the image as DISPLAYED — what the justified layout needs.
+   * Best-effort: fields are omitted for files that fail to parse.
    * @override
    * @param {string[]} files
    * @returns {Promise<import("./ProcessingService.js").MediaMetadata[]>}
@@ -95,15 +98,27 @@ export class NodeProcessingService extends ProcessingService {
   async metadata(files) {
     return Promise.all(
       files.map(async (path) => {
+        /** @type {import("./ProcessingService.js").MediaMetadata} */
+        const meta = { path };
+        try {
+          const info = await sharp(path).metadata();
+          // Orientations 5-8 are 90°/270° rotations: displayed dims are swapped.
+          const rotated = (info.orientation ?? 1) >= 5;
+          meta.width = rotated ? info.height : info.width;
+          meta.height = rotated ? info.width : info.height;
+        } catch {
+          /* dimensions unavailable */
+        }
         try {
           const exif = await exifr.parse(path, {
             pick: ["DateTimeOriginal", "CreateDate"],
           });
           const createDate = exif?.DateTimeOriginal || exif?.CreateDate;
-          return { path, createDate: createDate || undefined };
+          if (createDate) meta.createDate = createDate;
         } catch {
-          return { path };
+          /* no EXIF */
         }
+        return meta;
       })
     );
   }

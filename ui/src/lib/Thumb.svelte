@@ -3,7 +3,10 @@
   import { thumbUrl } from "./api.js";
   import Stars from "./Stars.svelte";
 
-  export let item; // {id, name, rating}
+  export let item; // {id, name, rating, mtimeMs}
+  export let box; // {x, y, width, height} from the justified layout
+  export let pad = 0; // grid frame inset (abs children ignore CSS padding)
+  export let size = 640; // thumb longest edge; higher zoom requests sharper
   export let selected = false;
 
   let el;
@@ -11,10 +14,11 @@
   let loaded = false;
   let observer;
 
-  // Recompute the src whenever the tile is visible OR the item changes. Svelte
-  // reuses this component across rescans (keyed by id), so `item` can swap to a
-  // different file under the same id — the mtime version keeps the URL correct.
-  $: src = visible ? thumbUrl(item.id, 320, item.mtimeMs) : null;
+  // Recompute the src whenever the tile is visible OR the item/size changes.
+  // Svelte reuses this component across rescans (keyed by id), so `item` can
+  // swap to a different file under the same id — the mtime version keeps the
+  // URL correct.
+  $: src = visible ? thumbUrl(item.id, size, item.mtimeMs) : null;
   $: if (src) loaded = false; // re-fade when the source changes
 
   onMount(() => {
@@ -27,7 +31,7 @@
           }
         }
       },
-      { rootMargin: "300px" } // fetch a bit before it scrolls into view
+      { rootMargin: "400px" } // fetch a bit before it scrolls into view
     );
     observer.observe(el);
   });
@@ -44,6 +48,7 @@
   class:selected
   data-id={item.id}
   title={item.name}
+  style={`top:${box.y + pad}px;left:${box.x + pad}px;width:${box.width}px;height:${box.height}px;`}
   on:click
 >
   {#if src}
@@ -62,15 +67,19 @@
 
 <style>
   .thumb {
-    position: relative;
-    aspect-ratio: 1 / 1;
+    position: absolute;
     padding: 0;
     border: 2px solid transparent;
-    border-radius: 6px;
+    border-radius: 4px;
     overflow: hidden;
     background: #1a1a1a;
     cursor: pointer;
     outline: none;
+    transition:
+      top 0.15s ease,
+      left 0.15s ease,
+      width 0.15s ease,
+      height 0.15s ease;
   }
   .thumb.selected {
     border-color: #4c9aff;

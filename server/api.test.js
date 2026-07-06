@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { createApp } from "./index.js";
 import { _resetSession } from "./api.js";
 import { _resetForTest } from "./ratings.js";
+import { flushMetaNow, _resetMetaForTest } from "./metaCache.js";
 
 /** Start the app on an ephemeral port; return { base, close }. */
 async function startServer() {
@@ -29,6 +30,7 @@ beforeAll(async () => {
   cacheDir = await mkdtemp(join(tmpdir(), "ag-cache-"));
   process.env.AUTOGALLERY_HOME = cacheDir;
   _resetForTest();
+  _resetMetaForTest();
   _resetSession();
 
   // Three tiny distinct JPEGs + a non-image that must be ignored.
@@ -97,6 +99,45 @@ describe("POST /api/scan", () => {
       body: JSON.stringify({ dir: "" }),
     });
     expect(empty.status).toBe(400);
+  });
+});
+
+describe("GET /api/meta", () => {
+  it("returns dimensions and takenAt for the requested ids", async () => {
+    await fetch(`${srv.base}/api/scan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dir: photosDir }),
+    });
+    const res = await fetch(`${srv.base}/api/meta?ids=0,1`);
+    expect(res.status).toBe(200);
+    const metas = await res.json();
+    expect(metas).toHaveLength(2);
+    // Fixture JPEGs are 48x32.
+    expect(metas[0]).toMatchObject({ id: 0, width: 48, height: 32 });
+    expect(metas[0]).toHaveProperty("takenAt"); // null: fixtures carry no EXIF
+  });
+
+  it("persists extracted metadata to the disk cache and reuses it", async () => {
+    flushMetaNow();
+    const raw = JSON.parse(
+      await import("node:fs/promises").then((fs) =>
+        fs.readFile(join(cacheDir, "metacache.json"), "utf8")
+      )
+    );
+    const entries = Object.values(raw);
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries[0]).toMatchObject({ w: 48, h: 32 });
+
+    // A fresh scan (new session) must resolve dims from the cache without
+    // touching the files (same values back).
+    await fetch(`${srv.base}/api/scan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dir: photosDir }),
+    });
+    const again = await (await fetch(`${srv.base}/api/meta?ids=0`)).json();
+    expect(again[0]).toMatchObject({ id: 0, width: 48, height: 32 });
   });
 });
 

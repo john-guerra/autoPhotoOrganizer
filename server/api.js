@@ -5,6 +5,7 @@ import { extname, join } from "node:path";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { thumbsDir } from "./lib/cachePaths.js";
 import { getAllRatings, setRating } from "./ratings.js";
+import { getMeta, putMeta } from "./metaCache.js";
 
 const processing = new NodeProcessingService();
 
@@ -75,8 +76,12 @@ export function registerApi(app) {
     res.json({ root: dir, count: items.length, elapsedMs, items });
   });
 
-  // --- Lazy EXIF enrichment ----------------------------------------------
-  // GET /api/meta?ids=0,1,2 -> [{ id, takenAt }]. Cached on the session.
+  // --- Lazy metadata enrichment --------------------------------------------
+  // GET /api/meta?ids=0,1,2 -> [{ id, takenAt, width, height }].
+  // Dimensions feed the justified grid layout; takenAt feeds album clustering
+  // later. Batched (the UI requests chunks). Two cache layers: the in-memory
+  // session, and the persistent ~/.autogallery/metacache.json keyed by
+  // absPath+mtimeMs so each folder pays the extraction cost once ever.
   app.get("/api/meta", async (req, res) => {
     const idsParam = String(req.query.ids ?? "");
     const ids = idsParam
@@ -86,19 +91,40 @@ export function registerApi(app) {
     const need = [];
     for (const id of ids) {
       const it = itemById(id);
-      if (it && it.takenAt === undefined) need.push(it);
+      if (!it || it.takenAt !== undefined) continue; // done or unknown id
+      const hit = getMeta(it.path, it.mtimeMs);
+      if (hit) {
+        it.takenAt = hit.t;
+        it.width = hit.w;
+        it.height = hit.h;
+      } else {
+        need.push(it);
+      }
     }
     if (need.length) {
       const metas = await processing.metadata(need.map((it) => it.path));
       metas.forEach((m, i) => {
+        const it = need[i];
         const d = m.createDate;
-        need[i].takenAt = d ? new Date(d).toISOString() : null;
+        it.takenAt = d ? new Date(d).toISOString() : null;
+        it.width = m.width ?? null;
+        it.height = m.height ?? null;
+        putMeta(it.path, it.mtimeMs, {
+          w: it.width,
+          h: it.height,
+          t: it.takenAt,
+        });
       });
     }
     const out = ids
       .map((id) => itemById(id))
       .filter(Boolean)
-      .map((it) => ({ id: it.id, takenAt: it.takenAt ?? null }));
+      .map((it) => ({
+        id: it.id,
+        takenAt: it.takenAt ?? null,
+        width: it.width ?? null,
+        height: it.height ?? null,
+      }));
     res.json(out);
   });
 

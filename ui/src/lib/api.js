@@ -21,6 +21,17 @@ export async function scan(dir) {
 }
 
 /**
+ * Fetch dimensions/takenAt for a batch of ids (feeds the justified layout).
+ * @param {number[]} ids
+ * @returns {Promise<Array<{id:number, takenAt:string|null, width:number|null, height:number|null}>>}
+ */
+export async function fetchMeta(ids) {
+  const res = await fetch(`/api/meta?ids=${ids.join(",")}`);
+  if (!res.ok) throw new Error(`meta failed (${res.status})`);
+  return res.json();
+}
+
+/**
  * @param {number} id
  * @param {number} rating
  */
