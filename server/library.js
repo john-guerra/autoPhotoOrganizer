@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { libraryFile } from "./lib/cachePaths.js";
 
 /**
@@ -49,8 +49,9 @@ function scheduleFlush() {
  * @param {number} [scannedAt] defaults to Date.now(); overridable for tests
  */
 export function recordScan(absPath, scannedAt = Date.now()) {
+  const normalized = resolve(absPath);
   const map = load();
-  map[absPath] = { name: basename(absPath), lastScannedAt: scannedAt };
+  map[normalized] = { name: basename(normalized), lastScannedAt: scannedAt };
   scheduleFlush();
 }
 

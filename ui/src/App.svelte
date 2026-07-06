@@ -670,6 +670,19 @@
     opacity: 0.6;
     cursor: default;
   }
+  .choose-folder {
+    padding: 0.45rem 1rem;
+    background: #4c9aff;
+    color: #06121f;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .choose-folder:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
   .library {
     position: relative;
   }

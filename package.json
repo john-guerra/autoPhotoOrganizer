@@ -5,6 +5,7 @@
   "main": "electron/main.js",
   "type": "module",
   "license": "MIT",
+  "author": "John Alexis Guerra Gómez",
   "engines": {
     "node": ">=22"
   },

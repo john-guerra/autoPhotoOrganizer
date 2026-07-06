@@ -15,8 +15,9 @@ const isDev = process.env.ELECTRON_DEV === "1";
 
 async function startEmbeddedServer() {
   const expressApp = createApp();
-  await new Promise((resolve) => {
-    expressApp.listen(PORT, HOST, resolve);
+  await new Promise((resolve, reject) => {
+    const server = expressApp.listen(PORT, HOST, resolve);
+    server.on("error", reject);
   });
 }
 
