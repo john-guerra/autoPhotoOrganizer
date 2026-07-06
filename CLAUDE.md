@@ -5,6 +5,10 @@ culling → best photos organized into dated album folders. Built for a photogra
 who returns from trips with thousands of JPEGs/videos (occasional RAW) and finds
 Lightroom too slow.
 
+**Start here: `docs/ROADMAP.md`** — current status, v0.2 backlog, working
+agreements (including read-only test folders and the no-browser-verification
+rule), and decisions already made.
+
 ## Two invariants (do not violate)
 
 1. **Folders on disk are the source of truth.** There is never an owning catalog.
