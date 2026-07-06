@@ -66,6 +66,8 @@
       localStorage.setItem(LS_KEY, res.root);
       status = `${res.count} photos · scanned in ${res.elapsedMs} ms`;
       enrichMeta(++scanEpoch);
+      await tick();
+      gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
     } catch (e) {
       error = e.message;
       status = "";
