@@ -217,3 +217,32 @@ traced the same wrong conclusion by hand in this session.
   general thumbnail-caching question, not burst-stack-specific) rather
   than fixed on this branch — orthogonal to the feature this branch
   implements, and not reproduced under normal single-scan usage.
+
+## Post-merge live-testing follow-ups (Electron packaging branch testing)
+
+- **Thumbnail generation is slow on a real SD card** (John's live report,
+  not reproduced against the read-only local test fixtures). Root cause:
+  `NodeProcessingService.thumbnail()` always fully decodes the source file
+  via sharp before resizing — there's no fast path reading the embedded
+  EXIF/JPEG preview first, even though `CLAUDE.md`'s own performance thesis
+  calls for exactly that ("Never fully decode a RAW during culling.
+  Extract... the EXIF/embedded preview (JPEG) via exiftool daemon mode").
+  `extractPreview()` remains an unimplemented stub. Filed as GitHub issue
+  #33 rather than fixed inline — real architectural change (new fast path +
+  fallback + reconsidering the eager full-cache-copy strategy), out of
+  scope for a live-testing pass. Related to #30 (stall/no-progress
+  indicator on large SD-card scans), which is the symptom side of the same
+  underlying slowness.
+- **Topbar fell behind the grid while scrolling — fixed inline.** Regression
+  from the peek-visual fix earlier in this log (`.thumb`'s explicit
+  `z-index: 10`, added so the selection border/peek layers paint
+  correctly). That value projects into the same ancestor stacking context
+  as `.topbar`'s own `z-index: 10` in `App.svelte`; at a tie, later DOM
+  order wins the paint, and the grid renders after `.topbar` in the
+  document, so thumbnails rendered over the sticky topbar during scroll.
+  Bumped `.topbar` to `z-index: 20` — clears the grid's projected `10`
+  while staying below `Loupe.svelte`'s full-screen overlay (`z-index: 100`),
+  which still needs to cover the topbar when open. Low-risk, well-understood
+  one-line CSS fix; applied directly rather than filed as an issue. Not
+  verified live per the no-browser-verification working agreement — worth a
+  visual confirm next time John is at `localhost:5173`.

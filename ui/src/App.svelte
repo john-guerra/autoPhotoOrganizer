@@ -627,7 +627,16 @@
   .topbar {
     position: sticky;
     top: 0;
-    z-index: 10;
+    /* Must outrank the grid content scrolling underneath it. Thumb.svelte's
+       `.thumb` sets an explicit z-index:10 (its own stacking context,
+       needed for the selection border/peek layers to paint correctly) —
+       that value projects into this same ancestor stacking context as a
+       sibling-level number. At a tie, later DOM order wins the paint, and
+       the grid comes after .topbar in the document, so equal z-index let
+       thumbnails render over this sticky bar while scrolling. 20 clears
+       that comfortably while staying below Loupe.svelte's full-screen
+       overlay (z-index:100), which still needs to cover the topbar. */
+    z-index: 20;
     display: flex;
     align-items: center;
     gap: 0.75rem;
