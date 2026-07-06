@@ -60,3 +60,20 @@ reviewed on return. Newest entries at the bottom.
   Also chose reasonable-but-arbitrary visual details (badge corners, gap
   slider range 0-10s/500ms steps, default 3000ms) — cheap to tweak after
   you look at it.
+- **Part 2, Task 1 (`displayEntries.js`) — one Important review finding
+  deliberately not fixed.** The reviewer flagged that
+  `buildDisplayEntries` doesn't guard against `stack.coverId` missing
+  from the `items`-derived `byId` map (would produce an `undefined`
+  `coverItem`). I judged this structurally unreachable given the
+  documented calling contract: `stacks` is always
+  `detectBursts(items, ...)`'s direct output, computed from the *same*
+  `items` array immediately before `buildDisplayEntries(items, stacks, ...)`
+  runs (both are `$:` reactive statements in `App.svelte`, same reactive
+  pass) — so `coverId` can never point outside `items`. Chose not to
+  spend a fix round-trip on defensive code for an unreachable path,
+  given the time cost of another implementer+reviewer cycle. **Flag for
+  review:** if this reasoning is wrong, or you want defensive code
+  anyway (e.g. in case the module is ever called from a new site that
+  doesn't uphold the invariant), it's a one-line fallback
+  (`byId.get(stack.coverId) ?? byId.get(stack.memberIds[0])`) in
+  `ui/src/lib/displayEntries.js`.
