@@ -2,6 +2,12 @@
   import { tick } from "svelte";
   import { justifiedLayout, layoutHeight } from "./lib/layouts/justified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
+  import { detectBursts } from "./lib/bursts.js";
+  import {
+    buildDisplayEntries,
+    entryDomId,
+    resolvePhoto,
+  } from "./lib/displayEntries.js";
   import {
     scan as apiScan,
     setRating as apiSetRating,
@@ -12,6 +18,8 @@
 
   const LS_KEY = "autogallery.lastDir";
   const LS_ZOOM = "autogallery.zoom";
+  const LS_BURST_GAP = "autogallery.burstGapMs";
+  const DEFAULT_BURST_GAP_MS = 3000;
   const META_CHUNK = 500; // ids per /api/meta request
   const DEFAULT_RATIO = 1.5; // placeholder until real dimensions arrive
 
@@ -26,6 +34,15 @@
       : 2;
   $: localStorage.setItem(LS_ZOOM, String(zoom));
   $: rowHeight = ZOOM_LEVELS[zoom];
+
+  const storedBurstGap = Number.parseInt(
+    localStorage.getItem(LS_BURST_GAP) ?? "",
+    10
+  );
+  let burstGapMs = Number.isFinite(storedBurstGap) && storedBurstGap >= 0
+    ? storedBurstGap
+    : DEFAULT_BURST_GAP_MS;
+  $: localStorage.setItem(LS_BURST_GAP, String(burstGapMs));
   // Request thumbs at the size actually displayed (row height × device pixel
   // ratio), snapped to a few buckets so the disk cache isn't fragmented per
   // pixel. The server caps size at 1024.
@@ -42,7 +59,7 @@
   let scanning = false;
   let scanEpoch = 0; // invalidates in-flight meta fetches on rescan
 
-  let selected = 0; // index into items
+  let selected = 0; // index into displayEntries
   let loupeOpen = false;
   let gridEl;
   let gridWidth = 0;
@@ -53,6 +70,7 @@
   let renderEnd = -1;
   let rafPending = false;
   let focusPending = false; // set after a scan; consumed once `boxes` exists
+  let expandedStackIds = new Set(); // stack ids currently expanded inline in the grid
 
   async function doScan() {
     if (!dir.trim()) return;
@@ -104,14 +122,22 @@
   // aspect ratios in, positioned boxes out. Absolutely-positioned children
   // ignore CSS padding, so the frame inset is applied to the box coordinates.
   const PAD = 12;
+  $: stacks = detectBursts(items, { gapMs: burstGapMs });
+  $: displayEntries = buildDisplayEntries(items, stacks, expandedStackIds);
+  $: resolvedPhotos = displayEntries.map(resolvePhoto); // passed to Loupe
   $: boxes =
-    items.length && gridWidth > 2 * PAD
+    displayEntries.length && gridWidth > 2 * PAD
       ? justifiedLayout(
-          items.map((it) => ({
-            id: it.id,
-            aspectRatio:
-              it.width && it.height ? it.width / it.height : DEFAULT_RATIO,
-          })),
+          displayEntries.map((e) => {
+            const photo = resolvePhoto(e);
+            return {
+              id: entryDomId(e),
+              aspectRatio:
+                photo.width && photo.height
+                  ? photo.width / photo.height
+                  : DEFAULT_RATIO,
+            };
+          }),
           {
             containerWidth: gridWidth - 2 * PAD,
             gap: 8,
@@ -121,7 +147,7 @@
       : null;
   $: gridHeight = boxes ? layoutHeight(boxes) + 2 * PAD : 0;
   $: if (boxes) updateVisibleRange(); // zoom change, meta enrichment, rescan
-  $: visibleItems = buildVisibleItems(items, renderStart, renderEnd, selected);
+  $: visibleItems = buildVisibleItems(displayEntries, renderStart, renderEnd, selected);
 
   // First scan of a session: bind:clientWidth's initial value arrives
   // asynchronously (Svelte's iframe resize-listener fires on iframe.onload),
@@ -132,12 +158,20 @@
   $: if (focusPending && boxes) {
     focusPending = false;
     tick().then(() => {
-      gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
+      // Thumb's data-id attribute is always the resolved photo's raw id
+      // (Thumb only ever receives `item`, never the display entry), so DOM
+      // lookups must key on resolvePhoto(entry).id, not entryDomId(entry) —
+      // entryDomId is the stack id for a collapsed stack and never appears
+      // in the DOM as a data-id.
+      const entry = displayEntries[selected];
+      gridEl?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)?.focus();
     });
   }
 
   function rate(index, rating) {
-    const it = items[index];
+    const entry = displayEntries[index];
+    if (!entry) return;
+    const it = resolvePhoto(entry);
     if (!it) return;
     it.rating = rating;
     items = items; // trigger reactivity
@@ -152,8 +186,53 @@
   async function closeLoupe() {
     loupeOpen = false;
     await tick();
-    // Return focus to the grid, scrolled to the current item.
-    gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
+    // Return focus to the grid, scrolled to the current item. (Key on
+    // resolvePhoto(entry).id, matching Thumb's data-id — see focusPending.)
+    const entry = displayEntries[selected];
+    gridEl?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)?.focus();
+  }
+
+  /** Re-collapse a stack: remove it from expandedStackIds, then re-select
+   * and re-focus its now-collapsed tile once displayEntries recomputes. */
+  async function collapseStack(stackId) {
+    expandedStackIds.delete(stackId);
+    expandedStackIds = expandedStackIds; // trigger reactivity
+    await tick();
+    const newIndex = displayEntries.findIndex(
+      (e) => e.kind === "stack" && e.stack.id === stackId
+    );
+    if (newIndex !== -1) {
+      selected = newIndex;
+      await tick();
+      // The re-collapsed tile resolves to its cover photo, so its data-id
+      // is the cover's raw id, not stackId — see focusPending's comment.
+      const entry = displayEntries[newIndex];
+      gridEl
+        ?.querySelector(`[data-id="${resolvePhoto(entry).id}"]`)
+        ?.focus({ preventScroll: true });
+    }
+  }
+
+  /** Expand a stack: every member appears individually, tagged with the
+   * stack id, until collapseStack() is called (Escape, in onKeydown). */
+  async function toggleExpand(stack) {
+    if (expandedStackIds.has(stack.id)) {
+      await collapseStack(stack.id);
+      return;
+    }
+    expandedStackIds.add(stack.id);
+    expandedStackIds = expandedStackIds; // trigger reactivity
+    await tick();
+    const newIndex = displayEntries.findIndex(
+      (e) => e.kind === "photo" && e.item.id === stack.coverId
+    );
+    if (newIndex !== -1) {
+      selected = newIndex;
+      await tick();
+      gridEl
+        ?.querySelector(`[data-id="${stack.coverId}"]`)
+        ?.focus({ preventScroll: true });
+    }
   }
 
   /** Recompute [renderStart, renderEnd] from the grid's current position. */
@@ -187,15 +266,15 @@
    * jumps (Home/End, arrow past the window) mount their target and Thumb's
    * own scrollIntoView reactive block (Thumb.svelte:42) brings it into view.
    */
-  function buildVisibleItems(items, start, end, selected) {
+  function buildVisibleItems(entries, start, end, selected) {
     const indices = [];
     for (let i = start; i <= end; i++) indices.push(i);
-    if (selected < items.length && !indices.includes(selected)) {
+    if (selected < entries.length && !indices.includes(selected)) {
       const insertAt = indices.findIndex((i) => i > selected);
       if (insertAt === -1) indices.push(selected);
       else indices.splice(insertAt, 0, selected);
     }
-    return indices.map((i) => ({ i, item: items[i] }));
+    return indices.map((i) => ({ i, entry: entries[i] }));
   }
 
   /**
@@ -244,7 +323,7 @@
       return;
     if (e.metaKey || e.ctrlKey || e.altKey) return; // browser shortcuts
 
-    if (!items.length) return;
+    if (!displayEntries.length) return;
     const key = e.key;
 
     // Grid zoom: +/- steps through the justified row heights.
@@ -261,7 +340,7 @@
     if (/^[0-5]$/.test(key)) {
       e.preventDefault();
       rate(selected, Number(key));
-      if (loupeOpen && selected < items.length - 1) selected += 1; // auto-advance
+      if (loupeOpen && selected < displayEntries.length - 1) selected += 1; // auto-advance
       return;
     }
 
@@ -271,7 +350,7 @@
         closeLoupe();
       } else if (key === "ArrowRight" || key === "ArrowDown") {
         e.preventDefault();
-        if (selected < items.length - 1) selected += 1;
+        if (selected < displayEntries.length - 1) selected += 1;
       } else if (key === "ArrowLeft" || key === "ArrowUp") {
         e.preventDefault();
         if (selected > 0) selected -= 1;
@@ -279,25 +358,43 @@
       return;
     }
 
+    // Escape in the grid: collapse an expanded stack if the selection is
+    // currently inside one.
+    if (key === "Escape") {
+      const entry = displayEntries[selected];
+      if (entry?.stackId) {
+        e.preventDefault();
+        await collapseStack(entry.stackId);
+      }
+      return;
+    }
+
     // Grid navigation.
     let next = selected;
-    if (key === "ArrowRight") next = Math.min(items.length - 1, selected + 1);
+    if (key === "ArrowRight")
+      next = Math.min(displayEntries.length - 1, selected + 1);
     else if (key === "ArrowLeft") next = Math.max(0, selected - 1);
     else if (key === "ArrowDown") next = navVertical(1);
     else if (key === "ArrowUp") next = navVertical(-1);
     else if (key === "Enter" || key === " ") {
       e.preventDefault();
-      openLoupe(selected);
+      const entry = displayEntries[selected];
+      if (entry?.kind === "stack") {
+        toggleExpand(entry.stack);
+      } else {
+        openLoupe(selected);
+      }
       return;
     } else if (key === "Home") next = 0;
-    else if (key === "End") next = items.length - 1;
+    else if (key === "End") next = displayEntries.length - 1;
     else return;
 
     e.preventDefault();
     selected = next;
     await tick();
+    const entry = displayEntries[selected];
     gridEl
-      ?.querySelector(`[data-id="${items[selected]?.id}"]`)
+      ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
       ?.focus({ preventScroll: true });
   }
 </script>
@@ -346,14 +443,15 @@
       tabindex="-1"
     >
       {#if boxes}
-        {#each visibleItems as { i, item } (item.id)}
+        {#each visibleItems as { i, entry } (entryDomId(entry))}
           <Thumb
-            {item}
+            item={resolvePhoto(entry)}
             box={boxes[i]}
             pad={PAD}
             size={thumbSize}
             selected={i === selected}
-            on:click={() => openLoupe(i)}
+            on:click={() =>
+              entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
           />
         {/each}
       {/if}
@@ -364,7 +462,7 @@
 </div>
 
 {#if loupeOpen}
-  <Loupe {items} bind:index={selected} />
+  <Loupe items={resolvedPhotos} bind:index={selected} />
 {/if}
 
 <style>
