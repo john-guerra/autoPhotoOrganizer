@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "../server/index.js";
@@ -36,6 +36,15 @@ async function createWindow() {
     await win.loadURL(`http://${HOST}:${PORT}`);
   }
 }
+
+ipcMain.handle("pick-folder", async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const result = await dialog.showOpenDialog(win, {
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
 
 app.whenReady().then(async () => {
   try {

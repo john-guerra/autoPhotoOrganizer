@@ -25,6 +25,9 @@
   const META_CHUNK = 500; // ids per /api/meta request
   const DEFAULT_RATIO = 1.5; // placeholder until real dimensions arrive
 
+  const hasNativePicker =
+    typeof window !== "undefined" && !!window.autogallery?.pickFolder;
+
   // Zoom = target row height of the justified layout. +/- keys or the slider.
   const ZOOM_LEVELS = [120, 160, 220, 300, 400];
   const storedZoom = Number.parseInt(localStorage.getItem(LS_ZOOM) ?? "", 10);
@@ -111,6 +114,14 @@
     dir = entry.path;
     libraryOpen = false;
     doScan();
+  }
+
+  async function chooseFolder() {
+    const path = await window.autogallery?.pickFolder();
+    if (path) {
+      dir = path;
+      doScan();
+    }
   }
 
   // Progressively fetch dimensions in chunks; the justified layout refines
@@ -504,6 +515,11 @@
     <button class="scan" on:click={doScan} disabled={scanning}>
       {scanning ? "Scanning…" : "Scan"}
     </button>
+    {#if hasNativePicker}
+      <button class="choose-folder" on:click={chooseFolder} disabled={scanning}>
+        Choose Folder…
+      </button>
+    {/if}
     <div class="library">
       <button
         class="library-toggle"

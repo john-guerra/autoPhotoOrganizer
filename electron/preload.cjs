@@ -1,5 +1,5 @@
-"use strict";
+const { contextBridge, ipcRenderer } = require("electron");
 
-const { contextBridge } = require("electron");
-
-contextBridge.exposeInMainWorld("autogallery", {});
+contextBridge.exposeInMainWorld("autogallery", {
+  pickFolder: () => ipcRenderer.invoke("pick-folder"),
+});
