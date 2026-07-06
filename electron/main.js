@@ -52,7 +52,11 @@ ipcMain.handle("pick-folder", async (event) => {
 app.whenReady().then(async () => {
   try {
     await createWindow();
-    if (!isDev) autoUpdater.checkForUpdatesAndNotify();
+    if (!isDev) {
+      autoUpdater
+        .checkForUpdatesAndNotify()
+        .catch((err) => console.error("Update check failed:", err));
+    }
   } catch (err) {
     dialog.showErrorBox("AutoGallery failed to start", String(err));
     app.quit();
