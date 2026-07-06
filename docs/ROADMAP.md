@@ -116,8 +116,8 @@ backlog triage happens on GitHub.
   - `/Users/aguerra/Pictures/fotos/Wonders Years` — 198 JPEGs, small demo set.
 - **Challenge him with evidence** — he explicitly asked not to be agreed
   with by default.
-- Direct pushes to `master` may be blocked by tooling; push to the
-  `v2-reorg` branch (John merges/fast-forwards `master` himself).
+- Direct pushes to `main` may be blocked by tooling; push to the
+  `v2-reorg` branch (John merges/fast-forwards `main` himself).
 - Commit early; the working tree should not accumulate multi-feature
   batches (an interrupted session nearly stranded uncommitted work once).
 
