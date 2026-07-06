@@ -1,0 +1,29 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { mkdirSync } from "node:fs";
+
+/**
+ * Resolve the AutoGallery cache root on the INTERNAL disk.
+ *
+ * ALL writes this app makes land under here (~/.autogallery). Scanned photo
+ * folders are strictly read-only; nothing is ever written back to them.
+ *
+ * Overridable via AUTOGALLERY_HOME so tests can point at a temp dir.
+ * @returns {string} Absolute path to the cache root.
+ */
+export function cacheRoot() {
+  return process.env.AUTOGALLERY_HOME || join(homedir(), ".autogallery");
+}
+
+/** @returns {string} Absolute path to the thumbnail cache dir (created if missing). */
+export function thumbsDir() {
+  const dir = join(cacheRoot(), "cache", "thumbs");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** @returns {string} Absolute path to the ratings JSON file. */
+export function ratingsFile() {
+  mkdirSync(cacheRoot(), { recursive: true });
+  return join(cacheRoot(), "ratings.json");
+}

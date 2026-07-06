@@ -16,10 +16,19 @@ describe("ProcessingService (smoke)", () => {
     }
   });
 
-  it("NodeProcessingService is a ProcessingService whose methods throw NotImplemented", async () => {
+  it("NodeProcessingService is a ProcessingService", () => {
     const svc = new NodeProcessingService();
     expect(svc).toBeInstanceOf(ProcessingService);
-    await expect(svc.scan("/tmp")).rejects.toThrow(/not implemented/i);
-    await expect(svc.metadata([])).rejects.toThrow(/not implemented/i);
+  });
+
+  it("NodeProcessingService still throws on the not-yet-implemented engines", async () => {
+    const svc = new NodeProcessingService();
+    // RAW embedded-preview extraction and video poster frames come later.
+    await expect(svc.extractPreview("/tmp/x.cr2")).rejects.toThrow(
+      /not implemented/i
+    );
+    await expect(svc.videoThumb("/tmp/x.mov")).rejects.toThrow(
+      /not implemented/i
+    );
   });
 });
