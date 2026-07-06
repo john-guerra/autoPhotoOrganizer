@@ -50,7 +50,13 @@ export function detectBursts(items, { gapMs }) {
     .map((cluster) => {
       const coverId = pickCover(cluster);
       return {
-        id: `burst-${coverId}`,
+        // Anchored to the chronologically-first member (cluster is
+        // time-sorted, so cluster[0] is stable), NOT coverId — coverId
+        // can change when a user rates a different member the highest
+        // (pickCover prefers the highest-rated member), and the stack's
+        // identity must survive that so a grid that's tracking "this
+        // stack is expanded" by id doesn't silently lose track of it.
+        id: `burst-${cluster[0].item.id}`,
         memberIds: cluster.map((c) => c.item.id),
         coverId,
         count: cluster.length,
