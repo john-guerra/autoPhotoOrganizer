@@ -1,7 +1,7 @@
 <script context="module">
   export const PEEK_STEP_PX = 6; // px offset per peeking layer (diagonal: horizontal alternating + vertical), tuned for visibility
   export const MAX_PEEK_DEPTH = 2; // visual depth cap — peeks beyond this render at the same max offset, keeping the tile's footprint small and neat regardless of actual stack size
-  export const PEEK_VERTICAL_PX = 1; // flat vertical offset for every peek layer (not scaled by depth) — a subtle "slightly offset" cue, kept tiny since it isn't reserved for in the grid layout
+  export const PEEK_VERTICAL_PX = 2; // flat vertical offset for every peek layer (not scaled by depth) — a subtle "slightly offset" cue, kept tiny since it isn't reserved for in the grid layout
 </script>
 
 <script>
@@ -69,7 +69,7 @@
         alt=""
         loading="lazy"
         class="stack-peek"
-        style={`inset: 0 ${stackMarginPx}px; transform: translate(${Math.min(i + 1, MAX_PEEK_DEPTH) * PEEK_STEP_PX}px, ${PEEK_VERTICAL_PX}px); z-index: ${rightPeekItems.length - i};`}
+        style={`left:${stackMarginPx}px; width:calc(100% - ${2 * stackMarginPx}px); transform: translate(${Math.min(i + 1, MAX_PEEK_DEPTH) * PEEK_STEP_PX}px, ${PEEK_VERTICAL_PX}px); z-index: ${rightPeekItems.length - i};`}
       />
     {/each}
     {#each leftPeekItems as peekItem, i (peekItem.id)}
@@ -78,7 +78,7 @@
         alt=""
         loading="lazy"
         class="stack-peek"
-        style={`inset: 0 ${stackMarginPx}px; transform: translate(${-Math.min(i + 1, MAX_PEEK_DEPTH) * PEEK_STEP_PX}px, ${PEEK_VERTICAL_PX}px); z-index: ${leftPeekItems.length - i};`}
+        style={`left:${stackMarginPx}px; width:calc(100% - ${2 * stackMarginPx}px); transform: translate(${-Math.min(i + 1, MAX_PEEK_DEPTH) * PEEK_STEP_PX}px, ${PEEK_VERTICAL_PX}px); z-index: ${leftPeekItems.length - i};`}
       />
     {/each}
   {/if}
@@ -131,6 +131,17 @@
   .thumb {
     position: absolute;
     inset: 0;
+    /* Explicit z-index (not auto) so this element establishes its own
+       stacking context: its own border/box-shadow (the selection
+       highlight) and its children (cover z-index:50, badges z-index:100)
+       all paint as one unit above the peek layers (z-index 1..
+       MAX_PEEK_DEPTH, siblings in .thumb-wrap), regardless of DOM order.
+       Without this, .thumb's own border/box-shadow — which has no
+       z-index of its own — was promoted into .thumb-wrap's shared
+       stacking context at the "auto" (effectively 0) level, below the
+       peek layers' explicit positive z-index, and got visually
+       painted over by them. */
+    z-index: 10;
     padding: 0;
     border: 2px solid transparent;
     border-radius: 4px;
@@ -151,9 +162,11 @@
     height: 100%;
     object-fit: cover;
     display: block;
-    border-radius: inherit;
   }
   img.cover {
+    /* inherit is correct here: img.cover is a child of .thumb, which
+       has its own border-radius: 4px. */
+    border-radius: inherit;
     z-index: 50;
     opacity: 0;
     transition: opacity 0.2s ease;
@@ -162,6 +175,11 @@
     opacity: 1;
   }
   .stack-peek {
+    /* NOT `inherit`: .stack-peek is a sibling of .thumb, a direct child
+       of .thumb-wrap (which has no border-radius of its own) — inherit
+       would resolve to 0 here, not .thumb's 4px. Match .thumb's radius
+       explicitly instead. */
+    border-radius: 4px;
     filter: brightness(0.75);
     pointer-events: none;
   }
