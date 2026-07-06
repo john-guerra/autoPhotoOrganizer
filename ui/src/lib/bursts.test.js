@@ -52,6 +52,27 @@ describe("detectBursts", () => {
     expect(stacks[0].coverId).toBe(2); // mtimeMs 0 is chronologically first
   });
 
+  it("keeps a stack's id stable when a rating changes which member is the cover", () => {
+    const items = [
+      { id: 1, name: "a.jpg", mtimeMs: 0 },
+      { id: 2, name: "b.jpg", mtimeMs: 200 },
+      { id: 3, name: "c.jpg", mtimeMs: 400 },
+    ];
+    const before = detectBursts(items, { gapMs: 1000 });
+    expect(before).toHaveLength(1);
+    const stackIdBefore = before[0].id;
+    expect(before[0].coverId).toBe(1); // no rating yet: chronologically-first is cover
+
+    // Simulate the user rating a different member the highest, as if
+    // App.svelte's rate() had mutated the shared item and re-run
+    // detectBursts on the same items array.
+    items[2].rating = 5; // item id 3
+    const after = detectBursts(items, { gapMs: 1000 });
+    expect(after).toHaveLength(1);
+    expect(after[0].coverId).toBe(3); // cover changed to the newly-rated member
+    expect(after[0].id).toBe(stackIdBefore); // but the stack's own id did NOT change
+  });
+
   it("prefers takenAt over mtimeMs for grouping when takenAt is present", () => {
     const items = [
       { id: 1, name: "a.jpg", mtimeMs: 0, takenAt: 0 },

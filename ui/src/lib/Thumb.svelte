@@ -8,6 +8,8 @@
   export let pad = 0; // grid frame inset (abs children ignore CSS padding)
   export let size = 640; // thumb longest edge; higher zoom requests sharper
   export let selected = false;
+  export let stackCount = undefined; // set when this tile is a collapsed stack's cover
+  export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
 
   let el;
   let visible = false; // set true once the tile nears the viewport
@@ -63,6 +65,12 @@
   {#if item.rating > 0}
     <span class="badge"><Stars rating={item.rating} /></span>
   {/if}
+  {#if stackCount}
+    <span class="stack-badge">×{stackCount}</span>
+  {/if}
+  {#if inExpandedStack}
+    <span class="stack-marker" title="Part of a burst — press Escape to collapse">⚏</span>
+  {/if}
 </button>
 
 <style>
@@ -100,6 +108,28 @@
     position: absolute;
     left: 5px;
     bottom: 5px;
+    pointer-events: none;
+  }
+  .stack-badge {
+    position: absolute;
+    right: 5px;
+    bottom: 5px;
+    padding: 1px 5px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    font-size: 0.7rem;
+    border-radius: 3px;
+    pointer-events: none;
+  }
+  .stack-marker {
+    position: absolute;
+    left: 5px;
+    top: 5px;
+    padding: 1px 4px;
+    background: rgba(76, 154, 255, 0.75);
+    color: #06121f;
+    font-size: 0.7rem;
+    border-radius: 3px;
     pointer-events: none;
   }
 </style>
