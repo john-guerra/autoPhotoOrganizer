@@ -77,3 +77,17 @@ reviewed on return. Newest entries at the bottom.
   doesn't uphold the invariant), it's a one-line fallback
   (`byId.get(stack.coverId) ?? byId.get(stack.memberIds[0])`) in
   `ui/src/lib/displayEntries.js`.
+- **Part 2, Task 2 — my own plan brief had a real bug, caught and fixed
+  by the implementer, then independently re-verified by the reviewer.**
+  The brief's literal focus-restoration code used `entryDomId(entry)` at
+  4 `querySelector('[data-id="..."]')` call sites, but `Thumb.svelte`
+  only ever renders `data-id={item.id}` (the resolved photo's id, never
+  a stack's synthetic id) — so those focus calls would have silently
+  found nothing for a collapsed-stack target. Fixed within scope to
+  `resolvePhoto(entry).id`, keeping `entryDomId` only where it's actually
+  needed (the `{#each}` key, and the `justifiedLayout` input's `id`
+  field, both of which do need to treat a collapsed stack as one
+  distinct element). Worth noting since it means my own design docs
+  aren't infallible — the subagent pipeline caught this one before it
+  reached you, but it's a reminder to actually run the app rather than
+  trust the plan looks right on paper.
