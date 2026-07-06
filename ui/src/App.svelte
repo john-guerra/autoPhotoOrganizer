@@ -430,6 +430,14 @@
       />
       <span class="zoom-icon">▦</span>
     </label>
+    <label
+      class="burst-gap"
+      title="Group photos taken within this many seconds as a burst"
+    >
+      <span class="burst-gap-icon">⧉</span>
+      <input type="range" min="0" max="10000" step="500" bind:value={burstGapMs} />
+      <span class="burst-gap-value">{(burstGapMs / 1000).toFixed(1)}s</span>
+    </label>
     <span class="status" class:err={!!error}>{error || status}</span>
   </header>
 
@@ -450,6 +458,8 @@
             pad={PAD}
             size={thumbSize}
             selected={i === selected}
+            stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
+            inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
             on:click={() =>
               entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
           />
@@ -540,6 +550,24 @@
   }
   .zoom-icon.small {
     font-size: 0.7rem;
+  }
+  .burst-gap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #777;
+  }
+  .burst-gap input[type="range"] {
+    width: 90px;
+    accent-color: #4c9aff;
+  }
+  .burst-gap-icon {
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .burst-gap-value {
+    font-size: 0.75rem;
+    min-width: 2.5em;
   }
   .status {
     color: #9a9a9a;
