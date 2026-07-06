@@ -26,12 +26,14 @@
 ## File structure
 
 New files:
+
 - `electron/main.js` — main process: creates the `BrowserWindow`, starts the embedded Express server in production, handles the `pick-folder` IPC call.
 - `electron/preload.cjs` — `contextBridge` surface exposed to the renderer (CommonJS — see Global Constraints).
 - `.github/workflows/release.yml` — CI matrix build (Mac/Windows/Linux) + publish on version tags.
 - `server/library.js` — persisted "recently scanned folders" store (mirrors `server/coverChoices.js`).
 
 Modified files:
+
 - `server/lib/cachePaths.js` — add `libraryFile()`.
 - `server/api.js` — auto-record scans into the library; add `GET /api/library`.
 - `server/api.test.js` — cover the above.
@@ -44,12 +46,14 @@ Modified files:
 ### Task 1: Library persistence + `/api/library` endpoint + auto-record on scan
 
 **Files:**
+
 - Modify: `server/lib/cachePaths.js`
 - Create: `server/library.js`
 - Modify: `server/api.js`
 - Modify: `server/api.test.js`
 
 **Interfaces:**
+
 - Produces: `libraryFile(): string` (in `server/lib/cachePaths.js`, same shape as existing `coverChoicesFile()`).
 - Produces: `recordScan(absPath: string, scannedAt?: number): void`, `getAllLibraryEntries(): Array<{path:string, name:string, lastScannedAt:number}>`, `flushNow(): void`, `_resetForTest(): void` (all in `server/library.js`).
 - Produces: `GET /api/library` → `Array<{path:string, name:string, lastScannedAt:number, mounted:boolean}>`.
@@ -60,13 +64,16 @@ Add to `server/api.test.js`. First, add these imports near the top (alongside th
 
 ```js
 import { basename } from "node:path";
-import { recordScan, _resetForTest as _resetLibraryForTest } from "./library.js";
+import {
+  recordScan,
+  _resetForTest as _resetLibraryForTest,
+} from "./library.js";
 ```
 
 In `beforeAll`, alongside the other `_resetForTest()` calls, add:
 
 ```js
-  _resetLibraryForTest();
+_resetLibraryForTest();
 ```
 
 Then add a new `describe` block (anywhere after the existing `describe("POST /api/scan", ...)` block):
@@ -218,31 +225,31 @@ import { getAllLibraryEntries, recordScan } from "./library.js";
 In the `POST /api/scan` handler, right after the existing directory validation (after the `if (!st.isDirectory())` block, i.e. right before `const t0 = performance.now();`), add:
 
 ```js
-    recordScan(dir);
+recordScan(dir);
 ```
 
 So that section reads:
 
 ```js
-    if (!st.isDirectory()) {
-      return res.status(400).json({ error: `not a directory: ${dir}` });
-    }
-    recordScan(dir);
+if (!st.isDirectory()) {
+  return res.status(400).json({ error: `not a directory: ${dir}` });
+}
+recordScan(dir);
 
-    const t0 = performance.now();
+const t0 = performance.now();
 ```
 
 Add a new route after the existing `/api/cover` route (right before the closing `}` of `registerApi`):
 
 ```js
-  // --- Library (recently-scanned folders) ----------------------------------
-  app.get("/api/library", (_req, res) => {
-    const entries = getAllLibraryEntries().map((e) => ({
-      ...e,
-      mounted: existsSync(e.path),
-    }));
-    res.json(entries);
-  });
+// --- Library (recently-scanned folders) ----------------------------------
+app.get("/api/library", (_req, res) => {
+  const entries = getAllLibraryEntries().map((e) => ({
+    ...e,
+    mounted: existsSync(e.path),
+  }));
+  res.json(entries);
+});
 ```
 
 - [ ] **Step 6: Run the tests to verify they pass**
@@ -262,10 +269,12 @@ git commit -m "feat: persist a library of scanned folders with offline detection
 ### Task 2: UI — library dropdown
 
 **Files:**
+
 - Modify: `ui/src/lib/api.js`
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: `GET /api/library` (Task 1).
 - Produces: `fetchLibrary(): Promise<Array<{path, name, lastScannedAt, mounted}>>` (`ui/src/lib/api.js`), used by `App.svelte`.
 
@@ -289,61 +298,61 @@ export async function fetchLibrary() {
 Change the Svelte import (line 2) from:
 
 ```js
-  import { tick } from "svelte";
+import { tick } from "svelte";
 ```
 
 to:
 
 ```js
-  import { onMount, tick } from "svelte";
+import { onMount, tick } from "svelte";
 ```
 
 Add `fetchLibrary` to the existing `./lib/api.js` import block (currently `scan as apiScan, setRating as apiSetRating, setCover as apiSetCover, fetchMeta`):
 
 ```js
-  import {
-    scan as apiScan,
-    setRating as apiSetRating,
-    setCover as apiSetCover,
-    fetchMeta,
-    fetchLibrary,
-  } from "./lib/api.js";
+import {
+  scan as apiScan,
+  setRating as apiSetRating,
+  setCover as apiSetCover,
+  fetchMeta,
+  fetchLibrary,
+} from "./lib/api.js";
 ```
 
 Add state, right after the existing `let scanEpoch = 0;` line:
 
 ```js
-  let library = [];
-  let libraryOpen = false;
+let library = [];
+let libraryOpen = false;
 ```
 
 Add two functions right after the `doScan()` function definition:
 
 ```js
-  async function refreshLibrary() {
-    library = await fetchLibrary().catch(() => library);
-  }
+async function refreshLibrary() {
+  library = await fetchLibrary().catch(() => library);
+}
 
-  function selectFromLibrary(entry) {
-    if (!entry.mounted) return;
-    dir = entry.path;
-    libraryOpen = false;
-    doScan();
-  }
+function selectFromLibrary(entry) {
+  if (!entry.mounted) return;
+  dir = entry.path;
+  libraryOpen = false;
+  doScan();
+}
 ```
 
 Inside `doScan()`, add a call to `refreshLibrary()` right after `localStorage.setItem(LS_KEY, res.root);`, so the success path reads:
 
 ```js
-      localStorage.setItem(LS_KEY, res.root);
-      refreshLibrary();
-      status = `${res.count} photos · scanned in ${res.elapsedMs} ms`;
+localStorage.setItem(LS_KEY, res.root);
+refreshLibrary();
+status = `${res.count} photos · scanned in ${res.elapsedMs} ms`;
 ```
 
 Add an `onMount` call to load the library on startup. Place it right after the state declarations, before `async function doScan()`:
 
 ```js
-  onMount(refreshLibrary);
+onMount(refreshLibrary);
 ```
 
 In the template, add a dropdown toggle button and panel right after the existing `<button class="scan" ...>` button (inside `<header class="topbar">`):
@@ -384,57 +393,57 @@ In the template, add a dropdown toggle button and panel right after the existing
 Add matching styles inside the existing `<style>` block:
 
 ```css
-  .library {
-    position: relative;
-  }
-  .library-panel {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    z-index: 200;
-    margin: 4px 0 0;
-    padding: 4px 0;
-    min-width: 220px;
-    max-height: 300px;
-    overflow-y: auto;
-    list-style: none;
-    background: #1e1e1e;
-    border: 1px solid #333;
-    border-radius: 4px;
-  }
-  .library-entry {
-    display: block;
-    width: 100%;
-    padding: 6px 10px;
-    text-align: left;
-    background: none;
-    border: none;
-    color: inherit;
-    cursor: pointer;
-  }
-  .library-entry:hover:not(:disabled) {
-    background: #2a2a2a;
-  }
-  .library-entry.offline {
-    color: #888;
-    cursor: default;
-  }
-  .offline-badge {
-    margin-left: 6px;
-    font-size: 0.7rem;
-    color: #888;
-  }
-  .library-empty {
-    padding: 6px 10px;
-    color: #888;
-  }
+.library {
+  position: relative;
+}
+.library-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 200;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  min-width: 220px;
+  max-height: 300px;
+  overflow-y: auto;
+  list-style: none;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+.library-entry {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+.library-entry:hover:not(:disabled) {
+  background: #2a2a2a;
+}
+.library-entry.offline {
+  color: #888;
+  cursor: default;
+}
+.offline-badge {
+  margin-left: 6px;
+  font-size: 0.7rem;
+  color: #888;
+}
+.library-empty {
+  padding: 6px 10px;
+  color: #888;
+}
 ```
 
 - [ ] **Step 3: Manual verification**
 
 Run: `npm run dev`
-Then, at `localhost:5173`: scan the "Wonders Years" test folder
-(`/Users/aguerra/Pictures/fotos/Wonders Years` — read-only, do not
+Then, at `localhost:5173`: scan the small demo test folder
+(see `docs/TEST_FOLDERS.local.md` — read-only, do not
 write/move/rename/delete anything inside it), then click "Library ▾" and
 confirm the folder appears in the dropdown and re-selecting it re-scans.
 This is a visual check — stop here and let John confirm it looks right;
@@ -452,11 +461,13 @@ git commit -m "feat: add a library dropdown of recently-scanned folders"
 ### Task 3: Electron scaffolding (shell boots, no picker yet)
 
 **Files:**
+
 - Modify: `package.json`
 - Create: `electron/main.js` (originally created as `electron/main.cjs`; converted to ESM — see amendment note below)
 - Create: `electron/preload.cjs`
 
 **Interfaces:**
+
 - Consumes: `createApp()` from `server/index.js` (existing, unmodified).
 - Produces: `electron/main.js` (Electron entry point, referenced by `package.json`'s `"main"` field), `electron/preload.cjs` (empty `contextBridge` scaffold, filled in by Task 4).
 
@@ -566,6 +577,7 @@ git commit -m "feat: add an Electron shell wrapping the existing server/UI uncha
 ```
 
 **Post-implementation amendments (both applied after the steps above, before Task 4):**
+
 1. A task review found `startEmbeddedServer()`/`createWindow()` had no error handling — a failed embedded-server startup would hang the window with no visible error. Fixed by wrapping `app.whenReady().then(createWindow)` in a try/catch that shows `dialog.showErrorBox` and calls `app.quit()` on failure.
 2. Per updated guidance, `electron/main.cjs` was converted to an ES module (`electron/main.js`, `import`/`export`, plus a static `import { createApp } from "../server/index.js"` replacing the old dynamic-import workaround since both files are ESM now). `electron/preload.cjs` was also attempted as ESM but confirmed NOT to work — Electron's sandboxed preload loader throws a `SyntaxError` on `import` — so it stays CommonJS unchanged. All code shown in this task's steps above is superseded by this — Tasks 4 and 7 below already reflect the correct main.js (ESM) / preload.cjs (CommonJS) split.
 
@@ -574,11 +586,13 @@ git commit -m "feat: add an Electron shell wrapping the existing server/UI uncha
 ### Task 4: Native folder picker (closes #7)
 
 **Files:**
+
 - Modify: `electron/main.js`
 - Modify: `electron/preload.cjs` (stays CommonJS — see Global Constraints)
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Produces: `window.autogallery.pickFolder(): Promise<string|null>` (renderer-facing, via `contextBridge`).
 - Consumes (in `App.svelte`): the above, feature-detected.
 - Consumes (in `electron/main.js`): the existing `app`, `BrowserWindow`, `createWindow`, `isDev` and the try/catch-wrapped `app.whenReady().then(...)` block added as Task 3's error-handling amendment — add to that block, don't replace it.
@@ -621,20 +635,20 @@ contextBridge.exposeInMainWorld("autogallery", {
 Add a module-scope constant right after the existing `const DEFAULT_RATIO = 1.5;` line:
 
 ```js
-  const hasNativePicker =
-    typeof window !== "undefined" && !!window.autogallery?.pickFolder;
+const hasNativePicker =
+  typeof window !== "undefined" && !!window.autogallery?.pickFolder;
 ```
 
 Add a function right after `selectFromLibrary` (added in Task 2):
 
 ```js
-  async function chooseFolder() {
-    const path = await window.autogallery?.pickFolder();
-    if (path) {
-      dir = path;
-      doScan();
-    }
+async function chooseFolder() {
+  const path = await window.autogallery?.pickFolder();
+  if (path) {
+    dir = path;
+    doScan();
   }
+}
 ```
 
 In the template, add the button right after the existing `<button class="scan" ...>` element:
@@ -650,9 +664,9 @@ In the template, add the button right after the existing `<button class="scan" .
 - [ ] **Step 4: Manual verification**
 
 Run: `npm run electron:dev`
-In the Electron window, click "Choose Folder…", pick the "Wonders Years"
+In the Electron window, click "Choose Folder…", pick the small demo
 test folder in the native dialog
-(`/Users/aguerra/Pictures/fotos/Wonders Years` — read-only), and confirm
+(see `docs/TEST_FOLDERS.local.md` — read-only), and confirm
 the path field fills in and a scan runs. Cancel the dialog once too and
 confirm nothing changes. Stop here for John's visual confirmation — no
 automated GUI driving.
@@ -669,9 +683,11 @@ git commit -m "feat: add a native folder picker via Electron's dialog API"
 ### Task 5: Packaging config (electron-builder, local unsigned build)
 
 **Files:**
+
 - Modify: `package.json`
 
 **Interfaces:**
+
 - Produces: `npm run electron:build` (local packaging for manual smoke-testing).
 
 - [ ] **Step 1: Add `electron-builder` as a dev dependency**
@@ -776,9 +792,11 @@ git commit -m "feat: add electron-builder packaging config for mac/win/linux"
 ### Task 6: CI release workflow (GitHub Actions)
 
 **Files:**
+
 - Create: `.github/workflows/release.yml`
 
 **Interfaces:**
+
 - Consumes: `npm run build` (existing), `electron-builder` (Task 5's config).
 
 - [ ] **Step 1: Create `.github/workflows/release.yml`**
@@ -839,10 +857,12 @@ git commit -m "ci: add a tag-triggered release build for mac/win/linux"
 ### Task 7: Auto-update wiring
 
 **Files:**
+
 - Modify: `package.json`
 - Modify: `electron/main.js`
 
 **Interfaces:**
+
 - Consumes: the `publish` config from Task 5 (`package.json`'s `"build".publish`).
 - Consumes: the current shape of `electron/main.js`'s `app.whenReady()` block, which (after Task 3's error-handling amendment) is:
 

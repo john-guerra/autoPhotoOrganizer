@@ -12,8 +12,8 @@ var express = require("express"),
 
 
 var fmt = d3.time.format("%Y:%m:%d %H:%M:%S");
-var url = "/Users/aguerra/Pictures/fotos/2015/2015_08Aug_01_Butterfly_Garden_Lukas_selected_peq/IMG_5472.jpg";
-var path = process.argv.length > 2 ? process.argv[2] :   "/Users/aguerra/Pictures/fotos/2015/2015_08Aug_01_Butterfly_Garden_Lukas_selected_peq/";
+var url = "/path/to/photos/2015_08Aug_01_Example_Album_selected_peq/IMG_5472.jpg";
+var path = process.argv.length > 2 ? process.argv[2] :   "/path/to/photos/2015_08Aug_01_Example_Album_selected_peq/";
 
 function getExif(list, done) {
 	return function (url) {

@@ -13,7 +13,7 @@
 - ESM everywhere (`"type": "module"`); no TypeScript — plain JS + JSDoc types.
 - Tests: vitest, colocated as `*.test.js` next to the source file.
 - Do **not** run automated browser/Playwright verification — John verifies visually himself at `localhost:5173`. Run unit tests, then stop and report tersely (working agreement in `docs/ROADMAP.md`).
-- Test photo folders under `/Users/aguerra/Pictures/` are strictly read-only reference for manual verification only — this plan does not write code that touches them directly.
+- Test photo folders (see `docs/TEST_FOLDERS.local.md`, gitignored) are strictly read-only reference for manual verification only — this plan does not write code that touches them directly.
 - Commit after each task; do not batch multiple tasks into one commit.
 - Full spec: `docs/superpowers/specs/2026-07-06-grid-virtualization-design.md`.
 
@@ -22,10 +22,12 @@
 ### Task 1: `visibleRange` pure windowing function
 
 **Files:**
+
 - Create: `ui/src/lib/layouts/windowing.js`
 - Test: `ui/src/lib/layouts/windowing.test.js`
 
 **Interfaces:**
+
 - Produces: `visibleRange(boxes, { scrollTop, viewportHeight, overscanPx = 800 }) → { start: number, end: number }`, exported from `ui/src/lib/layouts/windowing.js`. `boxes` is `Array<{id, x, y, width, height}>` sorted ascending by `y` (guaranteed by `justifiedLayout`). Returns inclusive indices into `boxes`; `{ start: 0, end: -1 }` means nothing is in range.
 
 - [ ] **Step 1: Write the failing tests**
@@ -207,9 +209,11 @@ EOF
 ### Task 2: Wire virtualization into `App.svelte`
 
 **Files:**
+
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: `visibleRange(boxes, { scrollTop, viewportHeight, overscanPx? }) → { start, end }` from Task 1.
 - Uses existing: `boxes` (reactive var, `App.svelte:98-112`), `gridEl` (`App.svelte:46`), `selected` (`App.svelte:44`), `items` (`App.svelte:38`).
 
@@ -218,7 +222,7 @@ EOF
 In `ui/src/App.svelte`, add to the existing import block near the top of `<script>` (after the `justifiedLayout, layoutHeight` import):
 
 ```js
-  import { visibleRange } from "./lib/layouts/windowing.js";
+import { visibleRange } from "./lib/layouts/windowing.js";
 ```
 
 - [ ] **Step 2: Add virtualization state**
@@ -226,11 +230,11 @@ In `ui/src/App.svelte`, add to the existing import block near the top of `<scrip
 Immediately after the existing `let gridWidth = 0;` line, add:
 
 ```js
-  // Virtualization: only Thumbs in [renderStart, renderEnd] (plus the
-  // selected index) are mounted. Recomputed on scroll/resize/layout change.
-  let renderStart = 0;
-  let renderEnd = -1;
-  let rafPending = false;
+// Virtualization: only Thumbs in [renderStart, renderEnd] (plus the
+// selected index) are mounted. Recomputed on scroll/resize/layout change.
+let renderStart = 0;
+let renderEnd = -1;
+let rafPending = false;
 ```
 
 - [ ] **Step 3: Add the recompute functions**
@@ -238,47 +242,47 @@ Immediately after the existing `let gridWidth = 0;` line, add:
 Add this after the `closeLoupe` function (right before the `navVertical` function):
 
 ```js
-  /** Recompute [renderStart, renderEnd] from the grid's current position. */
-  function updateVisibleRange() {
-    if (!gridEl || !boxes) {
-      renderStart = 0;
-      renderEnd = -1;
-      return;
-    }
-    const rect = gridEl.getBoundingClientRect();
-    const range = visibleRange(boxes, {
-      scrollTop: -rect.top,
-      viewportHeight: window.innerHeight,
-    });
-    renderStart = range.start;
-    renderEnd = range.end;
+/** Recompute [renderStart, renderEnd] from the grid's current position. */
+function updateVisibleRange() {
+  if (!gridEl || !boxes) {
+    renderStart = 0;
+    renderEnd = -1;
+    return;
   }
+  const rect = gridEl.getBoundingClientRect();
+  const range = visibleRange(boxes, {
+    scrollTop: -rect.top,
+    viewportHeight: window.innerHeight,
+  });
+  renderStart = range.start;
+  renderEnd = range.end;
+}
 
-  /** Collapse a burst of scroll/resize events to one recompute per frame. */
-  function scheduleVisibleRangeUpdate() {
-    if (rafPending) return;
-    rafPending = true;
-    requestAnimationFrame(() => {
-      rafPending = false;
-      updateVisibleRange();
-    });
-  }
+/** Collapse a burst of scroll/resize events to one recompute per frame. */
+function scheduleVisibleRangeUpdate() {
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => {
+    rafPending = false;
+    updateVisibleRange();
+  });
+}
 
-  /**
-   * Indices to mount: the virtualized window, plus `selected` so keyboard
-   * jumps (Home/End, arrow past the window) mount their target and Thumb's
-   * own scrollIntoView reactive block (Thumb.svelte:42) brings it into view.
-   */
-  function buildVisibleItems(items, start, end, selected) {
-    const indices = [];
-    for (let i = start; i <= end; i++) indices.push(i);
-    if (selected < items.length && !indices.includes(selected)) {
-      const insertAt = indices.findIndex((i) => i > selected);
-      if (insertAt === -1) indices.push(selected);
-      else indices.splice(insertAt, 0, selected);
-    }
-    return indices.map((i) => ({ i, item: items[i] }));
+/**
+ * Indices to mount: the virtualized window, plus `selected` so keyboard
+ * jumps (Home/End, arrow past the window) mount their target and Thumb's
+ * own scrollIntoView reactive block (Thumb.svelte:42) brings it into view.
+ */
+function buildVisibleItems(items, start, end, selected) {
+  const indices = [];
+  for (let i = start; i <= end; i++) indices.push(i);
+  if (selected < items.length && !indices.includes(selected)) {
+    const insertAt = indices.findIndex((i) => i > selected);
+    if (insertAt === -1) indices.push(selected);
+    else indices.splice(insertAt, 0, selected);
   }
+  return indices.map((i) => ({ i, item: items[i] }));
+}
 ```
 
 - [ ] **Step 4: Recompute when the layout changes, and derive the render list**
@@ -286,8 +290,8 @@ Add this after the `closeLoupe` function (right before the `navVertical` functio
 Add this right after the existing `$: gridHeight = boxes ? layoutHeight(boxes) + 2 * PAD : 0;` line:
 
 ```js
-  $: if (boxes) updateVisibleRange(); // zoom change, meta enrichment, rescan
-  $: visibleItems = buildVisibleItems(items, renderStart, renderEnd, selected);
+$: if (boxes) updateVisibleRange(); // zoom change, meta enrichment, rescan
+$: visibleItems = buildVisibleItems(items, renderStart, renderEnd, selected);
 ```
 
 - [ ] **Step 5: Listen for scroll and resize**
@@ -362,8 +366,9 @@ EOF
 - [ ] **Step 9: Stop for manual verification**
 
 Per the working agreement in `docs/ROADMAP.md`, do **not** run automated browser/Playwright verification. Report tersely that unit tests pass, and ask John to verify at `localhost:5173` against the two test folders:
-- `/Users/aguerra/Pictures/fotos/Wonders Years` (198 photos — sanity check nothing broke at small scale).
-- `/Users/aguerra/Pictures/fotos_bk/2025_10Oct_30_Backup_cell_pixel9pro/DCIM/Camera` (10,172 photos — the scale check; confirm scroll stays smooth and keyboard nav, including Home/End, still works).
+
+- the small demo folder (198 photos — sanity check nothing broke at small scale; see `docs/TEST_FOLDERS.local.md`).
+- the scale-test folder (10,172 photos — confirm scroll stays smooth and keyboard nav, including Home/End, still works; see `docs/TEST_FOLDERS.local.md`).
 
 ---
 

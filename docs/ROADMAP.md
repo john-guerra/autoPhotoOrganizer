@@ -55,7 +55,7 @@ state), `node_modules` untracked, v2 scaffold at root, design doc written.
 - Deferred via a `focusPending` flag consumed once `boxes` is truthy,
   rather than a fixed `tick()`: Svelte's `bind:clientWidth` resolves its
   initial value asynchronously (iframe `onload`), so the grid's layout
-  isn't ready within one tick on the *first* scan of a session — only on
+  isn't ready within one tick on the _first_ scan of a session — only on
   rescans. Design doc:
   `docs/superpowers/specs/2026-07-06-post-scan-focus-fix-design.md`.
 
@@ -104,16 +104,14 @@ backlog triage happens on GitHub.
 ## Working agreements (how John wants the work done)
 
 - **John verifies visually himself** at `localhost:5173` while the dev
-  server hot-reloads. Do NOT run automated browser/Playwright verification
-  unless he explicitly asks — it burns tokens. Run unit tests, then stop
-  and report tersely.
+  server hot-reloads. Automated browser verification (claude-in-chrome/
+  Playwright) is fine when it's actually useful, but use it in moderation —
+  it burns tokens — and prefer unit tests first. Don't reach for a full
+  browser session for things a unit test already covers.
 - **Test photo folders — STRICTLY READ-ONLY, handle with extreme care**
   (never write/move/rename/delete inside them; all app writes go to
-  `~/.autogallery/` only):
-  - `/Users/aguerra/Pictures/fotos_bk/2025_10Oct_30_Backup_cell_pixel9pro/DCIM/Camera`
-    — 10,172 JPGs + 809 MP4s, the scale test (~800 hash-named files: don't
-    assume `PXL_` naming).
-  - `/Users/aguerra/Pictures/fotos/Wonders Years` — 198 JPEGs, small demo set.
+  `~/.autogallery/` only). Real paths are personal and not committed — see
+  `docs/TEST_FOLDERS.local.md` (gitignored).
 - **Challenge him with evidence** — he explicitly asked not to be agreed
   with by default.
 - Direct pushes to `main` may be blocked by tooling; push to the

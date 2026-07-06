@@ -26,7 +26,7 @@ gate that determines which items are even eligible for time-gap grouping.
 
 Real data from John's test folders (surveyed 2026-07-06): the 10,172-photo
 Pixel folder has exactly 12 files (4 groups of 3) matching the Pixel burst
-filename pattern — about 0.1% of files. The `Wonders Years` folder (200
+filename pattern — about 0.1% of files. The small demo folder (200
 JPEGs, older camera exports) has zero burst-named files. So time-gap
 detection is the mechanism that actually matters for the large majority of
 real bursts; filename matching is a small correctness refinement on top.
@@ -50,7 +50,7 @@ export function detectBursts(items, { gapMs }) { ... }
    existing pattern of falling back to `mtimeMs` when EXIF hasn't
    resolved yet or is absent).
 2. **Walk consecutive photos**, merging into a running cluster whenever
-   *either*:
+   _either_:
    - the gap between consecutive effective-capture-times is `≤ gapMs`, or
    - both photos share the same Pixel burst filename prefix (see below) —
      a hard-link override, so a genuine burst-mode sequence always stays
@@ -103,7 +103,7 @@ step 4.2 above.
   within `gapMs` group; a gap wider than `gapMs` splits into separate
   runs (or drops to ungrouped if the run is length 1).
 - Pixel filename hard-link override: two same-burst-prefix files whose
-  timestamps are *farther apart* than `gapMs` still group together.
+  timestamps are _farther apart_ than `gapMs` still group together.
 - Cover selection priority: a rated member wins even when a `.COVER.`
   marker is also present in the same cluster; `.COVER.` wins when no
   member is rated; chronologically-first wins when neither applies.

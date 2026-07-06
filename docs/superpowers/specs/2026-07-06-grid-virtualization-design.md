@@ -34,7 +34,7 @@ use case:
 - **Virtualization, not the renderer, is what makes "millions" tractable
   for a linear-scroll cull grid.** Only ~50–150 tiles are ever visible at
   once regardless of total archive size. GPU's real payoff is a different
-  interaction — a zoomed-out view of the *entire* archive rendered at once
+  interaction — a zoomed-out view of the _entire_ archive rendered at once
   (PhotoMesa-style semantic zoom), where nothing can be virtualized because
   everything genuinely is on screen simultaneously. That's the separate
   "archive exploration" tier already recorded in
@@ -58,7 +58,10 @@ bookkeeping and stays correct regardless of what's above the grid.
 as `justified.js` (no DOM, no Svelte, unit-testable in isolation):
 
 ```js
-export function visibleRange(boxes, { scrollTop, viewportHeight, overscanPx = 800 }) {
+export function visibleRange(
+  boxes,
+  { scrollTop, viewportHeight, overscanPx = 800 }
+) {
   // boxes sorted ascending by y (guaranteed by justifiedLayout: rows are
   // emitted in order, all boxes in a row share one y).
   // Binary search for:
@@ -120,7 +123,7 @@ against.
 ## Validation
 
 After implementation, run against the 10,172-photo Pixel folder
-(`/Users/aguerra/Pictures/fotos_bk/2025_10Oct_30_Backup_cell_pixel9pro/DCIM/Camera`
+(the scale-test folder (see `docs/TEST_FOLDERS.local.md`)
 — read-only, per `docs/ROADMAP.md` working agreements) and report the
 mounted `Thumb` count at a given scroll position (should stay in the
 low hundreds regardless of total count) plus a qualitative scroll-feel

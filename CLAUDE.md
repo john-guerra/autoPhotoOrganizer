@@ -6,8 +6,8 @@ who returns from trips with thousands of JPEGs/videos (occasional RAW) and finds
 Lightroom too slow.
 
 **Start here: `docs/ROADMAP.md`** — current status, v0.2 backlog, working
-agreements (including read-only test folders and the no-browser-verification
-rule), and decisions already made.
+agreements (including read-only test folders and moderate use of browser
+verification), and decisions already made.
 
 ## Two invariants (do not violate)
 
@@ -66,3 +66,10 @@ rule), and decisions already made.
 - **Svelte + d3** on the frontend.
 - Every file-serving endpoint MUST route user paths through
   `server/lib/safeResolve.js` (path-traversal guard — the legacy app was flagged).
+
+## Agent tool usage
+
+- When driving the app with claude-in-chrome for verification, prefer
+  `browser_batch` to run a sequence of clicks/types/navigations/screenshots in
+  one call instead of one tool call per action — much faster than issuing them
+  individually.

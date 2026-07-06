@@ -10,7 +10,7 @@
 
 
     var fmt = d3.time.format("%Y:%m:%d %H:%M:%S");
-    var path = process.argv.length > 2 ? process.argv[2] : "/Users/aguerra/Pictures/fotos/2015/2015_12Dic_27_La_Pastora_selected_peq/";
+    var path = process.argv.length > 2 ? process.argv[2] : "/path/to/photos/2015_12Dic_27_Example_Album_selected_peq/";
     var photosByDate = [];
     var avgSeparation = 0; //What's the average separation between photos
 
