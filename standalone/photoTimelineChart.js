@@ -1,3 +1,6 @@
+var d3 = require("d3");
+
+
 function photoTimelineChart() {
   "use strict";
   var margin = {top: 20, right: 50, bottom: 20, left: 50},
@@ -138,3 +141,4 @@ function photoTimelineChart() {
   return chart;
 }
 
+module.exports = photoTimelineChart;

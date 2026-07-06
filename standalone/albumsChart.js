@@ -1,3 +1,4 @@
+var d3 = require("d3");
 
 function albumsChart() {
   "use strict";
@@ -71,3 +72,4 @@ function albumsChart() {
   return chart;
 }
 
+module.exports = albumsChart;
