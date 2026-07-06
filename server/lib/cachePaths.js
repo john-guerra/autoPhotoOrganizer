@@ -33,3 +33,9 @@ export function coverChoicesFile() {
   mkdirSync(cacheRoot(), { recursive: true });
   return join(cacheRoot(), "coverChoices.json");
 }
+
+/** @returns {string} Absolute path to the library (recent-folders) JSON file. */
+export function libraryFile() {
+  mkdirSync(cacheRoot(), { recursive: true });
+  return join(cacheRoot(), "library.json");
+}

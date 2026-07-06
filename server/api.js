@@ -7,6 +7,7 @@ import { thumbsDir } from "./lib/cachePaths.js";
 import { getAllRatings, setRating } from "./ratings.js";
 import { getAllCoverChoices, setCoverChoice } from "./coverChoices.js";
 import { getMeta, putMeta } from "./metaCache.js";
+import { getAllLibraryEntries, recordScan } from "./library.js";
 
 const processing = new NodeProcessingService();
 
@@ -53,6 +54,7 @@ export function registerApi(app) {
     if (!st.isDirectory()) {
       return res.status(400).json({ error: `not a directory: ${dir}` });
     }
+    recordScan(dir);
 
     const t0 = performance.now();
     const files = await processing.scan(dir);
@@ -213,6 +215,15 @@ export function registerApi(app) {
     }
     setCoverChoice(it.path, isCover);
     res.json({ id: it.id, preferredCover: isCover });
+  });
+
+  // --- Library (recently-scanned folders) ----------------------------------
+  app.get("/api/library", (_req, res) => {
+    const entries = getAllLibraryEntries().map((e) => ({
+      ...e,
+      mounted: existsSync(e.path),
+    }));
+    res.json(entries);
   });
 }
 

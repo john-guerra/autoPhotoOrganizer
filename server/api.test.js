@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, rm, mkdir, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import sharp from "sharp";
 import { createApp } from "./index.js";
 import { _resetSession } from "./api.js";
 import { _resetForTest } from "./ratings.js";
 import { _resetForTest as _resetCoverChoicesForTest } from "./coverChoices.js";
 import { flushMetaNow, _resetMetaForTest } from "./metaCache.js";
+import { recordScan, _resetForTest as _resetLibraryForTest } from "./library.js";
 
 /** Start the app on an ephemeral port; return { base, close }. */
 async function startServer() {
@@ -33,6 +34,7 @@ beforeAll(async () => {
   _resetForTest();
   _resetCoverChoicesForTest();
   _resetMetaForTest();
+  _resetLibraryForTest();
   _resetSession();
 
   // Three tiny distinct JPEGs + a non-image that must be ignored.
@@ -274,5 +276,32 @@ describe("manual cover choice round-trip", () => {
       body: JSON.stringify({ id: 0, isCover: "yes" }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/library", () => {
+  it("records the scanned folder and reports it as mounted", async () => {
+    await fetch(`${srv.base}/api/scan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dir: photosDir }),
+    });
+    const res = await fetch(`${srv.base}/api/library`);
+    expect(res.status).toBe(200);
+    const entries = await res.json();
+    const entry = entries.find((e) => e.path === photosDir);
+    expect(entry).toBeDefined();
+    expect(entry.mounted).toBe(true);
+    expect(entry.name).toBe(basename(photosDir));
+  });
+
+  it("reports a since-removed folder as not mounted", async () => {
+    const goneDir = join(photosDir, "does-not-exist-anymore");
+    recordScan(goneDir);
+    const res = await fetch(`${srv.base}/api/library`);
+    const entries = await res.json();
+    const entry = entries.find((e) => e.path === goneDir);
+    expect(entry).toBeDefined();
+    expect(entry.mounted).toBe(false);
   });
 });
