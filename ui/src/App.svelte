@@ -52,6 +52,7 @@
   let renderStart = 0;
   let renderEnd = -1;
   let rafPending = false;
+  let focusPending = false; // set after a scan; consumed once `boxes` exists
 
   async function doScan() {
     if (!dir.trim()) return;
@@ -66,8 +67,7 @@
       localStorage.setItem(LS_KEY, res.root);
       status = `${res.count} photos · scanned in ${res.elapsedMs} ms`;
       enrichMeta(++scanEpoch);
-      await tick();
-      gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
+      focusPending = true;
     } catch (e) {
       error = e.message;
       status = "";
@@ -122,6 +122,19 @@
   $: gridHeight = boxes ? layoutHeight(boxes) + 2 * PAD : 0;
   $: if (boxes) updateVisibleRange(); // zoom change, meta enrichment, rescan
   $: visibleItems = buildVisibleItems(items, renderStart, renderEnd, selected);
+
+  // First scan of a session: bind:clientWidth's initial value arrives
+  // asynchronously (Svelte's iframe resize-listener fires on iframe.onload),
+  // so `boxes` may still be null right after doScan sets focusPending. Defer
+  // the post-scan focus until `boxes` — and therefore the selected Thumb —
+  // actually exists; this also covers rescans, where `boxes` is already
+  // truthy and this fires immediately.
+  $: if (focusPending && boxes) {
+    focusPending = false;
+    tick().then(() => {
+      gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
+    });
+  }
 
   function rate(index, rating) {
     const it = items[index];
