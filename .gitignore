@@ -1,2 +1,7 @@
-/node_modules
-/standalone/node_modules
+node_modules/
+.DS_Store
+dist/
+.autogallery-cache/
+*.sqlite
+*.sqlite-*
+.env
