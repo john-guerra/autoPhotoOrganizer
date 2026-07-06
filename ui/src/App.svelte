@@ -11,6 +11,7 @@
   import {
     scan as apiScan,
     setRating as apiSetRating,
+    setCover as apiSetCover,
     fetchMeta,
   } from "./lib/api.js";
   import Thumb from "./lib/Thumb.svelte";
@@ -176,6 +177,35 @@
     it.rating = rating;
     items = items; // trigger reactivity
     apiSetRating(it.id, rating).catch((e) => (error = e.message));
+  }
+
+  /**
+   * Toggle the manual cover choice for the given display entry: if it's
+   * already the stack's manual pick, clear it (revert to automatic
+   * selection); otherwise make it the pick, clearing any other member of
+   * the same stack that was previously manually chosen. At most one
+   * manual pick per stack is enforced here, in the UI — pickCover's own
+   * fallback (first-in-cluster-order) only matters if that invariant is
+   * ever violated some other way.
+   */
+  function toggleCover(entry) {
+    if (entry?.kind !== "photo" || !entry.stackId) return;
+    const stack = stacks.find((s) => s.id === entry.stackId);
+    if (!stack) return;
+
+    const target = entry.item;
+    const makingManual = !target.preferredCover;
+
+    for (const id of stack.memberIds) {
+      const it = items.find((i) => i.id === id);
+      if (!it) continue;
+      const shouldBeCover = makingManual && id === target.id;
+      if (it.preferredCover !== shouldBeCover) {
+        it.preferredCover = shouldBeCover;
+        apiSetCover(it.id, shouldBeCover).catch((e) => (error = e.message));
+      }
+    }
+    items = items; // trigger reactivity
   }
 
   function openLoupe(index) {
@@ -344,6 +374,19 @@
       return;
     }
 
+    // Manual cover choice: 'C' toggles whether the selected photo is its
+    // stack's manually-chosen cover. Only meaningful for a member of a
+    // currently expanded stack; a no-op otherwise. Works in both grid and
+    // loupe, since both share the same selected index into displayEntries.
+    if (key.toLowerCase() === "c") {
+      const entry = displayEntries[selected];
+      if (entry?.stackId) {
+        e.preventDefault();
+        toggleCover(entry);
+      }
+      return;
+    }
+
     if (loupeOpen) {
       if (key === "Escape") {
         e.preventDefault();
@@ -460,6 +503,9 @@
             selected={i === selected}
             stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
             inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
+            isCurrentCover={entry.kind === "photo" &&
+              entry.stackId !== null &&
+              stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
             on:click={() =>
               entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
           />

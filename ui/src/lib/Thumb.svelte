@@ -10,6 +10,7 @@
   export let selected = false;
   export let stackCount = undefined; // set when this tile is a collapsed stack's cover
   export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
+  export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
 
   let el;
   let visible = false; // set true once the tile nears the viewport
@@ -69,7 +70,13 @@
     <span class="stack-badge">×{stackCount}</span>
   {/if}
   {#if inExpandedStack}
-    <span class="stack-marker" title="Part of a burst — press Escape to collapse">⚏</span>
+    <span
+      class="stack-marker"
+      class:is-cover={isCurrentCover}
+      title={isCurrentCover
+        ? "Current cover for this stack — press C to unset, Escape to collapse"
+        : "Part of a burst — press C to make this the cover, Escape to collapse"}>⚏</span
+    >
   {/if}
 </button>
 
@@ -131,5 +138,8 @@
     font-size: 0.7rem;
     border-radius: 3px;
     pointer-events: none;
+  }
+  .stack-marker.is-cover {
+    background: rgba(255, 196, 0, 0.85);
   }
 </style>
