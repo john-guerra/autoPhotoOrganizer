@@ -59,6 +59,39 @@ state), `node_modules` untracked, v2 scaffold at root, design doc written.
   rescans. Design doc:
   `docs/superpowers/specs/2026-07-06-post-scan-focus-fix-design.md`.
 
+**Electron packaging + native folder picker (done, merged `1841458`, closes
+issues #7 and #32)** —
+
+- The app is now also a packageable Electron desktop app (Mac/Windows/
+  Linux), not just a browser dev server — `electron/main.js` (ES modules)
+  wraps the existing Express server unchanged and opens a `BrowserWindow`;
+  `electron/preload.cjs` stays CommonJS (confirmed necessary: Electron's
+  sandboxed preload loader cannot load ESM). Security model:
+  `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`,
+  exposing exactly one `contextBridge` method (`pickFolder`) — deliberately
+  not repeating `legacy/2024-electron-standalone/main.js`'s insecure
+  pattern.
+- Closes #7 (folder selector UI): the raw path `<input>` is replaced by a
+  "Choose Folder…" button (visible only inside Electron, feature-detected)
+  that opens a real native `dialog.showOpenDialog`.
+- `server/library.js`: a persisted "library" of previously-scanned folders
+  (`~/.autogallery/library.json`), same pattern as `ratings.json`/
+  `coverChoices.json`; `GET /api/library` reports each entry's mounted/
+  offline status (`fs.existsSync`) for the removable-drive (SD card) case.
+  Shown as a dropdown in the topbar in both Electron and plain-browser dev
+  mode.
+- `electron-builder` packaging config (dmg/zip + nsis + AppImage across all
+  three OSes; `directories.output: "release"` to avoid colliding with
+  Vite's `dist/` build output; `asarUnpack` for sharp's native binaries)
+  and a tag-triggered GitHub Actions release workflow
+  (`.github/workflows/release.yml`, matrix build across all three OSes).
+  `electron-updater` checks GitHub Releases for updates in production only.
+- Not yet done: actually cutting a signed release (needs an Apple Developer
+  Program membership for notarization and a Windows code-signing
+  certificate — account/billing decisions, not technical blockers).
+  Design doc: `docs/superpowers/specs/2026-07-06-electron-packaging-design.md`.
+  Plan: `docs/superpowers/plans/2026-07-06-electron-packaging.md`.
+
 ## Backlog
 
 Tracked in GitHub Issues (milestones `v0.2`, `Backlog (unprioritized)`,
