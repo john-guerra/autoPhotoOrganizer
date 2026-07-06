@@ -158,16 +158,26 @@ introducing a new storage mechanism.
 ## Packaging & distribution
 
 - `electron-builder` for both build config and installers: `dmg`/`zip` +
-  notarization for macOS, `nsis` for Windows.
+  notarization for macOS, `nsis` for Windows, `AppImage` for Linux.
+  Linux is the cheapest of the three to add — no notarization, no
+  code-signing required — so it's included from the start rather than
+  deferred.
 - `electron-updater`, publishing to GitHub Releases (the repo is already
   hosted there) — avoids standing up separate update infrastructure.
+  `electron-updater` supports all three platforms against the same
+  GitHub Releases provider.
+- `dialog.showOpenDialog` (the folder picker) is natively cross-platform,
+  including Linux (GTK/Qt dialogs under the hood) — no extra code needed
+  for the picker itself beyond what's already specified above.
 - Real costs to accept, not solved by this doc: an Apple Developer Program
-  membership is required for notarization, and a Windows code-signing
-  certificate is needed to avoid SmartScreen warnings (a self-signed cert
-  works but keeps the warning). Both are account/billing decisions for
-  John to make when packaging is actually built, not a technical blocker.
-- App icon, exact `electron-builder` config, and CI for building both
-  platforms are implementation-plan detail, not design detail.
+  membership is required for macOS notarization, and a Windows
+  code-signing certificate is needed to avoid SmartScreen warnings (a
+  self-signed cert works but keeps the warning). Both are account/billing
+  decisions for John to make when packaging is actually built, not a
+  technical blocker. Linux has no equivalent cost.
+- App icon, exact `electron-builder` config per platform, and CI for
+  building all three targets are implementation-plan detail, not design
+  detail.
 
 ## Testing
 
@@ -182,7 +192,6 @@ introducing a new storage mechanism.
 
 ## Out of scope
 
-- Linux packaging — Mac + Windows only, per the stated requirement.
 - Removing/editing library entries, reordering, or showing per-entry photo
   counts — first cut is additive-only; a fast-follow once the basic list
   is in daily use.
