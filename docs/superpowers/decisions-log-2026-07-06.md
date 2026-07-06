@@ -131,3 +131,74 @@ reviewed on return. Newest entries at the bottom.
   when the Loupe is closed and nothing consumes it — likely fine at 10k
   scale (a few ms) but worth gating `resolvedPhotos` on `loupeOpen` if
   it's ever felt.
+
+## Follow-up: burst stack visual redesign + manual cover selection
+
+New spec/plan brainstormed and approved in the same session:
+`docs/superpowers/specs/2026-07-06-burst-stack-visual-and-manual-cover-design.md`
+/ `...plan.md`. All 5 tasks implemented and task-reviewed clean via the
+usual subagent pipeline (manual cover persistence+API, priority tier,
+keyboard trigger, `peekItems` data, peek rendering).
+
+**The peek-rendering visual (Task 5) required five additional rounds of
+fixing after task review passed clean** — every one of them a pure
+CSS/layout bug invisible to `npm test` (no component test harness exists
+in this repo) and, critically, **invisible to two rounds of careful
+static code review that traced the CSS by hand and declared it correct**.
+Only live browser testing (screenshots from John, then direct
+`claude-in-chrome` DOM measurement) surfaced the real bugs:
+
+1. `.thumb`'s pre-existing `overflow: hidden` clipped the peek layers
+   entirely (task review caught this one, static reasoning was right).
+2. Even after a non-clipping wrapper fix, peeks were still imperceptible
+   live — added diagonal offset + a margin that scaled with stack size.
+3. Screenshot showed large stacks overlapping/too-wide — clamped the
+   *visual* depth to a fixed `MAX_PEEK_DEPTH=2` (data/count stays
+   uncapped).
+4. Screenshot showed stacks still touching — a review pass traced the
+   CSS **by hand** and declared the containment fix correct (`inset: 0
+   Mpx` on the peek layer should shrink its box to match the reserved
+   margin). **This reasoning was wrong**, and the review didn't catch
+   it: `<img>` is a CSS "replaced element," and per spec, an
+   absolutely-positioned replaced element with `width: auto` sizes to
+   its *intrinsic* dimensions, ignoring `inset`-implied width entirely —
+   unlike a `<div>`/`<button>` (non-replaced), which is why the cover
+   button sized correctly under the identical-looking rule but the peek
+   `<img>` didn't. Only live DOM measurement (`getBoundingClientRect()`
+   via `claude-in-chrome`) revealed the peek's actual rendered width was
+   full-wrapper-width, overshooting ~18-30px past the tile. Fixed with
+   an explicit `left` + `width: calc(...)` instead of relying on
+   `inset` shorthand.
+5. Fixing #4 (moving peek layers to be siblings of the button, outside
+   its `overflow:hidden`, back in fix #1) had two more knock-on
+   consequences neither prior review caught: `border-radius: inherit`
+   on the peek layers now inherited from the new wrapper parent (no
+   radius set) instead of the button — square corners instead of
+   rounded; and the button's own selection border/box-shadow (no
+   z-index of its own) got promoted into the wrapper's shared stacking
+   context *below* the peek layers' explicit z-index, so the blue
+   selection highlight was invisible specifically on stack tiles. Both
+   fixed (explicit `border-radius` on peeks; explicit `z-index: 10` on
+   the button so it owns its own stacking context).
+
+**Takeaway for future visual/CSS work in this repo:** given there's no
+component test harness, static code review of CSS geometry is
+*insufficient* — verify pixel-level rendering claims (containment,
+z-index/stacking, inherited properties) via live DOM measurement
+(`claude-in-chrome` + `getBoundingClientRect()`/`getComputedStyle()`),
+not by tracing the cascade by hand. Two independent review passes both
+traced the same wrong conclusion by hand in this session.
+
+**Also logged mid-testing, not yet acted on:**
+- John noted while testing: "I think this is the first burst
+  `PXL_20240822_165336928.MP.jpg`" — a filename he expects to be the
+  chronological start of a real burst in the test folder. Not yet
+  cross-checked against what `detectBursts` actually grouped; worth
+  verifying if burst grouping in this folder is ever in question again.
+- John also reported "when I click in the thumb, I see a different
+  photo in the details [Loupe]" — suspected to be a symptom of the
+  peek-containment bug (bug #4 above) making it visually ambiguous
+  which tile was actually being clicked, now that containment is fixed.
+  **Not yet independently re-confirmed** — should be re-tested before
+  merge; if it persists after the containment fix, it's a separate,
+  real click/index bug needing its own investigation.
