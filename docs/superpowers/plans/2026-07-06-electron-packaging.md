@@ -692,6 +692,9 @@ Add a top-level `"build"` key:
   "build": {
     "appId": "com.johnguerra.autogallery",
     "productName": "AutoGallery",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**/*",
       "server/**/*",
@@ -726,6 +729,16 @@ Add a top-level `"build"` key:
 binaries (via its `@img/sharp-<platform>-<arch>` optional dependencies)
 that cannot be executed from inside an `asar` archive.
 
+`directories.output: "release"` matters because `electron-builder`'s
+default output directory is `dist/` — the same directory Vite already
+builds the UI into (and that this same config's `files` list reads from
+via `dist/**/*`). Without overriding it, packaged installers would land
+in the same folder as the UI build output they're bundling, which is
+confusing at best. `release/` keeps the two outputs separate.
+
+Add `release/` to `.gitignore` (alongside the existing `dist/` entry) in
+this same step, so packaged build artifacts never get committed.
+
 - [ ] **Step 3: Add build scripts**
 
 Add to `"scripts"`:
@@ -745,19 +758,16 @@ smoke-testing on the actual dev machine.)
 
 Run: `npm run electron:build:mac`
 Expected: completes without error and produces a `.dmg` and `.zip` under
-`dist_electron/` (or `release/`, whichever `electron-builder`'s default
-output directory resolves to on this machine — confirm by checking the
-command's own log output for the actual path it wrote to). The build will
-be unsigned (no Apple Developer certificate yet, per the design doc) — a
-Gatekeeper warning on launch is expected and fine for this local
-smoke-test; do not attempt to bypass Gatekeeper. Stop here — this step
-only confirms the build succeeds structurally, not that the packaged app
-runs correctly (that's John's manual check).
+`release/`. The build will be unsigned (no Apple Developer certificate
+yet, per the design doc) — a Gatekeeper warning on launch is expected and
+fine for this local smoke-test; do not attempt to bypass Gatekeeper. Stop
+here — this step only confirms the build succeeds structurally, not that
+the packaged app runs correctly (that's John's manual check).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add package.json package-lock.json
+git add package.json package-lock.json .gitignore
 git commit -m "feat: add electron-builder packaging config for mac/win/linux"
 ```
 
