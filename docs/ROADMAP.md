@@ -37,82 +37,25 @@ state), `node_modules` untracked, v2 scaffold at root, design doc written.
   persisted; thumbnails re-fetch at DPR-aware size buckets
   (160/320/480/640/1024).
 
-## v0.2 backlog (next, in recommended order)
+**Grid virtualization (done, commits `d7dbff4`, `e23f3b6`, `7db9334`)** —
 
-1. **Grid virtualization** — all 10k thumbnails currently exist as DOM
-   nodes (images lazy-load, but scroll will strain at scale; "millions"
-   is the ambition). Virtualize using the justified layout's computed
-   boxes (absolute positioning makes windowing straightforward).
-2. **Post-scan focus fix** — after Scan, focus stays in the path input, so
-   Enter re-scans instead of opening the loupe. Move focus to the grid.
-3. **Burst stacks** — group near-duplicate shots; pick the winner within a
-   stack. On Pixel photos this is EXACT via filenames
-   (`PXL_..._BURST-01.COVER.jpg`, `BURST-02`, ...); fallback is time-gap
-   proximity (shots < a few seconds apart). UI: stack collapses to its
-   cover with a count badge; expand to compare side-by-side.
-4. **Album clustering port** — port the time-gap algorithm from
-   `legacy/2024-electron-standalone/autoAlbums.js` (mean + stddev of
-   inter-photo intervals, custom separation overrides, filename-date
-   fallback) into `server/albums/` as a pure tested module. d3 timeline
-   with interactive separation threshold in the UI. **John authors/tunes
-   the thresholds and the burst-stack heuristic — his domain expertise.**
-5. **Video support** — 809 MP4s in the test folder are currently skipped.
-   ffmpeg (ffmpeg-static) frame-grab thumbnails via `ProcessingService`.
-6. **Export** — rating ≥ N → copy into `_selected/` (optional `_peq`
-   resized variant), never destructive. This materializes ratings to disk
-   (folders are truth) and creates the labeled data for later ML.
+- `ui/src/lib/layouts/windowing.js`: pure `visibleRange(boxes, viewport)`,
+  binary-searches the justified layout's y-sorted boxes for the indices
+  intersecting the current scroll viewport + overscan.
+- `ui/src/App.svelte` renders only that window, force-including the
+  selected index so keyboard jumps (Home/End, arrow past the window)
+  still mount their target and trigger `Thumb`'s existing `scrollIntoView`.
+  DOM node count now stays roughly flat regardless of folder size.
+- Design doc: `docs/superpowers/specs/2026-07-06-grid-virtualization-design.md`.
 
-Then: SQLite index (better-sqlite3) replacing the JSON caches, incremental
-rescan, ingest-from-SD-card flow, RAW embedded-preview extraction
-(exiftool-vendored). Phase 2+: faces/CLIP local search, predict-my-picks,
-WebGL zoomable archive view (see design doc).
+## Backlog
 
-## Backlog additions — 2026-07-06 (not yet prioritized)
-
-Captured mid-session while grid virtualization was in review; not yet
-triaged into the ordered v0.2 sequence above.
-
-- **Reconsider the index engine: DuckDB vs. SQLite.** "Key decisions
-  already made" below commits to SQLite (better-sqlite3); John wants to
-  evaluate DuckDB as an alternative before that milestone is built.
-  DuckDB is columnar/OLAP — strong for scanning/filtering large metadata
-  tables ("everything shot in 2019 rated ≥4"), weaker than SQLite's
-  row-store for the frequent single-row point writes a rating UI
-  generates. Needs a real evaluation, not a default swap.
-- **Folder selector UI.** The path input is a raw text field
-  (`ui/src/App.svelte`); replace with a real folder picker.
-- **Multi-folder / recent-folders switching.** Only the last-scanned
-  folder persists today (`localStorage` key `autogallery.lastDir`); add a
-  way to keep several folders bookmarked and flip between them quickly —
-  matches John's real archive being split across multiple external
-  drives, organized by year then album, with not all drives mounted at
-  once (see the SQLite-as-offline-mirror invariant in `CLAUDE.md`).
-- **Recursive folder browsing.** `POST /api/scan` is explicitly
-  non-recursive today. Pointed at a parent folder containing album
-  subfolders (John's `YYYY_MMMon_DD_Name` convention), it should recurse
-  and present the albums as a browsable list/grid to jump into — distinct
-  from backlog item 4 (album *clustering*, which infers album boundaries
-  from timestamps on unsorted photos); this is browsing structure that
-  already exists on disk.
-- **GPU archive-overview view.** Reinforces the "Rendering strategy"
-  decision already recorded in the design doc (regl/pixi/deck.gl,
-  Phase 2+, "archive exploration" tier) — John wants to see thousands of
-  photos at once at varying zoom levels across the whole archive, not
-  just one folder. No new decision needed; this just confirms it's
-  wanted.
-- **Cull-loop filters.** Grid view modes to show only unseen photos,
-  and/or only unrated photos.
-- **Cross-drive deduplication.** The archive spans drives that don't all
-  mount at once, so the same photos can end up duplicated across drives
-  over time. Use the content-hash key the index already plans to use
-  (`CLAUDE.md` invariant 2) to detect and surface duplicates.
-
-## Phase 3 ideas (unscheduled, recorded for later)
-
-- **Google-Photos-style replacement.** Cloud storage optimized for
-  photos, with direct mobile upload/access. Explicitly "way later" per
-  John — the design doc already excludes cloud/mobile from MVP; this
-  just names the concrete long-term shape of that ambition.
+Tracked in GitHub Issues (milestones `v0.2`, `Backlog (unprioritized)`,
+`Phase 3`): https://github.com/john-guerra/autoPhotoOrganizer/issues —
+this replaced the flat markdown backlog list that used to live here, since
+it was straining to track priority/status as it grew. Design docs and
+implementation plans stay in this repo under `docs/superpowers/`; day-to-day
+backlog triage happens on GitHub.
 
 ## Working agreements (how John wants the work done)
 
