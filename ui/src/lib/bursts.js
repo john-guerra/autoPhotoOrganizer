@@ -9,7 +9,7 @@
  * mechanism and filename matching is a supporting signal, not a
  * competing gate).
  *
- * @param {Array<{id: number|string, name: string, rating?: number, mtimeMs: number, takenAt?: number}>} items
+ * @param {Array<{id: number|string, name: string, rating?: number, mtimeMs: number, takenAt?: string|number|null}>} items
  * @param {{ gapMs: number }} opts
  * @returns {Array<{ id: string, memberIds: Array<number|string>, coverId: number|string, count: number }>}
  */
@@ -19,7 +19,7 @@ export function detectBursts(items, { gapMs }) {
   const withTime = items
     .map((item) => ({
       item,
-      time: item.takenAt ?? item.mtimeMs,
+      time: toMs(item.takenAt) ?? item.mtimeMs,
       burstKey: burstFilenameKey(item.name),
     }))
     .sort((a, b) => a.time - b.time);
@@ -56,6 +56,16 @@ export function detectBursts(items, { gapMs }) {
         count: cluster.length,
       };
     });
+}
+
+/** Coerces a numeric ms value or ISO-8601 string into ms; null if unparseable. */
+function toMs(value) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
 }
 
 const BURST_FILENAME_RE = /^(.*)\.BURST-\d+(?:\.COVER)?\.[^.]+$/i;
