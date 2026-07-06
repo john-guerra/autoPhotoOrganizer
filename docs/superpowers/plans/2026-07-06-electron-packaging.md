@@ -14,7 +14,7 @@
 ## Global Constraints
 
 - Server stays loopback-only (`127.0.0.1`) — never change this bind, even when embedded in Electron.
-- `electron/main.js` and `electron/preload.js` are ES modules (`import`/`export`), consistent with the repo root `package.json`'s `"type": "module"` and with `server/`/`ui/`. Verify after any change to these files that `npm run electron:dev` still boots and `window.autogallery` is still exposed in the renderer — Electron's sandboxed preload (`sandbox: true`, required by this plan) has historically been the one spot where ESM support lagged, so this is a real thing to confirm, not an assumption.
+- `electron/main.js` is an ES module (`import`/`export`), consistent with the repo root `package.json`'s `"type": "module"` and with `server/`/`ui/`. `electron/preload.cjs` is the one confirmed exception: Electron's sandboxed preload loader (`sandbox: true`, required below) cannot load ESM — verified directly in this environment (Electron 33.4.11 throws `SyntaxError: Cannot use import statement outside a module` for an ESM preload script) — so it stays CommonJS (`require`/`module.exports`, `.cjs` extension). This is the standard pattern other Electron+ESM projects use, not a stopgap. Verify after any change to either file that `npm run electron:dev` still boots and `window.autogallery` is still exposed in the renderer.
 - Every `BrowserWindow`'s `webPreferences` MUST set `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. Never repeat `legacy/2024-electron-standalone/main.js`'s `nodeIntegration: true` / no-isolation pattern (flagged as insecure in `CLAUDE.md`). No `remote` module.
 - The only renderer-exposed native API surface is `window.autogallery.pickFolder()` via `contextBridge`. Do not add other IPC surface without updating the design doc first.
 - `server/` and `ui/` source are modified only where a task explicitly says so — this is an additive packaging layer, not a refactor.
@@ -27,7 +27,7 @@
 
 New files:
 - `electron/main.js` — main process: creates the `BrowserWindow`, starts the embedded Express server in production, handles the `pick-folder` IPC call.
-- `electron/preload.js` — `contextBridge` surface exposed to the renderer.
+- `electron/preload.cjs` — `contextBridge` surface exposed to the renderer (CommonJS — see Global Constraints).
 - `.github/workflows/release.yml` — CI matrix build (Mac/Windows/Linux) + publish on version tags.
 - `server/library.js` — persisted "recently scanned folders" store (mirrors `server/coverChoices.js`).
 
@@ -458,7 +458,7 @@ git commit -m "feat: add a library dropdown of recently-scanned folders"
 
 **Interfaces:**
 - Consumes: `createApp()` from `server/index.js` (existing, unmodified).
-- Produces: `electron/main.js` (Electron entry point, referenced by `package.json`'s `"main"` field), `electron/preload.js` (empty `contextBridge` scaffold, filled in by Task 4).
+- Produces: `electron/main.js` (Electron entry point, referenced by `package.json`'s `"main"` field), `electron/preload.cjs` (empty `contextBridge` scaffold, filled in by Task 4).
 
 - [ ] **Step 1: Add dependencies and scripts to `package.json`**
 
@@ -567,7 +567,7 @@ git commit -m "feat: add an Electron shell wrapping the existing server/UI uncha
 
 **Post-implementation amendments (both applied after the steps above, before Task 4):**
 1. A task review found `startEmbeddedServer()`/`createWindow()` had no error handling — a failed embedded-server startup would hang the window with no visible error. Fixed by wrapping `app.whenReady().then(createWindow)` in a try/catch that shows `dialog.showErrorBox` and calls `app.quit()` on failure.
-2. Per updated guidance, `electron/main.cjs`/`electron/preload.cjs` were converted to ES modules (`electron/main.js`/`electron/preload.js`, `import`/`export`) instead of CommonJS, matching the Global Constraints update above. All code shown in this task's steps above is superseded by this — Tasks 4 and 7 below already reflect the ESM form.
+2. Per updated guidance, `electron/main.cjs` was converted to an ES module (`electron/main.js`, `import`/`export`, plus a static `import { createApp } from "../server/index.js"` replacing the old dynamic-import workaround since both files are ESM now). `electron/preload.cjs` was also attempted as ESM but confirmed NOT to work — Electron's sandboxed preload loader throws a `SyntaxError` on `import` — so it stays CommonJS unchanged. All code shown in this task's steps above is superseded by this — Tasks 4 and 7 below already reflect the correct main.js (ESM) / preload.cjs (CommonJS) split.
 
 ---
 
@@ -575,7 +575,7 @@ git commit -m "feat: add an Electron shell wrapping the existing server/UI uncha
 
 **Files:**
 - Modify: `electron/main.js`
-- Modify: `electron/preload.js`
+- Modify: `electron/preload.cjs` (stays CommonJS — see Global Constraints)
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
@@ -604,12 +604,12 @@ ipcMain.handle("pick-folder", async (event) => {
 });
 ```
 
-- [ ] **Step 2: Expose it in `electron/preload.js`**
+- [ ] **Step 2: Expose it in `electron/preload.cjs`**
 
-Replace the file's contents entirely with:
+This file stays CommonJS (confirmed necessary — see Global Constraints). Replace its contents entirely with:
 
 ```js
-import { contextBridge, ipcRenderer } from "electron";
+const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("autogallery", {
   pickFolder: () => ipcRenderer.invoke("pick-folder"),
@@ -660,7 +660,7 @@ automated GUI driving.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add electron/main.js electron/preload.js ui/src/App.svelte
+git add electron/main.js electron/preload.cjs ui/src/App.svelte
 git commit -m "feat: add a native folder picker via Electron's dialog API"
 ```
 
