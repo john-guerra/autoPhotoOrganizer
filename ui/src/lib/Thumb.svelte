@@ -1,9 +1,11 @@
+<script context="module">
+  export const PEEK_STEP_PX = 6; // px offset per peeking layer (diagonal: horizontal alternating + vertical), tuned for visibility
+</script>
+
 <script>
   import { onMount, onDestroy } from "svelte";
   import { thumbUrl } from "./api.js";
   import Stars from "./Stars.svelte";
-
-  const PEEK_STEP_PX = 2; // px offset per peeking layer, alternating left/right
 
   export let item; // {id, name, rating, mtimeMs}
   export let box; // {x, y, width, height} from the justified layout
@@ -14,6 +16,7 @@
   export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
   export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
   export let stackPeekItems = []; // this stack's other members (excludes the cover), for the peeking-photos visual
+  export let stackMarginPx = 0; // horizontal margin reserved in the layout for this stack's peek layers (0 for non-stack tiles)
 
   let el;
   let visible = false; // set true once the tile nears the viewport
@@ -64,7 +67,7 @@
         alt=""
         loading="lazy"
         class="stack-peek"
-        style={`transform: translateX(${(i + 1) * PEEK_STEP_PX}px); z-index: ${rightPeekItems.length - i};`}
+        style={`transform: translate(${(i + 1) * PEEK_STEP_PX}px, ${(i + 1) * PEEK_STEP_PX}px); z-index: ${rightPeekItems.length - i};`}
       />
     {/each}
     {#each leftPeekItems as peekItem, i (peekItem.id)}
@@ -73,7 +76,7 @@
         alt=""
         loading="lazy"
         class="stack-peek"
-        style={`transform: translateX(-${(i + 1) * PEEK_STEP_PX}px); z-index: ${leftPeekItems.length - i};`}
+        style={`transform: translate(${-(i + 1) * PEEK_STEP_PX}px, ${(i + 1) * PEEK_STEP_PX}px); z-index: ${leftPeekItems.length - i};`}
       />
     {/each}
   {/if}
@@ -83,6 +86,7 @@
     class:selected
     data-id={item.id}
     title={item.name}
+    style={stackMarginPx ? `inset: 0 ${stackMarginPx}px;` : ""}
     on:click
   >
     {#if src}

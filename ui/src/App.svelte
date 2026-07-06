@@ -14,7 +14,7 @@
     setCover as apiSetCover,
     fetchMeta,
   } from "./lib/api.js";
-  import Thumb from "./lib/Thumb.svelte";
+  import Thumb, { PEEK_STEP_PX } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
 
   const LS_KEY = "autogallery.lastDir";
@@ -123,6 +123,20 @@
   // aspect ratios in, positioned boxes out. Absolutely-positioned children
   // ignore CSS padding, so the frame inset is applied to the box coordinates.
   const PAD = 12;
+
+  /**
+   * Symmetric horizontal margin (px, at the target row height) reserved for
+   * a collapsed stack's peek layers, so they're visible within the tile's
+   * own box rather than relying entirely on the inter-tile gap. 0 for a
+   * non-stack entry. Uses the larger of the two peek groups (right/left
+   * split alternately in Thumb.svelte) so both sides have enough room.
+   */
+  function stackMarginPx(entry) {
+    return entry.kind === "stack"
+      ? Math.ceil(entry.peekItems.length / 2) * PEEK_STEP_PX
+      : 0;
+  }
+
   $: stacks = detectBursts(items, { gapMs: burstGapMs });
   $: displayEntries = buildDisplayEntries(items, stacks, expandedStackIds);
   $: resolvedPhotos = displayEntries.map(resolvePhoto); // passed to Loupe
@@ -131,12 +145,19 @@
       ? justifiedLayout(
           displayEntries.map((e) => {
             const photo = resolvePhoto(e);
+            const baseRatio =
+              photo.width && photo.height
+                ? photo.width / photo.height
+                : DEFAULT_RATIO;
+            // Reserve extra width for a collapsed stack's peek layers (see
+            // stackMarginPx) by inflating its aspect ratio at the target
+            // row height — an approximation, not pixel-exact once a row's
+            // uniform scale factor is applied, but close enough for a
+            // cosmetic margin.
+            const marginPx = stackMarginPx(e);
             return {
               id: entryDomId(e),
-              aspectRatio:
-                photo.width && photo.height
-                  ? photo.width / photo.height
-                  : DEFAULT_RATIO,
+              aspectRatio: baseRatio + (2 * marginPx) / rowHeight,
             };
           }),
           {
@@ -503,6 +524,7 @@
             selected={i === selected}
             stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
             stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
+            stackMarginPx={stackMarginPx(entry)}
             inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
             isCurrentCover={entry.kind === "photo" &&
               entry.stackId !== null &&
