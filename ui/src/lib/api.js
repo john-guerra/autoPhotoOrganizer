@@ -74,3 +74,12 @@ export function thumbUrl(id, size = 320, v = 0) {
 export function imageUrl(id, v = 0) {
   return `/api/image/${id}?v=${v}`;
 }
+
+/**
+ * @returns {Promise<Array<{path:string, name:string, lastScannedAt:number, mounted:boolean}>>}
+ */
+export async function fetchLibrary() {
+  const res = await fetch("/api/library");
+  if (!res.ok) throw new Error(`library failed (${res.status})`);
+  return res.json();
+}

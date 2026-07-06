@@ -1,5 +1,5 @@
 <script>
-  import { tick } from "svelte";
+  import { onMount, tick } from "svelte";
   import { justifiedLayout, layoutHeight } from "./lib/layouts/justified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
   import { detectBursts } from "./lib/bursts.js";
@@ -13,6 +13,7 @@
     setRating as apiSetRating,
     setCover as apiSetCover,
     fetchMeta,
+    fetchLibrary,
   } from "./lib/api.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
@@ -59,6 +60,8 @@
   let error = "";
   let scanning = false;
   let scanEpoch = 0; // invalidates in-flight meta fetches on rescan
+  let library = [];
+  let libraryOpen = false;
 
   let selected = 0; // index into displayEntries
   let loupeOpen = false;
@@ -73,6 +76,8 @@
   let focusPending = false; // set after a scan; consumed once `boxes` exists
   let expandedStackIds = new Set(); // stack ids currently expanded inline in the grid
 
+  onMount(refreshLibrary);
+
   async function doScan() {
     if (!dir.trim()) return;
     error = "";
@@ -84,6 +89,7 @@
       selected = 0;
       loupeOpen = false;
       localStorage.setItem(LS_KEY, res.root);
+      refreshLibrary();
       status = `${res.count} photos · scanned in ${res.elapsedMs} ms`;
       enrichMeta(++scanEpoch);
       focusPending = true;
@@ -94,6 +100,17 @@
     } finally {
       scanning = false;
     }
+  }
+
+  async function refreshLibrary() {
+    library = await fetchLibrary().catch(() => library);
+  }
+
+  function selectFromLibrary(entry) {
+    if (!entry.mounted) return;
+    dir = entry.path;
+    libraryOpen = false;
+    doScan();
   }
 
   // Progressively fetch dimensions in chunks; the justified layout refines
@@ -487,6 +504,36 @@
     <button class="scan" on:click={doScan} disabled={scanning}>
       {scanning ? "Scanning…" : "Scan"}
     </button>
+    <div class="library">
+      <button
+        class="library-toggle"
+        on:click={() => (libraryOpen = !libraryOpen)}
+        title="Recently scanned folders"
+      >
+        Library ▾
+      </button>
+      {#if libraryOpen}
+        <ul class="library-panel">
+          {#if library.length === 0}
+            <li class="library-empty">No folders scanned yet.</li>
+          {/if}
+          {#each library as entry (entry.path)}
+            <li>
+              <button
+                class="library-entry"
+                class:offline={!entry.mounted}
+                disabled={!entry.mounted}
+                on:click={() => selectFromLibrary(entry)}
+                title={entry.path}
+              >
+                {entry.name}
+                {#if !entry.mounted}<span class="offline-badge">offline</span>{/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
     <label class="zoom" title="Grid zoom (also + / - keys)">
       <span class="zoom-icon small">▦</span>
       <input
@@ -606,6 +653,62 @@
   .scan:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+  .library {
+    position: relative;
+  }
+  .library-toggle {
+    padding: 0.45rem 1rem;
+    background: #4c9aff;
+    color: #06121f;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .library-toggle:hover {
+    background: #5ba8ff;
+  }
+  .library-panel {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 200;
+    margin: 4px 0 0;
+    padding: 4px 0;
+    min-width: 220px;
+    max-height: 300px;
+    overflow-y: auto;
+    list-style: none;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 4px;
+  }
+  .library-entry {
+    display: block;
+    width: 100%;
+    padding: 6px 10px;
+    text-align: left;
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+  }
+  .library-entry:hover:not(:disabled) {
+    background: #2a2a2a;
+  }
+  .library-entry.offline {
+    color: #888;
+    cursor: default;
+  }
+  .offline-badge {
+    margin-left: 6px;
+    font-size: 0.7rem;
+    color: #888;
+  }
+  .library-empty {
+    padding: 6px 10px;
+    color: #888;
   }
   .zoom {
     display: flex;
