@@ -34,8 +34,18 @@
 
   // Split alternately: chronologically-nearer non-cover members peek out
   // closer to the cover (right first, then left, then right again, ...).
-  $: rightPeekItems = stackPeekItems.filter((_, i) => i % 2 === 0);
-  $: leftPeekItems = stackPeekItems.filter((_, i) => i % 2 === 1);
+  // Sliced to MAX_PEEK_DEPTH per side: every layer beyond that depth
+  // renders at the same clamped offset and is therefore fully occluded
+  // by the layer in front of it (same box, higher z-index) — rendering
+  // them anyway would mean fetching/decoding/compositing a thumbnail
+  // <img> for every extra member of a large burst for zero visible
+  // effect. The ×N badge already carries the true, uncapped count.
+  $: rightPeekItems = stackPeekItems
+    .filter((_, i) => i % 2 === 0)
+    .slice(0, MAX_PEEK_DEPTH);
+  $: leftPeekItems = stackPeekItems
+    .filter((_, i) => i % 2 === 1)
+    .slice(0, MAX_PEEK_DEPTH);
 
   onMount(() => {
     observer = new IntersectionObserver(
