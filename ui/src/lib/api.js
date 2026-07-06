@@ -5,7 +5,7 @@
 
 /**
  * @param {string} dir
- * @returns {Promise<{root:string, count:number, elapsedMs:number, items:Array<{id:number,name:string,size:number,mtimeMs:number,rating:number}>}>}
+ * @returns {Promise<{root:string, count:number, elapsedMs:number, items:Array<{id:number,name:string,size:number,mtimeMs:number,rating:number,preferredCover:boolean}>}>}
  */
 export async function scan(dir) {
   const res = await fetch("/api/scan", {
@@ -42,6 +42,20 @@ export async function setRating(id, rating) {
     body: JSON.stringify({ id, rating }),
   });
   if (!res.ok) throw new Error(`rating failed (${res.status})`);
+  return res.json();
+}
+
+/**
+ * @param {number} id
+ * @param {boolean} isCover
+ */
+export async function setCover(id, isCover) {
+  const res = await fetch("/api/cover", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, isCover }),
+  });
+  if (!res.ok) throw new Error(`cover failed (${res.status})`);
   return res.json();
 }
 

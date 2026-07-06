@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { createApp } from "./index.js";
 import { _resetSession } from "./api.js";
 import { _resetForTest } from "./ratings.js";
+import { _resetForTest as _resetCoverChoicesForTest } from "./coverChoices.js";
 import { flushMetaNow, _resetMetaForTest } from "./metaCache.js";
 
 /** Start the app on an ephemeral port; return { base, close }. */
@@ -30,6 +31,7 @@ beforeAll(async () => {
   cacheDir = await mkdtemp(join(tmpdir(), "ag-cache-"));
   process.env.AUTOGALLERY_HOME = cacheDir;
   _resetForTest();
+  _resetCoverChoicesForTest();
   _resetMetaForTest();
   _resetSession();
 
@@ -218,6 +220,58 @@ describe("ratings round-trip", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: 0, rating: 9 }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("manual cover choice round-trip", () => {
+  it("persists a manual cover choice keyed by absolute path across a rescan", async () => {
+    // Establish a session first so id 1 resolves to a real path.
+    await fetch(`${srv.base}/api/scan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dir: photosDir }),
+    });
+
+    const set = await fetch(`${srv.base}/api/cover`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 1, isCover: true }),
+    });
+    expect(set.status).toBe(200);
+
+    // Rescan (new session) — the choice must reattach by path.
+    const rescan = await fetch(`${srv.base}/api/scan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dir: photosDir }),
+    });
+    const body = await rescan.json();
+    expect(body.items[1].preferredCover).toBe(true);
+    expect(body.items[0].preferredCover).toBe(false);
+
+    // Clearing removes it.
+    await fetch(`${srv.base}/api/cover`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 1, isCover: false }),
+    });
+    const after = await (
+      await fetch(`${srv.base}/api/scan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dir: photosDir }),
+      })
+    ).json();
+    expect(after.items[1].preferredCover).toBe(false);
+  });
+
+  it("rejects a non-boolean isCover", async () => {
+    const res = await fetch(`${srv.base}/api/cover`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 0, isCover: "yes" }),
     });
     expect(res.status).toBe(400);
   });
