@@ -1,6 +1,7 @@
 <script>
   import { tick } from "svelte";
   import { justifiedLayout, layoutHeight } from "./lib/layouts/justified.js";
+  import { visibleRange } from "./lib/layouts/windowing.js";
   import {
     scan as apiScan,
     setRating as apiSetRating,
@@ -45,6 +46,12 @@
   let loupeOpen = false;
   let gridEl;
   let gridWidth = 0;
+
+  // Virtualization: only Thumbs in [renderStart, renderEnd] (plus the
+  // selected index) are mounted. Recomputed on scroll/resize/layout change.
+  let renderStart = 0;
+  let renderEnd = -1;
+  let rafPending = false;
 
   async function doScan() {
     if (!dir.trim()) return;
@@ -111,6 +118,8 @@
         )
       : null;
   $: gridHeight = boxes ? layoutHeight(boxes) + 2 * PAD : 0;
+  $: if (boxes) updateVisibleRange(); // zoom change, meta enrichment, rescan
+  $: visibleItems = buildVisibleItems(items, renderStart, renderEnd, selected);
 
   function rate(index, rating) {
     const it = items[index];
@@ -130,6 +139,48 @@
     await tick();
     // Return focus to the grid, scrolled to the current item.
     gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
+  }
+
+  /** Recompute [renderStart, renderEnd] from the grid's current position. */
+  function updateVisibleRange() {
+    if (!gridEl || !boxes) {
+      renderStart = 0;
+      renderEnd = -1;
+      return;
+    }
+    const rect = gridEl.getBoundingClientRect();
+    const range = visibleRange(boxes, {
+      scrollTop: -rect.top,
+      viewportHeight: window.innerHeight,
+    });
+    renderStart = range.start;
+    renderEnd = range.end;
+  }
+
+  /** Collapse a burst of scroll/resize events to one recompute per frame. */
+  function scheduleVisibleRangeUpdate() {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => {
+      rafPending = false;
+      updateVisibleRange();
+    });
+  }
+
+  /**
+   * Indices to mount: the virtualized window, plus `selected` so keyboard
+   * jumps (Home/End, arrow past the window) mount their target and Thumb's
+   * own scrollIntoView reactive block (Thumb.svelte:42) brings it into view.
+   */
+  function buildVisibleItems(items, start, end, selected) {
+    const indices = [];
+    for (let i = start; i <= end; i++) indices.push(i);
+    if (selected < items.length && !indices.includes(selected)) {
+      const insertAt = indices.findIndex((i) => i > selected);
+      if (insertAt === -1) indices.push(selected);
+      else indices.splice(insertAt, 0, selected);
+    }
+    return indices.map((i) => ({ i, item: items[i] }));
   }
 
   /**
@@ -233,7 +284,11 @@
   }
 </script>
 
-<svelte:window on:keydown={onKeydown} />
+<svelte:window
+  on:keydown={onKeydown}
+  on:scroll={scheduleVisibleRangeUpdate}
+  on:resize={scheduleVisibleRangeUpdate}
+/>
 
 <div class="app">
   <header class="topbar">
@@ -273,7 +328,7 @@
       tabindex="-1"
     >
       {#if boxes}
-        {#each items as item, i (item.id)}
+        {#each visibleItems as { i, item } (item.id)}
           <Thumb
             {item}
             box={boxes[i]}
