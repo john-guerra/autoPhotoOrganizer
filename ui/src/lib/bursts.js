@@ -9,7 +9,7 @@
  * mechanism and filename matching is a supporting signal, not a
  * competing gate).
  *
- * @param {Array<{id: number|string, name: string, rating?: number, mtimeMs: number, takenAt?: string|number|null}>} items
+ * @param {Array<{id: number|string, name: string, rating?: number, preferredCover?: boolean, mtimeMs: number, takenAt?: string|number|null}>} items
  * @param {{ gapMs: number }} opts
  * @returns {Array<{ id: string, memberIds: Array<number|string>, coverId: number|string, count: number }>}
  */
@@ -84,12 +84,20 @@ function burstFilenameKey(name) {
 }
 
 /**
- * Cover priority: highest-rated member, else the file marked `.COVER.`,
- * else the chronologically-first member. `cluster` is already sorted
- * chronologically (it's a run from the outer time-sorted walk), so
- * cluster[0] is the chronologically-first member.
+ * Cover priority: a manually-chosen member (item.preferredCover === true),
+ * else the highest-rated member, else the file marked `.COVER.`, else the
+ * chronologically-first member. `cluster` is already sorted chronologically
+ * (it's a run from the outer time-sorted walk), so cluster[0] is the
+ * chronologically-first member. If more than one member somehow carries
+ * `preferredCover`, the first in cluster order wins — the app's own UI
+ * never lets that happen (see
+ * docs/superpowers/specs/2026-07-06-burst-stack-visual-and-manual-cover-design.md),
+ * this is just a deterministic fallback.
  */
 function pickCover(cluster) {
+  const manual = cluster.find((c) => c.item.preferredCover === true);
+  if (manual) return manual.item.id;
+
   let bestRated = null;
   for (const c of cluster) {
     if (
