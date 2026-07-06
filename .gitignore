@@ -6,3 +6,4 @@ dist/
 *.sqlite-*
 .env
 .worktrees/
+.superpowers/
