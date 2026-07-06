@@ -21,3 +21,42 @@ reviewed on return. Newest entries at the bottom.
   `docs/superpowers/specs/2026-07-06-burst-detection-design.md` and
   `docs/superpowers/plans/2026-07-06-burst-detection.md`, both already
   written and effectively approved (user said "start implementing").
+  **Task-scoped review clean, but the final whole-branch review caught a
+  real bug the task review missed:** `detectBursts` did numeric
+  arithmetic on `item.takenAt` assuming it was already milliseconds, but
+  the real app produces `takenAt` as an **ISO-8601 string**
+  (`server/api.js:109`, `ui/src/lib/api.js:26`) — `string - string` is
+  `NaN` in JS, so time-gap grouping (the primary mechanism, per the
+  spec) would have silently produced nothing against real EXIF data;
+  only the ~0.1% filename-matched bursts would have grouped. All 9 tests
+  passed because every fixture used a numeric `takenAt`, not the real
+  shape. Fixed with a `toMs()` coercion helper + a realistic ISO-string
+  test. This is exactly the kind of integration bug a task-scoped review
+  can't see (it never reads the item-shape contract from other files)
+  and the final whole-branch review exists to catch — worth noting since
+  it's the second time in this session a final review has caught
+  something a task review approved (the first was the post-scan-focus
+  async-`clientWidth` bug).
+- **Part 2 (grid/UI integration) — designed and approved autonomously**
+  during this run (spec:
+  `docs/superpowers/specs/2026-07-06-burst-stacks-grid-integration-design.md`,
+  plan: `docs/superpowers/plans/2026-07-06-burst-stacks-grid-integration.md`).
+  Three judgment calls flagged in the spec that were **not** explicitly
+  confirmed interactively and deserve a look on return:
+  1. **Loupe now navigates the same collapsed/expanded sequence as the
+     grid** (skips buried burst duplicates), rather than always walking
+     every raw photo. Chosen for consistency — flag if you wanted the
+     Loupe to see every photo regardless of grid collapse state.
+  2. **Escape (while selection is inside an expanded stack) is the only
+     way to re-collapse it** — no dedicated click target. Chosen to avoid
+     a second hit-area competing with "click opens the Loupe" on expanded
+     members. A small non-interactive visual marker indicates stack
+     membership.
+  3. **New pure module `ui/src/lib/displayEntries.js`** (tested) rather
+     than inlining the merge logic into `App.svelte` the way
+     virtualization's `buildVisibleItems` glue function is (untested,
+     inline) — this function has more branching/risk than that precedent,
+     so it got its own module + tests instead.
+  Also chose reasonable-but-arbitrary visual details (badge corners, gap
+  slider range 0-10s/500ms steps, default 3000ms) — cheap to tweak after
+  you look at it.
