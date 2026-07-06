@@ -2,6 +2,8 @@
 
 This folder archives two prior generations of **autoPhotoOrganizer**. The code is kept for reference only: it is not maintained, and its dependencies are outdated.
 
+> ⚠️ **Do not run this code.** It contains known insecure patterns flagged by security review: a path-traversal vulnerability in `2016-express-web/server.js` (`/images/:id` serves unvalidated paths) and an insecure Electron configuration in `2024-electron-standalone/main.js` (`nodeIntegration: true`, no context isolation). It exists only as reference for porting the album-clustering algorithm to v2.
+
 ## `2016-express-web/`
 
 The original prototype: an Express server (`server.js`) serving a d3 v3 browser timeline (`static/`). It reads EXIF dates from a photo folder (paths are hardcoded) and visualizes the photo dates on a timeline. `dates.csv` is sample extracted date data.

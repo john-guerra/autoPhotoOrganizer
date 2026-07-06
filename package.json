@@ -1,0 +1,29 @@
+{
+  "name": "autogallery",
+  "version": "2.0.0-alpha",
+  "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,ui -c blue,magenta \"npm:dev:server\" \"npm:dev:ui\"",
+    "dev:server": "node server/index.js",
+    "dev:ui": "vite ui",
+    "build": "vite build ui",
+    "test": "vitest run",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^3.1.2",
+    "concurrently": "^8.2.2",
+    "prettier": "^3.3.3",
+    "svelte": "^4.2.19",
+    "vite": "^5.4.8",
+    "vitest": "^2.1.2"
+  }
+}
