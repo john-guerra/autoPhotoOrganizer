@@ -330,7 +330,20 @@
         )
       : null;
   $: gridHeight = boxes ? layoutHeight(boxes) + 2 * PAD : 0;
-  $: if (boxes) updateVisibleRange(); // zoom change, meta enrichment, rescan
+  // The first time this fires (right when `boxes` first becomes non-null,
+  // e.g. after the initial feed load), the grid's layout/paint may not have
+  // settled yet, so gridEl.getBoundingClientRect() below can return
+  // stale/incomplete geometry and produce a too-small initial render window
+  // that nothing else ever corrects. Recompute immediately (no regression
+  // when layout was already settled — zoom change, meta enrichment, rescan),
+  // then again after tick() + requestAnimationFrame, once the DOM has
+  // actually finished laying out (tick() alone only guarantees pending
+  // state changes were applied to the DOM, not that the browser finished a
+  // layout/paint pass) — see focusPending above for the same class of issue.
+  $: if (boxes) {
+    updateVisibleRange();
+    tick().then(() => requestAnimationFrame(updateVisibleRange));
+  }
   $: visibleItems = buildVisibleItems(displayEntries, renderStart, renderEnd, selected);
 
   // First scan of a session: bind:clientWidth's initial value arrives
