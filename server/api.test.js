@@ -1,14 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtemp, rm, mkdir, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import sharp from "sharp";
 import { createApp } from "./index.js";
-import { _resetSession } from "./api.js";
-import { _resetForTest } from "./ratings.js";
-import { _resetForTest as _resetCoverChoicesForTest } from "./coverChoices.js";
-import { flushMetaNow, _resetMetaForTest } from "./metaCache.js";
-import { recordScan, _resetForTest as _resetLibraryForTest } from "./library.js";
+import { getDb, _resetDbForTest } from "./db/connection.js";
 
 /** Start the app on an ephemeral port; return { base, close }. */
 async function startServer() {
@@ -23,6 +19,15 @@ async function startServer() {
   };
 }
 
+async function scan(base, dir) {
+  const res = await fetch(`${base}/api/scan`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ dir }),
+  });
+  return res.json();
+}
+
 let photosDir;
 let cacheDir;
 let srv;
@@ -31,11 +36,7 @@ beforeAll(async () => {
   photosDir = await mkdtemp(join(tmpdir(), "ag-photos-"));
   cacheDir = await mkdtemp(join(tmpdir(), "ag-cache-"));
   process.env.AUTOGALLERY_HOME = cacheDir;
-  _resetForTest();
-  _resetCoverChoicesForTest();
-  _resetMetaForTest();
-  _resetLibraryForTest();
-  _resetSession();
+  _resetDbForTest();
 
   // Three tiny distinct JPEGs + a non-image that must be ignored.
   const colors = [
@@ -73,21 +74,21 @@ afterAll(async () => {
 });
 
 describe("POST /api/scan", () => {
-  it("returns sorted image items with ids and ignores dirs", async () => {
-    const res = await fetch(`${srv.base}/api/scan`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dir: photosDir }),
-    });
-    expect(res.status).toBe(200);
-    const body = await res.json();
+  it("returns sorted image items with stable ids and ignores dirs", async () => {
+    const body = await scan(srv.base, photosDir);
     expect(body.count).toBe(4); // 3 jpg + 1 png, subdir excluded
-    expect(body.items[0].id).toBe(0);
     const names = body.items.map((i) => i.name);
     expect(names).toEqual([...names].sort()); // sorted by name
+    expect(body.items.every((i) => Number.isInteger(i.id))).toBe(true);
     expect(body.items[0]).toHaveProperty("size");
     expect(body.items[0]).toHaveProperty("mtimeMs");
     expect(typeof body.elapsedMs).toBe("number");
+  });
+
+  it("returns the same ids across a rescan of the same folder", async () => {
+    const first = await scan(srv.base, photosDir);
+    const second = await scan(srv.base, photosDir);
+    expect(second.items.map((i) => i.id)).toEqual(first.items.map((i) => i.id));
   });
 
   it("404s a missing dir and 400s a file/empty dir", async () => {
@@ -108,172 +109,139 @@ describe("POST /api/scan", () => {
 
 describe("GET /api/meta", () => {
   it("returns dimensions and takenAt for the requested ids", async () => {
-    await fetch(`${srv.base}/api/scan`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dir: photosDir }),
-    });
-    const res = await fetch(`${srv.base}/api/meta?ids=0,1`);
+    const scanBody = await scan(srv.base, photosDir);
+    const ids = scanBody.items.slice(0, 2).map((i) => i.id);
+    const res = await fetch(`${srv.base}/api/meta?ids=${ids.join(",")}`);
     expect(res.status).toBe(200);
     const metas = await res.json();
     expect(metas).toHaveLength(2);
     // Fixture JPEGs are 48x32.
-    expect(metas[0]).toMatchObject({ id: 0, width: 48, height: 32 });
+    expect(metas[0]).toMatchObject({ id: ids[0], width: 48, height: 32 });
     expect(metas[0]).toHaveProperty("takenAt"); // null: fixtures carry no EXIF
   });
 
-  it("persists extracted metadata to the disk cache and reuses it", async () => {
-    flushMetaNow();
-    const raw = JSON.parse(
-      await import("node:fs/promises").then((fs) =>
-        fs.readFile(join(cacheDir, "metacache.json"), "utf8")
-      )
-    );
-    const entries = Object.values(raw);
-    expect(entries.length).toBeGreaterThan(0);
-    expect(entries[0]).toMatchObject({ w: 48, h: 32 });
+  it("persists extracted metadata and reuses it on a later request", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
+    await fetch(`${srv.base}/api/meta?ids=${id}`);
 
-    // A fresh scan (new session) must resolve dims from the cache without
-    // touching the files (same values back).
-    await fetch(`${srv.base}/api/scan`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dir: photosDir }),
-    });
-    const again = await (await fetch(`${srv.base}/api/meta?ids=0`)).json();
-    expect(again[0]).toMatchObject({ id: 0, width: 48, height: 32 });
+    const db = getDb();
+    const row = db
+      .prepare("SELECT width, height FROM photos WHERE id = ?")
+      .get(id);
+    expect(row).toMatchObject({ width: 48, height: 32 });
+
+    const again = await (await fetch(`${srv.base}/api/meta?ids=${id}`)).json();
+    expect(again[0]).toMatchObject({ id, width: 48, height: 32 });
   });
 });
 
 describe("GET /api/thumb/:id", () => {
   it("generates a JPEG, then serves from cache on the second request", async () => {
-    // Ensure session is populated.
-    await fetch(`${srv.base}/api/scan`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dir: photosDir }),
-    });
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
 
-    const first = await fetch(`${srv.base}/api/thumb/0?size=64`);
+    const first = await fetch(`${srv.base}/api/thumb/${id}?size=64`);
     expect(first.status).toBe(200);
     expect(first.headers.get("content-type")).toContain("image/jpeg");
     expect(first.headers.get("x-cache")).toBe("miss");
     const bytes = Buffer.from(await first.arrayBuffer());
     expect(bytes.length).toBeGreaterThan(0);
-    // JPEG magic number.
-    expect(bytes[0]).toBe(0xff);
+    expect(bytes[0]).toBe(0xff); // JPEG magic number
     expect(bytes[1]).toBe(0xd8);
 
-    // A thumb file now exists in the cache dir.
     const cached = await readdir(join(cacheDir, "cache", "thumbs"));
     expect(cached.some((f) => f.endsWith(".jpg"))).toBe(true);
 
-    const second = await fetch(`${srv.base}/api/thumb/0?size=64`);
+    const second = await fetch(`${srv.base}/api/thumb/${id}?size=64`);
     expect(second.status).toBe(200);
     expect(second.headers.get("x-cache")).toBe("hit");
   });
 
-  it("404s an out-of-range id", async () => {
-    const res = await fetch(`${srv.base}/api/thumb/999?size=64`);
+  it("404s an unknown id", async () => {
+    const res = await fetch(`${srv.base}/api/thumb/999999?size=64`);
     expect(res.status).toBe(404);
   });
 });
 
 describe("GET /api/image/:id", () => {
   it("streams the original bytes", async () => {
-    const res = await fetch(`${srv.base}/api/image/0`);
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
+    const res = await fetch(`${srv.base}/api/image/${id}`);
     expect(res.status).toBe(200);
     const bytes = Buffer.from(await res.arrayBuffer());
     expect(bytes.length).toBeGreaterThan(0);
   });
 });
 
-describe("ratings round-trip", () => {
-  it("persists a rating keyed by absolute path across a rescan", async () => {
+describe("rating round-trip", () => {
+  it("persists a rating on the photo row across a rescan", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
+
     const set = await fetch(`${srv.base}/api/rating`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: 1, rating: 4 }),
+      body: JSON.stringify({ id, rating: 4 }),
     });
     expect(set.status).toBe(200);
 
-    // Rescan (new session) — rating must reattach by path.
-    await fetch(`${srv.base}/api/scan`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dir: photosDir }),
-    });
-    const res = await fetch(`${srv.base}/api/ratings`);
-    const body = await res.json();
-    expect(body.byId["1"]).toBe(4);
+    const rescan = await scan(srv.base, photosDir);
+    expect(rescan.items.find((i) => i.id === id).rating).toBe(4);
 
-    // Clearing with 0 removes it.
     await fetch(`${srv.base}/api/rating`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: 1, rating: 0 }),
+      body: JSON.stringify({ id, rating: 0 }),
     });
-    const after = await (await fetch(`${srv.base}/api/ratings`)).json();
-    expect(after.byId["1"]).toBeUndefined();
+    const after = await scan(srv.base, photosDir);
+    expect(after.items.find((i) => i.id === id).rating).toBe(0);
   });
 
   it("rejects an out-of-range rating", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
     const res = await fetch(`${srv.base}/api/rating`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: 0, rating: 9 }),
+      body: JSON.stringify({ id, rating: 9 }),
     });
     expect(res.status).toBe(400);
   });
 });
 
 describe("manual cover choice round-trip", () => {
-  it("persists a manual cover choice keyed by absolute path across a rescan", async () => {
-    // Establish a session first so id 1 resolves to a real path.
-    await fetch(`${srv.base}/api/scan`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dir: photosDir }),
-    });
+  it("persists a manual cover choice across a rescan", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[1].id;
 
     const set = await fetch(`${srv.base}/api/cover`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: 1, isCover: true }),
+      body: JSON.stringify({ id, isCover: true }),
     });
     expect(set.status).toBe(200);
 
-    // Rescan (new session) — the choice must reattach by path.
-    const rescan = await fetch(`${srv.base}/api/scan`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dir: photosDir }),
-    });
-    const body = await rescan.json();
-    expect(body.items[1].preferredCover).toBe(true);
-    expect(body.items[0].preferredCover).toBe(false);
+    const rescan = await scan(srv.base, photosDir);
+    expect(rescan.items.find((i) => i.id === id).preferredCover).toBe(true);
 
-    // Clearing removes it.
     await fetch(`${srv.base}/api/cover`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: 1, isCover: false }),
+      body: JSON.stringify({ id, isCover: false }),
     });
-    const after = await (
-      await fetch(`${srv.base}/api/scan`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ dir: photosDir }),
-      })
-    ).json();
-    expect(after.items[1].preferredCover).toBe(false);
+    const after = await scan(srv.base, photosDir);
+    expect(after.items.find((i) => i.id === id).preferredCover).toBe(false);
   });
 
   it("rejects a non-boolean isCover", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
     const res = await fetch(`${srv.base}/api/cover`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: 0, isCover: "yes" }),
+      body: JSON.stringify({ id, isCover: "yes" }),
     });
     expect(res.status).toBe(400);
   });
@@ -281,11 +249,7 @@ describe("manual cover choice round-trip", () => {
 
 describe("GET /api/library", () => {
   it("records the scanned folder and reports it as mounted", async () => {
-    await fetch(`${srv.base}/api/scan`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dir: photosDir }),
-    });
+    await scan(srv.base, photosDir);
     const res = await fetch(`${srv.base}/api/library`);
     expect(res.status).toBe(200);
     const entries = await res.json();
@@ -297,7 +261,12 @@ describe("GET /api/library", () => {
 
   it("reports a since-removed folder as not mounted", async () => {
     const goneDir = join(photosDir, "does-not-exist-anymore");
-    recordScan(goneDir);
+    getDb()
+      .prepare(
+        `INSERT INTO folders (abs_path, last_scanned_at) VALUES (?, ?)
+         ON CONFLICT(abs_path) DO NOTHING`
+      )
+      .run(goneDir, Date.now());
     const res = await fetch(`${srv.base}/api/library`);
     const entries = await res.json();
     const entry = entries.find((e) => e.path === goneDir);
