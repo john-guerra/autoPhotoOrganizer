@@ -207,6 +207,14 @@
     margin: 0;
     padding: 0;
   }
+  .folder-list {
+    /* A real library can have hundreds of indexed folders — without its
+       own scroll bound, the cache-management section below (breakdown,
+       clear, prune) would sit past a near-endless scroll, matching the
+       existing Library dropdown's own max-height convention. */
+    max-height: 240px;
+    overflow-y: auto;
+  }
   .folder-list li,
   .breakdown-list li {
     display: flex;
