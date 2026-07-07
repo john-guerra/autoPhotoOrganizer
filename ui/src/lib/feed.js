@@ -67,3 +67,35 @@ export function deriveSectionHeaders(items, groupBy) {
   });
   return headers;
 }
+
+/**
+ * Drops any header deriveSectionHeaders would otherwise emit at or below a
+ * placeholder's own collapse depth — the placeholder already renders its
+ * own folded label/count (see App.svelte's grid template), so a normal
+ * sticky-header band there would duplicate the same boundary.
+ * @param {Array<{index:number, depth:number}>} headers
+ * @param {Array<{kind:string, item:object}>} displayEntries
+ * @returns {Array<{index:number, depth:number, dimension:string, value:string, label:string}>}
+ */
+export function suppressPlaceholderHeaders(headers, displayEntries) {
+  return headers.filter((h) => {
+    const entry = displayEntries[h.index];
+    if (entry?.kind !== "placeholder") return true;
+    return h.depth < entry.item.path.length;
+  });
+}
+
+/**
+ * The id of the nearest non-placeholder item from one end of the array —
+ * used as a keyset seek anchor for loadMore, since a placeholder's
+ * synthetic id has no corresponding photos row for the server to look up a
+ * position from.
+ * @param {Array<{id: number|string, collapsed?: boolean}>} items
+ * @param {'start'|'end'} from
+ * @returns {number|string|null}
+ */
+export function nearestRealItemId(items, from) {
+  const seq = from === "end" ? [...items].reverse() : items;
+  const real = seq.find((it) => !it.collapsed);
+  return real ? real.id : null;
+}

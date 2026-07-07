@@ -3,6 +3,8 @@ import {
   formatGroupValue,
   mergeFeedPage,
   deriveSectionHeaders,
+  suppressPlaceholderHeaders,
+  nearestRealItemId,
 } from "./feed.js";
 
 describe("formatGroupValue", () => {
@@ -86,5 +88,60 @@ describe("deriveSectionHeaders", () => {
       ["year"]
     );
     expect(headers[0].label).toBe("Unknown");
+  });
+});
+
+describe("suppressPlaceholderHeaders", () => {
+  const displayEntries = [
+    { kind: "photo", item: { id: 1 } },
+    {
+      kind: "placeholder",
+      item: {
+        id: "collapsed:year=2019",
+        path: [{ dimension: "year", value: "2019" }],
+      },
+    },
+    { kind: "photo", item: { id: 2 } },
+  ];
+
+  it("drops a header at or below a placeholder's own collapse depth", () => {
+    const headers = [
+      { index: 1, depth: 0, dimension: "folder", value: "/a", label: "/a" },
+      { index: 1, depth: 1, dimension: "year", value: "2019", label: "2019" },
+    ];
+    const kept = suppressPlaceholderHeaders(headers, displayEntries);
+    expect(kept).toEqual([
+      { index: 1, depth: 0, dimension: "folder", value: "/a", label: "/a" },
+    ]);
+  });
+
+  it("keeps headers on real photo entries untouched", () => {
+    const headers = [
+      { index: 0, depth: 0, dimension: "folder", value: "/a", label: "/a" },
+      { index: 2, depth: 0, dimension: "folder", value: "/b", label: "/b" },
+    ];
+    expect(suppressPlaceholderHeaders(headers, displayEntries)).toEqual(
+      headers
+    );
+  });
+});
+
+describe("nearestRealItemId", () => {
+  it("finds the last real item's id, skipping a trailing placeholder", () => {
+    const items = [{ id: 1 }, { id: 2 }, { id: "ph", collapsed: true }];
+    expect(nearestRealItemId(items, "end")).toBe(2);
+  });
+
+  it("finds the first real item's id, skipping a leading placeholder", () => {
+    const items = [{ id: "ph", collapsed: true }, { id: 1 }, { id: 2 }];
+    expect(nearestRealItemId(items, "start")).toBe(1);
+  });
+
+  it("returns null when every item is a placeholder", () => {
+    const items = [
+      { id: "ph1", collapsed: true },
+      { id: "ph2", collapsed: true },
+    ];
+    expect(nearestRealItemId(items, "end")).toBeNull();
   });
 });
