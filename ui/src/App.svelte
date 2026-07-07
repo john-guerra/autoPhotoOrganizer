@@ -947,104 +947,32 @@
   }
 
   async function onKeydown(e) {
-    // Never steal keystrokes from a focused input (e.g. typing a folder path
-    // with digits in it must not rate photos).
+    if (e.metaKey || e.ctrlKey) return; // browser shortcuts
+
+    // Alt+Left/Right jumps groups regardless of what has focus: unlike a
+    // bare digit (typing a folder path must not rate photos), Option/Alt
+    // plus an arrow never inserts anything into a text field, so there's
+    // no legitimate typed input for the "never steal keystrokes from a
+    // focused input" guard below to protect here — checked before that
+    // guard, or focus sitting in the groupBy pill input (a likely resting
+    // place — it's the first, most prominent field on the page) would
+    // silently swallow the shortcut, as it did before this reordering.
+    if (e.altKey && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+      e.preventDefault();
+      if (!displayEntries.length) return;
+      await jumpGroupBoundary(e.key === "ArrowRight" ? "next" : "prev");
+      return;
+    }
+    if (e.altKey) return; // other Alt combos: browser shortcuts
+
+    // Never steal keystrokes from a focused input (e.g. typing a folder
+    // path with digits in it must not rate photos).
     const tag = e.target?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)
       return;
-    if (
-      e.metaKey ||
-      e.ctrlKey ||
-      (e.altKey && e.key !== "ArrowRight" && e.key !== "ArrowLeft")
-    )
-      return; // browser shortcuts, except Alt+Left/Right for group navigation
 
     if (!displayEntries.length) return;
     const key = e.key;
-
-    // Alt+Left/Right: jump to the previous/next section-header boundary,
-    // at any depth — e.g. the next year within a folder, rolling up to
-    // the next folder once the last year in the current one is passed.
-    // Resolved server-side (findGroupBoundary) rather than by paging
-    // through intermediate photos client-side — a folder in this
-    // library can hold 10,000+ photos between here and the boundary.
-    if (e.altKey && (key === "ArrowRight" || key === "ArrowLeft")) {
-      e.preventDefault();
-      const focusEntry = displayEntries[selected];
-      const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
-      if (focusId == null) return;
-      const direction = key === "ArrowRight" ? "next" : "prev";
-      let boundary;
-      try {
-        boundary = await fetchGroupBoundary({
-          groupBy,
-          collapsed: collapsedPaths,
-          focusId,
-          direction,
-        });
-      } catch (err) {
-        error = err.message;
-        return;
-      }
-      if (boundary.id == null) return; // already at the first/last group
-      const targetId = boundary.id;
-      error = "";
-      status = "loading…";
-      const epoch = ++feedEpoch;
-      // See loadInitialFeed's comment: blocks a concurrent scroll-triggered
-      // loadMore from splicing a stale page into the window this replaces.
-      fetchingBefore = true;
-      fetchingAfter = true;
-      try {
-        const { items: beforePage } = await fetchFeed({
-          groupBy,
-          collapsed: collapsedPaths,
-          focusId: targetId,
-          before: PAGE_SIZE / 2,
-          after: 0,
-        });
-        const { items: afterPage, focusItem } = await fetchFeed({
-          groupBy,
-          collapsed: collapsedPaths,
-          focusId: targetId,
-          before: 0,
-          after: PAGE_SIZE / 2,
-        });
-        if (epoch !== feedEpoch) return;
-        // See dedupeById's comment: these two independent seeks can return
-        // overlapping rows once a collapsed-path exclusion is active.
-        items = dedupeById([
-          ...beforePage,
-          ...(focusItem ? [focusItem] : []),
-          ...afterPage,
-        ]);
-        hasMoreBefore = beforePage.length >= PAGE_SIZE / 2;
-        hasMoreAfter = afterPage.length >= PAGE_SIZE / 2;
-        await tick();
-        const targetIndex = displayEntries.findIndex(
-          (en) => resolvePhoto(en).id === targetId
-        );
-        const t =
-          targetIndex !== -1
-            ? nextSelectable(displayEntries, targetIndex, 1)
-            : null;
-        selected = t ?? nextSelectable(displayEntries, 0, 1) ?? 0;
-        status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-        enrichMeta(items.map((i) => i.id));
-        await tick();
-        const targetHeader = layoutResult?.headers.find(
-          (h) => h.index === selected
-        );
-        if (targetHeader) scrollToSection(targetHeader);
-      } catch (err) {
-        error = err.message;
-        status = "";
-      } finally {
-        fetchingBefore = false;
-        fetchingAfter = false;
-      }
-      return;
-    }
 
     // Grid zoom: +/- steps through the justified row heights.
     if (!loupeOpen && (key === "+" || key === "=" || key === "-")) {
@@ -1145,6 +1073,87 @@
     gridEl
       ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
       ?.focus({ preventScroll: true });
+  }
+
+  /** Alt+Left/Right: jump to the previous/next section-header boundary, at
+   * any depth — e.g. the next year within a folder, rolling up to the next
+   * folder once the last year in the current one is passed. Resolved
+   * server-side (findGroupBoundary) rather than by paging through
+   * intermediate photos client-side — a folder in this library can hold
+   * 10,000+ photos between here and the boundary. */
+  async function jumpGroupBoundary(direction) {
+    const focusEntry = displayEntries[selected];
+    const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
+    if (focusId == null) return;
+    let boundary;
+    try {
+      boundary = await fetchGroupBoundary({
+        groupBy,
+        collapsed: collapsedPaths,
+        focusId,
+        direction,
+      });
+    } catch (err) {
+      error = err.message;
+      return;
+    }
+    if (boundary.id == null) return; // already at the first/last group
+    const targetId = boundary.id;
+    error = "";
+    status = "loading…";
+    const epoch = ++feedEpoch;
+    // See loadInitialFeed's comment: blocks a concurrent scroll-triggered
+    // loadMore from splicing a stale page into the window this replaces.
+    fetchingBefore = true;
+    fetchingAfter = true;
+    try {
+      const { items: beforePage } = await fetchFeed({
+        groupBy,
+        collapsed: collapsedPaths,
+        focusId: targetId,
+        before: PAGE_SIZE / 2,
+        after: 0,
+      });
+      const { items: afterPage, focusItem } = await fetchFeed({
+        groupBy,
+        collapsed: collapsedPaths,
+        focusId: targetId,
+        before: 0,
+        after: PAGE_SIZE / 2,
+      });
+      if (epoch !== feedEpoch) return;
+      // See dedupeById's comment: these two independent seeks can return
+      // overlapping rows once a collapsed-path exclusion is active.
+      items = dedupeById([
+        ...beforePage,
+        ...(focusItem ? [focusItem] : []),
+        ...afterPage,
+      ]);
+      hasMoreBefore = beforePage.length >= PAGE_SIZE / 2;
+      hasMoreAfter = afterPage.length >= PAGE_SIZE / 2;
+      await tick();
+      const targetIndex = displayEntries.findIndex(
+        (en) => resolvePhoto(en).id === targetId
+      );
+      const t =
+        targetIndex !== -1
+          ? nextSelectable(displayEntries, targetIndex, 1)
+          : null;
+      selected = t ?? nextSelectable(displayEntries, 0, 1) ?? 0;
+      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+      enrichMeta(items.map((i) => i.id));
+      await tick();
+      const targetHeader = layoutResult?.headers.find(
+        (h) => h.index === selected
+      );
+      if (targetHeader) scrollToSection(targetHeader);
+    } catch (err) {
+      error = err.message;
+      status = "";
+    } finally {
+      fetchingBefore = false;
+      fetchingAfter = false;
+    }
   }
 </script>
 
