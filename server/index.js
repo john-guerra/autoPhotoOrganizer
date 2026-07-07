@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { registerApi } from "./api.js";
+import { getDb } from "./db/connection.js";
+import { migrateLegacyJsonIfNeeded } from "./migrateLegacyJson.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json");
@@ -17,6 +19,8 @@ const HOST = "127.0.0.1";
 export function createApp() {
   const app = express();
   app.use(express.json());
+
+  migrateLegacyJsonIfNeeded(getDb());
 
   // Health check — proves the dev loop end to end.
   app.get("/api/health", (_req, res) => {
