@@ -68,6 +68,13 @@
   function settle(ok) {
     clearTimeout(stallTimer);
     clearTimeout(previewTimer);
+    // RAW thumbnails fail fast (extension check, no decode attempt) — almost
+    // always well under PREVIEW_DELAY_MS — so the timer above just got
+    // cancelled before it could ever fire. Without this, a RAW tile (whose
+    // Retry button is suppressed, since there's nothing to retry) would be
+    // left permanently blank. Falling back immediately on any failure that
+    // beats the delay covers that case, and any other fast failure too.
+    if (!ok && !previewSrc) previewSrc = previewUrl(item.id, item.mtimeMs);
     loaded = ok;
     failed = !ok;
     dispatch("settled", { id: item.id, ok });
@@ -152,7 +159,13 @@
     on:click
   >
     {#if src && previewSrc && !loaded}
-      <img src={previewSrc} alt="" loading="lazy" class="preview" />
+      <img
+        src={previewSrc}
+        alt=""
+        loading="lazy"
+        class="preview"
+        on:error={() => (previewSrc = null)}
+      />
     {/if}
     {#if src}
       {#key `${item.id}:${item.mtimeMs}`}
