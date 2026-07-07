@@ -409,6 +409,55 @@ describe("GET /api/library", () => {
   });
 });
 
+describe("GET /api/library id field", () => {
+  it("includes each folder's id", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(`${srv.base}/api/library`);
+    const body = await res.json();
+    const entry = body.find((e) => e.path === photosDir);
+    expect(entry).toBeDefined();
+    expect(typeof entry.id).toBe("number");
+  });
+});
+
+describe("DELETE /api/folders/:id", () => {
+  it("404s for an unknown id", async () => {
+    const res = await fetch(`${srv.base}/api/folders/999999`, {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("removes the folder and its photos; real files on disk are untouched", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "ag-removeme-"));
+    await sharp({
+      create: { width: 40, height: 30, channels: 3, background: { r: 1, g: 2, b: 3 } },
+    })
+      .jpeg()
+      .toFile(join(tempDir, "x.jpg"));
+
+    await scan(srv.base, tempDir);
+    const libRes = await fetch(`${srv.base}/api/library`);
+    const lib = await libRes.json();
+    const entry = lib.find((e) => e.path === tempDir);
+    expect(entry).toBeDefined();
+
+    const del = await fetch(`${srv.base}/api/folders/${entry.id}`, {
+      method: "DELETE",
+    });
+    expect(del.status).toBe(200);
+
+    const libRes2 = await fetch(`${srv.base}/api/library`);
+    const lib2 = await libRes2.json();
+    expect(lib2.some((e) => e.path === tempDir)).toBe(false);
+
+    const stillOnDisk = await readdir(tempDir);
+    expect(stillOnDisk).toEqual(["x.jpg"]);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+});
+
 describe("GET /api/feed", () => {
   beforeEach(async () => {
     const db = getDb();

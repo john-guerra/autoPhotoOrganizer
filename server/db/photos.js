@@ -88,3 +88,23 @@ export function setPhotoCover(db, id, isCover) {
     id
   );
 }
+
+/**
+ * Remove a folder and its photos from the index. Real files on disk are
+ * never touched — this only affects the `folders`/`photos` rows.
+ * photo_album/tags aren't cleaned up here: album clustering (GH #3) isn't
+ * implemented yet and those tables have no rows today.
+ * @param {import("better-sqlite3").Database} db
+ * @param {number} folderId
+ * @returns {boolean} true if the folder existed and was removed
+ */
+export function deleteFolder(db, folderId) {
+  const tx = db.transaction((id) => {
+    const exists = db.prepare(`SELECT id FROM folders WHERE id = ?`).get(id);
+    if (!exists) return false;
+    db.prepare(`DELETE FROM photos WHERE folder_id = ?`).run(id);
+    db.prepare(`DELETE FROM folders WHERE id = ?`).run(id);
+    return true;
+  });
+  return tx(folderId);
+}

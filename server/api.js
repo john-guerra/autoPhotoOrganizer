@@ -15,6 +15,7 @@ import {
   getPhotoById,
   setPhotoRating,
   setPhotoCover,
+  deleteFolder,
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
 import { getFeedPage, DIMENSIONS } from "./db/feed.js";
@@ -229,7 +230,7 @@ export function registerApi(app) {
     const db = getDb();
     const rows = db
       .prepare(
-        `SELECT folders.abs_path AS path, folders.last_scanned_at AS lastScannedAt,
+        `SELECT folders.id AS id, folders.abs_path AS path, folders.last_scanned_at AS lastScannedAt,
                 volumes.uuid AS volumeUuid, volumes.last_mount_path AS volumeMountPath
          FROM folders LEFT JOIN volumes ON volumes.id = folders.volume_id
          ORDER BY folders.last_scanned_at DESC`
@@ -254,6 +255,7 @@ export function registerApi(app) {
         volumeMounted = mountedByVolumeKey.get(volumeKey);
       }
       return {
+        id: r.id,
         path: r.path,
         name: basename(r.path),
         lastScannedAt: r.lastScannedAt,
@@ -261,6 +263,13 @@ export function registerApi(app) {
       };
     });
     res.json(entries);
+  });
+
+  app.delete("/api/folders/:id", (req, res) => {
+    const db = getDb();
+    const removed = deleteFolder(db, Number(req.params.id));
+    if (!removed) return res.status(404).end();
+    res.json({ removed: true });
   });
 
   // --- Grouped endless feed --------------------------------------------------

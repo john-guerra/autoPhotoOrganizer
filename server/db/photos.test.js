@@ -8,6 +8,7 @@ import {
   getPhotoById,
   setPhotoRating,
   setPhotoCover,
+  deleteFolder,
 } from "./photos.js";
 
 let cacheDir;
@@ -120,5 +121,44 @@ describe("setPhotoRating / setPhotoCover", () => {
     const photo = getPhotoById(db, row.id);
     expect(photo.rating).toBe(4);
     expect(photo.preferred_cover).toBe(1);
+  });
+});
+
+describe("deleteFolder", () => {
+  it("removes the folder and its photos, leaving other folders untouched", () => {
+    const db = getDb();
+    upsertScan(db, "/a", 1, [
+      { name: "1.jpg", size: 10, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/b", 1, [
+      { name: "2.jpg", size: 20, mtimeMs: 2, kind: "image" },
+    ]);
+    const folderAId = db
+      .prepare(`SELECT id FROM folders WHERE abs_path = '/a'`)
+      .get().id;
+
+    const removed = deleteFolder(db, folderAId);
+    expect(removed).toBe(true);
+
+    expect(
+      db.prepare(`SELECT * FROM folders WHERE id = ?`).get(folderAId)
+    ).toBeUndefined();
+    expect(
+      db.prepare(`SELECT * FROM photos WHERE folder_id = ?`).all(folderAId)
+    ).toEqual([]);
+
+    // /b is untouched
+    const folderBRow = db
+      .prepare(`SELECT id FROM folders WHERE abs_path = '/b'`)
+      .get();
+    expect(folderBRow).toBeDefined();
+    expect(
+      db.prepare(`SELECT filename FROM photos WHERE folder_id = ?`).all(folderBRow.id)
+    ).toEqual([{ filename: "2.jpg" }]);
+  });
+
+  it("returns false for an unknown folder id", () => {
+    const db = getDb();
+    expect(deleteFolder(db, 999999)).toBe(false);
   });
 });
