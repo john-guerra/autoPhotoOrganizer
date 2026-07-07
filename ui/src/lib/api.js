@@ -155,6 +155,30 @@ export async function fetchFeed({
 }
 
 /**
+ * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId: number, direction: "next"|"prev"}} opts
+ * @returns {Promise<{id: number|null}>}
+ */
+export async function fetchGroupBoundary({
+  groupBy,
+  collapsed = [],
+  focusId,
+  direction,
+}) {
+  const params = new URLSearchParams({
+    groupBy: groupBy.join(","),
+    focusId: String(focusId),
+    direction,
+  });
+  if (collapsed.length) params.set("collapsed", JSON.stringify(collapsed));
+  const res = await fetch(`/api/feed/boundary?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `feed boundary failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
  * @param {{groupBy: string[], path?: Array<{dimension:string,value:string}>}} opts
  * @returns {Promise<{total:number, nodes: Array<{value:string,label:string,count:number,hasChildren:boolean}>}>}
  */
