@@ -603,6 +603,53 @@ describe("GET /api/feed", () => {
   });
 });
 
+describe("GET /api/feed/boundary", () => {
+  it("finds the next group boundary", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const firstId = scanBody.items[0].id;
+    const res = await fetch(
+      `${srv.base}/api/feed/boundary?groupBy=folder&focusId=${firstId}&direction=next`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveProperty("id");
+  });
+
+  it("returns { id: null } at the true end of the library", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const lastId = scanBody.items[scanBody.items.length - 1].id;
+    const res = await fetch(
+      `${srv.base}/api/feed/boundary?groupBy=folder&focusId=${lastId}&direction=next`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ id: null });
+  });
+
+  it("400s for a missing groupBy", async () => {
+    const res = await fetch(
+      `${srv.base}/api/feed/boundary?focusId=1&direction=next`
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("400s for an invalid direction", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const firstId = scanBody.items[0].id;
+    const res = await fetch(
+      `${srv.base}/api/feed/boundary?groupBy=folder&focusId=${firstId}&direction=sideways`
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("404s for an unknown focusId", async () => {
+    const res = await fetch(
+      `${srv.base}/api/feed/boundary?groupBy=folder&focusId=999999&direction=next`
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("GET /api/tree", () => {
   beforeEach(async () => {
     const db = getDb();

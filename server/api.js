@@ -24,7 +24,7 @@ import {
   deleteFolder,
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
-import { getFeedPage, DIMENSIONS } from "./db/feed.js";
+import { getFeedPage, findGroupBoundary, DIMENSIONS } from "./db/feed.js";
 import { getTreeNode } from "./db/tree.js";
 
 const processing = new NodeProcessingService();
@@ -347,6 +347,55 @@ export function registerApi(app) {
       res.json({ items, focusItem });
     } catch (err) {
       res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/feed/boundary", (req, res) => {
+    const groupBy = String(req.query.groupBy ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!groupBy.length) {
+      return res.status(400).json({ error: "groupBy is required" });
+    }
+    if (groupBy.some((d) => !DIMENSIONS[d])) {
+      return res.status(400).json({
+        error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
+      });
+    }
+
+    const direction = String(req.query.direction ?? "");
+    if (direction !== "next" && direction !== "prev") {
+      return res
+        .status(400)
+        .json({ error: `direction must be "next" or "prev"` });
+    }
+
+    let collapsed = [];
+    if (req.query.collapsed) {
+      try {
+        collapsed = JSON.parse(String(req.query.collapsed));
+      } catch {
+        return res.status(400).json({ error: "collapsed must be JSON" });
+      }
+    }
+
+    const focusId = Number(req.query.focusId);
+    if (!Number.isInteger(focusId)) {
+      return res.status(400).json({ error: "focusId is required" });
+    }
+
+    try {
+      const db = getDb();
+      const result = findGroupBoundary(db, {
+        groupBy,
+        collapsed,
+        focusId,
+        direction,
+      });
+      res.json(result ?? { id: null });
+    } catch (e) {
+      res.status(404).json({ error: e.message });
     }
   });
 
