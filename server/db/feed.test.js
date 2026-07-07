@@ -193,6 +193,37 @@ describe("findGroupBoundary", () => {
     expect(result).toEqual({ id: cccPhotos[0].id });
   });
 
+  it("returns the FIRST row (not an arbitrary/last one) of a multi-row previous group", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const aaaPhotos = upsertScan(db, "/photos/aaa", 1, [
+      { name: "y1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "y2-first.jpg", size: 1, mtimeMs: 2, kind: "image" },
+      { name: "y2-second.jpg", size: 1, mtimeMs: 3, kind: "image" },
+    ]);
+    const bbbPhotos = upsertScan(db, "/photos/bbb", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    // year DESC means the LARGER year sorts first within "aaa", so the
+    // group immediately adjacent to "bbb" (in true forward order) is the
+    // smaller year — the two-photo one — not the single-photo one.
+    setTakenAt(db, aaaPhotos[0].id, "2024-01-01");
+    setTakenAt(db, aaaPhotos[1].id, "2023-01-01");
+    setTakenAt(db, aaaPhotos[2].id, "2023-01-01");
+    setTakenAt(db, bbbPhotos[0].id, "2022-01-01");
+
+    const result = findGroupBoundary(db, {
+      groupBy: ["folder", "year"],
+      focusId: bbbPhotos[0].id,
+      direction: "prev",
+    });
+    // y2-first has the lower id, so it sorts first within the tied
+    // (folder, year) tuple once photos.id breaks the tie — walking
+    // backward from "bbb" instead lands on y2-second (the higher id),
+    // which is what this test guards against.
+    expect(result).toEqual({ id: aaaPhotos[1].id });
+  });
+
   it("throws for an unknown focusId", () => {
     const db = getDb();
     seedVolume(db, 1);

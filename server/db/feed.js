@@ -421,13 +421,23 @@ export function getFeedPage(
 }
 
 /**
- * Find the id of the first real row in the next/previous DIFFERENT group
- * after/before focusId's own position, at any dimension depth — e.g. the
- * next year within the same folder, or the next folder once the last
- * year in the current one is passed. A single indexed query, regardless
- * of how many rows sit between focusId and the boundary — the client-side
+ * Find the id of the first real row (in true forward composite order) of
+ * the next/previous DIFFERENT group after/before focusId's own group, at
+ * any dimension depth — e.g. the next year within the same folder, or the
+ * next folder once the last year in the current one is passed. Regardless
+ * of how many rows sit between focusId and the boundary, this costs one
+ * indexed query for "next" and two for "prev" — the client-side
  * alternative (paging through every intermediate row) doesn't scale to a
  * 10,000-photo folder.
+ *
+ * "next" and "prev" are NOT symmetric here. Composite ordering already
+ * walks forward, so for "next", the first row found past the current
+ * group's boundary is necessarily the target group's own first row —
+ * one query suffices. For "prev", walking backward to find the nearest
+ * row across the boundary lands on the target group's LAST row in true
+ * forward order (the row closest to focus from the far side), not its
+ * first — so a second query re-seeks within that row's exact group
+ * tuple, in true forward order, to find the group's actual first row.
  * @param {import("better-sqlite3").Database} db
  * @param {{groupBy:string[], collapsed?:Array<Array<{dimension:string,value:string}>>, focusId:number, direction:"next"|"prev"}} opts
  * @returns {{id:number}|null}
@@ -456,10 +466,7 @@ export function findGroupBoundary(
     .map((_, i) => focusRow[`dim${i}`])
     .concat(focusRow.id);
 
-  const { sql: exclSql, params: exclParams } = exclusionClause(
-    collapsed,
-    dims
-  );
+  const { sql: exclSql, params: exclParams } = exclusionClause(collapsed, dims);
   const { sql: seekSql, params: seekParams } = seekCondition(
     seekDims,
     focusValues,
@@ -497,5 +504,36 @@ export function findGroupBoundary(
        LIMIT 1`
     )
     .get(...exclParams, ...seekParams, ...notCurrentParams);
-  return row ? { id: row.id } : null;
+  if (!row) return null;
+  if (wantAfter) return { id: row.id };
+
+  // `row` only tells us WHICH group is across the boundary (its own
+  // groupBy values), not which of that group's rows sorts first — reseek
+  // for the row with the smallest composite key among rows sharing that
+  // exact group tuple, in true forward order (each dimension in its own
+  // configured direction, id ASC as final tiebreaker).
+  const targetGroupPath = groupBy.map((name, i) => ({
+    dimension: name,
+    value: row[`dim${i}`],
+  }));
+  const { sql: notMatchSql, params: matchParams } = collapsedPathCondition(
+    targetGroupPath,
+    dims
+  );
+  const matchSql = notMatchSql.replace(/^NOT /, "");
+  const forwardOrderCols = seekDims
+    .map(
+      (d, i) => `${i < dims.length ? `dim${i}` : "photos.id"} ${d.direction}`
+    )
+    .join(", ");
+  const firstRow = db
+    .prepare(
+      `SELECT photos.id, ${selectDimCols}
+       FROM photos JOIN folders ON folders.id = photos.folder_id
+       WHERE photos.stale = 0 AND (${exclSql}) AND (${matchSql})
+       ORDER BY ${forwardOrderCols}
+       LIMIT 1`
+    )
+    .get(...exclParams, ...matchParams);
+  return firstRow ? { id: firstRow.id } : null;
 }
