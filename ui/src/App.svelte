@@ -439,14 +439,6 @@
   // photo-per-entry projection (see the Loupe usage above), so it's the
   // correct input here.
   $: sectionHeaders = deriveSectionHeaders(resolvedPhotos, groupBy);
-  $: sectionHeadersByIndex = (() => {
-    const map = new Map();
-    for (const h of sectionHeaders) {
-      if (!map.has(h.index)) map.set(h.index, []);
-      map.get(h.index).push(h);
-    }
-    return map;
-  })();
   $: layoutResult =
     displayEntries.length && gridWidth > 2 * PAD
       ? sectionedJustifiedLayout(
@@ -478,15 +470,6 @@
       : null;
   $: boxes = layoutResult ? layoutResult.boxes : null;
   $: gridHeight = layoutResult ? layoutResult.totalHeight + 2 * PAD : 0;
-  $: headerPositionByKey = (() => {
-    const map = new Map();
-    if (layoutResult) {
-      for (const h of layoutResult.headers) {
-        map.set(`${h.index}-${h.dimension}-${h.value}`, h);
-      }
-    }
-    return map;
-  })();
   // The first time this fires (right when `boxes` first becomes non-null,
   // e.g. after the initial feed load), the grid's layout/paint may not have
   // settled yet, so gridEl.getBoundingClientRect() below can return
@@ -913,43 +896,44 @@
       tabindex="-1"
     >
       {#if boxes}
+        <!-- Headers render unconditionally for the whole loaded window, unlike
+             photos — there are only dozens/hundreds of them (vs. tens of
+             thousands of photos), so they don't need windowing, and a header
+             whose triggering index falls outside the virtualized photo range
+             must still survive (it may be sticky-stuck mid-section while the
+             viewer has scrolled well past its origin index). -->
+        {#each layoutResult.headers as header (header.dimension + header.value + header.index)}
+          <div
+            class="section-wrapper"
+            style="top:{header.y}px; height:{header.endY - header.y}px;"
+          >
+            <div
+              class="section-header"
+              style="top:{header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
+            >
+              <button
+                class="section-toggle-icon"
+                title="Collapse/expand this section"
+                on:click={() =>
+                  toggleSectionCollapse(
+                    groupBy.slice(0, header.depth + 1).map((d) => ({
+                      dimension: d,
+                      value: resolvedPhotos[header.index]?.groupValues[d],
+                    }))
+                  )}
+              >
+                ▾
+              </button>
+              <button
+                class="section-label"
+                on:click={() => scrollToSection(header)}
+              >
+                {header.label}
+              </button>
+            </div>
+          </div>
+        {/each}
         {#each visibleItems as { i, entry } (entryDomId(entry))}
-          {#if sectionHeadersByIndex.has(i)}
-            {#each sectionHeadersByIndex.get(i) as header (header.dimension + header.value + header.index)}
-              {@const pos = headerPositionByKey.get(`${header.index}-${header.dimension}-${header.value}`)}
-              {#if pos}
-                <div
-                  class="section-wrapper"
-                  style="top:{pos.y}px; height:{pos.endY - pos.y}px;"
-                >
-                  <div
-                    class="section-header"
-                    style="top:{header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
-                  >
-                    <button
-                      class="section-toggle-icon"
-                      title="Collapse/expand this section"
-                      on:click={() =>
-                        toggleSectionCollapse(
-                          groupBy.slice(0, header.depth + 1).map((d) => ({
-                            dimension: d,
-                            value: resolvePhoto(entry).groupValues[d],
-                          }))
-                        )}
-                    >
-                      ▾
-                    </button>
-                    <button
-                      class="section-label"
-                      on:click={() => scrollToSection(pos)}
-                    >
-                      {header.label}
-                    </button>
-                  </div>
-                </div>
-              {/if}
-            {/each}
-          {/if}
           <Thumb
             item={resolvePhoto(entry)}
             box={boxes[i]}
