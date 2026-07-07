@@ -121,8 +121,16 @@
 
   onDestroy(() => observer?.disconnect());
 
-  // Keep the selected tile in view for roving keyboard focus.
-  $: if (selected && el) el.scrollIntoView({ block: "nearest" });
+  // Keep the selected tile centered for roving keyboard focus — re-runs
+  // whenever this tile's own position changes too (not just when it first
+  // becomes selected), since a metadata-driven justified-layout reflow can
+  // move the selected tile after the initial scroll; referencing box.x/y
+  // here is what makes Svelte re-fire this block on that reflow.
+  $: if (selected && el) {
+    void box.x;
+    void box.y;
+    el.scrollIntoView({ block: "center" });
+  }
 </script>
 
 <div

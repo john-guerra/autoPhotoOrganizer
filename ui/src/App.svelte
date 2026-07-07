@@ -526,6 +526,12 @@
   // immediately with placeholders). Unlike the old per-folder-scan
   // version, a feed page is already a bounded batch (PAGE_SIZE), so no
   // further chunking is needed here.
+  // How many of the nearest-to-selection un-enriched photos to fetch real
+  // dimensions for first — a rough viewport's worth, so the content the
+  // user is actually looking at settles onto its real aspect ratio quickly
+  // instead of waiting on the whole window's metadata in one batch.
+  const META_NEAR_BATCH = 24;
+
   async function enrichMeta(ids) {
     const epoch = feedEpoch;
     const need = ids.filter((id) => {
@@ -533,26 +539,52 @@
       return it && it.width == null;
     });
     if (!need.length) return;
-    try {
-      const metas = await fetchMeta(need);
-      if (epoch !== feedEpoch) return;
-      for (const m of metas) {
-        const it = items.find((i) => i.id === m.id);
-        if (!it) continue;
-        // Record the attempt's outcome unconditionally, even when no usable
-        // dimensions came back (RAW: server returns width/height 0) — the
-        // "already attempted" check below is `it.width == null`, so leaving
-        // width/height unset here would re-request metadata for this photo
-        // forever. takenAt is set independently since a RAW file can still
-        // have a valid capture date from EXIF despite unavailable dimensions.
-        it.width = m.width ?? 0;
-        it.height = m.height ?? 0;
-        it.takenAt = m.takenAt;
+
+    const applyBatch = async (batchIds) => {
+      if (!batchIds.length) return;
+      try {
+        const metas = await fetchMeta(batchIds);
+        if (epoch !== feedEpoch) return;
+        for (const m of metas) {
+          const it = items.find((i) => i.id === m.id);
+          if (!it) continue;
+          // Record the attempt's outcome unconditionally, even when no
+          // usable dimensions came back (RAW: server returns width/height
+          // 0) — the "already attempted" check above is `it.width == null`,
+          // so leaving width/height unset here would re-request metadata
+          // for this photo forever. takenAt is set independently since a
+          // RAW file can still have a valid capture date from EXIF despite
+          // unavailable dimensions.
+          it.width = m.width ?? 0;
+          it.height = m.height ?? 0;
+          it.takenAt = m.takenAt;
+        }
+        items = items; // re-layout with real aspect ratios
+      } catch {
+        // metadata is an enhancement; the grid still works without it
       }
-      items = items; // re-layout with real aspect ratios
-    } catch {
-      return; // metadata is an enhancement; the grid still works without it
-    }
+    };
+
+    // Fetching the whole window's metadata in one batch means a single
+    // all-at-once reflow once it resolves — visibly jumping whatever the
+    // user is currently looking at, including the selected tile. Splitting
+    // off the ids nearest the current selection into their own smaller,
+    // faster request lets that part of the layout settle first; the rest
+    // enriches in the background afterward.
+    const focusEntry = displayEntries[selected];
+    const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
+    const indexById = new Map(items.map((it, idx) => [it.id, idx]));
+    const focusIndex = focusId != null ? (indexById.get(focusId) ?? -1) : -1;
+    const distance = (id) => {
+      const idx = indexById.get(id);
+      return focusIndex === -1 || idx === undefined
+        ? Infinity
+        : Math.abs(idx - focusIndex);
+    };
+    const sorted = [...need].sort((a, b) => distance(a) - distance(b));
+
+    await applyBatch(sorted.slice(0, META_NEAR_BATCH));
+    applyBatch(sorted.slice(META_NEAR_BATCH)); // fire-and-forget
   }
 
   async function refreshLibrary() {
