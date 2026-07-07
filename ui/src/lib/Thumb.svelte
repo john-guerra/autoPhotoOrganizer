@@ -3,11 +3,12 @@
   export const MAX_PEEK_DEPTH = 2; // visual depth cap — peeks beyond this render at the same max offset, keeping the tile's footprint small and neat regardless of actual stack size
   export const PEEK_VERTICAL_PX = 2; // flat vertical offset for every peek layer (not scaled by depth) — a subtle "slightly offset" cue, kept tiny since it isn't reserved for in the grid layout
   export const STALL_MS = 12000; // an <img> load has no native timeout; treat a request that neither loads nor errors within this window as stalled
+  export const PREVIEW_DELAY_MS = 150; // only fetch the embedded-preview fallback if the full thumbnail hasn't already loaded by then — avoids a wasted request on every already-cached (warm) view, where the full thumbnail resolves well under this delay
 </script>
 
 <script>
   import { onMount, onDestroy, createEventDispatcher } from "svelte";
-  import { thumbUrl } from "./api.js";
+  import { thumbUrl, previewUrl } from "./api.js";
   import Stars from "./Stars.svelte";
 
   const dispatch = createEventDispatcher();
@@ -30,6 +31,8 @@
   let retryNonce = 0; // bumped by the retry click to force a fresh request past caches
   let observer;
   let stallTimer;
+  let previewSrc = null; // the fast-tier embedded-preview URL, set only if the full thumbnail hasn't loaded within PREVIEW_DELAY_MS
+  let previewTimer;
 
   // Recompute the src whenever the tile is visible OR the item/size changes.
   // Svelte reuses this component across rescans (keyed by id), so `item` can
@@ -50,15 +53,21 @@
   function armAttempt(url) {
     loaded = false; // re-fade in when the source changes
     failed = false;
+    previewSrc = null;
     dispatch("attempt", { id: item.id });
     clearTimeout(stallTimer);
+    clearTimeout(previewTimer);
     stallTimer = setTimeout(() => {
       if (src === url) settle(false);
     }, STALL_MS);
+    previewTimer = setTimeout(() => {
+      if (src === url && !loaded) previewSrc = previewUrl(item.id, item.mtimeMs);
+    }, PREVIEW_DELAY_MS);
   }
 
   function settle(ok) {
     clearTimeout(stallTimer);
+    clearTimeout(previewTimer);
     loaded = ok;
     failed = !ok;
     dispatch("settled", { id: item.id, ok });
@@ -68,7 +77,10 @@
     retryNonce += 1;
   }
 
-  onDestroy(() => clearTimeout(stallTimer));
+  onDestroy(() => {
+    clearTimeout(stallTimer);
+    clearTimeout(previewTimer);
+  });
 
   // Split alternately: chronologically-nearer non-cover members peek out
   // closer to the cover (right first, then left, then right again, ...).
@@ -139,6 +151,9 @@
     style={stackMarginPx ? `inset: 0 ${stackMarginPx}px;` : ""}
     on:click
   >
+    {#if src && previewSrc && !loaded}
+      <img src={previewSrc} alt="" loading="lazy" class="preview" />
+    {/if}
     {#if src}
       {#key `${item.id}:${item.mtimeMs}`}
         <img
@@ -155,7 +170,7 @@
     {#if src && !loaded && !failed}
       <span class="thumb-spinner" aria-hidden="true"></span>
     {/if}
-    {#if failed}
+    {#if failed && item.kind !== "raw"}
       <button
         class="thumb-retry"
         title="Failed to load — click to retry"
@@ -223,6 +238,16 @@
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+  .preview {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    border-radius: inherit;
+    z-index: 1;
   }
   img.cover {
     /* inherit is correct here: img.cover is a child of .thumb, which
