@@ -71,27 +71,6 @@ function exclusionClause(collapsedPaths, dims) {
   return { sql: parts.join(" AND "), params };
 }
 
-/**
- * @param {import("better-sqlite3").Database} db
- * @param {{groupBy: string[], collapsed: Array<Array<{dimension:string, value:string}>>}} opts
- * @returns {Array<{path: Array<{dimension:string, value:string}>, count: number}>}
- */
-function getCollapsedSummaries(db, { groupBy, collapsed }) {
-  const dims = resolveDimensions(groupBy);
-  return collapsed.map((path) => {
-    const { sql, params } = collapsedPathCondition(path, dims);
-    const positiveSql = sql.replace(/^NOT /, "");
-    const row = db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM photos JOIN folders ON folders.id = photos.folder_id
-         WHERE photos.stale = 0 AND ${positiveSql}`
-      )
-      .get(...params);
-    return { path, count: row.count };
-  });
-}
-
 /** @param {string} direction @param {boolean} wantAfter @returns {">"|"<"} */
 function cmpOp(direction, wantAfter) {
   if (direction === "ASC") return wantAfter ? ">" : "<";
@@ -126,6 +105,34 @@ function seekCondition(seekDims, focusValues, wantAfter) {
 }
 
 /**
+ * Like seekCondition, but seeks to an arbitrary hierarchy PATH's position
+ * rather than a specific row — used for "jump to this tree node," which has
+ * no focusId to anchor on since the target section may never have been
+ * loaded. Inclusive of the path's own exact prefix match (seekCondition
+ * seeks strictly past a given row; this seeks AT-OR-after a path).
+ * @param {Array<{expr:string, direction:string}>} dims
+ * @param {Array<{dimension:string, value:string}>} path a prefix of dims
+ * @returns {{sql:string, params:any[]}}
+ */
+function startPathCondition(dims, path) {
+  const clauses = [];
+  const params = [];
+  path.forEach(({ value }, i) => {
+    const parts = [];
+    for (let j = 0; j < i; j++) {
+      parts.push(`${dims[j].expr} = ?`);
+      params.push(path[j].value);
+    }
+    const op = cmpOp(dims[i].direction, true);
+    const inclusiveOp = op === ">" ? ">=" : "<=";
+    parts.push(`${dims[i].expr} ${inclusiveOp} ?`);
+    params.push(value);
+    clauses.push(`(${parts.join(" AND ")})`);
+  });
+  return { sql: clauses.join(" OR "), params };
+}
+
+/**
  * @param {{id:number, name:string, size:number, mtimeMs:number, rating:number, preferredCover:number, width:number|null, height:number|null, taken_at:number|null}} r
  * @param {Array<{name:string}>} dims
  */
@@ -146,13 +153,169 @@ function rowToItem(r, dims) {
   };
 }
 
+/** @param {Array<{dimension:string,value:string}>} path @returns {string} */
+function placeholderId(path) {
+  return "collapsed:" + path.map((p) => `${p.dimension}=${p.value}`).join(">");
+}
+
+/** @param {Array<{dimension:string,value:string}>} path @returns {Record<string,string>} */
+function pathGroupValues(path) {
+  const groupValues = {};
+  for (const { dimension, value } of path) groupValues[dimension] = value;
+  return groupValues;
+}
+
+/** Per-dimension comparison of two key tuples of the SAME length, honoring
+ * each dimension's own sort direction. @returns {-1|0|1} */
+function compareKeyTuples(a, b, dims) {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === b[i]) continue;
+    const lt = dims[i].direction === "ASC" ? a[i] < b[i] : a[i] > b[i];
+    return lt ? -1 : 1;
+  }
+  return 0;
+}
+
+/** True if `key` (a collapsed path's own tuple, possibly shorter than
+ * `dims`) sorts strictly on the `wantAfter` side of `focusValues` in
+ * composite order. A full tie can't occur in practice: focusId always
+ * names a real, non-collapsed row, so no collapsed path's full prefix can
+ * equal it. */
+function keyPassesSeek(key, focusValues, dims, wantAfter) {
+  for (let i = 0; i < key.length; i++) {
+    if (key[i] === focusValues[i]) continue;
+    const gt =
+      dims[i].direction === "ASC"
+        ? key[i] > focusValues[i]
+        : key[i] < focusValues[i];
+    return wantAfter ? gt : !gt;
+  }
+  return false;
+}
+
+function countCollapsedPath(db, path, dims) {
+  const { sql, params } = collapsedPathCondition(path, dims);
+  const positiveSql = sql.replace(/^NOT /, "");
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM photos JOIN folders ON folders.id = photos.folder_id
+       WHERE photos.stale = 0 AND ${positiveSql}`
+    )
+    .get(...params);
+  return row.count;
+}
+
+/**
+ * Which collapsed paths belong in this direction's page, as fully-built
+ * placeholder objects (with their count already queried): on the correct
+ * side of the focus (or, with no focus, only the "after" direction — there
+ * is nothing "before" the true start of the whole feed), and not further
+ * out than what was actually fetched — UNLESS fetching returned fewer than
+ * `limit` real rows, meaning this direction hit the true edge of the whole
+ * dataset, so nothing bounds it from that side.
+ */
+function selectPlaceholders(
+  db,
+  collapsed,
+  dims,
+  focusValues,
+  wantAfter,
+  realRows,
+  limit
+) {
+  if (!collapsed.length) return [];
+  // A limit of 0 means this direction wasn't requested at all (e.g. the
+  // default before:0 on a forward-only page) — realRows is then empty not
+  // because we hit the true edge of the dataset, but because we never
+  // looked, so there's no boundary to bound a placeholder against. Without
+  // this guard a collapsed path merely on the correct side of the focus
+  // would leak in from a direction the caller asked for zero rows of.
+  if (!limit) return [];
+  const hitEdge = realRows.length < limit;
+  const boundaryRow = realRows.length
+    ? realRows[wantAfter ? realRows.length - 1 : 0]
+    : null;
+  const boundaryKey = boundaryRow
+    ? dims.map((d) => boundaryRow.groupValues[d.name])
+    : null;
+
+  return collapsed
+    .filter((path) => {
+      const key = path.map((p) => p.value); // length = path.length, NOT dims.length
+      if (focusValues) {
+        if (!keyPassesSeek(key, focusValues, dims, wantAfter)) return false;
+      } else if (!wantAfter) {
+        return false;
+      }
+      if (!hitEdge && boundaryKey) {
+        const cmp = compareKeyTuples(
+          key,
+          boundaryKey.slice(0, key.length),
+          dims
+        );
+        const withinBound = wantAfter ? cmp <= 0 : cmp >= 0;
+        if (!withinBound) return false;
+      }
+      return true;
+    })
+    .map((path) => ({
+      collapsed: true,
+      id: placeholderId(path),
+      path,
+      groupValues: pathGroupValues(path),
+      count: countCollapsedPath(db, path, dims),
+    }));
+}
+
+/** How many leading dimensions an item's groupValues actually has real
+ * values for — the full dims.length for a real row, or just its own
+ * collapsed path's length for a placeholder. Needed so two placeholders of
+ * DIFFERENT depths landing in the same page never get compared past
+ * whichever one's shallower (comparing past that point would read
+ * `undefined` off the shorter one's groupValues). */
+function itemDepth(item, dims) {
+  return item.collapsed ? item.path.length : dims.length;
+}
+
+/** Inserts each placeholder into `realRows` (already in ascending composite
+ * order) at the position of the first row — real or a previously-inserted
+ * placeholder — that sorts after it. */
+function spliceInPlaceholders(realRows, placeholders, dims) {
+  if (!placeholders.length) return realRows;
+  const result = [...realRows];
+  for (const ph of placeholders) {
+    const key = ph.path.map((p) => p.value);
+    let insertAt = result.length;
+    for (let i = 0; i < result.length; i++) {
+      const depth = Math.min(key.length, itemDepth(result[i], dims));
+      const itemKey = dims
+        .slice(0, depth)
+        .map((d) => result[i].groupValues[d.name]);
+      if (compareKeyTuples(key.slice(0, depth), itemKey, dims) < 0) {
+        insertAt = i;
+        break;
+      }
+    }
+    result.splice(insertAt, 0, ph);
+  }
+  return result;
+}
+
 /**
  * @param {import("better-sqlite3").Database} db
- * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string, value:string}>>, focusId?: number|null, before?: number, after?: number}} opts
+ * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId?: number|null, startPath?: Array<{dimension:string,value:string}>|null, before?: number, after?: number}} opts
  */
 export function getFeedPage(
   db,
-  { groupBy, collapsed = [], focusId = null, before = 0, after = 50 }
+  {
+    groupBy,
+    collapsed = [],
+    focusId = null,
+    startPath = null,
+    before = 0,
+    after = 50,
+  }
 ) {
   const dims = resolveDimensions(groupBy);
   const seekDims = [
@@ -181,12 +344,16 @@ export function getFeedPage(
     focusItem = rowToItem(focusRow, dims);
   }
 
-  function fetchDirection(wantAfter, limit) {
+  function fetchRealRows(wantAfter, limit) {
     if (!limit) return [];
     let seekSql = "1=1";
     let seekParams = [];
     if (focusValues) {
       const seek = seekCondition(seekDims, focusValues, wantAfter);
+      seekSql = seek.sql;
+      seekParams = seek.params;
+    } else if (startPath && startPath.length && wantAfter) {
+      const seek = startPathCondition(dims, startPath);
       seekSql = seek.sql;
       seekParams = seek.params;
     }
@@ -223,8 +390,31 @@ export function getFeedPage(
     return wantAfter ? items : items.reverse();
   }
 
-  const beforeItems = fetchDirection(false, before);
-  const afterItems = fetchDirection(true, after);
-  const sections = getCollapsedSummaries(db, { groupBy, collapsed });
-  return { items: [...beforeItems, ...afterItems], sections, focusItem };
+  const beforeReal = fetchRealRows(false, before);
+  const afterReal = fetchRealRows(true, after);
+
+  const beforePlaceholders = selectPlaceholders(
+    db,
+    collapsed,
+    dims,
+    focusValues,
+    false,
+    beforeReal,
+    before
+  );
+  const afterPlaceholders = selectPlaceholders(
+    db,
+    collapsed,
+    dims,
+    focusValues,
+    true,
+    afterReal,
+    after
+  );
+
+  const items = [
+    ...spliceInPlaceholders(beforeReal, beforePlaceholders, dims),
+    ...spliceInPlaceholders(afterReal, afterPlaceholders, dims),
+  ];
+  return { items, focusItem };
 }

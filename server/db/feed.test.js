@@ -115,12 +115,18 @@ describe("getFeedPage — collapse-exclusion", () => {
       collapsed: [[{ dimension: "folder", value: "/photos/a-folder" }]],
       after: 10,
     });
-    expect(items.map((i) => i.name)).toEqual(["b1.jpg"]);
+    // The real-row query still excludes a-folder's own photos (unchanged,
+    // cheap) — a1.jpg never comes back as a real row. Its section now
+    // surfaces as an in-place placeholder instead (see the "in-place
+    // collapsed placeholder" describe block below for that behavior).
+    expect(items.filter((i) => !i.collapsed).map((i) => i.name)).toEqual([
+      "b1.jpg",
+    ]);
   });
 });
 
-describe("getFeedPage — collapsed section summaries", () => {
-  it("returns a count for each collapsed path", () => {
+describe("getFeedPage — in-place collapsed placeholder", () => {
+  it("splices a placeholder in place of a fully-collapsed leading section", () => {
     const db = getDb();
     seedVolume(db, 1);
     upsertScan(db, "/photos/a-folder", 1, [
@@ -130,27 +136,223 @@ describe("getFeedPage — collapsed section summaries", () => {
     upsertScan(db, "/photos/b-folder", 1, [
       { name: "b1.jpg", size: 1, mtimeMs: 1, kind: "image" },
     ]);
-    const { sections } = getFeedPage(db, {
+    const { items } = getFeedPage(db, {
       groupBy: ["folder"],
       collapsed: [[{ dimension: "folder", value: "/photos/a-folder" }]],
       after: 10,
     });
-    expect(sections).toEqual([
-      {
-        path: [{ dimension: "folder", value: "/photos/a-folder" }],
-        count: 2,
-      },
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      collapsed: true,
+      id: "collapsed:folder=/photos/a-folder",
+      path: [{ dimension: "folder", value: "/photos/a-folder" }],
+      count: 2,
+      groupValues: { folder: "/photos/a-folder" },
+    });
+    expect(items[1].name).toBe("b1.jpg");
+  });
+
+  it("splices a placeholder BETWEEN two real sections, in the right order", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/a-folder", 1, [
+      { name: "a1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/b-folder", 1, [
+      { name: "b1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/c-folder", 1, [
+      { name: "c1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      collapsed: [[{ dimension: "folder", value: "/photos/b-folder" }]],
+      after: 10,
+    });
+    expect(items.map((i) => i.name ?? i.id)).toEqual([
+      "a1.jpg",
+      "collapsed:folder=/photos/b-folder",
+      "c1.jpg",
     ]);
   });
 
-  it("returns an empty sections array when nothing is collapsed", () => {
+  it("splices multiple placeholders within one page, each in the right position", () => {
     const db = getDb();
     seedVolume(db, 1);
-    upsertScan(db, "/photos/trip", 1, [
+    upsertScan(db, "/photos/a-folder", 1, [
+      { name: "a1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/b-folder", 1, [
+      { name: "b1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/c-folder", 1, [
+      { name: "c1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      collapsed: [
+        [{ dimension: "folder", value: "/photos/a-folder" }],
+        [{ dimension: "folder", value: "/photos/c-folder" }],
+      ],
+      after: 10,
+    });
+    expect(items.map((i) => i.name ?? i.id)).toEqual([
+      "collapsed:folder=/photos/a-folder",
+      "b1.jpg",
+      "collapsed:folder=/photos/c-folder",
+    ]);
+  });
+
+  it("does not splice a placeholder for a collapsed path outside the requested window", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const rows = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(
+      db,
+      rows.find((r) => r.name === "a.jpg").id,
+      "2022-01-01T00:00:00.000Z"
+    );
+    setTakenAt(
+      db,
+      rows.find((r) => r.name === "b.jpg").id,
+      "2021-01-01T00:00:00.000Z"
+    );
+    setTakenAt(
+      db,
+      rows.find((r) => r.name === "c.jpg").id,
+      "2020-01-01T00:00:00.000Z"
+    );
+    // Fetch only 2020 (year DESC, so "after" from the c.jpg focus is empty
+    // in this fixture — instead fetch just after b.jpg, limit 1, so only
+    // c.jpg's year is in range and 2022's collapse (unrelated, "before"
+    // everything fetched) must not appear).
+    const focus = rows.find((r) => r.name === "b.jpg");
+    const { items } = getFeedPage(db, {
+      groupBy: ["year"],
+      collapsed: [[{ dimension: "year", value: "2022" }]],
+      focusId: focus.id,
+      after: 1,
+    });
+    expect(items.map((i) => i.name ?? i.id)).toEqual(["c.jpg"]);
+  });
+
+  it("splices a placeholder at the true start of the feed with no focusId", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/a-folder", 1, [
+      { name: "a1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/b-folder", 1, [
+      { name: "b1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      collapsed: [[{ dimension: "folder", value: "/photos/a-folder" }]],
+      after: 10,
+    });
+    expect(items[0].collapsed).toBe(true);
+  });
+
+  it("splices a placeholder at the true end of the feed (fewer real rows than the limit)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/a-folder", 1, [
+      { name: "a1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/b-folder", 1, [
+      { name: "b1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      collapsed: [[{ dimension: "folder", value: "/photos/b-folder" }]],
+      after: 10, // limit far exceeds the 1 real row left after a1.jpg
+    });
+    expect(items.map((i) => i.name ?? i.id)).toEqual([
+      "a1.jpg",
+      "collapsed:folder=/photos/b-folder",
+    ]);
+  });
+
+  it("orders two placeholders of DIFFERENT collapse depths correctly in one page", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/a-folder", 1, [
+      { name: "a1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const rowsB = upsertScan(db, "/photos/b-folder", 1, [
+      { name: "b2020.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b2019.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(
+      db,
+      rowsB.find((r) => r.name === "b2020.jpg").id,
+      "2020-01-01T00:00:00.000Z"
+    );
+    setTakenAt(
+      db,
+      rowsB.find((r) => r.name === "b2019.jpg").id,
+      "2019-01-01T00:00:00.000Z"
+    );
+    // a-folder is collapsed entirely (depth 1); only b-folder's 2020 is
+    // collapsed (depth 2) — the two placeholders share no common prefix
+    // value, so this exercises comparing across different depths without
+    // reading past either one's own known dimensions.
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder", "year"],
+      collapsed: [
+        [{ dimension: "folder", value: "/photos/a-folder" }],
+        [
+          { dimension: "folder", value: "/photos/b-folder" },
+          { dimension: "year", value: "2020" },
+        ],
+      ],
+      after: 10,
+    });
+    expect(items.map((i) => i.name ?? i.id)).toEqual([
+      "collapsed:folder=/photos/a-folder",
+      "collapsed:folder=/photos/b-folder>year=2020",
+      "b2019.jpg",
+    ]);
+  });
+});
+
+describe("getFeedPage — startPath (jump to an arbitrary hierarchy path)", () => {
+  it("seeks to the first row at or after the given path, without a focusId", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/a-folder", 1, [
+      { name: "a1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/b-folder", 1, [
+      { name: "b1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/c-folder", 1, [
+      { name: "c1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      startPath: [{ dimension: "folder", value: "/photos/b-folder" }],
+      after: 10,
+    });
+    expect(items.map((i) => i.name)).toEqual(["b1.jpg", "c1.jpg"]);
+  });
+
+  it("is inclusive of the exact path prefix (not strictly-after)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/only", 1, [
       { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
     ]);
-    const { sections } = getFeedPage(db, { groupBy: ["folder"], after: 10 });
-    expect(sections).toEqual([]);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      startPath: [{ dimension: "folder", value: "/photos/only" }],
+      after: 10,
+    });
+    expect(items.map((i) => i.name)).toEqual(["a.jpg"]);
   });
 });
 

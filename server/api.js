@@ -272,19 +272,28 @@ export function registerApi(app) {
       focusIdParam !== undefined && focusIdParam !== ""
         ? Number(focusIdParam)
         : null;
+    let startPath = null;
+    if (req.query.startPath) {
+      try {
+        startPath = JSON.parse(String(req.query.startPath));
+      } catch {
+        return res.status(400).json({ error: "startPath must be JSON" });
+      }
+    }
     const before = Math.max(0, Number(req.query.before) || 0);
     const after = Math.max(0, Number(req.query.after) || 50);
 
     const db = getDb();
     try {
-      const { items, sections, focusItem } = getFeedPage(db, {
+      const { items, focusItem } = getFeedPage(db, {
         groupBy,
         collapsed,
         focusId,
+        startPath,
         before,
         after,
       });
-      res.json({ items, sections, focusItem });
+      res.json({ items, focusItem });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }

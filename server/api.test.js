@@ -368,7 +368,6 @@ describe("GET /api/feed", () => {
     const body = await res.json();
     expect(body.items.length).toBeGreaterThan(0);
     expect(body.items[0]).toHaveProperty("groupValues.folder");
-    expect(body.sections).toEqual([]);
   });
 
   it("supports focusId + before/after keyset pagination", async () => {
@@ -384,7 +383,7 @@ describe("GET /api/feed", () => {
     expect(body.items.every((i) => i.id !== midId)).toBe(true);
   });
 
-  it("excludes a collapsed folder and returns its summary count", async () => {
+  it("folds a collapsed folder into one in-place placeholder item", async () => {
     await scan(srv.base, photosDir);
     const collapsed = encodeURIComponent(
       JSON.stringify([[{ dimension: "folder", value: photosDir }]])
@@ -393,9 +392,9 @@ describe("GET /api/feed", () => {
       `${srv.base}/api/feed?groupBy=folder&collapsed=${collapsed}&after=50`
     );
     const body = await res.json();
-    expect(body.items).toEqual([]);
-    expect(body.sections).toHaveLength(1);
-    expect(body.sections[0].count).toBeGreaterThan(0);
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].collapsed).toBe(true);
+    expect(body.items[0].count).toBeGreaterThan(0);
   });
 
   it("400s on an unknown groupBy dimension", async () => {
@@ -406,6 +405,19 @@ describe("GET /api/feed", () => {
   it("400s when groupBy is missing", async () => {
     const res = await fetch(`${srv.base}/api/feed`);
     expect(res.status).toBe(400);
+  });
+
+  it("supports startPath to jump to an arbitrary hierarchy path", async () => {
+    await scan(srv.base, photosDir);
+    const startPath = encodeURIComponent(
+      JSON.stringify([{ dimension: "folder", value: photosDir }])
+    );
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&startPath=${startPath}&after=50`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items.length).toBeGreaterThan(0);
   });
 });
 
@@ -453,7 +465,9 @@ describe("GET /api/tree", () => {
   });
 
   it("400s on malformed path JSON", async () => {
-    const res = await fetch(`${srv.base}/api/tree?groupBy=folder&path=not-json`);
+    const res = await fetch(
+      `${srv.base}/api/tree?groupBy=folder&path=not-json`
+    );
     expect(res.status).toBe(400);
   });
 
