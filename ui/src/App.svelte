@@ -11,6 +11,8 @@
   import {
     mergeFeedPage,
     deriveSectionHeaders,
+    suppressPlaceholderHeaders,
+    nearestRealItemId,
     formatGroupValue,
   } from "./lib/feed.js";
   import {
@@ -23,6 +25,7 @@
   } from "./lib/api.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
+  import TreeSidebar from "./lib/TreeSidebar.svelte";
   import MultiAutoSelect from "multi-auto-select";
 
   const LS_KEY = "autogallery.lastDir";
@@ -97,13 +100,7 @@
   })();
   $: localStorage.setItem(LS_GROUP_BY, JSON.stringify(groupBy));
   let collapsedPaths = []; // Array<Array<{dimension,value}>>, reset on hierarchy change
-  // Summaries (path + count) for every currently-collapsed path, as returned
-  // alongside items/focusItem by the most recent successful feed fetch —
-  // getCollapsedSummaries computes these from the full `collapsed` array
-  // passed to getFeedPage, not just newly-collapsed paths, so any fetch's
-  // response reflects the complete current list regardless of which page
-  // triggered it. Rendered as re-expand chips in the topbar.
-  let collapsedSummaries = [];
+  let treeSidebarRef; // bound to TreeSidebar, for revealCurrentLocation to call revealPath
   let items = []; // the currently-loaded feed window, ordered
   let hasMoreBefore = false;
   let hasMoreAfter = true;
@@ -121,6 +118,7 @@
   let selected = 0; // index into displayEntries
   let loupeOpen = false;
   let gridEl;
+  let mainColumnEl;
   let gridWidth = 0;
 
   // Virtualization: only Thumbs in [renderStart, renderEnd] (plus the
@@ -176,7 +174,7 @@
     thumbStatusTick++;
     const epoch = ++feedEpoch;
     try {
-      const { items: page, sections } = await fetchFeed({
+      const { items: page } = await fetchFeed({
         groupBy,
         collapsed: collapsedPaths,
         after: PAGE_SIZE,
@@ -191,7 +189,6 @@
       items = merged.items;
       hasMoreBefore = merged.hasMoreBefore;
       hasMoreAfter = merged.hasMoreAfter;
-      collapsedSummaries = sections;
       // Matches the original doScan's reset — a fresh/reset feed load
       // always re-focuses the first item and closes any open loupe,
       // rather than leaving `selected` pointing at whatever index the
@@ -222,7 +219,7 @@
       const { items: beforePage } = focusId
         ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0 })
         : { items: [] };
-      const { items: afterPage, focusItem, sections } = await fetchFeed({
+      const { items: afterPage, focusItem } = await fetchFeed({
         groupBy,
         focusId,
         before: 0,
@@ -235,7 +232,6 @@
       items = combined;
       hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
       hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
-      collapsedSummaries = sections;
       // `selected` indexes displayEntries (the burst-stack-collapsed view),
       // not raw items — beforePage.length would drift as soon as any burst
       // among the "before" items collapses into a single display entry.
@@ -253,6 +249,57 @@
       error = e.message;
       status = "";
     }
+  }
+
+  /** Jump the feed to an arbitrary hierarchy path from the tree — unlike
+   * onGroupByChange's re-centering, there's no specific photo id to seek
+   * from (the target section may never have been loaded), so this uses
+   * getFeedPage's startPath seek instead of a focusId. */
+  async function jumpToPath(path) {
+    error = "";
+    status = "loading…";
+    const epoch = ++feedEpoch;
+    try {
+      const { items: page } = await fetchFeed({
+        groupBy,
+        collapsed: collapsedPaths,
+        startPath: path,
+        after: PAGE_SIZE,
+      });
+      if (epoch !== feedEpoch) return;
+      const merged = mergeFeedPage(
+        { items: [], hasMoreBefore: false, hasMoreAfter: true },
+        { items: page },
+        "after",
+        PAGE_SIZE
+      );
+      items = merged.items;
+      hasMoreBefore = merged.hasMoreBefore;
+      hasMoreAfter = merged.hasMoreAfter;
+      selected = 0;
+      loupeOpen = false;
+      focusPending = true;
+      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+      enrichMeta(page.map((i) => i.id));
+    } catch (e) {
+      error = e.message;
+      status = "";
+    }
+  }
+
+  /** "Reveal current location": walks the tree down to whatever photo is
+   * currently selected, expanding/fetching each level as needed. Manual,
+   * not continuous — doesn't fight the tree's own navigation while the
+   * user is mid-scroll or has it open to a different part of the library. */
+  async function revealCurrentLocation() {
+    const entry = displayEntries[selected];
+    if (!entry || entry.kind === "placeholder") return;
+    const photo = resolvePhoto(entry);
+    if (!photo?.groupValues) return;
+    const path = groupBy
+      .filter((d) => photo.groupValues[d] !== undefined)
+      .map((d) => ({ dimension: d, value: photo.groupValues[d] }));
+    treeSidebarRef?.revealPath(path);
   }
 
   function pathKey(path) {
@@ -273,15 +320,14 @@
   }
 
   /** Scroll so this section's header lands at its stuck (sticky) position
-   * at the top of the viewport — accounting for the sticky topbar plus
-   * any shallower headers stacked above it, matching the CSS `top` offset
-   * used for depth stacking. */
+   * at the top of the scroll container — accounting for any shallower
+   * headers stacked above it, matching the CSS `top` offset used for
+   * depth stacking. */
   function scrollToSection(pos) {
-    if (!gridEl) return;
-    const gridTop = gridEl.getBoundingClientRect().top + window.scrollY;
-    const target =
-      gridTop + pos.y - topbarHeight - pos.depth * HEADER_HEIGHT + PAD;
-    window.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+    if (!gridEl || !mainColumnEl) return;
+    const gridTop = gridEl.getBoundingClientRect().top + mainColumnEl.scrollTop;
+    const target = gridTop + pos.y - pos.depth * HEADER_HEIGHT + PAD;
+    mainColumnEl.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
   }
 
   async function loadMore(direction) {
@@ -294,14 +340,23 @@
     }
     const epoch = feedEpoch;
     const focusId =
-      direction === "after" ? items[items.length - 1].id : items[0].id;
+      direction === "after"
+        ? nearestRealItemId(items, "end")
+        : nearestRealItemId(items, "start");
+    if (focusId == null) {
+      // Every currently-loaded item is a placeholder (e.g. everything
+      // visible right now is collapsed) — nothing real to seek from yet.
+      if (direction === "after") fetchingAfter = false;
+      else fetchingBefore = false;
+      return;
+    }
     // Preserve scroll position when prepending: content inserted above
     // the fold shifts everything below it down by the same amount, so
     // without this the browser's fixed scrollTop would visually jump
     // (the user would suddenly be looking at different content).
     const gridHeightBefore = gridEl ? gridEl.getBoundingClientRect().height : 0;
     try {
-      const { items: page, sections } = await fetchFeed({
+      const { items: page } = await fetchFeed({
         groupBy,
         collapsed: collapsedPaths,
         focusId,
@@ -318,14 +373,13 @@
       items = merged.items;
       hasMoreBefore = merged.hasMoreBefore;
       hasMoreAfter = merged.hasMoreAfter;
-      collapsedSummaries = sections;
       enrichMeta(page.map((i) => i.id));
       if (direction === "before" && page.length) {
         await tick();
         const gridHeightAfter = gridEl
           ? gridEl.getBoundingClientRect().height
           : 0;
-        window.scrollBy(0, gridHeightAfter - gridHeightBefore);
+        mainColumnEl.scrollBy(0, gridHeightAfter - gridHeightBefore);
       }
     } catch (e) {
       error = e.message;
@@ -410,12 +464,7 @@
   // ignore CSS padding, so the frame inset is applied to the box coordinates.
   const PAD = 12;
   const HEADER_HEIGHT = 32;
-  // Section headers stick below the topbar, not at the viewport's true
-  // top — the topbar is itself sticky at top:0 with a higher z-index, so
-  // a header stuck at top:0 would render directly underneath it, fully
-  // hidden. Measured (not hardcoded) since the topbar's height varies
-  // with window width (its controls wrap to a second row at some widths).
-  let topbarHeight = 0;
+  const PLACEHOLDER_HEIGHT = 40; // a bit taller than a header — needs room for an icon, label, and count on one line
 
   /**
    * Symmetric horizontal margin (px, at the target row height) reserved for
@@ -445,11 +494,17 @@
   // any collapsed stack. `resolvedPhotos` is already displayEntries' 1:1
   // photo-per-entry projection (see the Loupe usage above), so it's the
   // correct input here.
-  $: sectionHeaders = deriveSectionHeaders(resolvedPhotos, groupBy);
+  $: sectionHeaders = suppressPlaceholderHeaders(
+    deriveSectionHeaders(resolvedPhotos, groupBy),
+    displayEntries
+  );
   $: layoutResult =
     displayEntries.length && gridWidth > 2 * PAD
       ? sectionedJustifiedLayout(
           displayEntries.map((e) => {
+            if (e.kind === "placeholder") {
+              return { id: entryDomId(e), placeholder: true };
+            }
             const photo = resolvePhoto(e);
             const baseRatio =
               photo.width && photo.height
@@ -472,6 +527,7 @@
             gap: 8,
             targetRowHeight: rowHeight,
             headerHeight: HEADER_HEIGHT,
+            placeholderHeight: PLACEHOLDER_HEIGHT,
           }
         )
       : null;
@@ -620,7 +676,7 @@
     const rect = gridEl.getBoundingClientRect();
     const range = visibleRange(boxes, {
       scrollTop: -rect.top,
-      viewportHeight: window.innerHeight,
+      viewportHeight: mainColumnEl.clientHeight,
     });
     renderStart = range.start;
     renderEnd = range.end;
@@ -794,32 +850,19 @@
   }
 </script>
 
-<svelte:window
-  on:keydown={onKeydown}
-  on:scroll={scheduleVisibleRangeUpdate}
-  on:resize={scheduleVisibleRangeUpdate}
-/>
+<svelte:window on:keydown={onKeydown} on:resize={scheduleVisibleRangeUpdate} />
 
 <div class="app">
-  <header class="topbar" bind:clientHeight={topbarHeight}>
+  <header class="topbar">
     <h1>AutoGallery</h1>
     <div class="group-by" use:groupBySelector={groupBy}></div>
-    {#if collapsedSummaries.length}
-      <div class="collapsed-sections">
-        {#each collapsedSummaries as entry (pathKey(entry.path))}
-          <button
-            class="collapsed-chip"
-            on:click={() => toggleSectionCollapse(entry.path)}
-            title="Re-expand this section"
-          >
-            {formatGroupValue(
-              entry.path[entry.path.length - 1].dimension,
-              entry.path[entry.path.length - 1].value
-            )} ({entry.count.toLocaleString()})
-          </button>
-        {/each}
-      </div>
-    {/if}
+    <button
+      class="reveal-btn"
+      on:click={revealCurrentLocation}
+      title="Reveal the current photo's location in the tree"
+    >
+      Locate
+    </button>
     <input
       class="dir"
       type="text"
@@ -893,79 +936,115 @@
     {/if}
   </header>
 
-  {#if items.length}
+  <div class="app-body">
+    <TreeSidebar
+      bind:this={treeSidebarRef}
+      {groupBy}
+      {collapsedPaths}
+      on:toggle={(e) => toggleSectionCollapse(e.detail)}
+      on:jump={(e) => jumpToPath(e.detail)}
+    />
     <div
-      class="grid"
-      bind:this={gridEl}
-      bind:clientWidth={gridWidth}
-      style={boxes ? `height:${gridHeight}px;` : ""}
-      role="listbox"
-      tabindex="-1"
+      class="main-column"
+      bind:this={mainColumnEl}
+      on:scroll={scheduleVisibleRangeUpdate}
     >
-      {#if boxes}
-        <!-- Headers render unconditionally for the whole loaded window, unlike
-             photos — there are only dozens/hundreds of them (vs. tens of
-             thousands of photos), so they don't need windowing, and a header
-             whose triggering index falls outside the virtualized photo range
-             must still survive (it may be sticky-stuck mid-section while the
-             viewer has scrolled well past its origin index). -->
-        {#each layoutResult.headers as header (header.dimension + header.value + header.index)}
-          <div
-            class="section-wrapper"
-            style="top:{header.y}px; height:{header.endY - header.y}px;"
-          >
-            <div
-              class="section-header"
-              style="top:{topbarHeight +
-                header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
-            >
-              <button
-                class="section-toggle-icon"
-                title="Collapse/expand this section"
-                on:click={() =>
-                  toggleSectionCollapse(
-                    groupBy.slice(0, header.depth + 1).map((d) => ({
-                      dimension: d,
-                      value: resolvedPhotos[header.index]?.groupValues[d],
-                    }))
-                  )}
+      {#if items.length}
+        <div
+          class="grid"
+          bind:this={gridEl}
+          bind:clientWidth={gridWidth}
+          style={boxes ? `height:${gridHeight}px;` : ""}
+          role="listbox"
+          tabindex="-1"
+        >
+          {#if boxes}
+            <!-- Headers render unconditionally for the whole loaded window, unlike
+                 photos — there are only dozens/hundreds of them (vs. tens of
+                 thousands of photos), so they don't need windowing, and a header
+                 whose triggering index falls outside the virtualized photo range
+                 must still survive (it may be sticky-stuck mid-section while the
+                 viewer has scrolled well past its origin index). -->
+            {#each layoutResult.headers as header (header.dimension + header.value + header.index)}
+              <div
+                class="section-wrapper"
+                style="top:{header.y}px; height:{header.endY - header.y}px;"
               >
-                ▾
-              </button>
-              <button
-                class="section-label"
-                on:click={() => scrollToSection(header)}
-              >
-                {header.label}
-              </button>
-            </div>
-          </div>
-        {/each}
-        {#each visibleItems as { i, entry } (entryDomId(entry))}
-          <Thumb
-            item={resolvePhoto(entry)}
-            box={boxes[i]}
-            pad={PAD}
-            size={thumbSize}
-            selected={i === selected}
-            stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
-            stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
-            stackMarginPx={stackMarginPx(entry)}
-            inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
-            isCurrentCover={entry.kind === "photo" &&
-              entry.stackId !== null &&
-              stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
-            on:click={() =>
-              entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
-            on:attempt={handleThumbAttempt}
-            on:settled={handleThumbSettled}
-          />
-        {/each}
+                <div
+                  class="section-header"
+                  style="top:{header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
+                >
+                  <button
+                    class="section-toggle-icon"
+                    title="Collapse/expand this section"
+                    on:click={() =>
+                      toggleSectionCollapse(
+                        groupBy.slice(0, header.depth + 1).map((d) => ({
+                          dimension: d,
+                          value: resolvedPhotos[header.index]?.groupValues[d],
+                        }))
+                      )}
+                  >
+                    ▾
+                  </button>
+                  <button
+                    class="section-label"
+                    on:click={() => scrollToSection(header)}
+                  >
+                    {header.label}
+                  </button>
+                </div>
+              </div>
+            {/each}
+            {#each visibleItems as { i, entry } (entryDomId(entry))}
+              {#if entry.kind === "placeholder"}
+                <div
+                  class="placeholder-row"
+                  style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
+                  role="button"
+                  tabindex="0"
+                  on:click={() => toggleSectionCollapse(entry.item.path)}
+                  on:keydown={(e) =>
+                    e.key === "Enter" && toggleSectionCollapse(entry.item.path)}
+                >
+                  <span class="placeholder-icon">▸</span>
+                  <span class="placeholder-label">
+                    {entry.item.path
+                      .map((p) => formatGroupValue(p.dimension, p.value))
+                      .join(" / ")}
+                  </span>
+                  <span class="placeholder-count">
+                    {entry.item.count.toLocaleString()} items
+                  </span>
+                </div>
+              {:else}
+                <Thumb
+                  item={resolvePhoto(entry)}
+                  box={boxes[i]}
+                  pad={PAD}
+                  size={thumbSize}
+                  selected={i === selected}
+                  stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
+                  stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
+                  stackMarginPx={stackMarginPx(entry)}
+                  inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
+                  isCurrentCover={entry.kind === "photo" &&
+                    entry.stackId !== null &&
+                    stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
+                  on:click={() =>
+                    entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
+                  on:attempt={handleThumbAttempt}
+                  on:settled={handleThumbSettled}
+                />
+              {/if}
+            {/each}
+          {/if}
+        </div>
+      {:else if !scanning && status !== "loading…"}
+        <div class="empty">Nothing indexed yet — scan a folder to get started.</div>
       {/if}
     </div>
-  {:else if !scanning && status !== "loading…"}
-    <div class="empty">Nothing indexed yet — scan a folder to get started.</div>
-  {/if}
+  </div>
 </div>
 
 {#if loupeOpen}
@@ -983,7 +1062,36 @@
       sans-serif;
   }
   .app {
-    min-height: 100vh;
+    /* Exact (not min-) height: .app-body's flex:1 and .main-column's
+       overflow-y:auto only create an internal scroll region if this
+       ancestor has a bounded height instead of growing to fit content —
+       otherwise the whole page would scroll again, defeating the point
+       of moving the scroll container off `window`. */
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .app-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+  .main-column {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+  }
+  .reveal-btn {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    color: inherit;
+    font: inherit;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .reveal-btn:hover {
+    background: #2a2a2a;
   }
   .topbar {
     position: sticky;
@@ -1052,27 +1160,6 @@
   .choose-folder:disabled {
     opacity: 0.6;
     cursor: default;
-  }
-  .collapsed-sections {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .collapsed-chip {
-    padding: 3px 10px;
-    background: #2a2a2a;
-    border: 1px solid #444;
-    border-radius: 999px;
-    color: #ccc;
-    font-size: 0.75rem;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .collapsed-chip:hover {
-    background: #333;
-    border-color: #4c9aff;
-    color: #fff;
   }
   .library {
     position: relative;
@@ -1231,6 +1318,31 @@
   }
   .section-label:hover {
     background: #2a2a2a;
+  }
+  .placeholder-row {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    box-sizing: border-box;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 4px;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+  .placeholder-row:hover {
+    background: #2a2a2a;
+  }
+  .placeholder-count {
+    margin-left: auto;
+    color: #888;
+    font-size: 0.85em;
   }
   .empty {
     padding: 4rem 1rem;
