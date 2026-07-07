@@ -83,3 +83,29 @@ export async function fetchLibrary() {
   if (!res.ok) throw new Error(`library failed (${res.status})`);
   return res.json();
 }
+
+/**
+ * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId?: number|null, before?: number, after?: number}} opts
+ * @returns {Promise<{items: object[], sections: Array<{path: Array<{dimension:string,value:string}>, count: number}>}>}
+ */
+export async function fetchFeed({
+  groupBy,
+  collapsed = [],
+  focusId = null,
+  before = 0,
+  after = 50,
+}) {
+  const params = new URLSearchParams({
+    groupBy: groupBy.join(","),
+    before: String(before),
+    after: String(after),
+  });
+  if (focusId != null) params.set("focusId", String(focusId));
+  if (collapsed.length) params.set("collapsed", JSON.stringify(collapsed));
+  const res = await fetch(`/api/feed?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `feed failed (${res.status})`);
+  }
+  return res.json();
+}
