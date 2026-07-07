@@ -104,7 +104,7 @@ export function findGroupBoundary(
     })
     .join(", ");
 
-  const row = db
+  const nearestRow = db
     .prepare(
       `SELECT photos.id, ${selectDimCols}
        FROM photos JOIN folders ON folders.id = photos.folder_id
@@ -113,9 +113,51 @@ export function findGroupBoundary(
        LIMIT 1`
     )
     .get(...exclParams, ...seekParams, ...notCurrentParams);
-  return row ? { id: row.id } : null;
+  if (!nearestRow) return null;
+
+  // For "next", nearestRow already IS the target group's first row —
+  // composite order walks forward, so the first row past the boundary is
+  // necessarily that group's own first row. For "prev", composite order
+  // walked backward, so nearestRow is the target group's LAST row in true
+  // forward order, not its first — re-seek within that exact group tuple,
+  // in true forward order, to find the row the docstring above promises.
+  if (wantAfter) return { id: nearestRow.id };
+
+  const targetGroupPath = groupBy.map((name, i) => ({
+    dimension: name,
+    value: nearestRow[`dim${i}`],
+  }));
+  const matchSql = targetGroupPath
+    .map((p) => `${dims.find((d) => d.name === p.dimension).expr} = ?`)
+    .join(" AND ");
+  const matchParams = targetGroupPath.map((p) => p.value);
+  const forwardOrderCols = seekDims
+    .map((d, i) => `${i < dims.length ? `dim${i}` : "photos.id"} ${d.direction}`)
+    .join(", ");
+
+  const firstRow = db
+    .prepare(
+      `SELECT photos.id, ${selectDimCols}
+       FROM photos JOIN folders ON folders.id = photos.folder_id
+       WHERE photos.stale = 0 AND (${exclSql}) AND (${matchSql})
+       ORDER BY ${forwardOrderCols}
+       LIMIT 1`
+    )
+    .get(...exclParams, ...matchParams);
+  return firstRow ? { id: firstRow.id } : null;
 }
 ```
+
+(For "prev", this is a two-step query: step 1 above only identifies *which*
+group is the target by walking backward across the boundary — the row it
+returns is that group's last row in forward order, not its first. Step 2
+re-seeks within that exact group tuple in true forward order to find the
+row this function actually promises to return. An earlier single-step
+version of this code returned step 1's row directly for both directions,
+which is correct for "next" but silently wrong for "prev" — a review
+caught this via a hand-traced example before it shipped; see
+`server/db/feed.js`'s `findGroupBoundary` and its test file for the fixed,
+tested version.)
 
 `resolveDimensions`, `seekCondition`, `exclusionClause`,
 `collapsedPathCondition` are all existing, already-tested functions in
@@ -171,7 +213,9 @@ work identically in both).
   `null` at the true start/end of the library; correctly skips
   already-collapsed sections (a `collapsed` path between the focus and the
   next real boundary must not be treated as a stopping point, matching
-  `getFeedPage`'s own exclusion behavior).
+  `getFeedPage`'s own exclusion behavior); "prev" returns the FIRST row of
+  a multi-row previous group, not an arbitrary/last one (the regression
+  test for the two-step query above).
 - `server/api.test.js`: `GET /api/feed/boundary` — 200 with a real id for
   a normal case, `{id: null}` at the library's edge, 400 for an invalid
   `direction`, 404 for an unknown `focusId`.
