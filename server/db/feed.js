@@ -71,6 +71,27 @@ function exclusionClause(collapsedPaths, dims) {
   return { sql: parts.join(" AND "), params };
 }
 
+/**
+ * @param {import("better-sqlite3").Database} db
+ * @param {{groupBy: string[], collapsed: Array<Array<{dimension:string, value:string}>>}} opts
+ * @returns {Array<{path: Array<{dimension:string, value:string}>, count: number}>}
+ */
+function getCollapsedSummaries(db, { groupBy, collapsed }) {
+  const dims = resolveDimensions(groupBy);
+  return collapsed.map((path) => {
+    const { sql, params } = collapsedPathCondition(path, dims);
+    const positiveSql = sql.replace(/^NOT /, "");
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM photos JOIN folders ON folders.id = photos.folder_id
+         WHERE photos.stale = 0 AND ${positiveSql}`
+      )
+      .get(...params);
+    return { path, count: row.count };
+  });
+}
+
 /** @param {string} direction @param {boolean} wantAfter @returns {">"|"<"} */
 function cmpOp(direction, wantAfter) {
   if (direction === "ASC") return wantAfter ? ">" : "<";
@@ -198,5 +219,6 @@ export function getFeedPage(
 
   const beforeItems = fetchDirection(false, before);
   const afterItems = fetchDirection(true, after);
-  return { items: [...beforeItems, ...afterItems] };
+  const sections = getCollapsedSummaries(db, { groupBy, collapsed });
+  return { items: [...beforeItems, ...afterItems], sections };
 }

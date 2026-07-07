@@ -119,6 +119,41 @@ describe("getFeedPage — collapse-exclusion", () => {
   });
 });
 
+describe("getFeedPage — collapsed section summaries", () => {
+  it("returns a count for each collapsed path", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/a-folder", 1, [
+      { name: "a1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "a2.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/b-folder", 1, [
+      { name: "b1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { sections } = getFeedPage(db, {
+      groupBy: ["folder"],
+      collapsed: [[{ dimension: "folder", value: "/photos/a-folder" }]],
+      after: 10,
+    });
+    expect(sections).toEqual([
+      {
+        path: [{ dimension: "folder", value: "/photos/a-folder" }],
+        count: 2,
+      },
+    ]);
+  });
+
+  it("returns an empty sections array when nothing is collapsed", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { sections } = getFeedPage(db, { groupBy: ["folder"], after: 10 });
+    expect(sections).toEqual([]);
+  });
+});
+
 describe("getFeedPage — keyset pagination", () => {
   it("fetches the first N rows when no focusId is given", () => {
     const db = getDb();
