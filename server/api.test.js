@@ -340,6 +340,7 @@ describe("GET /api/library", () => {
       )
       .run(missingMountPath, Date.now()).lastInsertRowid;
     const folderPath = join(photosDir, "no-uuid-volume-folder");
+    await mkdir(folderPath, { recursive: true });
     db.prepare(
       `INSERT INTO folders (abs_path, last_scanned_at, volume_id) VALUES (?, ?, ?)
        ON CONFLICT(abs_path) DO NOTHING`
