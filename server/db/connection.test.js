@@ -45,8 +45,17 @@ describe("getDb", () => {
   });
 
   it("is idempotent to re-apply the schema on an existing db file", () => {
-    getDb();
+    const db = getDb();
+    db.prepare("INSERT INTO volumes (label) VALUES (?)").run("test-volume");
+
     _resetDbForTest();
     expect(() => getDb()).not.toThrow();
+
+    const reopenedDb = getDb();
+    const row = reopenedDb
+      .prepare("SELECT label FROM volumes WHERE label = ?")
+      .get("test-volume");
+    expect(row).toBeDefined();
+    expect(row.label).toBe("test-volume");
   });
 });
