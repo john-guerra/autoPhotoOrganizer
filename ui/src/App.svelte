@@ -1,6 +1,5 @@
 <script>
   import { onMount, tick } from "svelte";
-  import { justifiedLayout, layoutHeight } from "./lib/layouts/justified.js";
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
   import { detectBursts } from "./lib/bursts.js";
