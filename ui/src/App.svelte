@@ -324,13 +324,61 @@
    * `groupBy`) is collapsed. Collapsing removes its photos from `items`
    * (they were fetched already) and refetches — a subsequent scroll won't
    * re-request them, since the server excludes the collapsed path. */
+  /** Toggle a section's collapsed state and re-center the feed on whatever
+   * photo is currently selected, so the user doesn't lose their scroll
+   * position — mirrors onGroupByChange's re-centering, but this fetch DOES
+   * pass a `collapsed` list (unlike onGroupByChange's), so the refetched
+   * window can contain placeholder entries; fall back through
+   * nextSelectable (like loadInitialFeed/jumpToPath do) in case the focus
+   * item itself just got folded into the newly-collapsed placeholder. */
   async function toggleSectionCollapse(path) {
     const key = pathKey(path);
     const already = collapsedPaths.some((p) => pathKey(p) === key);
     collapsedPaths = already
       ? collapsedPaths.filter((p) => pathKey(p) !== key)
       : [...collapsedPaths, path];
-    await loadInitialFeed();
+    const focusEntry = displayEntries[selected];
+    const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
+    error = "";
+    status = "loading…";
+    const epoch = ++feedEpoch;
+    try {
+      const { items: beforePage } = focusId
+        ? await fetchFeed({
+            groupBy,
+            collapsed: collapsedPaths,
+            focusId,
+            before: PAGE_SIZE / 2,
+            after: 0,
+          })
+        : { items: [] };
+      const { items: afterPage, focusItem } = await fetchFeed({
+        groupBy,
+        collapsed: collapsedPaths,
+        focusId,
+        before: 0,
+        after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
+      });
+      if (epoch !== feedEpoch) return;
+      const combined = focusId
+        ? [...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage]
+        : afterPage;
+      items = combined;
+      hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
+      hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
+      await tick();
+      const focusIndex = focusId
+        ? displayEntries.findIndex((e) => resolvePhoto(e).id === focusId)
+        : -1;
+      selected =
+        focusIndex !== -1 ? focusIndex : (nextSelectable(displayEntries, 0, 1) ?? 0);
+      focusPending = true;
+      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+      enrichMeta(items.map((i) => i.id));
+    } catch (e) {
+      error = e.message;
+      status = "";
+    }
   }
 
   /** Scroll so this section's header lands at its stuck (sticky) position
