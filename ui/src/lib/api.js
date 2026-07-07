@@ -89,6 +89,41 @@ export async function fetchLibrary() {
   return res.json();
 }
 
+/** @param {number} id */
+export async function deleteFolder(id) {
+  const res = await fetch(`/api/folders/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`delete folder failed (${res.status})`);
+  return res.json();
+}
+
+/** @returns {Promise<{totalBytes:number, totalFiles:number}>} */
+export async function fetchCacheStats() {
+  const res = await fetch("/api/cache/stats");
+  if (!res.ok) throw new Error(`cache stats failed (${res.status})`);
+  return res.json();
+}
+
+/** @returns {Promise<{folders: Array<{id:number, path:string, cachedBytes:number, cachedFiles:number}>}>} */
+export async function fetchCacheBreakdown() {
+  const res = await fetch("/api/cache/breakdown");
+  if (!res.ok) throw new Error(`cache breakdown failed (${res.status})`);
+  return res.json();
+}
+
+/** @returns {Promise<{freedBytes:number, freedFiles:number}>} */
+export async function clearCache() {
+  const res = await fetch("/api/cache/clear", { method: "POST" });
+  if (!res.ok) throw new Error(`cache clear failed (${res.status})`);
+  return res.json();
+}
+
+/** @returns {Promise<{freedBytes:number, freedFiles:number}>} */
+export async function pruneCache() {
+  const res = await fetch("/api/cache/prune", { method: "POST" });
+  if (!res.ok) throw new Error(`cache prune failed (${res.status})`);
+  return res.json();
+}
+
 /**
  * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId?: number|null, startPath?: Array<{dimension:string,value:string}>|null, before?: number, after?: number}} opts
  * @returns {Promise<{items: object[], focusItem: object|null}>}
