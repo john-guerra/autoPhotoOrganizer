@@ -469,9 +469,16 @@
   }
 
   function selectFromLibrary(entry) {
-    if (!entry.mounted) return;
-    dir = entry.path;
     libraryOpen = false;
+    if (!entry.mounted) {
+      // Offline folders can still be browsed read-only from the SQLite
+      // cache (the app's offline-mirror invariant) — reuse the same
+      // jumpToPath the tree sidebar already uses for any folder, rather
+      // than requiring a live rescan this folder's volume can't provide.
+      jumpToPath([{ dimension: "folder", value: entry.path }]);
+      return;
+    }
+    dir = entry.path;
     doScan();
   }
 
@@ -970,7 +977,6 @@
               <button
                 class="library-entry"
                 class:offline={!entry.mounted}
-                disabled={!entry.mounted}
                 on:click={() => selectFromLibrary(entry)}
                 title={entry.path}
               >
