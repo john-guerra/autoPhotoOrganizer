@@ -26,6 +26,7 @@
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
+  import ManageLibrary from "./lib/ManageLibrary.svelte";
   import MultiAutoSelect from "multi-auto-select";
 
   const LS_KEY = "autogallery.lastDir";
@@ -114,6 +115,7 @@
   let feedEpoch = 0; // invalidates in-flight meta fetches when the window resets
   let library = [];
   let libraryOpen = false;
+  let manageLibraryOpen = false;
 
   let selected = 0; // index into displayEntries; must never land on a
   // {kind:'placeholder'} entry — see nextSelectable below.
@@ -437,6 +439,11 @@
 
   async function refreshLibrary() {
     library = await fetchLibrary().catch(() => library);
+  }
+
+  async function onFolderRemoved() {
+    await refreshLibrary();
+    loadInitialFeed();
   }
 
   async function doScan() {
@@ -972,9 +979,27 @@
               </button>
             </li>
           {/each}
+          <li>
+            <button
+              class="library-entry"
+              on:click={() => {
+                libraryOpen = false;
+                manageLibraryOpen = true;
+              }}
+            >
+              Manage library…
+            </button>
+          </li>
         </ul>
       {/if}
     </div>
+    {#if manageLibraryOpen}
+      <ManageLibrary
+        {library}
+        on:close={() => (manageLibraryOpen = false)}
+        on:folderRemoved={onFolderRemoved}
+      />
+    {/if}
     <label class="zoom" title="Grid zoom (also + / - keys)">
       <span class="zoom-icon small">▦</span>
       <input
