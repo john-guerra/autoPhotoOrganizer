@@ -67,3 +67,53 @@ describe("resolvePhoto", () => {
     expect(resolvePhoto({ kind: "photo", item: items[0], stackId: null })).toBe(items[0]);
   });
 });
+
+describe("buildDisplayEntries — placeholder entries", () => {
+  const placeholder = {
+    collapsed: true,
+    id: "collapsed:year=2019",
+    path: [{ dimension: "year", value: "2019" }],
+    count: 42,
+    groupValues: { year: "2019" },
+  };
+
+  it("passes a collapsed item through as its own placeholder entry, never treated as a photo or burst member", () => {
+    const mixed = [items[0], placeholder, items[1]];
+    const entries = buildDisplayEntries(mixed, [], new Set());
+    expect(entries).toEqual([
+      { kind: "photo", item: items[0], stackId: null },
+      { kind: "placeholder", item: placeholder },
+      { kind: "photo", item: items[1], stackId: null },
+    ]);
+  });
+});
+
+describe("entryDomId — placeholder entries", () => {
+  it("returns the placeholder's own id", () => {
+    const placeholder = {
+      collapsed: true,
+      id: "collapsed:year=2019",
+      path: [],
+      count: 1,
+      groupValues: {},
+    };
+    expect(entryDomId({ kind: "placeholder", item: placeholder })).toBe(
+      "collapsed:year=2019"
+    );
+  });
+});
+
+describe("resolvePhoto — placeholder entries", () => {
+  it("returns the placeholder object itself", () => {
+    const placeholder = {
+      collapsed: true,
+      id: "collapsed:year=2019",
+      path: [],
+      count: 1,
+      groupValues: {},
+    };
+    expect(resolvePhoto({ kind: "placeholder", item: placeholder })).toBe(
+      placeholder
+    );
+  });
+});

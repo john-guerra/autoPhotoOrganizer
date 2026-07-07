@@ -17,6 +17,7 @@
  * @returns {Array<
  *   | { kind: 'photo', item: object, stackId: string|null }
  *   | { kind: 'stack', stack: object, coverItem: object, peekItems: object[] }
+ *   | { kind: 'placeholder', item: object }
  * >}
  */
 export function buildDisplayEntries(items, stacks, expandedStackIds) {
@@ -29,6 +30,10 @@ export function buildDisplayEntries(items, stacks, expandedStackIds) {
   const emittedStackIds = new Set();
   const entries = [];
   for (const item of items) {
+    if (item.collapsed) {
+      entries.push({ kind: "placeholder", item });
+      continue;
+    }
     const stack = stackByMemberId.get(item.id);
     if (!stack) {
       entries.push({ kind: "photo", item, stackId: null });
@@ -54,10 +59,14 @@ export function buildDisplayEntries(items, stacks, expandedStackIds) {
 
 /** Stable DOM/data-id for a display entry. */
 export function entryDomId(entry) {
+  if (entry.kind === "placeholder") return String(entry.item.id);
   return String(entry.kind === "stack" ? entry.stack.id : entry.item.id);
 }
 
-/** The underlying photo a display entry represents (a stack's cover, or the photo itself). */
+/** The underlying photo a display entry represents (a stack's cover, the
+ * photo itself, or — for a placeholder entry — the placeholder object
+ * itself, which callers must check `entry.kind` before treating as a real
+ * photo). */
 export function resolvePhoto(entry) {
   return entry.kind === "stack" ? entry.coverItem : entry.item;
 }
