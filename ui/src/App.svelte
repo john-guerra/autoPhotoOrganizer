@@ -418,11 +418,16 @@
       if (epoch !== feedEpoch) return;
       for (const m of metas) {
         const it = items.find((i) => i.id === m.id);
-        if (it && m.width && m.height) {
-          it.width = m.width;
-          it.height = m.height;
-          it.takenAt = m.takenAt;
-        }
+        if (!it) continue;
+        // Record the attempt's outcome unconditionally, even when no usable
+        // dimensions came back (RAW: server returns width/height 0) — the
+        // "already attempted" check below is `it.width == null`, so leaving
+        // width/height unset here would re-request metadata for this photo
+        // forever. takenAt is set independently since a RAW file can still
+        // have a valid capture date from EXIF despite unavailable dimensions.
+        it.width = m.width ?? 0;
+        it.height = m.height ?? 0;
+        it.takenAt = m.takenAt;
       }
       items = items; // re-layout with real aspect ratios
     } catch {

@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { mkdtemp, rm, mkdir, readdir } from "node:fs/promises";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
+import { mkdtemp, rm, mkdir, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import sharp from "sharp";
 import { createApp } from "./index.js";
 import { getDb, _resetDbForTest } from "./db/connection.js";
+import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 
 /** Start the app on an ephemeral port; return { base, close }. */
 async function startServer() {
@@ -133,6 +134,43 @@ describe("GET /api/meta", () => {
 
     const again = await (await fetch(`${srv.base}/api/meta?ids=${id}`)).json();
     expect(again[0]).toMatchObject({ id, width: 48, height: 32 });
+  });
+
+  it("stores width 0 (not null) for a RAW file, so a second request does not re-extract", async () => {
+    // A plain invalid-but-.cr2-named file makes sharp fail its header read
+    // exactly like a genuine RAW file does — see NodeProcessingService.test.js.
+    await writeFile(join(photosDir, "shot.cr2"), Buffer.from([0]));
+    const scanBody = await scan(srv.base, photosDir);
+    const raw = scanBody.items.find((i) => i.name === "shot.cr2");
+    expect(raw).toBeTruthy();
+
+    const first = await (
+      await fetch(`${srv.base}/api/meta?ids=${raw.id}`)
+    ).json();
+    expect(first[0]).toMatchObject({ id: raw.id, width: 0, height: 0 });
+
+    const db = getDb();
+    const row = db
+      .prepare("SELECT width, height FROM photos WHERE id = ?")
+      .get(raw.id);
+    expect(row).toMatchObject({ width: 0, height: 0 }); // not null
+
+    // A second request must not re-attempt extraction: spy on the shared
+    // NodeProcessingService's metadata() and confirm it's not called again.
+    const spy = vi
+      .spyOn(NodeProcessingService.prototype, "metadata")
+      .mockRejectedValue(
+        new Error("must not re-attempt metadata for an already-tried RAW photo")
+      );
+    try {
+      const second = await (
+        await fetch(`${srv.base}/api/meta?ids=${raw.id}`)
+      ).json();
+      expect(second[0]).toMatchObject({ id: raw.id, width: 0, height: 0 });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

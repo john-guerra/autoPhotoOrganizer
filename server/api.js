@@ -75,10 +75,12 @@ export function registerApi(app) {
 
   // --- Lazy metadata enrichment --------------------------------------------
   // GET /api/meta?ids=1,2,3 -> [{ id, takenAt, width, height }].
-  // width is used as the "already attempted extraction" marker (sharp
-  // successfully reads dimensions for any valid image, so a NULL width
-  // reliably means "never tried", regardless of whether taken_at ended up
-  // null for lack of EXIF).
+  // width is used as the "already attempted extraction" marker, but sharp
+  // can't read most RAW headers, so a genuinely-attempted RAW photo has no
+  // dimensions to report. Storing that outcome as NULL would be
+  // indistinguishable from "never tried" and re-trigger extraction forever,
+  // so a completed-but-dimensionless attempt is stored as 0 (falsy, but
+  // distinct from NULL) — only NULL means "never tried".
   app.get("/api/meta", async (req, res) => {
     const db = getDb();
     const idsParam = String(req.query.ids ?? "");
@@ -106,12 +108,12 @@ export function registerApi(app) {
         const takenAtMs = m.createDate
           ? new Date(m.createDate).getTime()
           : null;
-        update.run(takenAtMs, m.width ?? null, m.height ?? null, photo.id);
+        update.run(takenAtMs, m.width ?? 0, m.height ?? 0, photo.id);
         photosById.set(photo.id, {
           ...photo,
           taken_at: takenAtMs,
-          width: m.width ?? null,
-          height: m.height ?? null,
+          width: m.width ?? 0,
+          height: m.height ?? 0,
         });
       });
     }
