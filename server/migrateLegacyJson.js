@@ -86,11 +86,16 @@ export function migrateLegacyJsonIfNeeded(db) {
     `UPDATE photos SET taken_at = ?, width = ?, height = ? WHERE id = ?`
   );
   for (const [key, entry] of Object.entries(metacache)) {
-    // Key is "<absPath> <mtimeMs>" (see metaCache.js's keyFor) — mtimeMs is
-    // always the last space-separated token, so dropping it back off is
-    // unambiguous even when absPath itself contains spaces.
-    const parts = key.split(" ");
-    const absPath = parts.slice(0, -1).join(" ");
+    // Key is "<absPath><sep><mtimeMs>", but the separator character has
+    // changed across app history (space in some versions, null byte in
+    // others) with no version marker to tell them apart, and absPath itself
+    // may contain spaces. Rather than assume a specific separator, anchor on
+    // the one part of the key guaranteed to be all-digits: the trailing
+    // mtimeMs run. Match everything up to the last non-digit character
+    // immediately followed by a run of digits to the end of the string.
+    const match = /^(.+)[^\d](\d+)$/.exec(key);
+    if (!match) continue;
+    const absPath = match[1];
     if (!absPath) continue;
     const takenAtMs = entry.t ? Date.parse(entry.t) : null;
     setMeta.run(
