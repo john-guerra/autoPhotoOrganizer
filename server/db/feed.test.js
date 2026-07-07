@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, _resetDbForTest } from "./connection.js";
 import { upsertScan } from "./photos.js";
-import { getFeedPage } from "./feed.js";
+import { getFeedPage, findGroupBoundary } from "./feed.js";
 
 let cacheDir;
 
@@ -97,6 +97,115 @@ describe("getFeedPage — composite ordering", () => {
       after: 10,
     });
     expect(items.map((i) => i.name)).toEqual(["y.jpg", "x.jpg"]);
+  });
+});
+
+describe("findGroupBoundary", () => {
+  it("finds the next boundary at the innermost dimension (next year, same folder)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const photos = upsertScan(db, "/photos/aaa", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "2.jpg", size: 1, mtimeMs: 2, kind: "image" },
+    ]);
+    setTakenAt(db, photos[0].id, "2024-01-01");
+    setTakenAt(db, photos[1].id, "2023-01-01");
+
+    const result = findGroupBoundary(db, {
+      groupBy: ["folder", "year"],
+      focusId: photos[0].id,
+      direction: "next",
+    });
+    expect(result).toEqual({ id: photos[1].id });
+  });
+
+  it("rolls up to the next outer dimension once the inner one is exhausted (next folder)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const aaaPhotos = upsertScan(db, "/photos/aaa", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const bbbPhotos = upsertScan(db, "/photos/bbb", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(db, aaaPhotos[0].id, "2024-01-01");
+    setTakenAt(db, bbbPhotos[0].id, "2023-01-01");
+
+    const result = findGroupBoundary(db, {
+      groupBy: ["folder", "year"],
+      focusId: aaaPhotos[0].id,
+      direction: "next",
+    });
+    expect(result).toEqual({ id: bbbPhotos[0].id });
+  });
+
+  it("returns null at the true end of the library", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const photos = upsertScan(db, "/photos/aaa", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(db, photos[0].id, "2024-01-01");
+
+    const result = findGroupBoundary(db, {
+      groupBy: ["folder", "year"],
+      focusId: photos[0].id,
+      direction: "next",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("returns null at the true start of the library (direction: prev)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const photos = upsertScan(db, "/photos/aaa", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(db, photos[0].id, "2024-01-01");
+
+    const result = findGroupBoundary(db, {
+      groupBy: ["folder", "year"],
+      focusId: photos[0].id,
+      direction: "prev",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("skips an already-collapsed section between the focus and the next real boundary", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const aaaPhotos = upsertScan(db, "/photos/aaa", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/bbb", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const cccPhotos = upsertScan(db, "/photos/ccc", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+
+    const result = findGroupBoundary(db, {
+      groupBy: ["folder"],
+      collapsed: [[{ dimension: "folder", value: "/photos/bbb" }]],
+      focusId: aaaPhotos[0].id,
+      direction: "next",
+    });
+    expect(result).toEqual({ id: cccPhotos[0].id });
+  });
+
+  it("throws for an unknown focusId", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/aaa", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    expect(() =>
+      findGroupBoundary(db, {
+        groupBy: ["folder"],
+        focusId: 999999,
+        direction: "next",
+      })
+    ).toThrow(/999999/);
   });
 });
 

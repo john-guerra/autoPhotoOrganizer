@@ -419,3 +419,83 @@ export function getFeedPage(
   ];
   return { items, focusItem };
 }
+
+/**
+ * Find the id of the first real row in the next/previous DIFFERENT group
+ * after/before focusId's own position, at any dimension depth — e.g. the
+ * next year within the same folder, or the next folder once the last
+ * year in the current one is passed. A single indexed query, regardless
+ * of how many rows sit between focusId and the boundary — the client-side
+ * alternative (paging through every intermediate row) doesn't scale to a
+ * 10,000-photo folder.
+ * @param {import("better-sqlite3").Database} db
+ * @param {{groupBy:string[], collapsed?:Array<Array<{dimension:string,value:string}>>, focusId:number, direction:"next"|"prev"}} opts
+ * @returns {{id:number}|null}
+ */
+export function findGroupBoundary(
+  db,
+  { groupBy, collapsed = [], focusId, direction }
+) {
+  const dims = resolveDimensions(groupBy);
+  const seekDims = [
+    ...dims,
+    { name: "__id", expr: "photos.id", direction: "ASC" },
+  ];
+  const wantAfter = direction === "next";
+  const selectDimCols = dims.map((d, i) => `${d.expr} AS dim${i}`).join(", ");
+
+  const focusRow = db
+    .prepare(
+      `SELECT photos.id, ${selectDimCols}
+       FROM photos JOIN folders ON folders.id = photos.folder_id
+       WHERE photos.id = ?`
+    )
+    .get(focusId);
+  if (!focusRow) throw new Error(`focusId ${focusId} not found`);
+  const focusValues = dims
+    .map((_, i) => focusRow[`dim${i}`])
+    .concat(focusRow.id);
+
+  const { sql: exclSql, params: exclParams } = exclusionClause(
+    collapsed,
+    dims
+  );
+  const { sql: seekSql, params: seekParams } = seekCondition(
+    seekDims,
+    focusValues,
+    wantAfter
+  );
+  // "Not the focus row's own full group" — collapsedPathCondition already
+  // builds exactly this NOT(...) shape for an arbitrary dimension/value
+  // path; the focus row's own current groupBy values are just another
+  // path to exclude, reused verbatim rather than duplicating the SQL.
+  const currentGroupPath = groupBy.map((name, i) => ({
+    dimension: name,
+    value: focusRow[`dim${i}`],
+  }));
+  const { sql: notCurrentSql, params: notCurrentParams } =
+    collapsedPathCondition(currentGroupPath, dims);
+
+  const orderCols = seekDims
+    .map((d, i) => {
+      const col = i < dims.length ? `dim${i}` : "photos.id";
+      const dir = wantAfter
+        ? d.direction
+        : d.direction === "ASC"
+          ? "DESC"
+          : "ASC";
+      return `${col} ${dir}`;
+    })
+    .join(", ");
+
+  const row = db
+    .prepare(
+      `SELECT photos.id, ${selectDimCols}
+       FROM photos JOIN folders ON folders.id = photos.folder_id
+       WHERE photos.stale = 0 AND (${exclSql}) AND (${seekSql}) AND (${notCurrentSql})
+       ORDER BY ${orderCols}
+       LIMIT 1`
+    )
+    .get(...exclParams, ...seekParams, ...notCurrentParams);
+  return row ? { id: row.id } : null;
+}
