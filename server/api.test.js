@@ -292,3 +292,58 @@ describe("GET /api/library", () => {
     expect(entry.mounted).toBe(false);
   });
 });
+
+describe("GET /api/feed", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+  });
+
+  it("returns items grouped by folder by default order, with group values", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(`${srv.base}/api/feed?groupBy=folder&after=50`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items[0]).toHaveProperty("groupValues.folder");
+    expect(body.sections).toEqual([]);
+  });
+
+  it("supports focusId + before/after keyset pagination", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const ids = scanBody.items.map((i) => i.id).sort((a, b) => a - b);
+    const midId = ids[Math.floor(ids.length / 2)];
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&focusId=${midId}&before=1&after=1`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.every((i) => i.id !== midId)).toBe(true);
+  });
+
+  it("excludes a collapsed folder and returns its summary count", async () => {
+    await scan(srv.base, photosDir);
+    const collapsed = encodeURIComponent(
+      JSON.stringify([[{ dimension: "folder", value: photosDir }]])
+    );
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&collapsed=${collapsed}&after=50`
+    );
+    const body = await res.json();
+    expect(body.items).toEqual([]);
+    expect(body.sections).toHaveLength(1);
+    expect(body.sections[0].count).toBeGreaterThan(0);
+  });
+
+  it("400s on an unknown groupBy dimension", async () => {
+    const res = await fetch(`${srv.base}/api/feed?groupBy=bogus&after=10`);
+    expect(res.status).toBe(400);
+  });
+
+  it("400s when groupBy is missing", async () => {
+    const res = await fetch(`${srv.base}/api/feed`);
+    expect(res.status).toBe(400);
+  });
+});

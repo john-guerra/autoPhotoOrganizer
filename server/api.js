@@ -17,6 +17,7 @@ import {
   setPhotoCover,
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
+import { getFeedPage, DIMENSIONS } from "./db/feed.js";
 
 const processing = new NodeProcessingService();
 
@@ -226,5 +227,52 @@ export function registerApi(app) {
           : true) && existsSync(r.path),
     }));
     res.json(entries);
+  });
+
+  // --- Grouped endless feed --------------------------------------------------
+  app.get("/api/feed", (req, res) => {
+    const groupBy = String(req.query.groupBy ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!groupBy.length) {
+      return res.status(400).json({ error: "groupBy is required" });
+    }
+    if (groupBy.some((d) => !DIMENSIONS[d])) {
+      return res.status(400).json({
+        error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
+      });
+    }
+
+    let collapsed = [];
+    if (req.query.collapsed) {
+      try {
+        collapsed = JSON.parse(String(req.query.collapsed));
+      } catch {
+        return res.status(400).json({ error: "collapsed must be JSON" });
+      }
+    }
+
+    const focusIdParam = req.query.focusId;
+    const focusId =
+      focusIdParam !== undefined && focusIdParam !== ""
+        ? Number(focusIdParam)
+        : null;
+    const before = Math.max(0, Number(req.query.before) || 0);
+    const after = Math.max(0, Number(req.query.after) || 50);
+
+    const db = getDb();
+    try {
+      const { items, sections } = getFeedPage(db, {
+        groupBy,
+        collapsed,
+        focusId,
+        before,
+        after,
+      });
+      res.json({ items, sections });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
   });
 }
