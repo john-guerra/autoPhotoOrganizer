@@ -217,12 +217,13 @@ export function registerApi(app) {
       path: r.path,
       name: basename(r.path),
       lastScannedAt: r.lastScannedAt,
-      mounted: r.volumeUuid
-        ? isVolumeMounted({
-            uuid: r.volumeUuid,
-            last_mount_path: r.volumeMountPath,
-          })
-        : existsSync(r.path),
+      mounted:
+        (r.volumeUuid
+          ? isVolumeMounted({
+              uuid: r.volumeUuid,
+              last_mount_path: r.volumeMountPath,
+            })
+          : true) && existsSync(r.path),
     }));
     res.json(entries);
   });

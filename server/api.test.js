@@ -273,4 +273,22 @@ describe("GET /api/library", () => {
     expect(entry).toBeDefined();
     expect(entry.mounted).toBe(false);
   });
+
+  it("reports a deleted internal-disk folder as not mounted after a real scan", async () => {
+    const removedDir = await mkdtemp(join(tmpdir(), "ag-removed-"));
+    await sharp({
+      create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } },
+    })
+      .jpeg()
+      .toFile(join(removedDir, "img.jpg"));
+
+    await scan(srv.base, removedDir);
+    await rm(removedDir, { recursive: true, force: true });
+
+    const res = await fetch(`${srv.base}/api/library`);
+    const entries = await res.json();
+    const entry = entries.find((e) => e.path === removedDir);
+    expect(entry).toBeDefined();
+    expect(entry.mounted).toBe(false);
+  });
 });
