@@ -408,3 +408,61 @@ describe("GET /api/feed", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("GET /api/tree", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+  });
+
+  it("returns the library total and root-level nodes", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(`${srv.base}/api/tree?groupBy=folder,year`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.total).toBeGreaterThan(0);
+    expect(body.nodes.length).toBeGreaterThan(0);
+    expect(body.nodes[0]).toHaveProperty("value");
+    expect(body.nodes[0]).toHaveProperty("count");
+    expect(body.nodes[0].hasChildren).toBe(true);
+  });
+
+  it("scopes to a given path prefix", async () => {
+    await scan(srv.base, photosDir);
+    const path = encodeURIComponent(
+      JSON.stringify([{ dimension: "folder", value: photosDir }])
+    );
+    const res = await fetch(
+      `${srv.base}/api/tree?groupBy=folder,year&path=${path}`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.nodes.length).toBeGreaterThan(0);
+    expect(body.nodes[0].hasChildren).toBe(false);
+  });
+
+  it("400s on an unknown groupBy dimension", async () => {
+    const res = await fetch(`${srv.base}/api/tree?groupBy=bogus`);
+    expect(res.status).toBe(400);
+  });
+
+  it("400s when groupBy is missing", async () => {
+    const res = await fetch(`${srv.base}/api/tree`);
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on malformed path JSON", async () => {
+    const res = await fetch(`${srv.base}/api/tree?groupBy=folder&path=not-json`);
+    expect(res.status).toBe(400);
+  });
+
+  it("400s when path is already at the deepest grouping level", async () => {
+    await scan(srv.base, photosDir);
+    const path = encodeURIComponent(
+      JSON.stringify([{ dimension: "folder", value: photosDir }])
+    );
+    const res = await fetch(`${srv.base}/api/tree?groupBy=folder&path=${path}`);
+    expect(res.status).toBe(400);
+  });
+});

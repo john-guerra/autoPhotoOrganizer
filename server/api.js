@@ -18,6 +18,7 @@ import {
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
 import { getFeedPage, DIMENSIONS } from "./db/feed.js";
+import { getTreeNode } from "./db/tree.js";
 
 const processing = new NodeProcessingService();
 
@@ -284,6 +285,39 @@ export function registerApi(app) {
         after,
       });
       res.json({ items, sections, focusItem });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // --- Hierarchy tree (lazy, per-level) --------------------------------------
+  app.get("/api/tree", (req, res) => {
+    const groupBy = String(req.query.groupBy ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!groupBy.length) {
+      return res.status(400).json({ error: "groupBy is required" });
+    }
+    if (groupBy.some((d) => !DIMENSIONS[d])) {
+      return res.status(400).json({
+        error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
+      });
+    }
+
+    let path = [];
+    if (req.query.path) {
+      try {
+        path = JSON.parse(String(req.query.path));
+      } catch {
+        return res.status(400).json({ error: "path must be JSON" });
+      }
+    }
+
+    const db = getDb();
+    try {
+      const { total, nodes } = getTreeNode(db, { groupBy, path });
+      res.json({ total, nodes });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
