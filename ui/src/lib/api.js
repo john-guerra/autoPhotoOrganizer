@@ -71,6 +71,11 @@ export function thumbUrl(id, size = 320, v = 0) {
 }
 
 /** @param {number} id @param {number} [v] mtime version */
+export function previewUrl(id, v = 0) {
+  return `/api/preview/${id}?v=${v}`;
+}
+
+/** @param {number} id @param {number} [v] mtime version */
 export function imageUrl(id, v = 0) {
   return `/api/image/${id}?v=${v}`;
 }
