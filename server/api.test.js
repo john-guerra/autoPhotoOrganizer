@@ -458,6 +458,84 @@ describe("DELETE /api/folders/:id", () => {
   });
 });
 
+describe("cache management routes", () => {
+  it("GET /api/cache/stats reflects real cache dir contents", async () => {
+    await fetch(`${srv.base}/api/cache/clear`, { method: "POST" });
+    const before = await (await fetch(`${srv.base}/api/cache/stats`)).json();
+    expect(before).toEqual({ totalBytes: 0, totalFiles: 0 });
+
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
+    await fetch(`${srv.base}/api/thumb/${id}?size=64`);
+
+    const after = await (await fetch(`${srv.base}/api/cache/stats`)).json();
+    expect(after.totalFiles).toBe(1);
+    expect(after.totalBytes).toBeGreaterThan(0);
+  });
+
+  it("GET /api/cache/breakdown attributes the cached thumbnail to its folder", async () => {
+    await fetch(`${srv.base}/api/cache/clear`, { method: "POST" });
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
+    await fetch(`${srv.base}/api/thumb/${id}?size=320`);
+
+    const breakdown = await (
+      await fetch(`${srv.base}/api/cache/breakdown`)
+    ).json();
+    const entry = breakdown.folders.find((f) => f.path === photosDir);
+    expect(entry).toBeDefined();
+    expect(entry.cachedFiles).toBeGreaterThanOrEqual(1);
+    expect(entry.cachedBytes).toBeGreaterThan(0);
+  });
+
+  it("POST /api/cache/clear empties the cache", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
+    await fetch(`${srv.base}/api/thumb/${id}?size=160`);
+    expect((await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles).toBeGreaterThan(0);
+
+    const result = await (
+      await fetch(`${srv.base}/api/cache/clear`, { method: "POST" })
+    ).json();
+    expect(result.freedFiles).toBeGreaterThan(0);
+
+    expect(await (await fetch(`${srv.base}/api/cache/stats`)).json()).toEqual({
+      totalBytes: 0,
+      totalFiles: 0,
+    });
+  });
+
+  it("POST /api/cache/prune removes an orphaned file left after folder removal", async () => {
+    await fetch(`${srv.base}/api/cache/clear`, { method: "POST" });
+    const tempDir = await mkdtemp(join(tmpdir(), "ag-prunetest-"));
+    await sharp({
+      create: { width: 40, height: 30, channels: 3, background: { r: 9, g: 9, b: 9 } },
+    })
+      .jpeg()
+      .toFile(join(tempDir, "z.jpg"));
+
+    const scanBody = await scan(srv.base, tempDir);
+    const id = scanBody.items[0].id;
+    await fetch(`${srv.base}/api/thumb/${id}?size=160`);
+    expect((await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles).toBe(1);
+
+    const lib = await (await fetch(`${srv.base}/api/library`)).json();
+    const entry = lib.find((e) => e.path === tempDir);
+    await fetch(`${srv.base}/api/folders/${entry.id}`, { method: "DELETE" });
+
+    const pruneResult = await (
+      await fetch(`${srv.base}/api/cache/prune`, { method: "POST" })
+    ).json();
+    expect(pruneResult.freedFiles).toBe(1);
+    expect(await (await fetch(`${srv.base}/api/cache/stats`)).json()).toEqual({
+      totalBytes: 0,
+      totalFiles: 0,
+    });
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+});
+
 describe("GET /api/feed", () => {
   beforeEach(async () => {
     const db = getDb();

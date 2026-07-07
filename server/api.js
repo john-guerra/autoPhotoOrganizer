@@ -4,6 +4,12 @@ import { writeFile, rename, stat } from "node:fs/promises";
 import { extname, join, basename } from "node:path";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { thumbsDir } from "./lib/cachePaths.js";
+import {
+  getCacheStats,
+  getCacheBreakdown,
+  clearCache,
+  pruneOrphanedCache,
+} from "./lib/cacheStats.js";
 import { getDb } from "./db/connection.js";
 import {
   volumeRootForPath,
@@ -270,6 +276,22 @@ export function registerApi(app) {
     const removed = deleteFolder(db, Number(req.params.id));
     if (!removed) return res.status(404).end();
     res.json({ removed: true });
+  });
+
+  app.get("/api/cache/stats", (_req, res) => {
+    res.json(getCacheStats());
+  });
+
+  app.get("/api/cache/breakdown", (_req, res) => {
+    res.json(getCacheBreakdown(getDb()));
+  });
+
+  app.post("/api/cache/clear", (_req, res) => {
+    res.json(clearCache());
+  });
+
+  app.post("/api/cache/prune", (_req, res) => {
+    res.json(pruneOrphanedCache(getDb()));
   });
 
   // --- Grouped endless feed --------------------------------------------------
