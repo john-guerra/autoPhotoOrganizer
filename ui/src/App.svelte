@@ -475,6 +475,17 @@
       // cache (the app's offline-mirror invariant) — reuse the same
       // jumpToPath the tree sidebar already uses for any folder, rather
       // than requiring a live rescan this folder's volume can't provide.
+      // startPath is matched POSITIONALLY against the live groupBy (see
+      // server/db/feed.js's startPathCondition — it never reads the
+      // `dimension` label), so this only lands on the right rows if
+      // "folder" is actually groupBy's first dimension; force that here
+      // rather than assuming it (groupBy is a freely reorderable
+      // multi-select, unlike the tree sidebar which always derives its
+      // path from whatever groupBy[0] currently is).
+      if (groupBy[0] !== "folder") {
+        groupBy = ["folder", ...groupBy.filter((d) => d !== "folder")];
+        collapsedPaths = [];
+      }
       jumpToPath([{ dimension: "folder", value: entry.path }]);
       return;
     }
