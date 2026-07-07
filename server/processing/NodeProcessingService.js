@@ -12,22 +12,50 @@ class NotImplementedError extends Error {
   }
 }
 
+/** Thrown by thumbnail() for a RAW file — sharp can't decode most RAW
+ * formats, so the full-resolution "slow tier" isn't available; a RAW
+ * photo's embedded preview (see extractPreview) is its only available
+ * image until a real RAW decoder is added as separate, future work. */
+class RawDecodeUnavailableError extends Error {
+  /** @param {string} file */
+  constructor(file) {
+    super(`full-resolution decode unavailable for RAW file: ${file}`);
+    this.name = "RawDecodeUnavailableError";
+  }
+}
+
 /**
- * Image extensions handled in v0.1. RAW/HEIC/video come later (they need the
- * embedded-preview / ffmpeg paths described in the design doc).
+ * Image extensions handled via the full sharp-decode path.
  */
 export const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
 
 /**
+ * RAW extensions discovered by scan() and given kind:"raw" — their only
+ * available image is the embedded preview (extractPreview); a full decode
+ * (thumbnail()) is intentionally unavailable until a real RAW decoder is
+ * added as separate, future work.
+ */
+export const RAW_EXTS = new Set([
+  ".cr2",
+  ".cr3",
+  ".nef",
+  ".arw",
+  ".dng",
+  ".orf",
+  ".rw2",
+  ".raf",
+]);
+
+/**
  * NodeProcessingService — the MVP implementation (sharp + exifr).
  *
- * v0.1 scope: images only. `extractPreview` (RAW embedded JPEG) and `videoThumb`
- * remain unimplemented until the exiftool/ffmpeg engines are wired.
+ * v0.2 scope: images + RAW (embedded preview only). `videoThumb` remains
+ * unimplemented until the ffmpeg engine is wired.
  */
 export class NodeProcessingService extends ProcessingService {
   /**
-   * Non-recursive scan: readdir the directory, keep image files, stat each for
-   * the incremental-rescan key (size + mtimeMs). Sorted by name.
+   * Non-recursive scan: readdir the directory, keep image/RAW files, stat
+   * each for the incremental-rescan key (size + mtimeMs). Sorted by name.
    * @override
    * @param {string} dir
    * @returns {Promise<import("./ProcessingService.js").MediaFile[]>}
@@ -37,7 +65,10 @@ export class NodeProcessingService extends ProcessingService {
     const files = [];
     for (const entry of entries) {
       if (!entry.isFile()) continue;
-      if (!IMAGE_EXTS.has(extname(entry.name).toLowerCase())) continue;
+      const ext = extname(entry.name).toLowerCase();
+      const isImage = IMAGE_EXTS.has(ext);
+      const isRaw = RAW_EXTS.has(ext);
+      if (!isImage && !isRaw) continue;
       const path = join(dir, entry.name);
       const st = await stat(path);
       files.push({
@@ -45,7 +76,7 @@ export class NodeProcessingService extends ProcessingService {
         name: entry.name,
         size: st.size,
         mtimeMs: st.mtimeMs,
-        kind: "image",
+        kind: isRaw ? "raw" : "image",
       });
     }
     files.sort((a, b) => a.name.localeCompare(b.name));
@@ -54,13 +85,17 @@ export class NodeProcessingService extends ProcessingService {
 
   /**
    * Resize to `size` px longest edge (fit inside, no enlargement), auto-rotate
-   * for EXIF orientation, encode JPEG q78.
+   * for EXIF orientation, encode JPEG q78. Unavailable for RAW — see
+   * RawDecodeUnavailableError.
    * @override
    * @param {string} file
    * @param {number} size
    * @returns {Promise<import("./ProcessingService.js").PreviewResult>}
    */
   async thumbnail(file, size) {
+    if (RAW_EXTS.has(extname(file).toLowerCase())) {
+      throw new RawDecodeUnavailableError(file);
+    }
     const pipeline = sharp(file)
       .rotate()
       .resize(size, size, { fit: "inside", withoutEnlargement: true })
@@ -70,11 +105,21 @@ export class NodeProcessingService extends ProcessingService {
   }
 
   /**
-   * RAW embedded-preview extraction — the exiftool engine lands later.
+   * Embedded EXIF/JPEG preview — a few KB, read near the file header rather
+   * than decoding the whole (possibly multi-megabyte, possibly RAW) source.
+   * Works identically for JPEG and RAW inputs — exifr reads an embedded
+   * preview the same way regardless of container format. Returns null when
+   * the file has no embedded preview (some cameras/edited files strip it) —
+   * a normal, expected outcome, not an error; genuine I/O failures still
+   * throw.
    * @override
+   * @param {string} file
+   * @returns {Promise<import("./ProcessingService.js").PreviewResult|null>}
    */
-  async extractPreview(_file) {
-    throw new NotImplementedError("extractPreview");
+  async extractPreview(file) {
+    const data = await exifr.thumbnail(file);
+    if (!data) return null;
+    return { data, source: "embedded" };
   }
 
   /**
@@ -90,7 +135,9 @@ export class NodeProcessingService extends ProcessingService {
    * header read (~0.2 ms/file, works for every supported format) and capture
    * date via exifr. Width/height are swapped for rotated EXIF orientations so
    * they describe the image as DISPLAYED — what the justified layout needs.
-   * Best-effort: fields are omitted for files that fail to parse.
+   * Best-effort: fields are omitted for files that fail to parse (this
+   * already covers RAW today, since sharp can't read most RAW headers —
+   * unchanged by this task).
    * @override
    * @param {string[]} files
    * @returns {Promise<import("./ProcessingService.js").MediaMetadata[]>}

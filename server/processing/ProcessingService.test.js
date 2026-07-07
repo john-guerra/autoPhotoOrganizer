@@ -21,12 +21,10 @@ describe("ProcessingService (smoke)", () => {
     expect(svc).toBeInstanceOf(ProcessingService);
   });
 
-  it("NodeProcessingService still throws on the not-yet-implemented engines", async () => {
+  it("NodeProcessingService still throws on the not-yet-implemented video engine", async () => {
     const svc = new NodeProcessingService();
-    // RAW embedded-preview extraction and video poster frames come later.
-    await expect(svc.extractPreview("/tmp/x.cr2")).rejects.toThrow(
-      /not implemented/i
-    );
+    // Video poster frames come later; RAW/JPEG embedded-preview extraction
+    // is implemented now (see NodeProcessingService.test.js).
     await expect(svc.videoThumb("/tmp/x.mov")).rejects.toThrow(
       /not implemented/i
     );
