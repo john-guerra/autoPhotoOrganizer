@@ -115,7 +115,8 @@
   let library = [];
   let libraryOpen = false;
 
-  let selected = 0; // index into displayEntries
+  let selected = 0; // index into displayEntries; must never land on a
+  // {kind:'placeholder'} entry — see nextSelectable below.
   let loupeOpen = false;
   let gridEl;
   let mainColumnEl;
@@ -192,8 +193,12 @@
       // Matches the original doScan's reset — a fresh/reset feed load
       // always re-focuses the first item and closes any open loupe,
       // rather than leaving `selected` pointing at whatever index the
-      // user had scrolled to in a now-discarded window.
-      selected = 0;
+      // user had scrolled to in a now-discarded window. displayEntries is
+      // a reactive statement over `items`, so it only reflects the
+      // assignment above after the next microtask flush — await tick()
+      // before reading it (see onGroupByChange for the same pattern).
+      await tick();
+      selected = nextSelectable(displayEntries, 0, 1) ?? 0;
       loupeOpen = false;
       focusPending = true;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
@@ -241,6 +246,10 @@
       const focusIndex = focusId
         ? displayEntries.findIndex((e) => resolvePhoto(e).id === focusId)
         : -1;
+      // No nextSelectable() needed here: fetchFeed above is never called
+      // with a `collapsed` list (it defaults to `[]` in both api.js and the
+      // server), so this window can never contain a placeholder entry —
+      // findIndex above always lands on a real photo/stack or -1.
       selected = focusIndex !== -1 ? focusIndex : 0;
       focusPending = true;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
@@ -276,7 +285,10 @@
       items = merged.items;
       hasMoreBefore = merged.hasMoreBefore;
       hasMoreAfter = merged.hasMoreAfter;
-      selected = 0;
+      // See loadInitialFeed: displayEntries needs a tick to reflect the
+      // `items` assignment above before it can be used to pick `selected`.
+      await tick();
+      selected = nextSelectable(displayEntries, 0, 1) ?? 0;
       loupeOpen = false;
       focusPending = true;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
@@ -715,16 +727,28 @@
     return indices.map((i) => ({ i, entry: entries[i] }));
   }
 
-  /**
-   * Vertical navigation in a justified layout: rows have varying column
-   * counts, so move to the box in the adjacent row whose horizontal centre is
-   * nearest to the current one.
-   * @param {1|-1} dir
-   */
-  function navVertical(dir) {
-    if (!boxes) return selected;
-    const cur = boxes[selected];
-    if (!cur) return selected;
+  /** Placeholders (in-place folded rows for a collapsed section) are never a
+   * valid keyboard-selection target, matching how section headers already
+   * aren't part of the selectable index space. Steps from `from` in `dir`
+   * (+1/-1) until landing on a non-placeholder entry, or returns null if
+   * the entries run out in that direction first. */
+  function nextSelectable(entries, from, dir) {
+    let i = from;
+    while (i >= 0 && i < entries.length && entries[i]?.kind === "placeholder") {
+      i += dir;
+    }
+    if (i < 0 || i >= entries.length) return null;
+    return i;
+  }
+
+  /** Nearest box in the row adjacent (in direction `dir`) to `fromIndex`'s
+   * row, by horizontal centre — the geometric core of navVertical, factored
+   * out so navVertical can re-run it from an intermediate (placeholder)
+   * landing spot without reading `selected` from the closure. Returns null
+   * when `fromIndex` is already on the first/last row. */
+  function nearestBoxInAdjacentRow(fromIndex, dir) {
+    const cur = boxes[fromIndex];
+    if (!cur) return null;
     const curCx = cur.x + cur.width / 2;
     // Find the y coordinate of the adjacent row.
     let rowY = null;
@@ -738,9 +762,9 @@
           rowY = t;
       }
     }
-    if (rowY === null) return selected; // already on the first/last row
+    if (rowY === null) return null; // already on the first/last row
     // Nearest horizontal centre within that row.
-    let best = selected;
+    let best = null;
     let bestDist = Infinity;
     for (let i = 0; i < boxes.length; i++) {
       if (boxes[i].y !== rowY) continue;
@@ -751,6 +775,27 @@
       }
     }
     return best;
+  }
+
+  /**
+   * Vertical navigation in a justified layout: rows have varying column
+   * counts, so move to the box in the adjacent row whose horizontal centre is
+   * nearest to the current one. If that lands on a placeholder, keep
+   * advancing row by row (placeholders are never a valid selection target)
+   * until a real entry is found or there's no further row, in which case the
+   * original selection is kept.
+   * @param {1|-1} dir
+   */
+  function navVertical(dir) {
+    if (!boxes) return selected;
+    const start = selected;
+    let cur = start;
+    while (true) {
+      const next = nearestBoxInAdjacentRow(cur, dir);
+      if (next === null) return start; // no further row that direction
+      if (displayEntries[next]?.kind !== "placeholder") return next;
+      cur = next; // placeholder row — keep looking past it
+    }
   }
 
   async function onKeydown(e) {
@@ -778,7 +823,11 @@
     if (/^[0-5]$/.test(key)) {
       e.preventDefault();
       rate(selected, Number(key));
-      if (loupeOpen && selected < displayEntries.length - 1) selected += 1; // auto-advance
+      // Auto-advance, but never onto a placeholder (see nextSelectable).
+      if (loupeOpen) {
+        const t = nextSelectable(displayEntries, selected + 1, 1);
+        if (t !== null) selected = t;
+      }
       return;
     }
 
@@ -801,10 +850,14 @@
         closeLoupe();
       } else if (key === "ArrowRight" || key === "ArrowDown") {
         e.preventDefault();
-        if (selected < displayEntries.length - 1) selected += 1;
+        // Placeholders are never a valid selection target (see
+        // nextSelectable) — skip past one rather than opening it in Loupe.
+        const t = nextSelectable(displayEntries, selected + 1, 1);
+        if (t !== null) selected = t;
       } else if (key === "ArrowLeft" || key === "ArrowUp") {
         e.preventDefault();
-        if (selected > 0) selected -= 1;
+        const t = nextSelectable(displayEntries, selected - 1, -1);
+        if (t !== null) selected = t;
       }
       return;
     }
@@ -820,11 +873,15 @@
       return;
     }
 
-    // Grid navigation.
+    // Grid navigation. Placeholders (in-place folded rows for a collapsed
+    // section) are never a valid selection target — every branch below
+    // resolves to the nearest non-placeholder entry in the direction of
+    // travel, falling back to `selected` (no movement) if none exists.
     let next = selected;
     if (key === "ArrowRight")
-      next = Math.min(displayEntries.length - 1, selected + 1);
-    else if (key === "ArrowLeft") next = Math.max(0, selected - 1);
+      next = nextSelectable(displayEntries, selected + 1, 1) ?? selected;
+    else if (key === "ArrowLeft")
+      next = nextSelectable(displayEntries, selected - 1, -1) ?? selected;
     else if (key === "ArrowDown") next = navVertical(1);
     else if (key === "ArrowUp") next = navVertical(-1);
     else if (key === "Enter" || key === " ") {
@@ -836,8 +893,12 @@
         openLoupe(selected);
       }
       return;
-    } else if (key === "Home") next = 0;
-    else if (key === "End") next = displayEntries.length - 1;
+    } else if (key === "Home")
+      next = nextSelectable(displayEntries, 0, 1) ?? selected;
+    else if (key === "End")
+      next =
+        nextSelectable(displayEntries, displayEntries.length - 1, -1) ??
+        selected;
     else return;
 
     e.preventDefault();
