@@ -875,9 +875,18 @@
       return;
     }
     const rect = gridEl.getBoundingClientRect();
+    // visibleRange's own default overscan (800px each side) roughly
+    // triples the mounted area beyond the viewport — measured live: 61
+    // tiles mounted (and immediately fetching thumbnails) for only 31
+    // actually on screen after a jump. Each extra tile competes for the
+    // server's thumbnail-generation throughput, delaying the visible
+    // ones on a cold cache — a smaller, explicit overscan here still
+    // pre-renders a row or two ahead of ordinary scrolling without
+    // flooding a jump with off-screen fetches.
     const range = visibleRange(boxes, {
       scrollTop: -rect.top,
       viewportHeight: mainColumnEl.clientHeight,
+      overscanPx: 300,
     });
     renderStart = range.start;
     renderEnd = range.end;

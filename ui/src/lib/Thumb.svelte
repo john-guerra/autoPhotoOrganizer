@@ -114,7 +114,18 @@
           }
         }
       },
-      { rootMargin: "400px" } // fetch a bit before it scrolls into view
+      // A generous margin means far more tiles become "visible" (and start
+      // fetching their thumbnail) than are actually on screen — compounds
+      // with the outer virtualization window's own overscan (see
+      // updateVisibleRange in App.svelte) after a big jump. Each extra
+      // fetch competes for the server's thumbnail-generation throughput
+      // (sharp/exiftool), so the visible tiles' own loads get queued
+      // behind off-screen ones — on a cold cache this reads as the whole
+      // screen "flickering" as images pop in over an extended window,
+      // rather than the visible ones settling quickly. Smaller margin
+      // still pre-fetches a bit ahead of ordinary scrolling, just not
+      // several rows' worth on every side.
+      { rootMargin: "150px" }
     );
     observer.observe(el);
   });
