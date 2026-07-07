@@ -229,8 +229,7 @@
   async function onGroupByChange(newGroupBy) {
     groupBy = newGroupBy;
     collapsedPaths = [];
-    const focusEntry = displayEntries[selected];
-    const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
+    const focusId = safeFocusId(selected);
     error = "";
     status = "loading…";
     const epoch = ++feedEpoch;
@@ -364,15 +363,43 @@
     });
   }
 
+  /** A placeholder entry (any collapsed section, however it got there) has
+   * no real photo id — resolvePhoto(entry).id would be its synthetic
+   * "collapsed:..." key, which the server can't seek on (it turns into
+   * NaN once coerced to a number) — so anything that turns `selected` into
+   * a server focusId must route through this, not read
+   * displayEntries[selected] directly. `excludePath`, when given, ALSO
+   * treats entries inside that specific group path as unusable — for
+   * collapsing a section the selection is itself inside, about to be
+   * hidden (the server never lets a focusId fall inside a collapsed path,
+   * see server/db/feed.js's keyPassesSeek). Walks forward then backward
+   * from `fromIndex` for the nearest usable entry if the one at
+   * `fromIndex` itself doesn't qualify. */
+  function safeFocusEntry(fromIndex, excludePath = null) {
+    const insidePath = (entry) => {
+      if (!entry || !excludePath) return false;
+      const values = resolvePhoto(entry).groupValues;
+      return excludePath.every((p) => values?.[p.dimension] === p.value);
+    };
+    const usable = (entry) =>
+      entry && entry.kind !== "placeholder" && !insidePath(entry);
+    const direct = displayEntries[fromIndex];
+    if (usable(direct)) return direct;
+    return (
+      displayEntries.slice(fromIndex).find(usable) ??
+      [...displayEntries.slice(0, fromIndex)].reverse().find(usable) ??
+      null
+    );
+  }
+
+  function safeFocusId(fromIndex, excludePath = null) {
+    const entry = safeFocusEntry(fromIndex, excludePath);
+    return entry ? resolvePhoto(entry).id : null;
+  }
+
   /** Toggle a section's collapsed state and re-center the feed on whatever
    * photo is currently selected, so the user doesn't lose their place —
-   * mirrors onGroupByChange's re-centering. If the selected photo is
-   * itself inside the section being collapsed, it's about to be hidden,
-   * so re-anchor on the nearest still-loaded photo in an adjacent section
-   * instead: the server never lets a focusId fall inside a collapsed path
-   * (see server/db/feed.js's keyPassesSeek), so seeking on the
-   * now-collapsed photo would silently drop that section's placeholder
-   * while leaving the one photo stranded outside it. */
+   * mirrors onGroupByChange's re-centering. */
   async function toggleSectionCollapse(path) {
     const key = pathKey(path);
     const collapsing = !collapsedPaths.some((p) => pathKey(p) === key);
@@ -380,25 +407,7 @@
       ? [...collapsedPaths, path]
       : collapsedPaths.filter((p) => pathKey(p) !== key);
 
-    const insidePath = (entry) => {
-      if (!entry) return false;
-      const values = resolvePhoto(entry).groupValues;
-      return path.every((p) => values[p.dimension] === p.value);
-    };
-    // A placeholder entry (any collapsed section, not just this one) has
-    // no real photo id — resolvePhoto(entry).id would be its synthetic
-    // "collapsed:..." key, which the server can't seek on — so the
-    // fallback search must skip every placeholder, not just ones inside
-    // the path currently being toggled.
-    const usableFocus = (entry) => entry && entry.kind !== "placeholder" && !insidePath(entry);
-    let focusEntry = displayEntries[selected];
-    if (collapsing && insidePath(focusEntry)) {
-      focusEntry =
-        displayEntries.slice(selected).find(usableFocus) ??
-        [...displayEntries.slice(0, selected)].reverse().find(usableFocus) ??
-        null;
-    }
-    const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
+    const focusId = safeFocusId(selected, collapsing ? path : null);
     error = "";
     status = "loading…";
     const epoch = ++feedEpoch;
@@ -1114,8 +1123,7 @@
    * intermediate photos client-side — a folder in this library can hold
    * 10,000+ photos between here and the boundary. */
   async function jumpGroupBoundary(direction) {
-    const focusEntry = displayEntries[selected];
-    const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
+    const focusId = safeFocusId(selected);
     if (focusId == null) return;
     let boundary;
     try {
