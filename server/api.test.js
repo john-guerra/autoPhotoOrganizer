@@ -164,6 +164,23 @@ describe("GET /api/thumb/:id", () => {
   });
 });
 
+describe("GET /api/preview/:id", () => {
+  it("404s for an unknown id", async () => {
+    const res = await fetch(`${srv.base}/api/preview/999999`);
+    expect(res.status).toBe(404);
+  });
+
+  it("404s when the photo has no embedded EXIF thumbnail", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
+    // The fixtures under photosDir are synthetically created (no EXIF
+    // segment) — see NodeProcessingService.test.js's own note on why a
+    // genuine embedded-thumbnail extraction isn't unit-tested here.
+    const res = await fetch(`${srv.base}/api/preview/${id}`);
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("GET /api/image/:id", () => {
   it("streams the original bytes", async () => {
     const scanBody = await scan(srv.base, photosDir);

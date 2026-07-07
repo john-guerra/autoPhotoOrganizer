@@ -160,6 +160,24 @@ export function registerApi(app) {
     }
   });
 
+  // --- Embedded preview (fast tier) ----------------------------------------
+  app.get("/api/preview/:id", async (req, res) => {
+    const db = getDb();
+    const it = getPhotoById(db, Number(req.params.id));
+    if (!it) return res.status(404).end();
+
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
+    res.type("image/jpeg");
+
+    try {
+      const preview = await processing.extractPreview(it.path);
+      if (!preview) return res.status(404).end();
+      res.send(preview.data);
+    } catch (err) {
+      res.status(500).json({ error: `preview failed: ${err.message}` });
+    }
+  });
+
   // --- Full image (loupe) -------------------------------------------------
   app.get("/api/image/:id", async (req, res) => {
     const db = getDb();
