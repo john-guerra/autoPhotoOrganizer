@@ -261,7 +261,7 @@
       // reflects the assignment above after the next microtask flush.
       await tick();
       const focusIndex = focusId
-        ? displayEntries.findIndex((e) => resolvePhoto(e).id === focusId)
+        ? findEntryIndexForId(displayEntries, focusId)
         : -1;
       // No nextSelectable() needed here: fetchFeed above is never called
       // with a `collapsed` list (it defaults to `[]` in both api.js and the
@@ -343,6 +343,21 @@
 
   function pathKey(path) {
     return path.map((p) => `${p.dimension}=${p.value}`).join(">");
+  }
+
+  /** Finds the displayEntries index whose entry represents photo `id` —
+   * either directly (a plain photo entry, or a stack entry whose cover IS
+   * id), or as a collapsed stack's non-cover member. resolvePhoto(entry)
+   * only ever returns a stack's cover photo, so `resolvePhoto(e).id ===
+   * id` alone can never match a member id that isn't the cover — a
+   * server-resolved focusId/targetId lands on whichever raw photo the
+   * seek found, with no awareness of this client-side burst grouping, so
+   * it can legitimately be a hidden member. Landing on that member's
+   * stack (showing its cover) is the correct behavior, not a fallback. */
+  function findEntryIndexForId(entries, id) {
+    return entries.findIndex((e) =>
+      e.kind === "stack" ? e.stack.memberIds.includes(id) : resolvePhoto(e).id === id
+    );
   }
 
   /** Keeps the first occurrence of each id, dropping later repeats. Guards
@@ -443,9 +458,7 @@
       hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
       hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
       await tick();
-      const focusIndex = focusId
-        ? displayEntries.findIndex((e) => resolvePhoto(e).id === focusId)
-        : -1;
+      const focusIndex = focusId ? findEntryIndexForId(displayEntries, focusId) : -1;
       selected =
         focusIndex !== -1 ? focusIndex : (nextSelectable(displayEntries, 0, 1) ?? 0);
       focusPending = true;
@@ -463,12 +476,30 @@
   /** Scroll so this section's header lands at its stuck (sticky) position
    * at the top of the scroll container — accounting for any shallower
    * headers stacked above it, matching the CSS `top` offset used for
-   * depth stacking. */
+   * depth stacking. Returns a promise that resolves once the (smooth,
+   * animated) scroll has genuinely settled — a defensive extension of
+   * loadMore's concurrency guard through the whole animation, not just
+   * the synchronous scrollTo() call, for callers that just replaced the
+   * whole feed window (the real fix for the cascade this class of bug
+   * caused live is in loadMore itself — see its own comment — but there's
+   * no reason to leave a second, related gap open here too). Falls back
+   * to a bounded timeout in case scrollend never fires (e.g. the target
+   * already matches the current position, or some interruption) so this
+   * can never leave the guard stuck permanently. */
   function scrollToSection(pos) {
-    if (!gridEl || !mainColumnEl) return;
+    if (!gridEl || !mainColumnEl) return Promise.resolve();
     const gridTop = gridEl.getBoundingClientRect().top + mainColumnEl.scrollTop;
-    const target = gridTop + pos.y - pos.depth * HEADER_HEIGHT + PAD;
-    mainColumnEl.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+    const target = Math.max(0, gridTop + pos.y - pos.depth * HEADER_HEIGHT + PAD);
+    if (Math.abs(mainColumnEl.scrollTop - target) < 1) return Promise.resolve();
+    mainColumnEl.scrollTo({ top: target, behavior: "smooth" });
+    return new Promise((resolve) => {
+      const done = () => {
+        mainColumnEl.removeEventListener("scrollend", done);
+        resolve();
+      };
+      mainColumnEl.addEventListener("scrollend", done, { once: true });
+      setTimeout(done, 1000);
+    });
   }
 
   async function loadMore(direction) {
@@ -521,6 +552,27 @@
           ? gridEl.getBoundingClientRect().height
           : 0;
         mainColumnEl.scrollBy(0, gridHeightAfter - gridHeightBefore);
+        // scrollBy's own scroll event re-triggers updateVisibleRange,
+        // which can call loadMore("before") again. Releasing
+        // fetchingBefore in `finally` right after the synchronous
+        // scrollBy() call (the old behavior) let that re-triggered call
+        // start concurrently with this one's still-settling DOM state —
+        // two overlapping calls independently reading gridEl's height
+        // for their own before/after compensation, racing each other.
+        // Confirmed live: this produced 690 overlapping updateVisibleRange
+        // calls in ~5 seconds and a real 23+ request chain walking
+        // backward through the entire library after a single jump.
+        // Awaiting one frame here doesn't block the re-trigger outright
+        // (a re-triggered loadMore("before") can still start once this
+        // await resolves) — what it does is keep this call's own guard
+        // held until its scroll compensation has had a frame to actually
+        // land, so a re-triggered call's measurements are no longer
+        // racing this one's mid-flight DOM writes. Confirmed live this
+        // is sufficient in practice: the same jump that produced the
+        // 690-call cascade now produces exactly the expected handful of
+        // requests, with no further loadMore calls once hasMoreBefore's
+        // normal termination is reached.
+        await new Promise(requestAnimationFrame);
       }
     } catch (e) {
       error = e.message;
@@ -1171,6 +1223,14 @@
         after: PAGE_SIZE / 2,
       });
       if (epoch !== feedEpoch) return;
+      // A jump can land anywhere in the library, arbitrarily far from
+      // wherever the user was scrolled to before — reset scrollTop to 0
+      // *before* items/boxes update, so the reactive updateVisibleRange
+      // (which fires as soon as boxes recomputes, before scrollToSection
+      // below ever runs) reads a scroll position that actually matches
+      // the new, much shorter document, rather than the OLD, deep-scrolled
+      // offset against a document that's now far shorter.
+      if (mainColumnEl) mainColumnEl.scrollTop = 0;
       // See dedupeById's comment: these two independent seeks can return
       // overlapping rows once a collapsed-path exclusion is active.
       items = dedupeById([
@@ -1181,9 +1241,14 @@
       hasMoreBefore = beforePage.length >= PAGE_SIZE / 2;
       hasMoreAfter = afterPage.length >= PAGE_SIZE / 2;
       await tick();
-      const targetIndex = displayEntries.findIndex(
-        (en) => resolvePhoto(en).id === targetId
-      );
+      // findEntryIndexForId, not a plain resolvePhoto(en).id === targetId
+      // search: targetId is a server-resolved photo id with no awareness
+      // of client-side burst grouping, so it can legitimately be a
+      // non-cover member of a collapsed stack — resolvePhoto only ever
+      // returns a stack's cover, so a bare equality search would silently
+      // miss it and fall through to index 0, landing on an unrelated
+      // photo instead of the jump target.
+      const targetIndex = findEntryIndexForId(displayEntries, targetId);
       const t =
         targetIndex !== -1
           ? nextSelectable(displayEntries, targetIndex, 1)
@@ -1195,7 +1260,7 @@
       const targetHeader = layoutResult?.headers.find(
         (h) => h.index === selected
       );
-      if (targetHeader) scrollToSection(targetHeader);
+      if (targetHeader) await scrollToSection(targetHeader);
     } catch (err) {
       error = err.message;
       status = "";
