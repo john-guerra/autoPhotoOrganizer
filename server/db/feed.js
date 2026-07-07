@@ -25,7 +25,7 @@ export const DIMENSIONS = {
 };
 
 /** @param {string[]} groupBy @returns {Array<{name:string, expr:string, direction:string}>} */
-function resolveDimensions(groupBy) {
+export function resolveDimensions(groupBy) {
   return groupBy.map((name) => {
     const dim = DIMENSIONS[name];
     if (!dim) throw new Error(`unknown dimension: ${name}`);
