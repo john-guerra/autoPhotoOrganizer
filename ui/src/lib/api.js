@@ -85,13 +85,14 @@ export async function fetchLibrary() {
 }
 
 /**
- * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId?: number|null, before?: number, after?: number}} opts
- * @returns {Promise<{items: object[], sections: Array<{path: Array<{dimension:string,value:string}>, count: number}>, focusItem: object|null}>}
+ * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId?: number|null, startPath?: Array<{dimension:string,value:string}>|null, before?: number, after?: number}} opts
+ * @returns {Promise<{items: object[], focusItem: object|null}>}
  */
 export async function fetchFeed({
   groupBy,
   collapsed = [],
   focusId = null,
+  startPath = null,
   before = 0,
   after = 50,
 }) {
@@ -101,11 +102,29 @@ export async function fetchFeed({
     after: String(after),
   });
   if (focusId != null) params.set("focusId", String(focusId));
+  if (startPath && startPath.length) {
+    params.set("startPath", JSON.stringify(startPath));
+  }
   if (collapsed.length) params.set("collapsed", JSON.stringify(collapsed));
   const res = await fetch(`/api/feed?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `feed failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * @param {{groupBy: string[], path?: Array<{dimension:string,value:string}>}} opts
+ * @returns {Promise<{total:number, nodes: Array<{value:string,label:string,count:number,hasChildren:boolean}>}>}
+ */
+export async function fetchTreeNode({ groupBy, path = [] }) {
+  const params = new URLSearchParams({ groupBy: groupBy.join(",") });
+  if (path.length) params.set("path", JSON.stringify(path));
+  const res = await fetch(`/api/tree?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `tree failed (${res.status})`);
   }
   return res.json();
 }
