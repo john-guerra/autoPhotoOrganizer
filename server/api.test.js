@@ -291,6 +291,29 @@ describe("GET /api/library", () => {
     expect(entry).toBeDefined();
     expect(entry.mounted).toBe(false);
   });
+
+  it("stays fast when many folders share one volume (dedupes diskutil calls per volume)", async () => {
+    const db = getDb();
+    const volumeId = db
+      .prepare(
+        `INSERT INTO volumes (label, uuid, last_mount_path, last_seen_at)
+         VALUES ('shared-volume', 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE', '/Volumes/SharedTestVolume', ?)`
+      )
+      .run(Date.now()).lastInsertRowid;
+    const insertFolder = db.prepare(
+      `INSERT INTO folders (abs_path, last_scanned_at, volume_id) VALUES (?, ?, ?)
+       ON CONFLICT(abs_path) DO NOTHING`
+    );
+    for (let i = 0; i < 5; i++) {
+      insertFolder.run(join(photosDir, `shared-volume-folder-${i}`), Date.now(), volumeId);
+    }
+
+    const start = Date.now();
+    const res = await fetch(`${srv.base}/api/library`);
+    const elapsedMs = Date.now() - start;
+    expect(res.status).toBe(200);
+    expect(elapsedMs).toBeLessThan(2000);
+  });
 });
 
 describe("GET /api/feed", () => {

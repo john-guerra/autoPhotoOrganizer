@@ -214,18 +214,28 @@ export function registerApi(app) {
          ORDER BY folders.last_scanned_at DESC`
       )
       .all();
-    const entries = rows.map((r) => ({
-      path: r.path,
-      name: basename(r.path),
-      lastScannedAt: r.lastScannedAt,
-      mounted:
-        (r.volumeUuid
-          ? isVolumeMounted({
-              uuid: r.volumeUuid,
-              last_mount_path: r.volumeMountPath,
-            })
-          : true) && existsSync(r.path),
-    }));
+    // isVolumeMounted shells out to `diskutil info` synchronously; memoize per
+    // volume so N folders on the same volume cost one subprocess, not N.
+    const mountedByVolumeKey = new Map();
+    const entries = rows.map((r) => {
+      const volumeKey = r.volumeUuid ?? r.volumeMountPath ?? null;
+      let volumeMounted = true;
+      if (volumeKey !== null) {
+        if (!mountedByVolumeKey.has(volumeKey)) {
+          mountedByVolumeKey.set(
+            volumeKey,
+            isVolumeMounted({ uuid: r.volumeUuid, last_mount_path: r.volumeMountPath })
+          );
+        }
+        volumeMounted = mountedByVolumeKey.get(volumeKey);
+      }
+      return {
+        path: r.path,
+        name: basename(r.path),
+        lastScannedAt: r.lastScannedAt,
+        mounted: volumeMounted && existsSync(r.path),
+      };
+    });
     res.json(entries);
   });
 
