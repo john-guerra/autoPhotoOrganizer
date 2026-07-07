@@ -176,6 +176,14 @@
     thumbStatus = new Map();
     thumbStatusTick++;
     const epoch = ++feedEpoch;
+    // Block loadMore (scroll-triggered) from firing while this operation
+    // replaces the whole `items` window — otherwise a concurrent loadMore
+    // started against the OLD window can resolve after this one finishes
+    // and splice its (now-stale) page into the NEW items, producing
+    // duplicate rows and duplicate Svelte keys (`{#each}` then throws and
+    // the grid stops updating, which reads as the UI "freezing").
+    fetchingBefore = true;
+    fetchingAfter = true;
     try {
       const { items: page } = await fetchFeed({
         groupBy,
@@ -208,6 +216,9 @@
     } catch (e) {
       error = e.message;
       status = "";
+    } finally {
+      fetchingBefore = false;
+      fetchingAfter = false;
     }
   }
 
@@ -222,6 +233,10 @@
     error = "";
     status = "loading…";
     const epoch = ++feedEpoch;
+    // See loadInitialFeed's comment: blocks a concurrent scroll-triggered
+    // loadMore from splicing a stale page into the window this replaces.
+    fetchingBefore = true;
+    fetchingAfter = true;
     try {
       const { items: beforePage } = focusId
         ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0 })
@@ -234,7 +249,7 @@
       });
       if (epoch !== feedEpoch) return;
       const combined = focusId
-        ? [...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage]
+        ? dedupeById([...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage])
         : afterPage;
       items = combined;
       hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
@@ -259,6 +274,9 @@
     } catch (e) {
       error = e.message;
       status = "";
+    } finally {
+      fetchingBefore = false;
+      fetchingAfter = false;
     }
   }
 
@@ -270,6 +288,10 @@
     error = "";
     status = "loading…";
     const epoch = ++feedEpoch;
+    // See loadInitialFeed's comment: blocks a concurrent scroll-triggered
+    // loadMore from splicing a stale page into the window this replaces.
+    fetchingBefore = true;
+    fetchingAfter = true;
     try {
       const { items: page } = await fetchFeed({
         groupBy,
@@ -298,6 +320,9 @@
     } catch (e) {
       error = e.message;
       status = "";
+    } finally {
+      fetchingBefore = false;
+      fetchingAfter = false;
     }
   }
 
@@ -318,6 +343,24 @@
 
   function pathKey(path) {
     return path.map((p) => `${p.dimension}=${p.value}`).join(">");
+  }
+
+  /** Keeps the first occurrence of each id, dropping later repeats. Guards
+   * against a real, observed case: fetching "before" and "after" a focusId
+   * as two independent seeks (used when re-centering on a known photo —
+   * toggleSectionCollapse, onGroupByChange) can return overlapping rows
+   * once a collapsed-path exclusion is active, producing duplicate ids in
+   * the raw concatenation — which Svelte's keyed {#each} then throws on,
+   * stopping the grid from updating further (reads as the UI "freezing").
+   * loadInitialFeed/jumpToPath don't need this: they merge into an
+   * existing window via mergeFeedPage, which already dedupes by id. */
+  function dedupeById(arr) {
+    const seen = new Set();
+    return arr.filter((it) => {
+      if (seen.has(it.id)) return false;
+      seen.add(it.id);
+      return true;
+    });
   }
 
   /** Toggle a section's collapsed state and re-center the feed on whatever
@@ -358,6 +401,13 @@
     error = "";
     status = "loading…";
     const epoch = ++feedEpoch;
+    // See loadInitialFeed's comment: blocks a concurrent scroll-triggered
+    // loadMore from splicing a stale page into the window this replaces —
+    // collapsing a large section can shrink the rendered grid enough that
+    // the current scroll position crosses loadMore's own auto-fetch
+    // threshold, firing it while this function's own fetch is in flight.
+    fetchingBefore = true;
+    fetchingAfter = true;
     try {
       const { items: beforePage } = focusId
         ? await fetchFeed({
@@ -377,7 +427,7 @@
       });
       if (epoch !== feedEpoch) return;
       const combined = focusId
-        ? [...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage]
+        ? dedupeById([...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage])
         : afterPage;
       items = combined;
       hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
@@ -394,6 +444,9 @@
     } catch (e) {
       error = e.message;
       status = "";
+    } finally {
+      fetchingBefore = false;
+      fetchingAfter = false;
     }
   }
 
