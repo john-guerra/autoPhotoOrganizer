@@ -101,4 +101,60 @@ describe("sectionedJustifiedLayout", () => {
     expect(year2020.endY).toBe(year2019.y);
     expect(year2019.endY).toBe(totalHeight);
   });
+
+  it("reserves a band for a placeholder, excludes it from photo packing, and keeps boxes index-aligned with items", () => {
+    const its = [
+      ...items(4),
+      { id: "ph-1", placeholder: true },
+      ...items(4).map((it) => ({ ...it, id: it.id + 100 })),
+    ];
+    const { boxes, totalHeight } = sectionedJustifiedLayout(its, [], {
+      ...opts,
+      headerHeight,
+      placeholderHeight: 40,
+    });
+    expect(boxes).toHaveLength(its.length); // one box per item, including the placeholder
+    const placeholderBox = boxes[4];
+    expect(placeholderBox).toEqual({
+      id: "ph-1",
+      x: 0,
+      y: expect.any(Number),
+      width: opts.containerWidth,
+      height: 40,
+      placeholder: true,
+    });
+    const before = boxes.slice(0, 4);
+    const after = boxes.slice(5);
+    expect(before.every((b) => !b.placeholder)).toBe(true);
+    expect(after.every((b) => !b.placeholder)).toBe(true);
+    const maxBeforeY = Math.max(...before.map((b) => b.y));
+    const minAfterY = Math.min(...after.map((b) => b.y));
+    expect(placeholderBox.y).toBeGreaterThanOrEqual(maxBeforeY);
+    expect(placeholderBox.y + placeholderBox.height).toBeLessThanOrEqual(
+      minAfterY
+    );
+    expect(totalHeight).toBeGreaterThan(
+      placeholderBox.y + placeholderBox.height
+    );
+  });
+
+  it("combines a placeholder with a header at the same index without conflict", () => {
+    const its = [
+      ...items(3),
+      { id: "ph-1", placeholder: true },
+      ...items(3).map((it) => ({ ...it, id: it.id + 100 })),
+    ];
+    const headersIn = [
+      { index: 3, depth: 0, dimension: "year", value: "2019", label: "2019" },
+    ];
+    const { boxes, headers } = sectionedJustifiedLayout(its, headersIn, {
+      ...opts,
+      headerHeight,
+      placeholderHeight: 40,
+    });
+    expect(boxes).toHaveLength(its.length);
+    expect(boxes[3].placeholder).toBe(true);
+    expect(headers).toHaveLength(1);
+    expect(boxes[3].y).toBeGreaterThanOrEqual(headers[0].y + headerHeight);
+  });
 });
