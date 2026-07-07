@@ -100,6 +100,20 @@ describe("getFeedPage — composite ordering", () => {
   });
 });
 
+describe("getFeedPage — kind", () => {
+  it("includes each item's kind (image vs raw)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/mixed", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.cr2", size: 1, mtimeMs: 1, kind: "raw" },
+    ]);
+    const { items } = getFeedPage(db, { groupBy: ["folder"], after: 10 });
+    const byName = Object.fromEntries(items.map((i) => [i.name, i.kind]));
+    expect(byName).toEqual({ "a.jpg": "image", "b.cr2": "raw" });
+  });
+});
+
 describe("getFeedPage — collapse-exclusion", () => {
   it("excludes photos whose prefix matches a collapsed path", () => {
     const db = getDb();

@@ -149,6 +149,7 @@ function rowToItem(r, dims) {
     width: r.width,
     height: r.height,
     takenAt: r.taken_at ? new Date(r.taken_at).toISOString() : null,
+    kind: r.kind,
     groupValues,
   };
 }
@@ -333,7 +334,7 @@ export function getFeedPage(
         `SELECT photos.id, photos.filename AS name, photos.size,
                 photos.mtime AS mtimeMs, photos.rating,
                 photos.preferred_cover AS preferredCover,
-                photos.width, photos.height, photos.taken_at,
+                photos.width, photos.height, photos.taken_at, photos.kind,
                 ${selectDimCols}
          FROM photos JOIN folders ON folders.id = photos.folder_id
          WHERE photos.id = ?`
@@ -377,7 +378,7 @@ export function getFeedPage(
         `SELECT photos.id, photos.filename AS name, photos.size,
                 photos.mtime AS mtimeMs, photos.rating,
                 photos.preferred_cover AS preferredCover,
-                photos.width, photos.height, photos.taken_at,
+                photos.width, photos.height, photos.taken_at, photos.kind,
                 ${selectDimCols}
          FROM photos
          JOIN folders ON folders.id = photos.folder_id
