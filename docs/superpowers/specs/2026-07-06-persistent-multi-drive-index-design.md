@@ -80,6 +80,8 @@ CREATE TABLE photos (
   camera TEXT,
   kind TEXT NOT NULL,        -- 'image' | 'raw' | 'video'
   perceptual_hash TEXT,      -- reserved; populated by the follow-up dedup spec
+  rating INTEGER NOT NULL DEFAULT 0,       -- 0-5, retires ratings.js/ratings.json
+  preferred_cover INTEGER NOT NULL DEFAULT 0, -- retires coverChoices.js/.json
   stale INTEGER NOT NULL DEFAULT 0,  -- 1 = not seen in the most recent scan
   UNIQUE(folder_id, filename)
 );
@@ -168,9 +170,17 @@ app falls back to today's path-existence check.
    volumes as last-known-cached. This is what actually backs a cross-drive
    feed, rather than only ever knowing about the last-scanned folder.
 3. **One-time migration**, run on first startup against the new DB: import
-   `ratings.json`, `coverChoices.json`, `library.json`, and `metacache.json`
-   into the new tables, matched by absolute path. Guarded so it only runs
-   once (skipped once `photos` is non-empty).
+   `ratings.json` (→ `photos.rating`), `coverChoices.json` (→
+   `photos.preferred_cover`), `library.json` (→ `folders`/`volumes`), and
+   `metacache.json` (→ `photos.taken_at`/`width`/`height`) into the new
+   tables, matched by absolute path. Guarded so it only runs once (skipped
+   once `photos` is non-empty). `ratings.js`, `coverChoices.js`, and
+   `metaCache.js` are retired by this plan — their JSON files are read once
+   by the migration and not written again; `GET/POST /api/rating` and
+   `GET/POST /api/cover` become DB reads/writes against the `photos` row
+   instead. This also fixes a real fragility in the JSON stores: a
+   path-keyed rating breaks on file rename/move, whereas the DB row (keyed
+   by stable id, later re-linkable via `content_hash`) does not.
 
 ## Error handling / edge cases
 
@@ -220,9 +230,9 @@ vitest, colocated `*.test.js`, following the existing pattern
 - Backup-coverage query: synthetic photos sharing a `content_hash` across
   two `volume_id`s are correctly identified as backed up; one without a
   match is not.
-- JSON→DB migration: fixture-shaped `ratings.json`/`library.json`/
-  `metacache.json` import correctly and the migration guard prevents a
-  second import.
+- JSON→DB migration: fixture-shaped `ratings.json`/`coverChoices.json`/
+  `library.json`/`metacache.json` import correctly and the migration guard
+  prevents a second import.
 
 All fixtures are synthetic, created per-test — never the real read-only test
 folders in `docs/TEST_FOLDERS.local.md`.
