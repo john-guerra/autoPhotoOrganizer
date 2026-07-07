@@ -81,7 +81,7 @@ export function suppressPlaceholderHeaders(headers, displayEntries) {
   return headers.filter((h) => {
     const entry = displayEntries[h.index];
     if (entry?.kind !== "placeholder") return true;
-    return h.depth < entry.item.path.length;
+    return h.depth < entry.item.path.length - 1;
   });
 }
 

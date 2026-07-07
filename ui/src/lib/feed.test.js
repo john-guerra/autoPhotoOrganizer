@@ -97,8 +97,11 @@ describe("suppressPlaceholderHeaders", () => {
     {
       kind: "placeholder",
       item: {
-        id: "collapsed:year=2019",
-        path: [{ dimension: "year", value: "2019" }],
+        id: "collapsed:folder=/a>year=2019",
+        path: [
+          { dimension: "folder", value: "/a" },
+          { dimension: "year", value: "2019" },
+        ],
       },
     },
     { kind: "photo", item: { id: 2 } },
