@@ -277,7 +277,12 @@ describe("GET /api/library", () => {
   it("reports a deleted internal-disk folder as not mounted after a real scan", async () => {
     const removedDir = await mkdtemp(join(tmpdir(), "ag-removed-"));
     await sharp({
-      create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } },
+      create: {
+        width: 8,
+        height: 8,
+        channels: 3,
+        background: { r: 1, g: 2, b: 3 },
+      },
     })
       .jpeg()
       .toFile(join(removedDir, "img.jpg"));
@@ -304,15 +309,47 @@ describe("GET /api/library", () => {
       `INSERT INTO folders (abs_path, last_scanned_at, volume_id) VALUES (?, ?, ?)
        ON CONFLICT(abs_path) DO NOTHING`
     );
-    for (let i = 0; i < 5; i++) {
-      insertFolder.run(join(photosDir, `shared-volume-folder-${i}`), Date.now(), volumeId);
-    }
+    const insertManyFolders = db.transaction((count) => {
+      for (let i = 0; i < count; i++) {
+        insertFolder.run(
+          join(photosDir, `shared-volume-folder-${i}`),
+          Date.now(),
+          volumeId
+        );
+      }
+    });
+    // 300 folders on one volume: at ~15-25ms/diskutil call on this machine, the
+    // buggy (per-folder) path takes several seconds while the deduped (one
+    // call per volume) path stays under ~100ms — a wide, non-flaky margin.
+    insertManyFolders(300);
 
     const start = Date.now();
     const res = await fetch(`${srv.base}/api/library`);
     const elapsedMs = Date.now() - start;
     expect(res.status).toBe(200);
-    expect(elapsedMs).toBeLessThan(2000);
+    expect(elapsedMs).toBeLessThan(500);
+  });
+
+  it("reports a folder as not mounted when its no-uuid volume's mount path is gone", async () => {
+    const db = getDb();
+    const missingMountPath = join(photosDir, "no-uuid-volume-does-not-exist");
+    const volumeId = db
+      .prepare(
+        `INSERT INTO volumes (label, uuid, last_mount_path, last_seen_at)
+         VALUES ('no-uuid-volume', NULL, ?, ?)`
+      )
+      .run(missingMountPath, Date.now()).lastInsertRowid;
+    const folderPath = join(photosDir, "no-uuid-volume-folder");
+    db.prepare(
+      `INSERT INTO folders (abs_path, last_scanned_at, volume_id) VALUES (?, ?, ?)
+       ON CONFLICT(abs_path) DO NOTHING`
+    ).run(folderPath, Date.now(), volumeId);
+
+    const res = await fetch(`${srv.base}/api/library`);
+    const entries = await res.json();
+    const entry = entries.find((e) => e.path === folderPath);
+    expect(entry).toBeDefined();
+    expect(entry.mounted).toBe(false);
   });
 });
 

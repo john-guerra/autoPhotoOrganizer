@@ -224,7 +224,10 @@ export function registerApi(app) {
         if (!mountedByVolumeKey.has(volumeKey)) {
           mountedByVolumeKey.set(
             volumeKey,
-            isVolumeMounted({ uuid: r.volumeUuid, last_mount_path: r.volumeMountPath })
+            isVolumeMounted({
+              uuid: r.volumeUuid,
+              last_mount_path: r.volumeMountPath,
+            })
           );
         }
         volumeMounted = mountedByVolumeKey.get(volumeKey);
