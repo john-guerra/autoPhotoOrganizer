@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, _resetDbForTest } from "./db/connection.js";
@@ -60,6 +60,28 @@ describe("migrateLegacyJsonIfNeeded", () => {
       height: 32,
     });
     expect(row.taken_at).toBe(Date.parse("2020-01-01T00:00:00.000Z"));
+  });
+
+  it("preserves lastScannedAt from library.json even when folder is referenced by ratings", async () => {
+    const photoPath = "/photos/trip/b.jpg";
+    const libraryTimestamp = 1234567890;
+    await writeFile(
+      join(cacheDir, "library.json"),
+      JSON.stringify({ "/photos/trip": { name: "trip", lastScannedAt: libraryTimestamp } })
+    );
+    await writeFile(
+      join(cacheDir, "ratings.json"),
+      JSON.stringify({ [photoPath]: 3 })
+    );
+
+    const result = migrateLegacyJsonIfNeeded(getDb());
+    expect(result.migrated).toBe(true);
+
+    const db = getDb();
+    const folder = db
+      .prepare(`SELECT last_scanned_at FROM folders WHERE abs_path = ?`)
+      .get("/photos/trip");
+    expect(folder.last_scanned_at).toBe(libraryTimestamp);
   });
 
   it("is a no-op when photos already exist", async () => {

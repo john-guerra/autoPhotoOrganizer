@@ -36,8 +36,13 @@ export function migrateLegacyJsonIfNeeded(db) {
     `INSERT INTO folders (abs_path, last_scanned_at) VALUES (?, ?)
      ON CONFLICT(abs_path) DO UPDATE SET last_scanned_at = excluded.last_scanned_at`
   );
+  const folderIdByPath = new Map();
   for (const [absPath, entry] of Object.entries(library)) {
     upsertFolder.run(absPath, entry.lastScannedAt ?? Date.now());
+    const id = db
+      .prepare(`SELECT id FROM folders WHERE abs_path = ?`)
+      .get(absPath).id;
+    folderIdByPath.set(absPath, id);
   }
 
   const upsertPhotoStub = db.prepare(`
@@ -45,7 +50,6 @@ export function migrateLegacyJsonIfNeeded(db) {
     VALUES (@folderId, @filename, 0, 0, 'image', 0)
     ON CONFLICT(folder_id, filename) DO NOTHING
   `);
-  const folderIdByPath = new Map();
 
   function folderIdFor(folderPath) {
     if (folderIdByPath.has(folderPath)) return folderIdByPath.get(folderPath);
