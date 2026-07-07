@@ -25,7 +25,9 @@
     "electron-updater": "^6.3.0",
     "exifr": "^7.1.3",
     "express": "^4.19.2",
-    "sharp": "^0.35.3"
+    "multi-auto-select": "^0.0.11",
+    "sharp": "^0.35.3",
+    "sortablejs": "^1.15.7"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^3.1.2",

@@ -8,7 +8,7 @@
     entryDomId,
     resolvePhoto,
   } from "./lib/displayEntries.js";
-  import { mergeFeedPage } from "./lib/feed.js";
+  import { mergeFeedPage, deriveSectionHeaders } from "./lib/feed.js";
   import {
     fetchFeed,
     setRating as apiSetRating,
@@ -19,6 +19,7 @@
   } from "./lib/api.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
+  import MultiAutoSelect from "multi-auto-select";
 
   const LS_KEY = "autogallery.lastDir";
   const LS_ZOOM = "autogallery.zoom";
@@ -58,8 +59,40 @@
       (b) => b >= Math.ceil(rowHeight * (window.devicePixelRatio || 1))
     ) ?? 1024;
 
+  /** Svelte action: mounts the real MultiAutoSelect DOM widget into the
+   * node, keeps it in sync with `groupBy` via the `value` param, and
+   * calls `onGroupByChange` when the user reorders/adds/removes a pill. */
+  function groupBySelector(node, initialValue) {
+    const widget = MultiAutoSelect(ALL_DIMENSIONS, {
+      value: initialValue,
+      placeholder: "Add a grouping level…",
+      sortable: true,
+    });
+    widget.addEventListener("input", () => onGroupByChange(widget.value));
+    node.appendChild(widget);
+    return {
+      destroy() {
+        widget.remove();
+      },
+    };
+  }
+
   let dir = localStorage.getItem(LS_KEY) || "";
-  const groupBy = ["folder"]; // hardcoded here; Task 7 makes this user-configurable
+  const LS_GROUP_BY = "autogallery.groupBy";
+  const ALL_DIMENSIONS = ["folder", "year", "month", "day"];
+  let groupBy = (() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(LS_GROUP_BY) ?? "null");
+      if (Array.isArray(stored) && stored.every((d) => ALL_DIMENSIONS.includes(d))) {
+        return stored;
+      }
+    } catch {
+      /* fall through to default */
+    }
+    return ["folder"];
+  })();
+  $: localStorage.setItem(LS_GROUP_BY, JSON.stringify(groupBy));
+  let collapsedPaths = []; // Array<Array<{dimension,value}>>, reset on hierarchy change
   let items = []; // the currently-loaded feed window, ordered
   let hasMoreBefore = false;
   let hasMoreAfter = true;
@@ -132,7 +165,11 @@
     thumbStatusTick++;
     const epoch = ++feedEpoch;
     try {
-      const { items: page } = await fetchFeed({ groupBy, after: PAGE_SIZE });
+      const { items: page } = await fetchFeed({
+        groupBy,
+        collapsed: collapsedPaths,
+        after: PAGE_SIZE,
+      });
       if (epoch !== feedEpoch) return;
       const merged = mergeFeedPage(
         { items: [], hasMoreBefore: false, hasMoreAfter: true },
@@ -158,6 +195,70 @@
     }
   }
 
+  /** Rebuild the feed for a new grouping order, re-centering on whatever
+   * photo is currently selected so the user doesn't lose their place —
+   * falls back to the start of the feed if nothing resolves. */
+  async function onGroupByChange(newGroupBy) {
+    groupBy = newGroupBy;
+    collapsedPaths = [];
+    const focusEntry = displayEntries[selected];
+    const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
+    error = "";
+    status = "loading…";
+    const epoch = ++feedEpoch;
+    try {
+      const { items: beforePage } = focusId
+        ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0 })
+        : { items: [] };
+      const { items: afterPage } = await fetchFeed({
+        groupBy,
+        focusId,
+        before: 0,
+        after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
+      });
+      if (epoch !== feedEpoch) return;
+      const combined = focusId
+        ? [...beforePage, ...(await getFocusRow(focusId)), ...afterPage]
+        : afterPage;
+      items = combined;
+      hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
+      hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
+      selected = focusId ? beforePage.length : 0;
+      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+      enrichMeta(items.map((i) => i.id));
+    } catch (e) {
+      error = e.message;
+      status = "";
+    }
+  }
+
+  /** The focus photo itself isn't returned by either before/after fetch
+   * (both are strictly-after/strictly-before), so fetch it directly by
+   * id via /api/meta's sibling lookup — reuse fetchFeed with before=1,
+   * after=0 centered one id past it is overkill; simplest is: it's
+   * already in `items` from before the hierarchy change, so just find it. */
+  async function getFocusRow(focusId) {
+    const existing = items.find((i) => i.id === focusId);
+    return existing ? [existing] : [];
+  }
+
+  function pathKey(path) {
+    return path.map((p) => `${p.dimension}=${p.value}`).join(">");
+  }
+
+  /** Toggle whether the section identified by `path` (an ordered prefix of
+   * `groupBy`) is collapsed. Collapsing removes its photos from `items`
+   * (they were fetched already) and refetches — a subsequent scroll won't
+   * re-request them, since the server excludes the collapsed path. */
+  async function toggleSectionCollapse(path) {
+    const key = pathKey(path);
+    const already = collapsedPaths.some((p) => pathKey(p) === key);
+    collapsedPaths = already
+      ? collapsedPaths.filter((p) => pathKey(p) !== key)
+      : [...collapsedPaths, path];
+    await loadInitialFeed();
+  }
+
   async function loadMore(direction) {
     if (direction === "after") {
       if (fetchingAfter || !hasMoreAfter || !items.length) return;
@@ -177,6 +278,7 @@
     try {
       const { items: page } = await fetchFeed({
         groupBy,
+        collapsed: collapsedPaths,
         focusId,
         before: direction === "before" ? PAGE_SIZE : 0,
         after: direction === "after" ? PAGE_SIZE : 0,
@@ -302,6 +404,23 @@
   $: stacks = detectBursts(items, { gapMs: burstGapMs });
   $: displayEntries = buildDisplayEntries(items, stacks, expandedStackIds);
   $: resolvedPhotos = displayEntries.map(resolvePhoto); // passed to Loupe
+  // deriveSectionHeaders' `index` must land in the same index space as the
+  // `{#each visibleItems}` loop below, which walks `displayEntries` (via
+  // buildVisibleItems) — not raw `items`. A collapsed burst stack folds
+  // several `items` rows into a single display entry, so indexing against
+  // `items` directly would drift out of sync with every entry downstream of
+  // any collapsed stack. `resolvedPhotos` is already displayEntries' 1:1
+  // photo-per-entry projection (see the Loupe usage above), so it's the
+  // correct input here.
+  $: sectionHeaders = deriveSectionHeaders(resolvedPhotos, groupBy);
+  $: sectionHeadersByIndex = (() => {
+    const map = new Map();
+    for (const h of sectionHeaders) {
+      if (!map.has(h.index)) map.set(h.index, []);
+      map.get(h.index).push(h);
+    }
+    return map;
+  })();
   $: boxes =
     displayEntries.length && gridWidth > 2 * PAD
       ? justifiedLayout(
@@ -656,6 +775,7 @@
 <div class="app">
   <header class="topbar">
     <h1>AutoGallery</h1>
+    <div class="group-by" use:groupBySelector={groupBy}></div>
     <input
       class="dir"
       type="text"
@@ -740,6 +860,27 @@
     >
       {#if boxes}
         {#each visibleItems as { i, entry } (entryDomId(entry))}
+          {#if sectionHeadersByIndex.has(i)}
+            {#each sectionHeadersByIndex.get(i) as header (header.dimension + header.value)}
+              <div
+                class="section-header"
+                style="top:{header.depth * 32}px; z-index:{15 - header.depth};"
+              >
+                <button
+                  class="section-toggle"
+                  on:click={() =>
+                    toggleSectionCollapse(
+                      groupBy.slice(0, header.depth + 1).map((d) => ({
+                        dimension: d,
+                        value: resolvePhoto(entry).groupValues[d],
+                      }))
+                    )}
+                >
+                  ▾ {header.label}
+                </button>
+              </div>
+            {/each}
+          {/if}
           <Thumb
             item={resolvePhoto(entry)}
             box={boxes[i]}
@@ -967,9 +1108,35 @@
   .grid:focus {
     outline: none;
   }
+  .section-header {
+    position: sticky;
+    z-index: 15;
+    padding: 4px 8px;
+  }
+  .section-toggle {
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .section-toggle:hover {
+    background: #2a2a2a;
+  }
   .empty {
     padding: 4rem 1rem;
     text-align: center;
     color: #777;
+  }
+  .group-by :global(.multi-auto-select) {
+    color: inherit;
+  }
+  .group-by :global(.pill) {
+    background: #2a2a2a !important;
+    color: #eee !important;
+    border-color: #444 !important;
   }
 </style>
