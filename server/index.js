@@ -7,6 +7,17 @@ import { registerApi } from "./api.js";
 import { getDb } from "./db/connection.js";
 import { migrateLegacyJsonIfNeeded } from "./migrateLegacyJson.js";
 
+// sharp/libvips offloads decode+resize work to libuv's threadpool, which
+// defaults to just 4 threads regardless of CPU core count — a jump or
+// fresh scan can request dozens of thumbnails at once, but only 4 ever
+// generate concurrently, so the rest queue behind them and complete in a
+// visibly staggered wave (reads as the whole grid "flickering" as images
+// pop in one at a time) instead of settling together. Must be set before
+// the threadpool's first use (the first actual sharp operation, not import
+// — ESM hoists imports above this line, but they don't submit threadpool
+// work on their own), so this has to run before any /api/thumb request.
+if (!process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = "16";
+
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json");
 
