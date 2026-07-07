@@ -55,22 +55,30 @@ describe("getVolumeInfo", () => {
     const info = getVolumeInfo("/Volumes/Whatever", throwingExec);
     expect(info).toEqual({ uuid: null, label: "Whatever" });
   });
+
+  it("rejects placeholder UUID text (FAT32/exFAT SD cards) as null", () => {
+    const fakeExec = () =>
+      "   Volume Name:               MyCard\n" +
+      "   Volume UUID:               Not applicable (no root user UUID)\n";
+    const info = getVolumeInfo("/Volumes/MyCard", fakeExec);
+    expect(info).toEqual({ uuid: null, label: "MyCard" });
+  });
 });
 
 describe("upsertVolume", () => {
   it("creates a volume row keyed by uuid and returns its id", () => {
     const db = getDb();
-    const fakeExec = () => "   Volume Name:  Foo\n   Volume UUID:  AAA-111\n";
+    const fakeExec = () => "   Volume Name:  Foo\n   Volume UUID:  12345678-1234-1234-1234-123456789012\n";
     const id1 = upsertVolume(db, "/Volumes/Foo", fakeExec);
     const id2 = upsertVolume(db, "/Volumes/Foo", fakeExec);
     expect(id1).toBe(id2);
     const row = db.prepare("SELECT * FROM volumes WHERE id = ?").get(id1);
-    expect(row).toMatchObject({ uuid: "AAA-111", label: "Foo" });
+    expect(row).toMatchObject({ uuid: "12345678-1234-1234-1234-123456789012", label: "Foo" });
   });
 
   it("re-links to the same volume row even if the mount path changes", () => {
     const db = getDb();
-    const fakeExec = () => "   Volume Name:  Foo\n   Volume UUID:  AAA-111\n";
+    const fakeExec = () => "   Volume Name:  Foo\n   Volume UUID:  12345678-1234-1234-1234-123456789012\n";
     const id1 = upsertVolume(db, "/Volumes/Foo", fakeExec);
     const id2 = upsertVolume(db, "/Volumes/Foo 1", fakeExec); // remounted with a suffix
     expect(id1).toBe(id2);
@@ -89,20 +97,20 @@ describe("upsertVolume", () => {
 
 describe("isVolumeMounted", () => {
   it("returns true when the current mount path reports the same uuid", () => {
-    const fakeExec = () => "   Volume UUID:  AAA-111\n";
+    const fakeExec = () => "   Volume UUID:  12345678-1234-1234-1234-123456789012\n";
     expect(
       isVolumeMounted(
-        { uuid: "AAA-111", last_mount_path: "/Volumes/Foo" },
+        { uuid: "12345678-1234-1234-1234-123456789012", last_mount_path: "/Volumes/Foo" },
         fakeExec
       )
     ).toBe(true);
   });
 
   it("returns false when a different drive is now at the same mount path", () => {
-    const fakeExec = () => "   Volume UUID:  DIFFERENT-999\n";
+    const fakeExec = () => "   Volume UUID:  87654321-4321-4321-4321-210987654321\n";
     expect(
       isVolumeMounted(
-        { uuid: "AAA-111", last_mount_path: "/Volumes/Foo" },
+        { uuid: "12345678-1234-1234-1234-123456789012", last_mount_path: "/Volumes/Foo" },
         fakeExec
       )
     ).toBe(false);
@@ -114,7 +122,7 @@ describe("isVolumeMounted", () => {
     };
     expect(
       isVolumeMounted(
-        { uuid: "AAA-111", last_mount_path: "/Volumes/Foo" },
+        { uuid: "12345678-1234-1234-1234-123456789012", last_mount_path: "/Volumes/Foo" },
         throwingExec
       )
     ).toBe(false);
