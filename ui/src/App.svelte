@@ -1,6 +1,7 @@
 <script>
   import { onMount, tick } from "svelte";
   import { justifiedLayout, layoutHeight } from "./lib/layouts/justified.js";
+  import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
   import { detectBursts } from "./lib/bursts.js";
   import {
@@ -272,6 +273,17 @@
     await loadInitialFeed();
   }
 
+  /** Scroll so this section's header lands at its stuck (sticky) position
+   * at the top of the viewport — accounting for any shallower headers
+   * stacked above it, matching the CSS `top` offset used for depth
+   * stacking. */
+  function scrollToSection(pos) {
+    if (!gridEl) return;
+    const gridTop = gridEl.getBoundingClientRect().top + window.scrollY;
+    const target = gridTop + pos.y - pos.depth * HEADER_HEIGHT + PAD;
+    window.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+  }
+
   async function loadMore(direction) {
     if (direction === "after") {
       if (fetchingAfter || !hasMoreAfter || !items.length) return;
@@ -397,6 +409,7 @@
   // aspect ratios in, positioned boxes out. Absolutely-positioned children
   // ignore CSS padding, so the frame inset is applied to the box coordinates.
   const PAD = 12;
+  const HEADER_HEIGHT = 32;
 
   /**
    * Symmetric horizontal margin (px, at the target row height) reserved for
@@ -435,9 +448,9 @@
     }
     return map;
   })();
-  $: boxes =
+  $: layoutResult =
     displayEntries.length && gridWidth > 2 * PAD
-      ? justifiedLayout(
+      ? sectionedJustifiedLayout(
           displayEntries.map((e) => {
             const photo = resolvePhoto(e);
             const baseRatio =
@@ -455,14 +468,26 @@
               aspectRatio: baseRatio + (2 * marginPx) / rowHeight,
             };
           }),
+          sectionHeaders,
           {
             containerWidth: gridWidth - 2 * PAD,
             gap: 8,
             targetRowHeight: rowHeight,
+            headerHeight: HEADER_HEIGHT,
           }
         )
       : null;
-  $: gridHeight = boxes ? layoutHeight(boxes) + 2 * PAD : 0;
+  $: boxes = layoutResult ? layoutResult.boxes : null;
+  $: gridHeight = layoutResult ? layoutResult.totalHeight + 2 * PAD : 0;
+  $: headerPositionByKey = (() => {
+    const map = new Map();
+    if (layoutResult) {
+      for (const h of layoutResult.headers) {
+        map.set(`${h.index}-${h.dimension}-${h.value}`, h);
+      }
+    }
+    return map;
+  })();
   // The first time this fires (right when `boxes` first becomes non-null,
   // e.g. after the initial feed load), the grid's layout/paint may not have
   // settled yet, so gridEl.getBoundingClientRect() below can return
@@ -891,24 +916,39 @@
       {#if boxes}
         {#each visibleItems as { i, entry } (entryDomId(entry))}
           {#if sectionHeadersByIndex.has(i)}
-            {#each sectionHeadersByIndex.get(i) as header (header.dimension + header.value)}
-              <div
-                class="section-header"
-                style="top:{header.depth * 32}px; z-index:{15 - header.depth};"
-              >
-                <button
-                  class="section-toggle"
-                  on:click={() =>
-                    toggleSectionCollapse(
-                      groupBy.slice(0, header.depth + 1).map((d) => ({
-                        dimension: d,
-                        value: resolvePhoto(entry).groupValues[d],
-                      }))
-                    )}
+            {#each sectionHeadersByIndex.get(i) as header (header.dimension + header.value + header.index)}
+              {@const pos = headerPositionByKey.get(`${header.index}-${header.dimension}-${header.value}`)}
+              {#if pos}
+                <div
+                  class="section-wrapper"
+                  style="top:{pos.y}px; height:{pos.endY - pos.y}px;"
                 >
-                  ▾ {header.label}
-                </button>
-              </div>
+                  <div
+                    class="section-header"
+                    style="top:{header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
+                  >
+                    <button
+                      class="section-toggle-icon"
+                      title="Collapse/expand this section"
+                      on:click={() =>
+                        toggleSectionCollapse(
+                          groupBy.slice(0, header.depth + 1).map((d) => ({
+                            dimension: d,
+                            value: resolvePhoto(entry).groupValues[d],
+                          }))
+                        )}
+                    >
+                      ▾
+                    </button>
+                    <button
+                      class="section-label"
+                      on:click={() => scrollToSection(pos)}
+                    >
+                      {header.label}
+                    </button>
+                  </div>
+                </div>
+              {/if}
             {/each}
           {/if}
           <Thumb
@@ -1159,12 +1199,35 @@
   .grid:focus {
     outline: none;
   }
+  .section-wrapper {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    pointer-events: none;
+  }
   .section-header {
     position: sticky;
     z-index: 15;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     padding: 4px 8px;
+    background: #141414;
+    pointer-events: auto;
   }
-  .section-toggle {
+  .section-toggle-icon {
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+  .section-toggle-icon:hover {
+    background: #2a2a2a;
+  }
+  .section-label {
     background: none;
     border: none;
     color: inherit;
@@ -1173,8 +1236,9 @@
     cursor: pointer;
     padding: 2px 6px;
     border-radius: 4px;
+    text-align: left;
   }
-  .section-toggle:hover {
+  .section-label:hover {
     background: #2a2a2a;
   }
   .empty {
