@@ -9,7 +9,7 @@
   export let childrenByKey; // Map<string, {nodes, error?}>
   export let loadingKeys; // Set<string>
   export let highlightedKey; // string|null
-  export let isCollapsedInFeed; // (path) => boolean
+  export let collapsedPaths; // Array<Array<{dimension,value}>>
 
   const dispatch = createEventDispatcher();
 
@@ -19,7 +19,11 @@
   $: loading = loadingKeys.has(key);
   $: children = childrenByKey.get(key)?.nodes ?? [];
   $: childError = childrenByKey.get(key)?.error;
-  $: collapsedInFeed = isCollapsedInFeed(path);
+  // Compare against collapsedPaths directly (not via a called function) so
+  // Svelte's dependency tracking — based on the reactive statement's own
+  // source text, not what a called function closes over — actually re-runs
+  // this when collapsedPaths changes.
+  $: collapsedInFeed = collapsedPaths.some((p) => treeKey(p) === key);
 </script>
 
 <li class="tree-node" class:highlighted={highlightedKey === key}>
@@ -63,7 +67,7 @@
             {childrenByKey}
             {loadingKeys}
             {highlightedKey}
-            {isCollapsedInFeed}
+            {collapsedPaths}
             on:toggleExpand
             on:toggleCollapse
             on:jump

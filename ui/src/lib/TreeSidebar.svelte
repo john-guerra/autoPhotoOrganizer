@@ -16,11 +16,6 @@
   let loadingKeys = new Set();
   let highlightedKey = null;
 
-  function isCollapsedInFeed(path) {
-    const key = treeKey(path);
-    return collapsedPaths.some((p) => treeKey(p) === key);
-  }
-
   async function loadRoot() {
     try {
       const { total, nodes } = await fetchTreeNode({ groupBy, path: [] });
@@ -123,7 +118,7 @@
         {childrenByKey}
         {loadingKeys}
         {highlightedKey}
-        {isCollapsedInFeed}
+        {collapsedPaths}
         on:toggleExpand={handleToggleExpand}
         on:toggleCollapse={handleToggleCollapse}
         on:jump={handleJump}
