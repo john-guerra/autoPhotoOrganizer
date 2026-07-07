@@ -39,3 +39,9 @@ export function libraryFile() {
   mkdirSync(cacheRoot(), { recursive: true });
   return join(cacheRoot(), "library.json");
 }
+
+/** @returns {string} Absolute path to the SQLite index database file. */
+export function indexDbFile() {
+  mkdirSync(cacheRoot(), { recursive: true });
+  return join(cacheRoot(), "index.db");
+}
