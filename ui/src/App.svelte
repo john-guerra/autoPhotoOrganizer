@@ -320,24 +320,40 @@
     return path.map((p) => `${p.dimension}=${p.value}`).join(">");
   }
 
-  /** Toggle whether the section identified by `path` (an ordered prefix of
-   * `groupBy`) is collapsed. Collapsing removes its photos from `items`
-   * (they were fetched already) and refetches — a subsequent scroll won't
-   * re-request them, since the server excludes the collapsed path. */
   /** Toggle a section's collapsed state and re-center the feed on whatever
-   * photo is currently selected, so the user doesn't lose their scroll
-   * position — mirrors onGroupByChange's re-centering, but this fetch DOES
-   * pass a `collapsed` list (unlike onGroupByChange's), so the refetched
-   * window can contain placeholder entries; fall back through
-   * nextSelectable (like loadInitialFeed/jumpToPath do) in case the focus
-   * item itself just got folded into the newly-collapsed placeholder. */
+   * photo is currently selected, so the user doesn't lose their place —
+   * mirrors onGroupByChange's re-centering. If the selected photo is
+   * itself inside the section being collapsed, it's about to be hidden,
+   * so re-anchor on the nearest still-loaded photo in an adjacent section
+   * instead: the server never lets a focusId fall inside a collapsed path
+   * (see server/db/feed.js's keyPassesSeek), so seeking on the
+   * now-collapsed photo would silently drop that section's placeholder
+   * while leaving the one photo stranded outside it. */
   async function toggleSectionCollapse(path) {
     const key = pathKey(path);
-    const already = collapsedPaths.some((p) => pathKey(p) === key);
-    collapsedPaths = already
-      ? collapsedPaths.filter((p) => pathKey(p) !== key)
-      : [...collapsedPaths, path];
-    const focusEntry = displayEntries[selected];
+    const collapsing = !collapsedPaths.some((p) => pathKey(p) === key);
+    collapsedPaths = collapsing
+      ? [...collapsedPaths, path]
+      : collapsedPaths.filter((p) => pathKey(p) !== key);
+
+    const insidePath = (entry) => {
+      if (!entry) return false;
+      const values = resolvePhoto(entry).groupValues;
+      return path.every((p) => values[p.dimension] === p.value);
+    };
+    // A placeholder entry (any collapsed section, not just this one) has
+    // no real photo id — resolvePhoto(entry).id would be its synthetic
+    // "collapsed:..." key, which the server can't seek on — so the
+    // fallback search must skip every placeholder, not just ones inside
+    // the path currently being toggled.
+    const usableFocus = (entry) => entry && entry.kind !== "placeholder" && !insidePath(entry);
+    let focusEntry = displayEntries[selected];
+    if (collapsing && insidePath(focusEntry)) {
+      focusEntry =
+        displayEntries.slice(selected).find(usableFocus) ??
+        [...displayEntries.slice(0, selected)].reverse().find(usableFocus) ??
+        null;
+    }
     const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
     error = "";
     status = "loading…";

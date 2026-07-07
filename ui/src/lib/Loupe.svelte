@@ -5,7 +5,16 @@
   export let items;
   export let index; // current position in items
 
-  $: item = items[index];
+  // `items` is App.svelte's resolvedPhotos — 1:1 with displayEntries so
+  // positional indexing lines up elsewhere, which means a collapsed
+  // section's placeholder (a synthetic entry with a string id like
+  // "collapsed:...", not a real photo) can appear in this array too.
+  // `index` is normally never left pointing at one, but a brief window
+  // exists whenever the caller reassigns `items` and only corrects
+  // `index` afterward (e.g. after an `await tick()`) — during that gap
+  // this two-way-bound `index` can transiently resolve to a placeholder.
+  const isRealPhoto = (it) => it && typeof it.id === "number";
+  $: item = isRealPhoto(items[index]) ? items[index] : null;
 
   // Prefetch window: keep ±3 neighbours warm so navigation never waits on decode.
   const warm = new Map(); // id -> Image()
@@ -15,7 +24,7 @@
     const wanted = new Set();
     for (let d = -3; d <= 3; d++) {
       const it = items[i + d];
-      if (!it) continue;
+      if (!isRealPhoto(it)) continue;
       wanted.add(it.id);
       if (!warm.has(it.id)) {
         const img = new Image();
@@ -32,16 +41,18 @@
 
 <div class="loupe" role="dialog" aria-modal="true">
   <div class="stage">
-    {#key item.id}
-      <img src={imageUrl(item.id, item.mtimeMs)} alt={item.name} />
-    {/key}
+    {#if item}
+      {#key item.id}
+        <img src={imageUrl(item.id, item.mtimeMs)} alt={item.name} />
+      {/key}
+    {/if}
   </div>
   <div class="hud">
     <div class="left">
-      <span class="name">{item.name}</span>
+      <span class="name">{item?.name ?? ""}</span>
       <span class="count">{index + 1} of {items.length}</span>
     </div>
-    <Stars rating={item.rating} full />
+    <Stars rating={item?.rating ?? 0} full />
   </div>
 </div>
 
