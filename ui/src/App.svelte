@@ -273,13 +273,14 @@
   }
 
   /** Scroll so this section's header lands at its stuck (sticky) position
-   * at the top of the viewport — accounting for any shallower headers
-   * stacked above it, matching the CSS `top` offset used for depth
-   * stacking. */
+   * at the top of the viewport — accounting for the sticky topbar plus
+   * any shallower headers stacked above it, matching the CSS `top` offset
+   * used for depth stacking. */
   function scrollToSection(pos) {
     if (!gridEl) return;
     const gridTop = gridEl.getBoundingClientRect().top + window.scrollY;
-    const target = gridTop + pos.y - pos.depth * HEADER_HEIGHT + PAD;
+    const target =
+      gridTop + pos.y - topbarHeight - pos.depth * HEADER_HEIGHT + PAD;
     window.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
   }
 
@@ -409,6 +410,12 @@
   // ignore CSS padding, so the frame inset is applied to the box coordinates.
   const PAD = 12;
   const HEADER_HEIGHT = 32;
+  // Section headers stick below the topbar, not at the viewport's true
+  // top — the topbar is itself sticky at top:0 with a higher z-index, so
+  // a header stuck at top:0 would render directly underneath it, fully
+  // hidden. Measured (not hardcoded) since the topbar's height varies
+  // with window width (its controls wrap to a second row at some widths).
+  let topbarHeight = 0;
 
   /**
    * Symmetric horizontal margin (px, at the target row height) reserved for
@@ -794,7 +801,7 @@
 />
 
 <div class="app">
-  <header class="topbar">
+  <header class="topbar" bind:clientHeight={topbarHeight}>
     <h1>AutoGallery</h1>
     <div class="group-by" use:groupBySelector={groupBy}></div>
     {#if collapsedSummaries.length}
@@ -909,7 +916,8 @@
           >
             <div
               class="section-header"
-              style="top:{header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
+              style="top:{topbarHeight +
+                header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
             >
               <button
                 class="section-toggle-icon"
