@@ -210,7 +210,7 @@
       const { items: beforePage } = focusId
         ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0 })
         : { items: [] };
-      const { items: afterPage } = await fetchFeed({
+      const { items: afterPage, focusItem } = await fetchFeed({
         groupBy,
         focusId,
         before: 0,
@@ -218,7 +218,7 @@
       });
       if (epoch !== feedEpoch) return;
       const combined = focusId
-        ? [...beforePage, ...(await getFocusRow(focusId)), ...afterPage]
+        ? [...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage]
         : afterPage;
       items = combined;
       hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
@@ -230,16 +230,6 @@
       error = e.message;
       status = "";
     }
-  }
-
-  /** The focus photo itself isn't returned by either before/after fetch
-   * (both are strictly-after/strictly-before), so fetch it directly by
-   * id via /api/meta's sibling lookup — reuse fetchFeed with before=1,
-   * after=0 centered one id past it is overkill; simplest is: it's
-   * already in `items` from before the hierarchy change, so just find it. */
-  async function getFocusRow(focusId) {
-    const existing = items.find((i) => i.id === focusId);
-    return existing ? [existing] : [];
   }
 
   function pathKey(path) {

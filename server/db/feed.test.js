@@ -258,3 +258,41 @@ describe("getFeedPage — keyset pagination", () => {
     expect(items.map((i) => i.name)).toEqual(["y2020.jpg"]);
   });
 });
+
+describe("getFeedPage — focusItem", () => {
+  it("returns the focus photo's own row, with groupValues under the current groupBy", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const rowsA = upsertScan(db, "/photos/b-folder", 1, [
+      { name: "x.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const rowsB = upsertScan(db, "/photos/a-folder", 1, [
+      { name: "y.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(db, rowsA[0].id, "2020-01-01T00:00:00.000Z");
+    setTakenAt(db, rowsB[0].id, "2024-01-01T00:00:00.000Z");
+    const focus = rowsA.find((r) => r.name === "x.jpg");
+    const { focusItem } = getFeedPage(db, {
+      groupBy: ["year", "folder"],
+      focusId: focus.id,
+      after: 10,
+    });
+    expect(focusItem).not.toBeNull();
+    expect(focusItem.id).toBe(focus.id);
+    expect(focusItem.name).toBe("x.jpg");
+    expect(focusItem.groupValues).toEqual({
+      year: "2020",
+      folder: "/photos/b-folder",
+    });
+  });
+
+  it("returns null focusItem when no focusId is given", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { focusItem } = getFeedPage(db, { groupBy: ["folder"], after: 10 });
+    expect(focusItem).toBeNull();
+  });
+});

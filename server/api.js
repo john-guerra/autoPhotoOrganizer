@@ -276,14 +276,14 @@ export function registerApi(app) {
 
     const db = getDb();
     try {
-      const { items, sections } = getFeedPage(db, {
+      const { items, sections, focusItem } = getFeedPage(db, {
         groupBy,
         collapsed,
         focusId,
         before,
         after,
       });
-      res.json({ items, sections });
+      res.json({ items, sections, focusItem });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }

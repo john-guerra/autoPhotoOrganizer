@@ -86,7 +86,7 @@ export async function fetchLibrary() {
 
 /**
  * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId?: number|null, before?: number, after?: number}} opts
- * @returns {Promise<{items: object[], sections: Array<{path: Array<{dimension:string,value:string}>, count: number}>}>}
+ * @returns {Promise<{items: object[], sections: Array<{path: Array<{dimension:string,value:string}>, count: number}>, focusItem: object|null}>}
  */
 export async function fetchFeed({
   groupBy,

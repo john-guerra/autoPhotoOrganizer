@@ -163,16 +163,22 @@ export function getFeedPage(
   const { sql: exclSql, params: exclParams } = exclusionClause(collapsed, dims);
 
   let focusValues = null;
+  let focusItem = null;
   if (focusId != null) {
     const focusRow = db
       .prepare(
-        `SELECT ${selectDimCols}, photos.id
+        `SELECT photos.id, photos.filename AS name, photos.size,
+                photos.mtime AS mtimeMs, photos.rating,
+                photos.preferred_cover AS preferredCover,
+                photos.width, photos.height, photos.taken_at,
+                ${selectDimCols}
          FROM photos JOIN folders ON folders.id = photos.folder_id
          WHERE photos.id = ?`
       )
       .get(focusId);
     if (!focusRow) throw new Error(`focusId ${focusId} not found`);
     focusValues = dims.map((_, i) => focusRow[`dim${i}`]).concat(focusRow.id);
+    focusItem = rowToItem(focusRow, dims);
   }
 
   function fetchDirection(wantAfter, limit) {
@@ -220,5 +226,5 @@ export function getFeedPage(
   const beforeItems = fetchDirection(false, before);
   const afterItems = fetchDirection(true, after);
   const sections = getCollapsedSummaries(db, { groupBy, collapsed });
-  return { items: [...beforeItems, ...afterItems], sections };
+  return { items: [...beforeItems, ...afterItems], sections, focusItem };
 }
