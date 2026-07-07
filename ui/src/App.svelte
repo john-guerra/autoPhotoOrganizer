@@ -8,7 +8,11 @@
     entryDomId,
     resolvePhoto,
   } from "./lib/displayEntries.js";
-  import { mergeFeedPage, deriveSectionHeaders } from "./lib/feed.js";
+  import {
+    mergeFeedPage,
+    deriveSectionHeaders,
+    formatGroupValue,
+  } from "./lib/feed.js";
   import {
     fetchFeed,
     setRating as apiSetRating,
@@ -93,6 +97,13 @@
   })();
   $: localStorage.setItem(LS_GROUP_BY, JSON.stringify(groupBy));
   let collapsedPaths = []; // Array<Array<{dimension,value}>>, reset on hierarchy change
+  // Summaries (path + count) for every currently-collapsed path, as returned
+  // alongside items/focusItem by the most recent successful feed fetch —
+  // getCollapsedSummaries computes these from the full `collapsed` array
+  // passed to getFeedPage, not just newly-collapsed paths, so any fetch's
+  // response reflects the complete current list regardless of which page
+  // triggered it. Rendered as re-expand chips in the topbar.
+  let collapsedSummaries = [];
   let items = []; // the currently-loaded feed window, ordered
   let hasMoreBefore = false;
   let hasMoreAfter = true;
@@ -165,7 +176,7 @@
     thumbStatusTick++;
     const epoch = ++feedEpoch;
     try {
-      const { items: page } = await fetchFeed({
+      const { items: page, sections } = await fetchFeed({
         groupBy,
         collapsed: collapsedPaths,
         after: PAGE_SIZE,
@@ -180,6 +191,7 @@
       items = merged.items;
       hasMoreBefore = merged.hasMoreBefore;
       hasMoreAfter = merged.hasMoreAfter;
+      collapsedSummaries = sections;
       // Matches the original doScan's reset — a fresh/reset feed load
       // always re-focuses the first item and closes any open loupe,
       // rather than leaving `selected` pointing at whatever index the
@@ -210,7 +222,7 @@
       const { items: beforePage } = focusId
         ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0 })
         : { items: [] };
-      const { items: afterPage, focusItem } = await fetchFeed({
+      const { items: afterPage, focusItem, sections } = await fetchFeed({
         groupBy,
         focusId,
         before: 0,
@@ -223,7 +235,18 @@
       items = combined;
       hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
       hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
-      selected = focusId ? beforePage.length : 0;
+      collapsedSummaries = sections;
+      // `selected` indexes displayEntries (the burst-stack-collapsed view),
+      // not raw items — beforePage.length would drift as soon as any burst
+      // among the "before" items collapses into a single display entry.
+      // displayEntries is a reactive statement over `items`, so it only
+      // reflects the assignment above after the next microtask flush.
+      await tick();
+      const focusIndex = focusId
+        ? displayEntries.findIndex((e) => resolvePhoto(e).id === focusId)
+        : -1;
+      selected = focusIndex !== -1 ? focusIndex : 0;
+      focusPending = true;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       enrichMeta(items.map((i) => i.id));
     } catch (e) {
@@ -266,7 +289,7 @@
     // (the user would suddenly be looking at different content).
     const gridHeightBefore = gridEl ? gridEl.getBoundingClientRect().height : 0;
     try {
-      const { items: page } = await fetchFeed({
+      const { items: page, sections } = await fetchFeed({
         groupBy,
         collapsed: collapsedPaths,
         focusId,
@@ -283,6 +306,7 @@
       items = merged.items;
       hasMoreBefore = merged.hasMoreBefore;
       hasMoreAfter = merged.hasMoreAfter;
+      collapsedSummaries = sections;
       enrichMeta(page.map((i) => i.id));
       if (direction === "before" && page.length) {
         await tick();
@@ -766,6 +790,22 @@
   <header class="topbar">
     <h1>AutoGallery</h1>
     <div class="group-by" use:groupBySelector={groupBy}></div>
+    {#if collapsedSummaries.length}
+      <div class="collapsed-sections">
+        {#each collapsedSummaries as entry (pathKey(entry.path))}
+          <button
+            class="collapsed-chip"
+            on:click={() => toggleSectionCollapse(entry.path)}
+            title="Re-expand this section"
+          >
+            {formatGroupValue(
+              entry.path[entry.path.length - 1].dimension,
+              entry.path[entry.path.length - 1].value
+            )} ({entry.count.toLocaleString()})
+          </button>
+        {/each}
+      </div>
+    {/if}
     <input
       class="dir"
       type="text"
@@ -981,6 +1021,27 @@
   .choose-folder:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+  .collapsed-sections {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .collapsed-chip {
+    padding: 3px 10px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 999px;
+    color: #ccc;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .collapsed-chip:hover {
+    background: #333;
+    border-color: #4c9aff;
+    color: #fff;
   }
   .library {
     position: relative;
