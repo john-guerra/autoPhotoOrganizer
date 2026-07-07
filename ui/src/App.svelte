@@ -8,12 +8,14 @@
     entryDomId,
     resolvePhoto,
   } from "./lib/displayEntries.js";
+  import { mergeFeedPage } from "./lib/feed.js";
   import {
-    scan as apiScan,
+    fetchFeed,
     setRating as apiSetRating,
     setCover as apiSetCover,
     fetchMeta,
     fetchLibrary,
+    scan as apiScan,
   } from "./lib/api.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
@@ -22,7 +24,6 @@
   const LS_ZOOM = "autogallery.zoom";
   const LS_BURST_GAP = "autogallery.burstGapMs";
   const DEFAULT_BURST_GAP_MS = 3000;
-  const META_CHUNK = 500; // ids per /api/meta request
   const DEFAULT_RATIO = 1.5; // placeholder until real dimensions arrive
 
   const hasNativePicker =
@@ -58,11 +59,18 @@
     ) ?? 1024;
 
   let dir = localStorage.getItem(LS_KEY) || "";
-  let items = [];
+  const groupBy = ["folder"]; // hardcoded here; Task 7 makes this user-configurable
+  let items = []; // the currently-loaded feed window, ordered
+  let hasMoreBefore = false;
+  let hasMoreAfter = true;
+  let fetchingBefore = false;
+  let fetchingAfter = false;
+  const PAGE_SIZE = 60;
+  const FETCH_THRESHOLD = 20; // start fetching more when within this many items of an edge
   let status = "";
   let error = "";
   let scanning = false;
-  let scanEpoch = 0; // invalidates in-flight meta fetches on rescan
+  let feedEpoch = 0; // invalidates in-flight meta fetches when the window resets
   let library = [];
   let libraryOpen = false;
 
@@ -112,36 +120,146 @@
         ? `${thumbCounts.error} thumbnail${thumbCounts.error === 1 ? "" : "s"} failed to load`
         : "";
 
-  onMount(refreshLibrary);
+  onMount(() => {
+    refreshLibrary();
+    loadInitialFeed();
+  });
+
+  async function loadInitialFeed() {
+    error = "";
+    status = "loading…";
+    thumbStatus = new Map();
+    thumbStatusTick++;
+    const epoch = ++feedEpoch;
+    try {
+      const { items: page } = await fetchFeed({ groupBy, after: PAGE_SIZE });
+      if (epoch !== feedEpoch) return;
+      const merged = mergeFeedPage(
+        { items: [], hasMoreBefore: false, hasMoreAfter: true },
+        { items: page },
+        "after",
+        PAGE_SIZE
+      );
+      items = merged.items;
+      hasMoreBefore = merged.hasMoreBefore;
+      hasMoreAfter = merged.hasMoreAfter;
+      // Matches the original doScan's reset — a fresh/reset feed load
+      // always re-focuses the first item and closes any open loupe,
+      // rather than leaving `selected` pointing at whatever index the
+      // user had scrolled to in a now-discarded window.
+      selected = 0;
+      loupeOpen = false;
+      focusPending = true;
+      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+      enrichMeta(page.map((i) => i.id));
+    } catch (e) {
+      error = e.message;
+      status = "";
+    }
+  }
+
+  async function loadMore(direction) {
+    if (direction === "after") {
+      if (fetchingAfter || !hasMoreAfter || !items.length) return;
+      fetchingAfter = true;
+    } else {
+      if (fetchingBefore || !hasMoreBefore || !items.length) return;
+      fetchingBefore = true;
+    }
+    const epoch = feedEpoch;
+    const focusId =
+      direction === "after" ? items[items.length - 1].id : items[0].id;
+    // Preserve scroll position when prepending: content inserted above
+    // the fold shifts everything below it down by the same amount, so
+    // without this the browser's fixed scrollTop would visually jump
+    // (the user would suddenly be looking at different content).
+    const gridHeightBefore = gridEl ? gridEl.getBoundingClientRect().height : 0;
+    try {
+      const { items: page } = await fetchFeed({
+        groupBy,
+        focusId,
+        before: direction === "before" ? PAGE_SIZE : 0,
+        after: direction === "after" ? PAGE_SIZE : 0,
+      });
+      if (epoch !== feedEpoch) return;
+      const merged = mergeFeedPage(
+        { items, hasMoreBefore, hasMoreAfter },
+        { items: page },
+        direction,
+        PAGE_SIZE
+      );
+      items = merged.items;
+      hasMoreBefore = merged.hasMoreBefore;
+      hasMoreAfter = merged.hasMoreAfter;
+      enrichMeta(page.map((i) => i.id));
+      if (direction === "before" && page.length) {
+        await tick();
+        const gridHeightAfter = gridEl
+          ? gridEl.getBoundingClientRect().height
+          : 0;
+        window.scrollBy(0, gridHeightAfter - gridHeightBefore);
+      }
+    } catch (e) {
+      error = e.message;
+    } finally {
+      if (direction === "after") fetchingAfter = false;
+      else fetchingBefore = false;
+    }
+  }
+
+  // Progressively fetch dimensions for a batch of newly-loaded ids; the
+  // justified layout refines itself as each batch lands (grid appears
+  // immediately with placeholders). Unlike the old per-folder-scan
+  // version, a feed page is already a bounded batch (PAGE_SIZE), so no
+  // further chunking is needed here.
+  async function enrichMeta(ids) {
+    const epoch = feedEpoch;
+    const need = ids.filter((id) => {
+      const it = items.find((i) => i.id === id);
+      return it && it.width == null;
+    });
+    if (!need.length) return;
+    try {
+      const metas = await fetchMeta(need);
+      if (epoch !== feedEpoch) return;
+      for (const m of metas) {
+        const it = items.find((i) => i.id === m.id);
+        if (it && m.width && m.height) {
+          it.width = m.width;
+          it.height = m.height;
+          it.takenAt = m.takenAt;
+        }
+      }
+      items = items; // re-layout with real aspect ratios
+    } catch {
+      return; // metadata is an enhancement; the grid still works without it
+    }
+  }
+
+  async function refreshLibrary() {
+    library = await fetchLibrary().catch(() => library);
+  }
 
   async function doScan() {
     if (!dir.trim()) return;
     error = "";
     scanning = true;
     status = "scanning…";
-    thumbStatus = new Map();
-    thumbStatusTick++;
     try {
-      const res = await apiScan(dir.trim());
-      items = res.items;
-      selected = 0;
-      loupeOpen = false;
-      localStorage.setItem(LS_KEY, res.root);
+      await apiScan(dir.trim());
+      localStorage.setItem(LS_KEY, dir.trim());
       refreshLibrary();
-      status = `${res.count} photos · scanned in ${res.elapsedMs} ms`;
-      enrichMeta(++scanEpoch);
-      focusPending = true;
+      // The scanned folder is now indexed — reload the feed from the
+      // start so the newly-scanned photos appear (they may sort anywhere
+      // in the current grouping, not necessarily at the loaded window's
+      // edge, so a full reset is simpler and correct here).
+      await loadInitialFeed();
     } catch (e) {
       error = e.message;
       status = "";
-      items = [];
     } finally {
       scanning = false;
     }
-  }
-
-  async function refreshLibrary() {
-    library = await fetchLibrary().catch(() => library);
   }
 
   function selectFromLibrary(entry) {
@@ -156,29 +274,6 @@
     if (path) {
       dir = path;
       doScan();
-    }
-  }
-
-  // Progressively fetch dimensions in chunks; the justified layout refines
-  // itself as each batch lands (grid appears immediately with placeholders).
-  async function enrichMeta(epoch) {
-    for (let start = 0; start < items.length; start += META_CHUNK) {
-      const ids = items.slice(start, start + META_CHUNK).map((it) => it.id);
-      try {
-        const metas = await fetchMeta(ids);
-        if (epoch !== scanEpoch) return; // a newer scan replaced this session
-        for (const m of metas) {
-          const it = items[m.id];
-          if (it && m.width && m.height) {
-            it.width = m.width;
-            it.height = m.height;
-            it.takenAt = m.takenAt;
-          }
-        }
-        items = items; // re-layout with real aspect ratios
-      } catch {
-        return; // metadata is an enhancement; the grid still works without it
-      }
     }
   }
 
@@ -353,7 +448,9 @@
     }
   }
 
-  /** Recompute [renderStart, renderEnd] from the grid's current position. */
+  /** Recompute [renderStart, renderEnd] from the grid's current position,
+   * and trigger a fetch-more in either direction when the render window
+   * is near a loaded edge. */
   function updateVisibleRange() {
     if (!gridEl || !boxes) {
       renderStart = 0;
@@ -367,6 +464,13 @@
     });
     renderStart = range.start;
     renderEnd = range.end;
+
+    if (renderEnd >= displayEntries.length - FETCH_THRESHOLD) {
+      loadMore("after");
+    }
+    if (renderStart <= FETCH_THRESHOLD) {
+      loadMore("before");
+    }
   }
 
   /** Collapse a burst of scroll/resize events to one recompute per frame. */
@@ -644,8 +748,8 @@
         {/each}
       {/if}
     </div>
-  {:else if !scanning}
-    <div class="empty">Enter a folder path and press Scan.</div>
+  {:else if !scanning && status !== "loading…"}
+    <div class="empty">Nothing indexed yet — scan a folder to get started.</div>
   {/if}
 </div>
 
