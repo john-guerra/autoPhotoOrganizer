@@ -69,6 +69,27 @@ export function deriveSectionHeaders(items, groupBy) {
 }
 
 /**
+ * Annotates each header (as produced by deriveSectionHeaders) with its full
+ * ancestor path — the {dimension,value} pair for itself and every shallower
+ * currently-open header, in depth order. Needed to fetch this header's photo
+ * count from the tree API (`getTreeNode`'s `path` param is exactly this
+ * shape, scoped to the header's own depth). Headers arrive already in index
+ * order with the same "outer dimension change resets every inner one"
+ * structure the tree itself has, so a single pass with a depth-indexed stack
+ * reconstructs each one's path with no lookahead.
+ * @param {Array<{depth:number, dimension:string, value:string}>} headers
+ * @returns {Array<{depth:number, dimension:string, value:string, path: Array<{dimension:string,value:string}>}>}
+ */
+export function computeHeaderPaths(headers) {
+  const current = [];
+  return headers.map((h) => {
+    current.length = h.depth;
+    current.push({ dimension: h.dimension, value: h.value });
+    return { ...h, path: [...current] };
+  });
+}
+
+/**
  * Drops any header deriveSectionHeaders would otherwise emit at or below a
  * placeholder's own collapse depth — the placeholder already renders its
  * own folded label/count (see App.svelte's grid template), so a normal

@@ -5,6 +5,7 @@ import {
   deriveSectionHeaders,
   suppressPlaceholderHeaders,
   nearestRealItemId,
+  computeHeaderPaths,
 } from "./feed.js";
 
 describe("formatGroupValue", () => {
@@ -88,6 +89,40 @@ describe("deriveSectionHeaders", () => {
       ["year"]
     );
     expect(headers[0].label).toBe("Unknown");
+  });
+});
+
+describe("computeHeaderPaths", () => {
+  const ITEMS = [
+    { id: 1, groupValues: { year: "2024", folder: "/a" } },
+    { id: 2, groupValues: { year: "2024", folder: "/a" } },
+    { id: 3, groupValues: { year: "2024", folder: "/b" } },
+    { id: 4, groupValues: { year: "2020", folder: "/a" } },
+  ];
+
+  it("reconstructs each header's full ancestor path, resetting on an outer-dimension change", () => {
+    const headers = deriveSectionHeaders(ITEMS, ["year", "folder"]);
+    const withPaths = computeHeaderPaths(headers);
+    expect(withPaths.map((h) => h.path)).toEqual([
+      [{ dimension: "year", value: "2024" }],
+      [
+        { dimension: "year", value: "2024" },
+        { dimension: "folder", value: "/a" },
+      ],
+      [
+        { dimension: "year", value: "2024" },
+        { dimension: "folder", value: "/b" },
+      ],
+      [{ dimension: "year", value: "2020" }],
+      [
+        { dimension: "year", value: "2020" },
+        { dimension: "folder", value: "/a" },
+      ],
+    ]);
+  });
+
+  it("returns an empty array for no headers", () => {
+    expect(computeHeaderPaths([])).toEqual([]);
   });
 });
 

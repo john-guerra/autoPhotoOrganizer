@@ -2,7 +2,8 @@
   import { onMount, tick } from "svelte";
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
-  import { detectBursts } from "./lib/bursts.js";
+  import { detectBurstsByGroup } from "./lib/bursts.js";
+  import { nextSelectable, navVertical } from "./lib/navigation.js";
   import {
     buildDisplayEntries,
     entryDomId,
@@ -108,6 +109,25 @@
   let hasMoreAfter = true;
   let fetchingBefore = false;
   let fetchingAfter = false;
+  // Guards jumpGroupBoundary's *entire* duration, including the initial
+  // fetchGroupBoundary lookup — unlike fetchingBefore/fetchingAfter (which
+  // it also sets, but only after that lookup resolves), nothing previously
+  // stopped a second Option+Left/Right from starting a fully independent
+  // jump while an earlier one was still awaiting its own boundary lookup.
+  // Two overlapping jumps' network calls can resolve out of order (the
+  // second-pressed jump's boundary lookup can simply finish first), and
+  // since each jump replaces `items` wholesale, the epoch guard only
+  // protects against a stale jump's page landing *after* a newer one's own
+  // `items` replacement — it doesn't stop a scroll/loadMore triggered by
+  // the first jump's own boxes-recompute from merging a page seeked from
+  // its (by-then-superseded) window onto whatever the second jump just
+  // replaced `items` with. Confirmed live: firing several Option+Right
+  // presses in quick succession produced a section header for the same
+  // folder appearing twice, with a different folder's photos sandwiched in
+  // between — a non-contiguous `items` array, not a genuine duplicate row
+  // (the database has no duplicate photos/folders). A simple re-entry
+  // guard, checked and set before the first await, closes this off.
+  let jumpingGroup = false;
   const PAGE_SIZE = 60;
   const FETCH_THRESHOLD = 20; // start fetching more when within this many items of an edge
   let status = "";
@@ -527,6 +547,20 @@
     // without this the browser's fixed scrollTop would visually jump
     // (the user would suddenly be looking at different content).
     const gridHeightBefore = gridEl ? gridEl.getBoundingClientRect().height : 0;
+    // `selected` is a raw index into displayEntries. Prepending a "before"
+    // page shifts every existing entry's index forward by however many new
+    // entries land in front of it — capture the CURRENTLY selected photo's
+    // id now, so it can be re-resolved to its new (shifted) index below,
+    // the same findEntryIndexForId re-anchor every other items-replacing
+    // function (onGroupByChange, toggleSectionCollapse, jumpGroupBoundary)
+    // already does. Without this, `selected` silently keeps pointing at
+    // whatever raw index it had before the shift — a different, effectively
+    // arbitrary photo — and each subsequent backward loadMore (e.g. a
+    // virtualization-triggered chain) drifts it further. Confirmed live:
+    // this is what made a group-jump's landing photo appear random/erratic
+    // rather than simply wrong-but-consistent.
+    const selectedEntry = displayEntries[selected];
+    const selectedId = selectedEntry ? resolvePhoto(selectedEntry).id : null;
     try {
       const { items: page } = await fetchFeed({
         groupBy,
@@ -545,9 +579,21 @@
       items = merged.items;
       hasMoreBefore = merged.hasMoreBefore;
       hasMoreAfter = merged.hasMoreAfter;
+      // Every other items-replacing function updates this status line;
+      // loadMore was the one place that didn't, so the "N photos loaded"
+      // counter looked permanently stuck at the initial window's count
+      // even while more content kept loading correctly in the background —
+      // reported as "the group looks cut off," confirmed live: the actual
+      // items array and network requests were fine, only this label was
+      // stale.
+      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       enrichMeta(page.map((i) => i.id));
       if (direction === "before" && page.length) {
         await tick();
+        if (selectedId != null) {
+          const newIndex = findEntryIndexForId(displayEntries, selectedId);
+          if (newIndex !== -1) selected = newIndex;
+        }
         const gridHeightAfter = gridEl
           ? gridEl.getBoundingClientRect().height
           : 0;
@@ -736,7 +782,7 @@
       : 0;
   }
 
-  $: stacks = detectBursts(items, { gapMs: burstGapMs });
+  $: stacks = detectBurstsByGroup(items, groupBy, { gapMs: burstGapMs });
   $: displayEntries = buildDisplayEntries(items, stacks, expandedStackIds);
   $: resolvedPhotos = displayEntries.map(resolvePhoto); // passed to Loupe
   // deriveSectionHeaders' `index` must land in the same index space as the
@@ -977,76 +1023,6 @@
     return indices.map((i) => ({ i, entry: entries[i] }));
   }
 
-  /** Placeholders (in-place folded rows for a collapsed section) are never a
-   * valid keyboard-selection target, matching how section headers already
-   * aren't part of the selectable index space. Steps from `from` in `dir`
-   * (+1/-1) until landing on a non-placeholder entry, or returns null if
-   * the entries run out in that direction first. */
-  function nextSelectable(entries, from, dir) {
-    let i = from;
-    while (i >= 0 && i < entries.length && entries[i]?.kind === "placeholder") {
-      i += dir;
-    }
-    if (i < 0 || i >= entries.length) return null;
-    return i;
-  }
-
-  /** Nearest box in the row adjacent (in direction `dir`) to `fromIndex`'s
-   * row, by horizontal centre — the geometric core of navVertical, factored
-   * out so navVertical can re-run it from an intermediate (placeholder)
-   * landing spot without reading `selected` from the closure. Returns null
-   * when `fromIndex` is already on the first/last row. */
-  function nearestBoxInAdjacentRow(fromIndex, dir) {
-    const cur = boxes[fromIndex];
-    if (!cur) return null;
-    const curCx = cur.x + cur.width / 2;
-    // Find the y coordinate of the adjacent row.
-    let rowY = null;
-    for (let i = 0; i < boxes.length; i++) {
-      const t = boxes[i].y;
-      if (dir > 0 ? t > cur.y : t < cur.y) {
-        if (
-          rowY === null ||
-          (dir > 0 ? t < rowY : t > rowY) // nearest row in that direction
-        )
-          rowY = t;
-      }
-    }
-    if (rowY === null) return null; // already on the first/last row
-    // Nearest horizontal centre within that row.
-    let best = null;
-    let bestDist = Infinity;
-    for (let i = 0; i < boxes.length; i++) {
-      if (boxes[i].y !== rowY) continue;
-      const d = Math.abs(boxes[i].x + boxes[i].width / 2 - curCx);
-      if (d < bestDist) {
-        bestDist = d;
-        best = i;
-      }
-    }
-    return best;
-  }
-
-  /**
-   * Vertical navigation in a justified layout: rows have varying column
-   * counts, so move to the box in the adjacent row whose horizontal centre is
-   * nearest to the current one. If that lands on a placeholder, keep
-   * advancing row by row (placeholders are never a valid selection target)
-   * until a real entry is found or there's no further row, in which case the
-   * original selection is kept.
-   * @param {1|-1} dir
-   */
-  function navVertical(dir) {
-    if (!boxes) return selected;
-    const start = selected;
-    let cur = start;
-    while (true) {
-      const next = nearestBoxInAdjacentRow(cur, dir);
-      if (next === null) return start; // no further row that direction
-      if (displayEntries[next]?.kind !== "placeholder") return next;
-      cur = next; // placeholder row — keep looking past it
-    }
-  }
 
   async function onKeydown(e) {
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
@@ -1149,8 +1125,10 @@
       next = nextSelectable(displayEntries, selected + 1, 1) ?? selected;
     else if (key === "ArrowLeft")
       next = nextSelectable(displayEntries, selected - 1, -1) ?? selected;
-    else if (key === "ArrowDown") next = navVertical(1);
-    else if (key === "ArrowUp") next = navVertical(-1);
+    else if (key === "ArrowDown")
+      next = navVertical(boxes, displayEntries, selected, 1);
+    else if (key === "ArrowUp")
+      next = navVertical(boxes, displayEntries, selected, -1);
     else if (key === "Enter" || key === " ") {
       e.preventDefault();
       const entry = displayEntries[selected];
@@ -1184,8 +1162,33 @@
    * intermediate photos client-side — a folder in this library can hold
    * 10,000+ photos between here and the boundary. */
   async function jumpGroupBoundary(direction) {
+    if (jumpingGroup) return;
     const focusId = safeFocusId(selected);
     if (focusId == null) return;
+    jumpingGroup = true;
+    try {
+      await jumpGroupBoundaryInner(direction, focusId);
+    } finally {
+      jumpingGroup = false;
+      // updateVisibleRange's own reactive trigger (`$: if (boxes) {...}`)
+      // fires on every boxes recompute during jumpGroupBoundaryInner's own
+      // execution — but at that point fetchingBefore/fetchingAfter are
+      // still held true (they're only released in jumpGroupBoundaryInner's
+      // own finally, which hasn't run yet), so any "we're near the loaded
+      // edge, fetch more" check it makes is silently swallowed by the
+      // guard. Nothing re-runs that check once the guard actually clears,
+      // so a genuinely-needed loadMore (e.g. the group just jumped away
+      // from has thousands more photos before the small window this jump
+      // loaded) was never triggered — confirmed live: `hasMoreBefore`
+      // stayed `true` and `renderStart` stayed `0` (both conditions for an
+      // auto-load satisfied) in the final settled state, but no follow-up
+      // /api/feed request ever fired. One more check here, after the
+      // guards are genuinely clear, catches it.
+      updateVisibleRange();
+    }
+  }
+
+  async function jumpGroupBoundaryInner(direction, focusId) {
     let boundary;
     try {
       boundary = await fetchGroupBoundary({
@@ -1208,11 +1211,20 @@
     fetchingBefore = true;
     fetchingAfter = true;
     try {
+      // Full PAGE_SIZE each side, not PAGE_SIZE/2 — a jump's initial window
+      // used to load only 30+30, so any group bigger than that needed one
+      // or more follow-up loadMore round-trips (each a separate network
+      // request + layout pass) before it looked complete. Reported as "it
+      // takes a while... it should be smooth": the fix that made those
+      // follow-ups actually fire (see the finally block below) surfaced
+      // this as a visibly staggered load. A bigger up-front window means
+      // most real groups (the large majority of this library's folders are
+      // under 60 photos) need zero follow-ups at all.
       const { items: beforePage } = await fetchFeed({
         groupBy,
         collapsed: collapsedPaths,
         focusId: targetId,
-        before: PAGE_SIZE / 2,
+        before: PAGE_SIZE,
         after: 0,
       });
       const { items: afterPage, focusItem } = await fetchFeed({
@@ -1220,7 +1232,7 @@
         collapsed: collapsedPaths,
         focusId: targetId,
         before: 0,
-        after: PAGE_SIZE / 2,
+        after: PAGE_SIZE,
       });
       if (epoch !== feedEpoch) return;
       // A jump can land anywhere in the library, arbitrarily far from
@@ -1238,8 +1250,8 @@
         ...(focusItem ? [focusItem] : []),
         ...afterPage,
       ]);
-      hasMoreBefore = beforePage.length >= PAGE_SIZE / 2;
-      hasMoreAfter = afterPage.length >= PAGE_SIZE / 2;
+      hasMoreBefore = beforePage.length >= PAGE_SIZE;
+      hasMoreAfter = afterPage.length >= PAGE_SIZE;
       await tick();
       // findEntryIndexForId, not a plain resolvePhoto(en).id === targetId
       // search: targetId is a server-resolved photo id with no awareness
@@ -1257,10 +1269,34 @@
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       enrichMeta(items.map((i) => i.id));
       await tick();
+      // Prefer the section header at this index (gives the correct
+      // depth-stacked sticky offset), but a group-jump target is only
+      // guaranteed to be A photo at the new group's boundary — nothing
+      // guarantees displayEntries[selected] is itself the header row (e.g.
+      // it can be a stack cover one slot after the header, or the header
+      // can have been suppressed by suppressPlaceholderHeaders). Falling
+      // back to the target's own box keeps scrollToSection from being
+      // skipped in that case, which otherwise leaves mainColumnEl.scrollTop
+      // stuck at the 0 this function just forced it to above — and *that*,
+      // not the fetch/landing logic, is what was driving the runaway
+      // backward-loading cascade: with scrollTop pinned at 0, updateVisibleRange
+      // reads the render window as pinned to the start of the loaded feed
+      // and keeps calling loadMore("before") once per settled frame,
+      // walking back through the entire library page by page (confirmed
+      // live: a single jump produced 20+ sequential /api/feed?before=60
+      // calls, each stepping focusId back by exactly PAGE_SIZE, until
+      // hasMoreBefore ran out near the start of the whole library).
+      const targetEntry = displayEntries[selected];
       const targetHeader = layoutResult?.headers.find(
         (h) => h.index === selected
       );
-      if (targetHeader) await scrollToSection(targetHeader);
+      const targetBox =
+        !targetHeader && targetEntry
+          ? layoutResult?.boxes.find((b) => b.id === entryDomId(targetEntry))
+          : null;
+      const scrollTarget =
+        targetHeader ?? (targetBox && { y: targetBox.y, depth: 0 });
+      if (scrollTarget) await scrollToSection(scrollTarget);
     } catch (err) {
       error = err.message;
       status = "";
