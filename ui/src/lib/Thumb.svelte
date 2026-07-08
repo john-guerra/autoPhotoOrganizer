@@ -233,6 +233,10 @@
   .thumb {
     position: absolute;
     inset: 0;
+    /* Keep the sticky-header band clear when scrollIntoView() reveals this
+       tile (App.svelte's revealSelected). --reveal-margin is set on the
+       scroll container = one header per grouping level + breathing room. */
+    scroll-margin-top: var(--reveal-margin, 44px);
     /* Explicit z-index (not auto) so this element establishes its own
        stacking context: its own border/box-shadow (the selection
        highlight) and its children (cover z-index:50, badges z-index:100)

@@ -1,8 +1,31 @@
 # Active-navigation scroll reveal
 
 **Date:** 2026-07-08
-**Status:** approved, ready for implementation plan
+**Status:** implemented — see amendment below; the geometry module (`scroll.js`)
+this spec proposed was superseded during implementation.
 **Related:** GitHub issue #40 (selected-thumbnail scroll-hijacking on every reflow)
+
+## Implementation amendment (native scrollIntoView)
+
+The shipped implementation replaced the hand-rolled geometry (`revealScrollTop`
+in `scroll.js`, plus content-vs-client coordinate math) with the **native DOM
+`element.scrollIntoView({ block })` API** plus a CSS `scroll-margin-top` on the
+tile (`--reveal-margin`, set on the scroll container = one sticky-header band per
+grouping level + a `PAD` of breathing room). This clears the sticky header
+without any manual margin math, and `block: "nearest"` gives the "minimal scroll,
+no-op when already visible" behaviour the spec wanted for keyboard nav for free.
+`scroll.js` was deleted.
+
+The spec's "one re-reveal after `enrichMeta` settles" (§ Group-jump) proved
+insufficient on its own: a *single* one-shot re-reveal fires at one frame and
+can land on a bad one (rapid jumps ended up scrolled far past the target). The
+shipped version instead **re-asserts on every reflow while a jump's metadata is
+still loading** (`jumpRevealPending` gates a `$: boxes` reactive), which is
+self-correcting — rapid jumps converge. Crucially the release is an **event**
+(the jump window's metadata finished loading, or the user took over via
+keypress/`wheel`), never a timer — matching the "no timeouts" constraint. This
+is the continuous-anchor idea from the earlier scroll-anchoring attempt, but
+gated to the post-jump window so it never fights ordinary browsing scroll.
 
 ## Problem
 

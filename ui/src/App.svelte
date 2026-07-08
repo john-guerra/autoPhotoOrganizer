@@ -2,7 +2,6 @@
   import { onMount, tick } from "svelte";
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
-  import { revealScrollTop } from "./lib/scroll.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
   import { nextSelectable, navVertical } from "./lib/navigation.js";
   import {
@@ -133,18 +132,12 @@
   // (the database has no duplicate photos/folders). A simple re-entry
   // guard, checked and set before the first await, closes this off.
   let jumpingGroup = false;
-  // Scroll-anchoring: keep the selected photo visually fixed through layout
-  // reflows *while it's on screen*. After a group-jump the landing sits near
-  // the top, then content above it keeps reflowing for a beat (metadata
-  // streaming in for the group jumped away from resizes those rows) — with no
-  // anchor that shifts the landing up under the header. Rather than a fragile
-  // post-jump timer, we continuously remember where the selected tile sits
-  // (anchorOffset, px from the viewport top) and, on every reflow, nudge
-  // scrollTop to put it back there. It releases itself: when the user scrolls
-  // the selection out of view, there's no anchor, so ordinary browsing scroll
-  // is never fought. No timeouts.
-  let anchorId = null; // photo id of the current scroll anchor (null = none)
-  let anchorOffset = 0; // its last-known px offset from the viewport top
+  // True from a group-jump's landing until its window's metadata finishes
+  // loading — the cue to re-assert the landing once (the above-the-fold rows
+  // resize as their dimensions arrive, drifting the one-shot landing down).
+  // Cleared the instant the user takes over (a keypress or wheel/trackpad
+  // scroll), so the re-assert never fights them. Not a timer.
+  let jumpRevealPending = false;
   // Per-group photo counts shown on each section header, so the user knows
   // how many photos a group holds before scrolling it (the loaded window is
   // only a slice; a group can hold thousands). Keyed by pathKey(group path).
@@ -526,101 +519,29 @@
     }
   }
 
-  /** Scroll mainColumnEl so the currently-selected tile is visible — called
-   * ONLY from active navigation (keyboard, group-jump), never from a reflow or
-   * a programmatic re-anchor. Reads the tile's live DOM rect (buildVisibleItems
-   * always mounts `selected`, so it exists after a tick), which avoids any
-   * content-vs-client coordinate mismatch. No-op if the tile isn't mounted.
-   *
-   * `align: "nearest"` (default, for keyboard nav) scrolls the minimum needed
-   * and is a no-op when already fully visible — never re-centers. `align:
-   * "top"` (for a group-jump) pins the tile just below the sticky-header band
-   * so the newly-landed group reads from the top; a jump lands somewhere the
-   * user can't see, so "just barely in view" isn't enough there.
-   *
-   * Scrolls INSTANTLY, not smoothly: a smooth scroll here is silently
-   * cancelled by the reflow the same navigation triggers (selection change →
-   * re-layout → the animation never lands, confirmed live), and instant is
-   * also snappier for fast keyboard culling.
-   * @param {{align?: "nearest"|"top"}} [opts]
-   */
-  function revealSelected({ align = "nearest" } = {}) {
-    if (!gridEl || !mainColumnEl) return;
-    const entry = displayEntries[selected];
-    const tile =
-      entry && gridEl.querySelector(`[data-id="${resolvePhoto(entry).id}"]`);
-    if (!tile) return;
-    const tileRect = tile.getBoundingClientRect();
-    const contRect = mainColumnEl.getBoundingClientRect();
-    // Express the tile's top in the same scrollTop-based coordinate the
-    // viewport uses, so the math compares like with like.
-    const boxTop = mainColumnEl.scrollTop + (tileRect.top - contRect.top);
-    // Reserve the worst-case sticky-header stack (one band per grouping level)
-    // so a tile at a section boundary isn't revealed underneath the headers.
-    const margin = HEADER_HEIGHT * groupBy.length;
-    let target;
-    if (align === "top") {
-      // Pin the landing photo a comfortable PAD below the header band, not
-      // flush against it — scrollToSection lands the header at the very top
-      // with the first photo touching it (1px gap), which reads as "tucked
-      // under the header". The extra PAD gives clear separation. Authoritative
-      // (only skips a scroll that's already essentially there).
-      target = boxTop - margin - PAD;
-      if (Math.abs(target - mainColumnEl.scrollTop) < 2) return;
-    } else {
-      target = revealScrollTop(
-        { top: boxTop, height: tileRect.height },
-        mainColumnEl.scrollTop,
-        mainColumnEl.clientHeight,
-        margin
-      );
-    }
-    if (target != null) {
-      mainColumnEl.scrollTo({ top: Math.max(0, target), behavior: "auto" });
-    }
-    // The place we just put it becomes the scroll anchor.
-    captureAnchor();
+  /** Re-put the jump landing at the top after a reflow moved it. Waits a tick
+   * so the DOM reflects the new layout, then re-checks the flag (it may have
+   * cleared — metadata finished, or the user took over — during the tick). */
+  async function reAssertJumpLanding() {
+    await tick();
+    if (jumpRevealPending) revealSelected({ block: "start" });
   }
 
-  /** Remember where the selected tile currently sits, so reflows can put it
-   * back. Only anchors while the tile is actually on screen — once the user
-   * scrolls it out of view there's nothing to hold, which is what makes this
-   * self-releasing (no hijack of ordinary scrolling). Called after every
-   * reveal and on every scroll frame. */
-  function captureAnchor() {
-    if (!gridEl || !mainColumnEl) return;
+  /** Bring the selected tile into view using the native scroll API — called
+   * ONLY from active navigation (keyboard, group-jump). One-shot and
+   * imperative: it never re-fires on reflow, so it can't hijack the user's
+   * scrolling. The tile's CSS `scroll-margin-top` (var --reveal-margin) keeps
+   * it clear of the sticky-header band.
+   * `block: "start"` (group-jump) puts the landing at the top of the group;
+   * `"nearest"` (keyboard nav) scrolls the minimum and is a no-op when the tile
+   * is already fully visible.
+   * @param {{block?: ScrollLogicalPosition}} [opts]
+   */
+  function revealSelected({ block = "nearest" } = {}) {
     const entry = displayEntries[selected];
     const id = entry ? resolvePhoto(entry).id : null;
-    const tile = id != null && gridEl.querySelector(`[data-id="${id}"]`);
-    if (!tile) {
-      anchorId = null;
-      return;
-    }
-    const t = tile.getBoundingClientRect();
-    const c = mainColumnEl.getBoundingClientRect();
-    if (t.bottom > c.top && t.top < c.bottom) {
-      anchorId = id;
-      anchorOffset = t.top - c.top;
-    } else {
-      anchorId = null; // selected tile scrolled off screen — stop anchoring
-    }
-  }
-
-  /** After a reflow moved the anchored tile, nudge scrollTop to put it back at
-   * anchorOffset — keeping it (and the viewport) visually fixed. Skipped while
-   * a loadMore is prepending: that path does its own gridHeight compensation,
-   * so anchoring there would double-correct. Waits a tick so the DOM reflects
-   * the new layout before measuring. */
-  async function restoreAnchor() {
-    if (anchorId == null || fetchingBefore || !gridEl || !mainColumnEl) return;
-    await tick();
-    if (anchorId == null) return; // may have cleared during the tick
-    const tile = gridEl.querySelector(`[data-id="${anchorId}"]`);
-    if (!tile) return;
-    const t = tile.getBoundingClientRect();
-    const c = mainColumnEl.getBoundingClientRect();
-    const delta = t.top - c.top - anchorOffset;
-    if (Math.abs(delta) > 0.5) mainColumnEl.scrollTop += delta;
+    const tile = id != null && gridEl?.querySelector(`[data-id="${id}"]`);
+    tile?.scrollIntoView({ block, inline: "nearest" });
   }
 
   /** Give roving keyboard focus to the currently-selected tile's DOM element,
@@ -831,7 +752,12 @@
     const sorted = [...need].sort((a, b) => distance(a) - distance(b));
 
     await applyBatch(sorted.slice(0, META_NEAR_BATCH));
-    applyBatch(sorted.slice(META_NEAR_BATCH)); // fire-and-forget
+    // Await the rest too, so the returned promise resolves only once EVERY
+    // photo in the batch has its real dimensions (the layout has stopped
+    // reflowing). A group-jump `.then()`s on this to re-assert its landing
+    // after the above-the-fold rows stop resizing. Callers that don't care
+    // (initial load, loadMore) already fire-and-forget.
+    await applyBatch(sorted.slice(META_NEAR_BATCH));
   }
 
   async function refreshLibrary() {
@@ -1008,12 +934,12 @@
         )
       : null;
   $: boxes = layoutResult ? layoutResult.boxes : null;
-  // On every reflow (each `boxes` recompute), hold the anchored tile in place.
-  // This is the ONLY place reflow drives scroll, and only when there IS an
-  // anchor (the selected tile is on screen) — so it stabilises a jump landing
-  // and ordinary in-view selections through metadata reflow, but never fights
-  // scrolling once the selection is off screen.
-  $: if (boxes) restoreAnchor();
+  // While a jump's window is still loading metadata (jumpRevealPending), the
+  // above-the-fold rows keep resizing and drift the landing down; re-assert it
+  // to the top on every reflow until that metadata is done. Gated by an event
+  // (metadata-loaded, or the user taking over), never a timer — and self-
+  // correcting, so even rapid jumps converge on the right spot.
+  $: if (jumpRevealPending && boxes) reAssertJumpLanding();
   $: gridHeight = layoutResult ? layoutResult.totalHeight + 2 * PAD : 0;
   // The first time this fires (right when `boxes` first becomes non-null,
   // e.g. after the initial feed load), the grid's layout/paint may not have
@@ -1172,12 +1098,6 @@
     renderStart = range.start;
     renderEnd = range.end;
 
-    // Track where the selected tile sits as the user scrolls, so a later
-    // reflow can hold it there (and so scrolling it off screen drops the
-    // anchor). Skipped mid-prepend — loadMore is actively moving scrollTop
-    // itself and re-anchoring on its transient state would fight it.
-    if (!fetchingBefore) captureAnchor();
-
     if (renderEnd >= displayEntries.length - FETCH_THRESHOLD) {
       loadMore("after");
     }
@@ -1215,6 +1135,9 @@
 
   async function onKeydown(e) {
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
+    // The user is driving now — cancel any pending post-jump re-assert (a jump
+    // re-arms it at the end of jumpGroupBoundary, after this returns).
+    jumpRevealPending = false;
 
     // Alt+Left/Right jumps groups regardless of what has focus: unlike a
     // bare digit (typing a folder path must not rate photos), Option/Alt
@@ -1427,7 +1350,7 @@
       // A jump can land anywhere in the library, arbitrarily far from
       // wherever the user was scrolled to before — reset scrollTop to 0
       // *before* items/boxes update, so the reactive updateVisibleRange
-      // (which fires as soon as boxes recomputes, before scrollToSection
+      // (which fires as soon as boxes recomputes, before revealSelected
       // below ever runs) reads a scroll position that actually matches
       // the new, much shorter document, rather than the OLD, deep-scrolled
       // offset against a document that's now far shorter.
@@ -1456,48 +1379,36 @@
           : null;
       selected = t ?? nextSelectable(displayEntries, 0, 1) ?? 0;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-      // Metadata streaming in for this window reflows the layout for a beat
-      // after landing; the scroll anchor (set by revealSelected below) holds
-      // the landing in place through those reflows, so this is fire-and-forget.
-      enrichMeta(items.map((i) => i.id));
+      // Re-assert the landing once this window's metadata has fully loaded and
+      // the above-the-fold rows have stopped resizing (see enrichMeta). Guarded
+      // so it stays a no-op if a newer jump/load superseded this one (epoch) or
+      // the user has already taken over (jumpRevealPending cleared on their
+      // first keypress/scroll) — so it corrects the drift without ever fighting
+      // the user.
+      const metaDone = enrichMeta(items.map((i) => i.id));
       await tick();
-      // Prefer the section header at this index (gives the correct
-      // depth-stacked sticky offset), but a group-jump target is only
-      // guaranteed to be A photo at the new group's boundary — nothing
-      // guarantees displayEntries[selected] is itself the header row (e.g.
-      // it can be a stack cover one slot after the header, or the header
-      // can have been suppressed by suppressPlaceholderHeaders). Falling
-      // back to the target's own box keeps scrollToSection from being
-      // skipped in that case, which otherwise leaves mainColumnEl.scrollTop
-      // stuck at the 0 this function just forced it to above — and *that*,
-      // not the fetch/landing logic, is what was driving the runaway
-      // backward-loading cascade: with scrollTop pinned at 0, updateVisibleRange
-      // reads the render window as pinned to the start of the loaded feed
-      // and keeps calling loadMore("before") once per settled frame,
-      // walking back through the entire library page by page (confirmed
-      // live: a single jump produced 20+ sequential /api/feed?before=60
-      // calls, each stepping focusId back by exactly PAGE_SIZE, until
-      // hasMoreBefore ran out near the start of the whole library).
-      const targetEntry = displayEntries[selected];
-      const targetHeader = layoutResult?.headers.find(
-        (h) => h.index === selected
-      );
-      const targetBox =
-        !targetHeader && targetEntry
-          ? layoutResult?.boxes.find((b) => b.id === entryDomId(targetEntry))
-          : null;
-      const scrollTarget =
-        targetHeader ?? (targetBox && { y: targetBox.y, depth: 0 });
-      if (scrollTarget) await scrollToSection(scrollTarget);
-      // scrollToSection only positions the section header — the landing photo
-      // itself can still be below the fold. Pin it to the top (instant, so it
-      // doesn't animate-fight scrollToSection's just-finished smooth scroll)
-      // and give it roving focus, so the jump's selected photo is in view and
-      // in focus.
-      revealSelected({ align: "top" });
+      // Put the landing photo at the top of the newly-loaded group, clear of
+      // the sticky header (native scrollIntoView + the tile's
+      // scroll-margin-top). This also moves scrollTop OFF the 0 forced above,
+      // which matters: were it left at 0, updateVisibleRange would read the
+      // render window as pinned to the start of the loaded feed and call
+      // loadMore("before") once per settled frame, walking backward through
+      // the whole library (a real, confirmed cascade — 20+ sequential
+      // /api/feed?before=60 requests from a single jump). revealSelected is
+      // one-shot and imperative, so it never re-fires on the reflows that
+      // follow — no scroll hijack.
+      revealSelected({ block: "start" });
       focusSelectedTile();
-      // revealSelected set the scroll anchor to this landing; restoreAnchor
-      // now holds it there through the metadata reflows still to come.
+      // The reactive re-assert (see jumpRevealPending) now holds this landing
+      // at the top through every metadata reflow — self-correcting, so rapid
+      // jumps converge instead of getting stuck at one bad frame. We stop as
+      // soon as this window's metadata is fully loaded (the layout has stopped
+      // resizing): an EVENT, not a timer. Epoch-guarded so a superseded jump's
+      // completion doesn't cancel a newer jump's pin.
+      jumpRevealPending = true;
+      metaDone?.then(() => {
+        if (epoch === feedEpoch) jumpRevealPending = false;
+      });
     } catch (err) {
       error = err.message;
       status = "";
@@ -1623,6 +1534,8 @@
       class="main-column"
       bind:this={mainColumnEl}
       on:scroll={scheduleVisibleRangeUpdate}
+      on:wheel={() => (jumpRevealPending = false)}
+      style="--reveal-margin:{HEADER_HEIGHT * groupBy.length + PAD}px"
     >
       {#if items.length}
         <div
