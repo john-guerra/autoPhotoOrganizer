@@ -64,6 +64,47 @@ export function detectBursts(items, { gapMs }) {
     });
 }
 
+/**
+ * Runs detectBursts independently within each contiguous run of items that
+ * share the same value for every `groupBy` dimension — detectBursts itself
+ * is documented as grouping "a folder's photos" (a single group), but
+ * App.svelte's endless feed hands it a window that can span several
+ * groups (e.g. two different folders back to back). Without this
+ * partitioning, two unrelated folders whose photos happen to have
+ * time-adjacent (or, for a duplicated backup, literally identical)
+ * timestamps get merged into one cross-folder burst — a real case in
+ * John's archive (`fotos_peq/2002/..._comida_peq` and
+ * `..._grado_Edwin_peq` share an identical timestamp sequence), which
+ * silently corrupted stack membership and cover selection for photos
+ * nowhere near each other in the library.
+ * `items` is assumed already sorted so each group's rows are contiguous
+ * (matches the server's composite ORDER BY — groupBy dimensions first,
+ * then time/id).
+ * @param {Array<{id, name, rating?, mtimeMs, takenAt?, groupValues: Record<string,string>}>} items
+ * @param {string[]} groupBy
+ * @param {{ gapMs: number }} opts
+ * @returns {Array<{ id, memberIds: Array<number|string>, coverId, count }>}
+ */
+export function detectBurstsByGroup(items, groupBy, opts) {
+  if (!items.length) return [];
+  const runs = [];
+  let current = [items[0]];
+  for (let i = 1; i < items.length; i++) {
+    const prev = items[i - 1];
+    const cur = items[i];
+    const sameGroup = groupBy.every(
+      (d) => prev.groupValues?.[d] === cur.groupValues?.[d]
+    );
+    if (sameGroup) current.push(cur);
+    else {
+      runs.push(current);
+      current = [cur];
+    }
+  }
+  runs.push(current);
+  return runs.flatMap((run) => detectBursts(run, opts));
+}
+
 /** Coerces a numeric ms value or ISO-8601 string into ms; null if unparseable. */
 function toMs(value) {
   if (typeof value === "number") return value;

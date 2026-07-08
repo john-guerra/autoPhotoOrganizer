@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectBursts } from "./bursts.js";
+import { detectBursts, detectBurstsByGroup } from "./bursts.js";
 
 describe("detectBursts", () => {
   it("groups consecutive photos within gapMs, and splits on a wider gap", () => {
@@ -161,5 +161,35 @@ describe("detectBursts", () => {
     expect(memberIdSets).toContainEqual([4, 5]);
     const allGrouped = stacks.flatMap((s) => s.memberIds);
     expect(allGrouped).not.toContain(1);
+  });
+});
+
+describe("detectBurstsByGroup", () => {
+  it("never merges a burst across a group boundary, even when two groups share identical timestamps", () => {
+    // Real case from John's archive: two different folders whose photos
+    // happen to carry an identical timestamp sequence (a duplicated
+    // backup) — a naive whole-window detectBursts call merges them into
+    // one cross-folder burst; this must keep them as two separate stacks.
+    const items = [
+      { id: 1, name: "a.jpg", mtimeMs: 0, groupValues: { folder: "/A" } },
+      { id: 2, name: "b.jpg", mtimeMs: 200, groupValues: { folder: "/A" } },
+      { id: 3, name: "c.jpg", mtimeMs: 0, groupValues: { folder: "/B" } },
+      { id: 4, name: "d.jpg", mtimeMs: 200, groupValues: { folder: "/B" } },
+    ];
+    const stacks = detectBurstsByGroup(items, ["folder"], { gapMs: 1000 });
+    expect(stacks).toHaveLength(2);
+    const memberIdSets = stacks.map((s) => [...s.memberIds].sort());
+    expect(memberIdSets).toContainEqual([1, 2]);
+    expect(memberIdSets).toContainEqual([3, 4]);
+  });
+
+  it("behaves like detectBursts on the whole array when groupBy is empty", () => {
+    const items = [
+      { id: 1, name: "a.jpg", mtimeMs: 0, groupValues: {} },
+      { id: 2, name: "b.jpg", mtimeMs: 200, groupValues: {} },
+    ];
+    expect(detectBurstsByGroup(items, [], { gapMs: 1000 })).toEqual(
+      detectBursts(items, { gapMs: 1000 })
+    );
   });
 });
