@@ -73,3 +73,39 @@ verification), and decisions already made.
   `browser_batch` to run a sequence of clicks/types/navigations/screenshots in
   one call instead of one tool call per action — much faster than issuing them
   individually.
+- **Never modify, move, rename, or delete anything inside the user's actual
+  photo folders** (the real files on disk/SD cards/external drives) unless the
+  user has explicitly asked for that specific action in that conversation. This
+  is independent of and stricter than the read-only test-folder convention
+  above — it applies to all of the user's photo libraries, not just the
+  designated test folders. The `~/.autogallery/` SQLite cache is safe to
+  inspect/rebuild freely per the second invariant above.
+- If a feature ever needs to delete a photo (export cleanup, dedup, etc.), it
+  must soft-delete — move the file into a recoverable trash location, never a
+  hard/permanent delete — so the user can always recover it.
+
+## Debugging discipline (learned the hard way — see issues #36–#39)
+
+- **For any data-ordering/display bug, verify the raw API response before
+  proposing a client-side fix.** A multi-day chase of a "group-jump lands on
+  the wrong photo" bug spent most of its time on client-side theories
+  (scroll-anchor, race conditions, burst-clustering) before `curl`ing the
+  actual `/api/feed?before=N&focusId=X` response and discovering the server's
+  "before" seek was returning items *after* the focus point too — a bug no
+  amount of client-side reasoning could have found. Check the lowest layer
+  first, especially when the client is "correctly" rendering data it was
+  handed.
+- **Verify a fix against the exact reported scenario, live, before claiming
+  it's fixed.** A fix that resolves a *similar* case (e.g. a rapid-fire
+  concurrency repro) is not the same as verifying the user's *actual* repro
+  steps. This project's existing "manual browser verification for App.svelte"
+  convention (see `docs/ROADMAP.md`) exists for this reason — a passing test
+  suite plus a plausible-looking screenshot is not sufficient for anything
+  touching feed-window ordering or state.
+- **New logic that replaces/merges the feed window (`items`) must not
+  hand-roll another copy of the `fetchingBefore`/`fetchingAfter`/`feedEpoch`
+  guard pattern.** Six near-identical copies of this pattern already caused
+  two shipped bugs (issues #35, #36, #39) — route through whatever shared
+  helper exists from the modularization work tracked in issue #42 (or, if
+  that hasn't landed yet, flag the duplication in review rather than adding a
+  seventh copy).
