@@ -132,16 +132,10 @@
 
   onDestroy(() => observer?.disconnect());
 
-  // Keep the selected tile centered for roving keyboard focus — re-runs
-  // whenever this tile's own position changes too (not just when it first
-  // becomes selected), since a metadata-driven justified-layout reflow can
-  // move the selected tile after the initial scroll; referencing box.x/y
-  // here is what makes Svelte re-fire this block on that reflow.
-  $: if (selected && el) {
-    void box.x;
-    void box.y;
-    el.scrollIntoView({ block: "center" });
-  }
+  // (Selection reveal is owned by App.svelte's revealSelected(), triggered by
+  // active navigation only — a tile no longer scrolls the page itself. This
+  // deliberately removes the old reflow-triggered re-center, which hijacked
+  // the user's scroll on every metadata-driven layout change. See issue #40.)
 </script>
 
 <div

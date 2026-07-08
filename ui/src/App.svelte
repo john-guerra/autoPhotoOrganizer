@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
+  import { revealScrollTop } from "./lib/scroll.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
   import { nextSelectable, navVertical } from "./lib/navigation.js";
   import {
@@ -511,6 +512,67 @@
       fetchingBefore = false;
       fetchingAfter = false;
     }
+  }
+
+  /** Scroll mainColumnEl so the currently-selected tile is visible — called
+   * ONLY from active navigation (keyboard, group-jump), never from a reflow or
+   * a programmatic re-anchor. Reads the tile's live DOM rect (buildVisibleItems
+   * always mounts `selected`, so it exists after a tick), which avoids any
+   * content-vs-client coordinate mismatch. No-op if the tile isn't mounted.
+   *
+   * `align: "nearest"` (default, for keyboard nav) scrolls the minimum needed
+   * and is a no-op when already fully visible — never re-centers. `align:
+   * "top"` (for a group-jump) pins the tile just below the sticky-header band
+   * so the newly-landed group reads from the top; a jump lands somewhere the
+   * user can't see, so "just barely in view" isn't enough there.
+   *
+   * Scrolls INSTANTLY, not smoothly: a smooth scroll here is silently
+   * cancelled by the reflow the same navigation triggers (selection change →
+   * re-layout → the animation never lands, confirmed live), and instant is
+   * also snappier for fast keyboard culling.
+   * @param {{align?: "nearest"|"top"}} [opts]
+   */
+  function revealSelected({ align = "nearest" } = {}) {
+    if (!gridEl || !mainColumnEl) return;
+    const entry = displayEntries[selected];
+    const tile =
+      entry && gridEl.querySelector(`[data-id="${resolvePhoto(entry).id}"]`);
+    if (!tile) return;
+    const tileRect = tile.getBoundingClientRect();
+    const contRect = mainColumnEl.getBoundingClientRect();
+    // Express the tile's top in the same scrollTop-based coordinate the
+    // viewport uses, so the math compares like with like.
+    const boxTop = mainColumnEl.scrollTop + (tileRect.top - contRect.top);
+    // Reserve the worst-case sticky-header stack (one band per grouping level)
+    // so a tile at a section boundary isn't revealed underneath the headers.
+    const margin = HEADER_HEIGHT * groupBy.length;
+    let target;
+    if (align === "top") {
+      target = boxTop - margin;
+      // Skip a scroll that wouldn't meaningfully move (avoids jitter when
+      // scrollToSection already landed the tile at the top).
+      if (Math.abs(target - mainColumnEl.scrollTop) < 2) return;
+    } else {
+      target = revealScrollTop(
+        { top: boxTop, height: tileRect.height },
+        mainColumnEl.scrollTop,
+        mainColumnEl.clientHeight,
+        margin
+      );
+    }
+    if (target != null) {
+      mainColumnEl.scrollTo({ top: Math.max(0, target), behavior: "auto" });
+    }
+  }
+
+  /** Give roving keyboard focus to the currently-selected tile's DOM element,
+   * without letting the browser's native focus-scroll fight revealSelected
+   * (preventScroll). Shared by keyboard nav and group-jump. */
+  function focusSelectedTile() {
+    const entry = displayEntries[selected];
+    gridEl
+      ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
+      ?.focus({ preventScroll: true });
   }
 
   /** Scroll so this section's header lands at its stuck (sticky) position
@@ -1206,10 +1268,10 @@
     e.preventDefault();
     selected = next;
     await tick();
-    const entry = displayEntries[selected];
-    gridEl
-      ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
-      ?.focus({ preventScroll: true });
+    // focus (preventScroll) suppresses the browser's native focus scroll;
+    // revealSelected is the sole, deliberate reveal for keyboard navigation.
+    focusSelectedTile();
+    revealSelected();
   }
 
   /** Alt+Left/Right: jump to the previous/next section-header boundary, at
@@ -1324,7 +1386,15 @@
           : null;
       selected = t ?? nextSelectable(displayEntries, 0, 1) ?? 0;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-      enrichMeta(items.map((i) => i.id));
+      // The near-selection metadata batch reflows the layout a beat after the
+      // jump lands, which can drift the landing photo. Re-pin it to the top
+      // once that batch settles (epoch-guarded so a newer jump/load that
+      // bumped feedEpoch doesn't yank the view). Runs AFTER the initial
+      // scrollToSection + reveal below (metadata is async), so it's the last
+      // word, not a racer.
+      enrichMeta(items.map((i) => i.id)).then(() => {
+        if (epoch === feedEpoch) revealSelected({ align: "top" });
+      });
       await tick();
       // Prefer the section header at this index (gives the correct
       // depth-stacked sticky offset), but a group-jump target is only
@@ -1354,6 +1424,13 @@
       const scrollTarget =
         targetHeader ?? (targetBox && { y: targetBox.y, depth: 0 });
       if (scrollTarget) await scrollToSection(scrollTarget);
+      // scrollToSection only positions the section header — the landing photo
+      // itself can still be below the fold. Pin it to the top (instant, so it
+      // doesn't animate-fight scrollToSection's just-finished smooth scroll)
+      // and give it roving focus, so the jump's selected photo is in view and
+      // in focus.
+      revealSelected({ align: "top" });
+      focusSelectedTile();
     } catch (err) {
       error = err.message;
       status = "";
