@@ -133,26 +133,18 @@
   // (the database has no duplicate photos/folders). A simple re-entry
   // guard, checked and set before the first await, closes this off.
   let jumpingGroup = false;
-  // A group-jump lands the selected photo near the top, but content ABOVE it
-  // keeps reflowing for a beat afterward — metadata streaming in for the group
-  // it jumped away from changes those rows' heights, and a loadMore("before")
-  // can prepend more — either of which shifts the landing up under the header
-  // (the exact instability the old reflow-triggered re-center used to mask).
-  // So for a short, BOUNDED window after a jump we re-pin the landing on every
-  // reflow; then we release, so normal browsing scroll is never fought again.
-  // Cleared by the timeout, or immediately when the user takes over (a keypress
-  // or a wheel/trackpad scroll).
-  let jumpSettling = false;
-  let jumpSettleTimer = null;
-  function beginJumpSettle() {
-    jumpSettling = true;
-    clearTimeout(jumpSettleTimer);
-    jumpSettleTimer = setTimeout(() => (jumpSettling = false), 2000);
-  }
-  function endJumpSettle() {
-    jumpSettling = false;
-    clearTimeout(jumpSettleTimer);
-  }
+  // Scroll-anchoring: keep the selected photo visually fixed through layout
+  // reflows *while it's on screen*. After a group-jump the landing sits near
+  // the top, then content above it keeps reflowing for a beat (metadata
+  // streaming in for the group jumped away from resizes those rows) — with no
+  // anchor that shifts the landing up under the header. Rather than a fragile
+  // post-jump timer, we continuously remember where the selected tile sits
+  // (anchorOffset, px from the viewport top) and, on every reflow, nudge
+  // scrollTop to put it back there. It releases itself: when the user scrolls
+  // the selection out of view, there's no anchor, so ordinary browsing scroll
+  // is never fought. No timeouts.
+  let anchorId = null; // photo id of the current scroll anchor (null = none)
+  let anchorOffset = 0; // its last-known px offset from the viewport top
   // Per-group photo counts shown on each section header, so the user knows
   // how many photos a group holds before scrolling it (the loaded window is
   // only a slice; a group can hold thousands). Keyed by pathKey(group path).
@@ -586,15 +578,49 @@
     if (target != null) {
       mainColumnEl.scrollTo({ top: Math.max(0, target), behavior: "auto" });
     }
+    // The place we just put it becomes the scroll anchor.
+    captureAnchor();
   }
 
-  /** Re-pin the just-jumped-to landing photo after a reflow moved it. Waits a
-   * tick so the DOM reflects the new layout, then re-checks the settle flag (a
-   * reflow late in the settle window may resolve after the flag already
-   * cleared). Only ever called from the jumpSettling-gated reactive. */
-  async function repinLandingAfterReflow() {
+  /** Remember where the selected tile currently sits, so reflows can put it
+   * back. Only anchors while the tile is actually on screen — once the user
+   * scrolls it out of view there's nothing to hold, which is what makes this
+   * self-releasing (no hijack of ordinary scrolling). Called after every
+   * reveal and on every scroll frame. */
+  function captureAnchor() {
+    if (!gridEl || !mainColumnEl) return;
+    const entry = displayEntries[selected];
+    const id = entry ? resolvePhoto(entry).id : null;
+    const tile = id != null && gridEl.querySelector(`[data-id="${id}"]`);
+    if (!tile) {
+      anchorId = null;
+      return;
+    }
+    const t = tile.getBoundingClientRect();
+    const c = mainColumnEl.getBoundingClientRect();
+    if (t.bottom > c.top && t.top < c.bottom) {
+      anchorId = id;
+      anchorOffset = t.top - c.top;
+    } else {
+      anchorId = null; // selected tile scrolled off screen — stop anchoring
+    }
+  }
+
+  /** After a reflow moved the anchored tile, nudge scrollTop to put it back at
+   * anchorOffset — keeping it (and the viewport) visually fixed. Skipped while
+   * a loadMore is prepending: that path does its own gridHeight compensation,
+   * so anchoring there would double-correct. Waits a tick so the DOM reflects
+   * the new layout before measuring. */
+  async function restoreAnchor() {
+    if (anchorId == null || fetchingBefore || !gridEl || !mainColumnEl) return;
     await tick();
-    if (jumpSettling) revealSelected({ align: "top" });
+    if (anchorId == null) return; // may have cleared during the tick
+    const tile = gridEl.querySelector(`[data-id="${anchorId}"]`);
+    if (!tile) return;
+    const t = tile.getBoundingClientRect();
+    const c = mainColumnEl.getBoundingClientRect();
+    const delta = t.top - c.top - anchorOffset;
+    if (Math.abs(delta) > 0.5) mainColumnEl.scrollTop += delta;
   }
 
   /** Give roving keyboard focus to the currently-selected tile's DOM element,
@@ -982,11 +1008,12 @@
         )
       : null;
   $: boxes = layoutResult ? layoutResult.boxes : null;
-  // While a jump is settling, re-pin the landing photo on every reflow (each
-  // `boxes` recompute) so post-jump layout shifts can't tuck it under the
-  // header. Bounded by jumpSettling (see beginJumpSettle) — this is the ONLY
-  // place reflow drives scroll, and only for ~2s after a jump.
-  $: if (jumpSettling && boxes) repinLandingAfterReflow();
+  // On every reflow (each `boxes` recompute), hold the anchored tile in place.
+  // This is the ONLY place reflow drives scroll, and only when there IS an
+  // anchor (the selected tile is on screen) — so it stabilises a jump landing
+  // and ordinary in-view selections through metadata reflow, but never fights
+  // scrolling once the selection is off screen.
+  $: if (boxes) restoreAnchor();
   $: gridHeight = layoutResult ? layoutResult.totalHeight + 2 * PAD : 0;
   // The first time this fires (right when `boxes` first becomes non-null,
   // e.g. after the initial feed load), the grid's layout/paint may not have
@@ -1144,6 +1171,12 @@
     });
     renderStart = range.start;
     renderEnd = range.end;
+
+    // Track where the selected tile sits as the user scrolls, so a later
+    // reflow can hold it there (and so scrolling it off screen drops the
+    // anchor). Skipped mid-prepend — loadMore is actively moving scrollTop
+    // itself and re-anchoring on its transient state would fight it.
+    if (!fetchingBefore) captureAnchor();
 
     if (renderEnd >= displayEntries.length - FETCH_THRESHOLD) {
       loadMore("after");
@@ -1303,11 +1336,6 @@
     else return;
 
     e.preventDefault();
-    // Arrowing/Home/End is the user taking over — end any post-jump settle-pin
-    // (done HERE, not for every keydown: a second jump keypress is swallowed by
-    // jumpGroupBoundary's re-entrancy guard, and clearing on it would unpin the
-    // in-flight jump's landing without re-arming — the "5 rapid jumps" break).
-    endJumpSettle();
     selected = next;
     await tick();
     // focus (preventScroll) suppresses the browser's native focus scroll;
@@ -1429,8 +1457,8 @@
       selected = t ?? nextSelectable(displayEntries, 0, 1) ?? 0;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       // Metadata streaming in for this window reflows the layout for a beat
-      // after landing; beginJumpSettle (below) re-pins the landing through
-      // those reflows, so this is just fire-and-forget now.
+      // after landing; the scroll anchor (set by revealSelected below) holds
+      // the landing in place through those reflows, so this is fire-and-forget.
       enrichMeta(items.map((i) => i.id));
       await tick();
       // Prefer the section header at this index (gives the correct
@@ -1468,8 +1496,8 @@
       // in focus.
       revealSelected({ align: "top" });
       focusSelectedTile();
-      // Keep it pinned through the metadata/loadMore reflows still to come.
-      beginJumpSettle();
+      // revealSelected set the scroll anchor to this landing; restoreAnchor
+      // now holds it there through the metadata reflows still to come.
     } catch (err) {
       error = err.message;
       status = "";
@@ -1595,7 +1623,6 @@
       class="main-column"
       bind:this={mainColumnEl}
       on:scroll={scheduleVisibleRangeUpdate}
-      on:wheel={endJumpSettle}
     >
       {#if items.length}
         <div
