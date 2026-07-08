@@ -15,10 +15,14 @@
     suppressPlaceholderHeaders,
     nearestRealItemId,
     formatGroupValue,
+    computeHeaderPaths,
+    pathKey,
+    headerParentPaths,
   } from "./lib/feed.js";
   import {
     fetchFeed,
     fetchGroupBoundary,
+    fetchTreeNode,
     setRating as apiSetRating,
     setCover as apiSetCover,
     fetchMeta,
@@ -128,6 +132,19 @@
   // (the database has no duplicate photos/folders). A simple re-entry
   // guard, checked and set before the first await, closes this off.
   let jumpingGroup = false;
+  // Per-group photo counts shown on each section header, so the user knows
+  // how many photos a group holds before scrolling it (the loaded window is
+  // only a slice; a group can hold thousands). Keyed by pathKey(group path).
+  // A count depends ONLY on that path's constraints (WHERE folder=… AND
+  // year=…), never on groupBy order or the loaded window, so the cache is
+  // valid for the whole session and is only reset when a rescan can change
+  // the underlying photos (loadInitialFeed bumps countsEpoch). headerCounts
+  // is reassigned (not mutated) to stay reactive; the two Sets are plain
+  // bookkeeping and needn't be.
+  let headerCounts = {}; // pathKey(fullPath) -> number
+  let fetchedParents = new Set(); // pathKey(parentPath) already resolved
+  let inFlightParents = new Set(); // pathKey(parentPath) mid-fetch (dedup)
+  let countsEpoch = 0;
   const PAGE_SIZE = 60;
   const FETCH_THRESHOLD = 20; // start fetching more when within this many items of an edge
   let status = "";
@@ -196,6 +213,13 @@
     status = "loading…";
     thumbStatus = new Map();
     thumbStatusTick++;
+    // A rescan can add/remove photos, changing group counts — invalidate the
+    // header-count cache so it refetches (bumping the epoch also discards any
+    // count fetch still in flight from the previous window).
+    countsEpoch++;
+    headerCounts = {};
+    fetchedParents = new Set();
+    inFlightParents = new Set();
     const epoch = ++feedEpoch;
     // Block loadMore (scroll-triggered) from firing while this operation
     // replaces the whole `items` window — otherwise a concurrent loadMore
@@ -359,10 +383,6 @@
       .filter((d) => photo.groupValues[d] !== undefined)
       .map((d) => ({ dimension: d, value: photo.groupValues[d] }));
     treeSidebarRef?.revealPath(path);
-  }
-
-  function pathKey(path) {
-    return path.map((p) => `${p.dimension}=${p.value}`).join(">");
   }
 
   /** Finds the displayEntries index whose entry represents photo `id` —
@@ -793,10 +813,47 @@
   // any collapsed stack. `resolvedPhotos` is already displayEntries' 1:1
   // photo-per-entry projection (see the Loupe usage above), so it's the
   // correct input here.
+  // computeHeaderPaths annotates each header with its full ancestor path
+  // BEFORE suppression — suppress only ever drops *deeper* headers, never an
+  // ancestor, so every surviving header's path stays intact. The path both
+  // keys the count cache (see loadHeaderCounts) and, spread through the
+  // layout, is read by the header template to look up its own count.
   $: sectionHeaders = suppressPlaceholderHeaders(
-    deriveSectionHeaders(resolvedPhotos, groupBy),
+    computeHeaderPaths(deriveSectionHeaders(resolvedPhotos, groupBy)),
     displayEntries
   );
+  // Fetch each visible group's total photo count, one query per *parent*
+  // path (the tree API returns every sibling's count in a single GROUP BY),
+  // caching so scrolling — which recomputes sectionHeaders on every window
+  // change — refetches nothing already known. Runs whenever the header set
+  // changes; almost every run is a no-op once a region's counts are cached.
+  $: loadHeaderCounts(sectionHeaders, groupBy, countsEpoch);
+
+  async function loadHeaderCounts(headers, groupByAtCall, epoch) {
+    for (const parent of headerParentPaths(headers)) {
+      const key = pathKey(parent);
+      if (fetchedParents.has(key) || inFlightParents.has(key)) continue;
+      inFlightParents.add(key);
+      let node;
+      try {
+        node = await fetchTreeNode({ groupBy: groupByAtCall, path: parent });
+      } catch {
+        inFlightParents.delete(key); // transient failure — allow a retry
+        continue;
+      }
+      inFlightParents.delete(key);
+      // A rescan (loadInitialFeed) may have invalidated the cache while this
+      // was in flight — dropping a stale result keeps counts honest.
+      if (epoch !== countsEpoch) return;
+      fetchedParents.add(key);
+      const dimension = groupByAtCall[parent.length];
+      const next = { ...headerCounts };
+      for (const n of node.nodes) {
+        next[pathKey([...parent, { dimension, value: n.value }])] = n.count;
+      }
+      headerCounts = next; // reassign to trigger the template's lookup
+    }
+  }
   $: layoutResult =
     displayEntries.length && gridWidth > 2 * PAD
       ? sectionedJustifiedLayout(
@@ -1467,6 +1524,11 @@
                   >
                     {header.label}
                   </button>
+                  {#if header.path && headerCounts[pathKey(header.path)] !== undefined}
+                    <span class="section-count">
+                      {headerCounts[pathKey(header.path)].toLocaleString()} items
+                    </span>
+                  {/if}
                 </div>
               </div>
             {/each}
@@ -1792,6 +1854,13 @@
   }
   .section-label:hover {
     background: #2a2a2a;
+  }
+  .section-count {
+    color: #888;
+    font-size: 0.85em;
+    font-weight: 400;
+    /* Matches the collapsed-section placeholder's own count (.placeholder-count)
+       so a section reads the same expanded or collapsed. */
   }
   .placeholder-row {
     position: absolute;

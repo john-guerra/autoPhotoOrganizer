@@ -90,6 +90,43 @@ export function computeHeaderPaths(headers) {
 }
 
 /**
+ * A stable string key for a group path (a `{dimension,value}[]`), for use as
+ * a cache/Map key or a Svelte `{#each}` key. Encodes dimension AND value in
+ * order so two paths collide iff they're the same hierarchy node — a folder
+ * value like `/a/b` can contain any character, so this JSON-encodes rather
+ * than joining on a delimiter that a value might itself contain.
+ * @param {Array<{dimension:string, value:string}>} path
+ * @returns {string}
+ */
+export function pathKey(path) {
+  return JSON.stringify(path.map((p) => [p.dimension, p.value]));
+}
+
+/**
+ * The distinct *parent* paths of a set of headers (each header's own path
+ * minus its last element), deduped by pathKey, in first-appearance order.
+ * A header's photo count comes from the tree API's node list for its parent
+ * path (one GROUP BY that returns every sibling's count at once), so callers
+ * fetch one parent, not one header — a folder with 30 date-subgroups is a
+ * single query. A depth-0 header's parent is the empty root path `[]`, which
+ * is a valid, needed query (top-level counts), so it's kept, not dropped.
+ * @param {Array<{path: Array<{dimension:string, value:string}>}>} headers
+ * @returns {Array<Array<{dimension:string, value:string}>>}
+ */
+export function headerParentPaths(headers) {
+  const seen = new Set();
+  const parents = [];
+  for (const h of headers) {
+    const parent = h.path.slice(0, -1);
+    const key = pathKey(parent);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    parents.push(parent);
+  }
+  return parents;
+}
+
+/**
  * Drops any header deriveSectionHeaders would otherwise emit at or below a
  * placeholder's own collapse depth — the placeholder already renders its
  * own folded label/count (see App.svelte's grid template), so a normal

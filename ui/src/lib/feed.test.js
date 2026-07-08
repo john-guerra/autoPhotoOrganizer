@@ -6,6 +6,8 @@ import {
   suppressPlaceholderHeaders,
   nearestRealItemId,
   computeHeaderPaths,
+  pathKey,
+  headerParentPaths,
 } from "./feed.js";
 
 describe("formatGroupValue", () => {
@@ -123,6 +125,68 @@ describe("computeHeaderPaths", () => {
 
   it("returns an empty array for no headers", () => {
     expect(computeHeaderPaths([])).toEqual([]);
+  });
+});
+
+describe("pathKey", () => {
+  it("returns the same key for equal paths and different keys for different ones", () => {
+    const a = [{ dimension: "folder", value: "/a" }];
+    const b = [{ dimension: "folder", value: "/a" }];
+    const c = [{ dimension: "folder", value: "/b" }];
+    expect(pathKey(a)).toBe(pathKey(b));
+    expect(pathKey(a)).not.toBe(pathKey(c));
+  });
+
+  it("gives the empty root path a stable key", () => {
+    expect(pathKey([])).toBe(pathKey([]));
+  });
+
+  it("does not collide when a delimiter-like character sits inside a value", () => {
+    // A folder value can contain '/', '=', ',' etc. — a naive join would let
+    // [{folder,'a'},{year,'b'}] collide with [{folder,'a/year=b'}].
+    const nested = [
+      { dimension: "folder", value: "a" },
+      { dimension: "year", value: "b" },
+    ];
+    const flat = [{ dimension: "folder", value: "a/year=b" }];
+    expect(pathKey(nested)).not.toBe(pathKey(flat));
+  });
+});
+
+describe("headerParentPaths", () => {
+  it("returns each header's parent path, deduped, in first-appearance order", () => {
+    const headers = computeHeaderPaths(
+      deriveSectionHeaders(
+        [
+          { id: 1, groupValues: { year: "2024", folder: "/a" } },
+          { id: 2, groupValues: { year: "2024", folder: "/b" } },
+          { id: 3, groupValues: { year: "2020", folder: "/a" } },
+        ],
+        ["year", "folder"]
+      )
+    );
+    // headers: 2024, 2024>/a, 2024>/b, 2020, 2020>/a
+    // parents: [] (for 2024), [2024] (for /a and /b — deduped), [] (2020, dup),
+    //          [2020] (for /a)
+    expect(headerParentPaths(headers)).toEqual([
+      [],
+      [{ dimension: "year", value: "2024" }],
+      [{ dimension: "year", value: "2020" }],
+    ]);
+  });
+
+  it("keeps the empty root parent for a single top-level dimension", () => {
+    const headers = computeHeaderPaths(
+      deriveSectionHeaders(
+        [{ id: 1, groupValues: { folder: "/a" } }],
+        ["folder"]
+      )
+    );
+    expect(headerParentPaths(headers)).toEqual([[]]);
+  });
+
+  it("returns nothing for no headers", () => {
+    expect(headerParentPaths([])).toEqual([]);
   });
 });
 
