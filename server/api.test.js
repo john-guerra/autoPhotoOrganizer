@@ -589,6 +589,35 @@ describe("GET /api/feed", () => {
     expect(res.status).toBe(400);
   });
 
+  it("respects an explicit after=0 instead of silently defaulting it to 50", async () => {
+    // Regression test: `Number(req.query.after) || 50` treated an
+    // explicitly-passed "0" (falsy in JS) the same as a missing param,
+    // silently injecting 50 unrelated "after" items into what a caller
+    // asked to be a pure before-page — this corrupted the client's
+    // assembled feed order after a group-jump (see issues #36, #39).
+    const scanBody = await scan(srv.base, photosDir);
+    const ids = scanBody.items.map((i) => i.id).sort((a, b) => a - b);
+    const midId = ids[Math.floor(ids.length / 2)];
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&focusId=${midId}&before=1&after=0`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items.length).toBe(1);
+  });
+
+  it("respects an explicit before=0 alongside a real after count", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const ids = scanBody.items.map((i) => i.id).sort((a, b) => a - b);
+    const midId = ids[Math.floor(ids.length / 2)];
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&focusId=${midId}&before=0&after=1`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items.length).toBe(1);
+  });
+
   it("supports startPath to jump to an arbitrary hierarchy path", async () => {
     await scan(srv.base, photosDir);
     const startPath = encodeURIComponent(

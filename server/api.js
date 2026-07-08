@@ -331,8 +331,22 @@ export function registerApi(app) {
         return res.status(400).json({ error: "startPath must be JSON" });
       }
     }
-    const before = Math.max(0, Number(req.query.before) || 0);
-    const after = Math.max(0, Number(req.query.after) || 50);
+    // `|| 0`/`|| 50` as a fallback for a MISSING param would also silently
+    // override an explicitly-passed `0` (falsy in JS) — a real, shipped bug:
+    // jumpGroupBoundary's "before" fetch passes `after=0` deliberately (it
+    // wants only before-items), but that got coerced back up to the default
+    // 50, injecting 50 unrelated "after" items into what should have been a
+    // pure before-page and corrupting the client's assembled feed order
+    // (duplicate/out-of-order section headers after a group-jump). Only
+    // fall back to the default when the param is genuinely absent.
+    const before =
+      req.query.before !== undefined
+        ? Math.max(0, Number(req.query.before) || 0)
+        : 0;
+    const after =
+      req.query.after !== undefined
+        ? Math.max(0, Number(req.query.after) || 0)
+        : 50;
 
     const db = getDb();
     try {
