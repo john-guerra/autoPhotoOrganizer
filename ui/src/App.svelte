@@ -133,6 +133,26 @@
   // (the database has no duplicate photos/folders). A simple re-entry
   // guard, checked and set before the first await, closes this off.
   let jumpingGroup = false;
+  // A group-jump lands the selected photo near the top, but content ABOVE it
+  // keeps reflowing for a beat afterward — metadata streaming in for the group
+  // it jumped away from changes those rows' heights, and a loadMore("before")
+  // can prepend more — either of which shifts the landing up under the header
+  // (the exact instability the old reflow-triggered re-center used to mask).
+  // So for a short, BOUNDED window after a jump we re-pin the landing on every
+  // reflow; then we release, so normal browsing scroll is never fought again.
+  // Cleared by the timeout, or immediately when the user takes over (a keypress
+  // or a wheel/trackpad scroll).
+  let jumpSettling = false;
+  let jumpSettleTimer = null;
+  function beginJumpSettle() {
+    jumpSettling = true;
+    clearTimeout(jumpSettleTimer);
+    jumpSettleTimer = setTimeout(() => (jumpSettling = false), 2000);
+  }
+  function endJumpSettle() {
+    jumpSettling = false;
+    clearTimeout(jumpSettleTimer);
+  }
   // Per-group photo counts shown on each section header, so the user knows
   // how many photos a group holds before scrolling it (the loaded window is
   // only a slice; a group can hold thousands). Keyed by pathKey(group path).
@@ -548,9 +568,12 @@
     const margin = HEADER_HEIGHT * groupBy.length;
     let target;
     if (align === "top") {
-      target = boxTop - margin;
-      // Skip a scroll that wouldn't meaningfully move (avoids jitter when
-      // scrollToSection already landed the tile at the top).
+      // Pin the landing photo a comfortable PAD below the header band, not
+      // flush against it — scrollToSection lands the header at the very top
+      // with the first photo touching it (1px gap), which reads as "tucked
+      // under the header". The extra PAD gives clear separation. Authoritative
+      // (only skips a scroll that's already essentially there).
+      target = boxTop - margin - PAD;
       if (Math.abs(target - mainColumnEl.scrollTop) < 2) return;
     } else {
       target = revealScrollTop(
@@ -563,6 +586,15 @@
     if (target != null) {
       mainColumnEl.scrollTo({ top: Math.max(0, target), behavior: "auto" });
     }
+  }
+
+  /** Re-pin the just-jumped-to landing photo after a reflow moved it. Waits a
+   * tick so the DOM reflects the new layout, then re-checks the settle flag (a
+   * reflow late in the settle window may resolve after the flag already
+   * cleared). Only ever called from the jumpSettling-gated reactive. */
+  async function repinLandingAfterReflow() {
+    await tick();
+    if (jumpSettling) revealSelected({ align: "top" });
   }
 
   /** Give roving keyboard focus to the currently-selected tile's DOM element,
@@ -950,6 +982,11 @@
         )
       : null;
   $: boxes = layoutResult ? layoutResult.boxes : null;
+  // While a jump is settling, re-pin the landing photo on every reflow (each
+  // `boxes` recompute) so post-jump layout shifts can't tuck it under the
+  // header. Bounded by jumpSettling (see beginJumpSettle) — this is the ONLY
+  // place reflow drives scroll, and only for ~2s after a jump.
+  $: if (jumpSettling && boxes) repinLandingAfterReflow();
   $: gridHeight = layoutResult ? layoutResult.totalHeight + 2 * PAD : 0;
   // The first time this fires (right when `boxes` first becomes non-null,
   // e.g. after the initial feed load), the grid's layout/paint may not have
@@ -1266,6 +1303,11 @@
     else return;
 
     e.preventDefault();
+    // Arrowing/Home/End is the user taking over — end any post-jump settle-pin
+    // (done HERE, not for every keydown: a second jump keypress is swallowed by
+    // jumpGroupBoundary's re-entrancy guard, and clearing on it would unpin the
+    // in-flight jump's landing without re-arming — the "5 rapid jumps" break).
+    endJumpSettle();
     selected = next;
     await tick();
     // focus (preventScroll) suppresses the browser's native focus scroll;
@@ -1386,15 +1428,10 @@
           : null;
       selected = t ?? nextSelectable(displayEntries, 0, 1) ?? 0;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-      // The near-selection metadata batch reflows the layout a beat after the
-      // jump lands, which can drift the landing photo. Re-pin it to the top
-      // once that batch settles (epoch-guarded so a newer jump/load that
-      // bumped feedEpoch doesn't yank the view). Runs AFTER the initial
-      // scrollToSection + reveal below (metadata is async), so it's the last
-      // word, not a racer.
-      enrichMeta(items.map((i) => i.id)).then(() => {
-        if (epoch === feedEpoch) revealSelected({ align: "top" });
-      });
+      // Metadata streaming in for this window reflows the layout for a beat
+      // after landing; beginJumpSettle (below) re-pins the landing through
+      // those reflows, so this is just fire-and-forget now.
+      enrichMeta(items.map((i) => i.id));
       await tick();
       // Prefer the section header at this index (gives the correct
       // depth-stacked sticky offset), but a group-jump target is only
@@ -1431,6 +1468,8 @@
       // in focus.
       revealSelected({ align: "top" });
       focusSelectedTile();
+      // Keep it pinned through the metadata/loadMore reflows still to come.
+      beginJumpSettle();
     } catch (err) {
       error = err.message;
       status = "";
@@ -1556,6 +1595,7 @@
       class="main-column"
       bind:this={mainColumnEl}
       on:scroll={scheduleVisibleRangeUpdate}
+      on:wheel={endJumpSettle}
     >
       {#if items.length}
         <div
