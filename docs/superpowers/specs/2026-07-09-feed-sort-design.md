@@ -146,32 +146,43 @@ group-by time attributes should match the sorting one used"). So year/month/day
 are not hardwired to `taken_at` — they re-derive their column *and* direction from
 the current date sort.
 
+Sorting and grouping need **different null handling** for the same date, so they
+read from two maps (this split was caught by TDD — sharing one COALESCE source
+silently collapsed the "Unknown" group):
+
 ```js
-// One place defines each date source's SQL expr; the three date sort attributes
-// and the date group dimensions both read from it.
-export const DATE_SOURCES = {
-  date_taken:    "COALESCE(photos.taken_at, photos.mtime)",
-  date_created:  "COALESCE(photos.btime, photos.mtime)",
+// SORTING: null-safe, falls back to mtime so undated photos still order sensibly.
+export const SORT_ATTRS = {
+  date_taken:    { expr: "COALESCE(photos.taken_at, photos.mtime)" },
+  date_created:  { expr: "COALESCE(photos.btime, photos.mtime)" },
+  date_modified: { expr: "photos.mtime" },
+  /* rating, size, name … */
+};
+
+// GROUPING: RAW column, so a NULL date → '' Unknown bucket survives (a deliberate,
+// tested grouping behavior; the timeline's Unknown band mirrors it).
+const GROUP_DATE_COL = {
+  date_taken:    "photos.taken_at",
+  date_created:  "photos.btime",
   date_modified: "photos.mtime",
 };
 
-// The effective date source for grouping = the sort's source when sorting by a
-// date, else the default (taken). year/month/day exprs are built from it.
-function effectiveDateSource(sort) {
-  return DATE_SOURCES[sort?.by] ?? DATE_SOURCES.date_taken;
-}
-function dateDimExpr(unit, srcExpr) {
-  const fmt = { year: "%Y", month: "%m", day: "%Y-%m-%d" }[unit]; // month = month-of-year (timeline spec)
-  return `COALESCE(strftime('${fmt}', (${srcExpr}) / 1000, 'unixepoch'), '')`;
+function dateDimExpr(unit, colExpr) {
+  const fmt = { year: "%Y", month: "%Y-%m", day: "%Y-%m-%d" }[unit];
+  // Outer COALESCE(..., '') maps a NULL date to the Unknown bucket.
+  // NOTE (cross-spec seam): the timeline spec changes month to "%m"
+  // (month-of-year) — update the fmt here when that lands.
+  return `COALESCE(strftime('${fmt}', ${colExpr} / 1000, 'unixepoch'), '')`;
 }
 
-/** Rebuild the date dims' expr (which date column) + direction (asc/desc) from the sort. */
+/** Rebuild date dims' column + direction from the sort; non-date sort → default (taken, DESC). */
 export function applySortToDims(dims, sort) {
-  const src = effectiveDateSource(sort);
-  const dateDir = DATE_SOURCES[sort?.by] ? sort.dir.toUpperCase() : "DESC";
+  const isDate = Boolean(GROUP_DATE_COL[sort?.by]);
+  const col = isDate ? GROUP_DATE_COL[sort.by] : GROUP_DATE_COL.date_taken;
+  const dir = isDate ? sort.dir.toUpperCase() : "DESC";
   return dims.map((d) =>
     ["year", "month", "day"].includes(d.name)
-      ? { ...d, expr: dateDimExpr(d.name, src), direction: dateDir }
+      ? { ...d, expr: dateDimExpr(d.name, col), direction: dir }
       : d
   );
 }
@@ -191,11 +202,11 @@ first. Non-date sorts (rating, size, name) leave the date dims at their default
 (taken, DESC) and only reorder photos *within* leaf groups.
 
 > **Composes with the timeline spec.** That spec redefines `month` as month-of-
-> year (`strftime('%m', …)`); here the `…` becomes `effectiveDateSource(sort)`
-> instead of a hardcoded `taken_at`. Whichever lands second wires the date-source
-> into the same `year/month/day` exprs — they are the single seam both specs
-> touch. The **date filter/timeline still queries `taken_at`** (its own spec); a
-> future unification of the filter's date source is noted there.
+> year (`strftime('%m', …)`); here the `…` is already `GROUP_DATE_COL[sort.by]`
+> via `dateDimExpr` — so the timeline change is just flipping the month `fmt` from
+> `%Y-%m` to `%m` in `dateDimExpr`. The `year/month/day` exprs are the single seam
+> both specs touch. The **date filter/timeline still queries `taken_at`** (its own
+> spec); a future unification of the filter's date source is noted there.
 
 ### 4. Server: parse & validate
 
