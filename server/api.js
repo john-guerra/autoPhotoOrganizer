@@ -46,6 +46,7 @@ import { getTreeNode, getFlatTree } from "./db/tree.js";
 import { ALLOWED_ORIENTATIONS } from "./db/filters.js";
 import { parseSort } from "./db/sort.js";
 import { setKeepScope } from "./db/keepScope.js";
+import { registry } from "./jobs/registry.js";
 
 /**
  * True if `target` is `root` itself or nested anywhere inside it. Same
@@ -188,6 +189,40 @@ function parseFilterParam(req) {
  * @param {import("express").Express} app
  */
 export function registerApi(app) {
+  // --- Jobs -----------------------------------------------------------------
+  app.get("/api/jobs", (_req, res) => res.json({ jobs: registry.list() }));
+
+  app.get("/api/jobs/events", (req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    const send = (jobs) => res.write(`data: ${JSON.stringify(jobs)}\n\n`);
+    send(registry.list());
+    const onChange = (jobs) => send(jobs);
+    registry.on("change", onChange);
+    req.on("close", () => registry.off("change", onChange));
+  });
+
+  app.post("/api/jobs/:id/cancel", (req, res) => {
+    const j = registry.get(req.params.id);
+    if (!j) return res.status(404).json({ error: "no such job" });
+    if (j.status !== "running")
+      return res.status(409).json({ error: "not running" });
+    registry.cancel(req.params.id);
+    res.json({ ok: true });
+  });
+
+  app.post("/api/jobs/:id/dismiss", (req, res) => {
+    const j = registry.get(req.params.id);
+    if (!j) return res.status(404).json({ error: "no such job" });
+    if (j.status === "running")
+      return res.status(409).json({ error: "still running" });
+    registry.dismiss(req.params.id);
+    res.json({ ok: true });
+  });
+
   // --- Scan ---------------------------------------------------------------
   app.post("/api/scan", async (req, res) => {
     const dir = req.body?.dir;

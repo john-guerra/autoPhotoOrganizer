@@ -15,6 +15,7 @@ import sharp from "sharp";
 import { createApp } from "./index.js";
 import { getDb, _resetDbForTest } from "./db/connection.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
+import { registry } from "./jobs/registry.js";
 
 /** Start the app on an ephemeral port; return { base, close }. */
 async function startServer() {
@@ -1435,5 +1436,81 @@ describe("GET /api/tree", () => {
     );
     const res = await fetch(`${srv.base}/api/tree?groupBy=folder&path=${path}`);
     expect(res.status).toBe(400);
+  });
+});
+
+describe("jobs endpoints", () => {
+  it("GET /api/jobs returns {jobs: []} initially", async () => {
+    const res = await fetch(`${srv.base}/api/jobs`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ jobs: [] });
+  });
+
+  it("GET /api/jobs lists a job created via the registry, without a controller field", async () => {
+    const job = registry.create("scan", { label: "Test scan", total: 3 });
+    try {
+      const res = await fetch(`${srv.base}/api/jobs`);
+      const body = await res.json();
+      const entry = body.jobs.find((j) => j.id === job.id);
+      expect(entry).toBeDefined();
+      expect(entry.status).toBe("running");
+      expect(entry.label).toBe("Test scan");
+      expect(entry.controller).toBeUndefined();
+    } finally {
+      registry.cancel(job.id);
+      registry.fail(job.id, new Error("test cleanup"));
+      registry.dismiss(job.id);
+    }
+  });
+
+  it("POST /api/jobs/:id/cancel 404s for an unknown id", async () => {
+    const res = await fetch(`${srv.base}/api/jobs/job-does-not-exist/cancel`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("POST /api/jobs/:id/cancel 200s for a running job", async () => {
+    const job = registry.create("scan", { label: "Cancel me" });
+    const res = await fetch(`${srv.base}/api/jobs/${job.id}/cancel`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    expect(job.controller.signal.aborted).toBe(true);
+    // Simulate the aborted operation reporting back, then clean up.
+    registry.fail(job.id, new Error("canceled"));
+    registry.dismiss(job.id);
+  });
+
+  it("POST /api/jobs/:id/dismiss 409s while the job is running", async () => {
+    const job = registry.create("scan", { label: "Still running" });
+    try {
+      const res = await fetch(`${srv.base}/api/jobs/${job.id}/dismiss`, {
+        method: "POST",
+      });
+      expect(res.status).toBe(409);
+    } finally {
+      registry.cancel(job.id);
+      registry.fail(job.id, new Error("test cleanup"));
+      registry.dismiss(job.id);
+    }
+  });
+
+  it("POST /api/jobs/:id/dismiss 200s for a terminal job and removes it", async () => {
+    const job = registry.create("scan", { label: "Done" });
+    registry.finish(job.id, { count: 1 });
+    const res = await fetch(`${srv.base}/api/jobs/${job.id}/dismiss`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    expect(registry.get(job.id)).toBeUndefined();
+  });
+
+  it("POST /api/jobs/:id/dismiss 404s for an unknown id", async () => {
+    const res = await fetch(`${srv.base}/api/jobs/job-does-not-exist/dismiss`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
   });
 });
