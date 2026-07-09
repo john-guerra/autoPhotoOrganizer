@@ -1541,8 +1541,23 @@
    * leave album mode, re-center the feed on it, and open the loupe if the
    * photo landed in the window. Reuses the canonical recenter helper — no
    * new copy of the feed-window guard pattern (issue #42). */
-  async function openPhotoById(id) {
+  /** Open an arbitrary photo by id (from an album or feed snapshot strip).
+   * The target may sit inside a collapsed/snapshot group (the server never
+   * seeks a focusId into a collapsed path), so first make it visible:
+   * expand just `groupPath` when known (feed snapshot), else clear all
+   * collapse state (album jump has no group context). Then re-center via the
+   * canonical helper and open the loupe if it landed in the window. */
+  async function openPhotoById(id, groupPath = null) {
     albumMode = false;
+    if (groupPath) {
+      const key = pathKey(groupPath);
+      collapsedPaths = collapsedPaths.filter((p) => pathKey(p) !== key);
+      snapshotGroupKeys.delete(key);
+      snapshotGroupKeys = snapshotGroupKeys;
+    } else {
+      collapsedPaths = [];
+      snapshotGroupKeys = new Set();
+    }
     await recenterFeedOnId(id);
     const idx = findEntryIndexForId(displayEntries, id);
     if (idx !== -1) openLoupe(idx);
@@ -2449,7 +2464,7 @@
                         {sort}
                         {groupBy}
                         thumbPx={SNAPSHOT_ROW_HEIGHT - 16}
-                        on:select={(e) => openPhotoById(e.detail.id)}
+                        on:select={(e) => openPhotoById(e.detail.id, entry.item.path)}
                       />
                     </div>
                   </div>
