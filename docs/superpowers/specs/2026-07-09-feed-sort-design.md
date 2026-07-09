@@ -23,9 +23,14 @@ this spec is what makes date order adjustable.)
 - **Model:** the sort is one extra column in the existing seek tuple, between the
   group dimensions and the `id` tiebreak — so grouped-within, flat-whole, and all
   pagination/seek keep working for free.
-- **Attributes (v1):** date, rating, file size, filename, **megapixels** (`w×h`).
-  Each with an asc/desc direction. (Camera/orientation and a random "shuffle" are
-  deferred.)
+- **Attributes (v1):** three **dates** — EXIF/taken, creation, modified —
+  plus rating, file size (bytes; "MB" is just the display unit, ordering is
+  identical), and filename. Each with an asc/desc direction. (Camera/orientation
+  and a random "shuffle" are deferred.)
+- **Creation date needs a new column.** The schema stores `mtime` (modified) and
+  `taken_at` (EXIF) but **not** file creation time. Add a `btime` column, captured
+  from the *same* `stat()` the scanner already calls (`st.birthtimeMs` — free, no
+  extra I/O), backfilled on the next rescan.
 - **Group sorting (v1):** only the **trivial case** — when the sort attribute is
   *also* a group dimension (sort by date while grouped by year/month/day), the
   date group dimensions follow the sort direction. Ordering groups by an aggregate
@@ -35,7 +40,8 @@ this spec is what makes date order adjustable.)
 
 1. A `sort: { by, dir }` spec threaded into `getFeedPage`'s seek tuple → orders
    photos within leaf groups, and orders the whole feed when `groupBy` is empty.
-2. Sortable attributes: **date, rating, size, name, megapixels**, each asc/desc.
+2. Sortable attributes: **date_taken, date_created, date_modified, rating, size,
+   name**, each asc/desc.
 3. A toolbar **sort control** (attribute + direction), persisted.
 4. **Date-sort ↔ date-dimension coupling:** when sorting by date, the year/month/
    day group dimensions (in the feed *and* the tree/fisheye sidebars) follow the
@@ -48,32 +54,53 @@ this spec is what makes date order adjustable.)
   rating) — deferred; needs per-group aggregation in the grouping query + seek.
 - Random / shuffle sort — deferred; true random breaks keyset pagination unless
   seeded, which is separate work.
-- Camera / orientation sort attributes — not in the v1 set.
+- Camera / orientation / megapixels sort attributes — not in the v1 set.
+- Making the **date filter / grouping / albums** honor the taken-vs-created-vs-
+  modified choice — v1 gives the choice only to *sort*; those keep using `taken_at`
+  (see Open Questions).
 - Independent sort per nested group level.
 
 ---
 
 ## Architecture
 
+### 0. Schema & scan: capture creation date (`btime`) — prerequisite
+
+- **Schema** (`server/db/schema.js`): add `btime INTEGER` to `photos` (nullable —
+  existing rows and filesystems without a reliable birthtime stay NULL).
+- **Scanner** (`NodeProcessingService.scan`): the loop already does
+  `const st = await stat(path)`; add `btimeMs: st.birthtimeMs` to each file
+  record (no extra syscall). `ProcessingService` JSDoc updated to document it.
+- **Persistence** (`upsertScan`, `server/db/photos.js`): add `btime` to the INSERT
+  and the `ON CONFLICT DO UPDATE SET`. Because the upsert re-writes every scanned
+  file (only `content_hash` is conditionally preserved), **`btime` backfills on
+  the next scan of each folder** — no separate migration. Until a folder is
+  rescanned its photos have `btime = NULL`, and `date_created` falls back to
+  `mtime` (below).
+- Note: `birthtimeMs` is reliable on macOS/APFS (John's platform); on filesystems
+  that don't record it, it can be `0`/`mtime` — the fallback covers that.
+
 ### 1. Sortable-attribute registry
 
 A small map beside `DIMENSIONS` (`server/db/feed.js`, or a new
 `server/db/sortAttrs.js`), each entry a **null-safe, deterministic** SQL expr —
 determinism only needs to be *total together with the `id` tiebreak*, so ties are
-fine:
+fine. The three dates each fall back to `mtime` so undated/unbackfilled rows still
+sort sensibly:
 
 ```js
 export const SORT_ATTRS = {
-  date:       { expr: "COALESCE(photos.taken_at, photos.mtime)" },
-  rating:     { expr: "photos.rating" },                 // 0..5, NOT NULL default 0
-  size:       { expr: "photos.size" },                   // bytes, NOT NULL
-  name:       { expr: "photos.filename COLLATE NOCASE" },// case-insensitive
-  megapixels: { expr: "(COALESCE(photos.width,0) * COALESCE(photos.height,0))" },
+  date_taken:    { expr: "COALESCE(photos.taken_at, photos.mtime)" }, // EXIF, fallback modified
+  date_created:  { expr: "COALESCE(photos.btime, photos.mtime)" },    // creation, fallback modified
+  date_modified: { expr: "photos.mtime" },
+  rating:        { expr: "photos.rating" },                  // 0..5, NOT NULL default 0
+  size:          { expr: "photos.size" },                    // bytes (= MB ordering), NOT NULL
+  name:          { expr: "photos.filename COLLATE NOCASE" }, // case-insensitive (confirmed)
 };
 ```
 
-`by` defaults to **`date`**, `dir` defaults to **`desc`** (see Open Questions —
-this changes within-*folder* order from scan-order to date-desc).
+`by` defaults to **`date_taken`**, `dir` defaults to **`desc`** (see Open
+Questions — this changes within-*folder* order from scan-order to date-desc).
 
 ### 2. Photo-level sort in `getFeedPage`
 
@@ -114,8 +141,10 @@ sort. No change.
 The one place sort touches *group* order. A helper:
 
 ```js
-// date sort is the only v1 attribute that corresponds to group dimensions.
-const SORT_DIM_FAMILY = { date: ["year", "month", "day"] };
+// The year/month/day dimensions derive from taken_at, so only the EXIF/taken
+// sort corresponds to them. date_created / date_modified sort *within* groups
+// but do not reorder the (taken_at-based) date groups.
+const SORT_DIM_FAMILY = { date_taken: ["year", "month", "day"] };
 
 /** Return dims with directions overridden to follow the sort, where they correspond. */
 export function applySortToDims(dims, sort) {
@@ -134,16 +163,16 @@ everywhere:
 - `getTreeNode` and `getFlatTree` (`server/db/tree.js`) — the tree sidebar and the
   fisheye navigator, so the sidebar's month order matches the feed.
 
-So: group by `month`, sort `date` ascending → the sidebar and the feed both read
-January → December. rating/size/name/megapixels have no dimension family, so they
-only sort *within* leaf groups (and the flat feed) — groups keep their default
-order.
+So: group by `month`, sort `date_taken` ascending → the sidebar and the feed both
+read January → December. The other attributes (date_created, date_modified,
+rating, size, name) have no dimension family, so they only sort *within* leaf
+groups (and the flat feed) — groups keep their default order.
 
 ### 4. Server: parse & validate
 
 `server/api.js` reads a `sort` query param on the feed, boundary, tree, and
 flat-tree endpoints — `by:dir` (e.g. `rating:asc`) or a small JSON object. Coerce:
-`by` must be a `SORT_ATTRS` key (else `date`), `dir` ∈ {asc,desc} (else `desc`).
+`by` must be a `SORT_ATTRS` key (else `date_taken`), `dir` ∈ {asc,desc} (else `desc`).
 Invalid → default, **not a 400** — sort is a display nicety, and defaulting keeps
 the feed rendering. (The count/ids endpoints are order-independent and take no
 `sort`.)
@@ -151,13 +180,13 @@ the feed rendering. (The count/ids endpoints are order-independent and take no
 ### 5. Client
 
 - **State:** `sort = { by, dir }` in `App.svelte`, persisted in localStorage
-  (`autogallery.sort`), defaulting to `{ by: "date", dir: "desc" }`.
+  (`autogallery.sort`), defaulting to `{ by: "date_taken", dir: "desc" }`.
 - **Threading:** pass `sort` through `fetchFeed`, `fetchGroupBoundary`,
   `fetchTreeNode`, `fetchFlatTree` (`ui/src/lib/api.js` serializes it to the query
   string). It joins the existing `displayFilter`/`groupBy` recompute path, so any
   change re-pulls the feed + sidebars.
-- **Control:** a compact `sort by ▾ [date|rating|size|name|megapixels]  ⇅` in the
-  toolbar's organize cluster (near group-by). The `⇅` toggles asc/desc. Same
+- **Control:** a compact `sort by ▾ [taken|created|modified|rating|size|name]  ⇅`
+  in the toolbar's organize cluster (near group-by). The `⇅` toggles asc/desc. Same
   inline-button styling as the existing toolbar widgets.
 
 ---
@@ -179,7 +208,7 @@ Filter and grouping are orthogonal: sort changes only *order*, never *membership
 
 - Unknown `by` / bad `dir` → coerced to defaults, never a 400.
 - NULL-bearing attributes sort deterministically via the registry's null-safe
-  exprs (undated → `mtime`; missing rating → 0; missing dimensions → 0 MP); the
+  exprs (no EXIF/creation → `mtime`; missing rating → 0); the
   `id` tiebreak guarantees a total order so pagination never loops or skips.
 - Changing sort mid-scroll re-pulls from the current focus (the existing
   `feedEpoch`/`focusId` re-centering path); no bespoke guard added.
@@ -192,18 +221,22 @@ Filter and grouping are orthogonal: sort changes only *order*, never *membership
   leaves group order unchanged but reorders within; `before`/`after` paging around
   a focus is stable and gap-free under a non-default sort; NULL attributes land
   predictably.
-- `applySortToDims` (`feed.test.js`): date sort overrides year/month/day
-  direction; non-date sort is a no-op; unknown `by` is a no-op.
+- `applySortToDims` (`feed.test.js`): `date_taken` sort overrides year/month/day
+  direction; `date_created`/`date_modified`/non-date sort is a no-op; unknown `by`
+  is a no-op.
 - Coupling reaches the tree: `getFlatTree`/`getTreeNode` month order flips with
-  date `dir` (`tree.test.js`).
-- Param parse (`api.test.js`): `sort=rating:asc` honored; garbage → date:desc.
+  `date_taken` `dir` (`tree.test.js`).
+- Param parse (`api.test.js`): `sort=rating:asc` honored; garbage → date_taken:desc.
+- `btime` capture + backfill: a scan writes `btime`; a rescan of an existing
+  folder backfills a previously-NULL `btime`; `date_created` falls back to `mtime`
+  when NULL. (`photos.test.js` / `api.test.js`)
 
 **Live (App.svelte manual-verify convention):**
 - Flat feed (remove all group levels) → sort by rating desc, size desc, name asc,
-  megapixels desc each reorder the grid correctly; direction toggle reverses.
+  each of the three dates each reorder the grid correctly; direction toggle reverses.
 - Group by folder, sort by rating → photos reorder *within* each folder; folder
   order unchanged.
-- Group by month, sort date asc vs desc → **both the month headers and the
+- Group by month, sort `date_taken` asc vs desc → **both the month headers and the
   sidebar** flip Jan↔Dec; the feed photos within follow.
 - Sort persists across reload; seek/focus (arrow nav, group jump) stays correct.
 
@@ -211,24 +244,32 @@ Filter and grouping are orthogonal: sort changes only *order*, never *membership
 
 ## Build order (checkpoints)
 
-1. `SORT_ATTRS` registry + `getFeedPage` seek-tuple sort dim + `sort` param parse
+1. **`btime` column + scanner capture + `upsertScan` persistence** + tests
+   (capture, rescan-backfill). Rescan a test folder; `curl` to confirm. **Commit.**
+2. `SORT_ATTRS` registry + `getFeedPage` seek-tuple sort dim + `sort` param parse
    + unit tests (within-group, flat, pagination-stable). Verify via `curl`.
    **Commit.**
-2. `applySortToDims` coupling across feed / boundary / tree / flat-tree + tests +
+3. `applySortToDims` coupling across feed / boundary / tree / flat-tree + tests +
    live-verify month asc/desc. **Commit.**
-3. Toolbar sort control + client threading (feed/boundary/tree/flatTree) +
+4. Toolbar sort control + client threading (feed/boundary/tree/flatTree) +
    persistence + full live-verify. **Commit.**
 
 Each step builds, tests pass, and a slice works before the next.
 
 ## Open questions (confirm during spec review)
 
-1. **Default sort = `date:desc`.** This changes within-*folder* (and any
+1. **Default sort = `date_taken:desc`.** This changes within-*folder* (and any
    non-date group) order from today's scan-order (`id`) to date-descending.
    Intended, or keep `id` as the default and only sort when the user picks one?
-2. **"mbs" = megapixels** (`width × height`) — confirm you didn't mean megabytes
-   (file size, already covered by `size`).
-3. **Name sort case-insensitive** (`COLLATE NOCASE`) — assumed; ok?
+2. **Date-source choice is sort-only in v1.** The date *filter* (timeline),
+   *grouping* (year/month/day), and *albums* keep using `taken_at`. Want any of
+   those to also honor taken/created/modified later, or is sort-only right?
+3. **Date fallbacks.** `date_taken`/`date_created` fall back to `mtime` when
+   EXIF/creation is missing (keeps them non-null and deterministic). Prefer that,
+   or sort missing values strictly last?
+
+_Resolved in review: "mbs" = megabytes → covered by `size` (bytes; identical
+ordering), megapixels dropped. Name sort is case-insensitive (`COLLATE NOCASE`)._
 
 ## Deferred / follow-up issues (not built here)
 
