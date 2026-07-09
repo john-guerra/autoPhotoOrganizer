@@ -1,4 +1,5 @@
 import { resolveDimensions } from "./feed.js";
+import { buildFilter } from "./filters.js";
 
 /**
  * One level of the grouping hierarchy tree: the distinct values (with
@@ -7,18 +8,20 @@ import { resolveDimensions } from "./feed.js";
  * GROUP BY query per expand click, not a full-tree walk, so this stays
  * cheap regardless of library size.
  * @param {import("better-sqlite3").Database} db
- * @param {{groupBy: string[], path?: Array<{dimension:string, value:string}>}} opts
+ * @param {{groupBy: string[], path?: Array<{dimension:string, value:string}>, filter?: Object}} opts
  * @returns {{total: number, nodes: Array<{value:string, label:string, count:number, hasChildren:boolean}>}}
  */
-export function getTreeNode(db, { groupBy, path = [] }) {
+export function getTreeNode(db, { groupBy, path = [], filter: filterSpec = {} }) {
   const dims = resolveDimensions(groupBy);
   if (path.length >= dims.length) {
     throw new Error("path is already at the deepest grouping level");
   }
 
+  const filter = buildFilter(filterSpec);
+
   const total = db
-    .prepare(`SELECT COUNT(*) AS count FROM photos WHERE stale = 0`)
-    .get().count;
+    .prepare(`SELECT COUNT(*) AS count FROM photos WHERE stale = 0 AND (${filter.sql})`)
+    .get(...filter.params).count;
 
   const prefixClauses = [];
   const prefixParams = [];
@@ -34,7 +37,7 @@ export function getTreeNode(db, { groupBy, path = [] }) {
   });
 
   const nextDim = dims[path.length];
-  const whereSql = ["photos.stale = 0", ...prefixClauses].join(" AND ");
+  const whereSql = ["photos.stale = 0", `(${filter.sql})`, ...prefixClauses].join(" AND ");
   const rows = db
     .prepare(
       `SELECT ${nextDim.expr} AS value, COUNT(*) AS count
@@ -43,7 +46,7 @@ export function getTreeNode(db, { groupBy, path = [] }) {
        GROUP BY ${nextDim.expr}
        ORDER BY ${nextDim.expr} ${nextDim.direction}`
     )
-    .all(...prefixParams);
+    .all(...filter.params, ...prefixParams);
 
   const hasChildren = path.length + 1 < dims.length;
   const nodes = rows.map((r) => ({
@@ -69,15 +72,17 @@ function formatTreeLabel(value) {
  * count, ordered exactly as the feed orders groups. Feeds the fisheye
  * navigator. One GROUP BY query; bounded by the number of distinct leaf groups.
  * @param {import("better-sqlite3").Database} db
- * @param {{groupBy: string[]}} opts
+ * @param {{groupBy: string[], filter?: Object}} opts
  * @returns {{total:number, leaves: Array<{values: Record<string,string>, count:number}>}}
  */
-export function getFlatTree(db, { groupBy }) {
+export function getFlatTree(db, { groupBy, filter: filterSpec = {} }) {
   const dims = resolveDimensions(groupBy);
 
+  const filter = buildFilter(filterSpec);
+
   const total = db
-    .prepare(`SELECT COUNT(*) AS count FROM photos WHERE stale = 0`)
-    .get().count;
+    .prepare(`SELECT COUNT(*) AS count FROM photos WHERE stale = 0 AND (${filter.sql})`)
+    .get(...filter.params).count;
 
   const selectCols = dims.map((dim, i) => `${dim.expr} AS d${i}`).join(", ");
   const groupByCols = dims.map((dim) => dim.expr).join(", ");
@@ -89,11 +94,11 @@ export function getFlatTree(db, { groupBy }) {
     .prepare(
       `SELECT ${selectCols}, COUNT(*) AS count
        FROM photos JOIN folders ON folders.id = photos.folder_id
-       WHERE photos.stale = 0
+       WHERE photos.stale = 0 AND (${filter.sql})
        GROUP BY ${groupByCols}
        ORDER BY ${orderByCols}`
     )
-    .all();
+    .all(...filter.params);
 
   const leaves = rows.map((row) => {
     const values = {};
