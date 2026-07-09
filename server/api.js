@@ -5,6 +5,11 @@ import {
   createReadStream,
   mkdirSync,
   copyFileSync,
+  renameSync,
+  fsyncSync,
+  openSync,
+  closeSync,
+  unlinkSync,
 } from "node:fs";
 import { writeFile, rename, stat } from "node:fs/promises";
 import { extname, join, basename, resolve, sep } from "node:path";
@@ -99,25 +104,87 @@ function resolveExportTarget(db, destParent, folderName) {
 }
 
 /**
- * Copy the given photo ids into `targetDir` (created if needed). Never moves or
- * overwrites — collisions get a " (2)" suffix; missing/unmounted sources are
- * counted as skipped. Shared by export and materialize.
- * @returns {{copied:number, skipped:number}}
+ * Move `src` to `dst`. Tries a same-volume `renameSync` first (atomic); on
+ * `EXDEV` (cross-volume — e.g. SD card -> internal disk) falls back to
+ * copy -> fsync -> verify size -> unlink. The source is removed ONLY after
+ * the destination is confirmed written, so a crash between copy and unlink
+ * leaves a harmless duplicate, never a lost file. This is the only code path
+ * allowed to remove a source file.
+ * @param {string} src
+ * @param {string} dst
  */
-function copyIdsIntoFolder(db, targetDir, ids) {
+function moveFile(src, dst) {
+  try {
+    renameSync(src, dst);
+    return;
+  } catch (e) {
+    if (e.code !== "EXDEV") throw e;
+  }
+  copyFileSync(src, dst); // cross-volume
+  const fd = openSync(dst, "r");
+  fsyncSync(fd);
+  closeSync(fd);
+  if (statSync(dst).size !== statSync(src).size) {
+    throw new Error(`move verify failed: ${src}`);
+  }
+  unlinkSync(src); // remove source only after the copy is verified
+}
+
+/**
+ * Copy (or move) the given photo ids into `targetDir` (created if needed).
+ * Never overwrites — collisions get a " (2)" suffix; missing/unmounted
+ * sources are counted as skipped. Shared by export and materialize.
+ *
+ * `signal?.aborted` is checked at the top of every iteration; on abort, an
+ * `AbortError` is thrown (files already processed stay — a canceled run
+ * leaves a partial, consistent result). The partial manifest is attached to
+ * the thrown error as `.manifest` so a caller (e.g. a canceled background
+ * job) can still see exactly what was processed for undo purposes.
+ *
+ * In move mode, each successfully moved file's index row is repointed
+ * (`repointPhoto`) so it isn't reported "missing" at its new location.
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} targetDir
+ * @param {Array<number|string>} ids
+ * @param {{signal?: AbortSignal, onProgress?: (done:number, total:number, phase:string) => void, move?: boolean}} [opts]
+ * @returns {{copied:number, moved:number, skipped:number, manifest:Array<{id:number, from:string, to:string}>}}
+ */
+export function copyIdsIntoFolder(db, targetDir, ids, { signal, onProgress, move = false } = {}) {
   mkdirSync(targetDir, { recursive: true });
   let copied = 0;
+  let moved = 0;
   let skipped = 0;
-  for (const id of ids) {
+  const manifest = [];
+  const total = ids.length;
+
+  ids.forEach((id, i) => {
+    if (signal?.aborted) {
+      const e = new Error("canceled");
+      e.name = "AbortError";
+      e.manifest = manifest;
+      throw e;
+    }
     const photo = getPhotoById(db, Number(id));
     if (!photo || !existsSync(photo.path)) {
       skipped++;
-      continue;
+    } else {
+      const dst = nextAvailablePath(targetDir, basename(photo.path));
+      if (move) {
+        moveFile(photo.path, dst);
+        // TODO(task4): repoint index
+        moved++;
+      } else {
+        copyFileSync(photo.path, dst);
+        copied++;
+      }
+      manifest.push({ id: Number(id), from: photo.path, to: dst });
     }
-    copyFileSync(photo.path, nextAvailablePath(targetDir, basename(photo.path)));
-    copied++;
-  }
-  return { copied, skipped };
+    if (i % 50 === 0 || i === total - 1) {
+      onProgress?.(i + 1, total, move ? "moving" : "copying");
+    }
+  });
+
+  return { copied, moved, skipped, manifest };
 }
 
 const processing = new NodeProcessingService();
