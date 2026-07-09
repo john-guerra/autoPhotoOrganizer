@@ -192,10 +192,44 @@ export async function fetchGroupBoundary({
 }
 
 /**
+ * First/middle/last sample of a group, for the fisheye snapshot strip — a
+ * scroll-free stand-in for a whole group without fetching every row.
+ * @param {{path: Array<{dimension:string,value:string}>, groupBy: string[], filter?: object|null, sort?: object|null, slots?: number}} opts
+ * @returns {Promise<{count:number, samples: Array<object & {offset:number, gapAfter:boolean}>}>}
+ */
+export async function fetchGroupSample({
+  path,
+  groupBy,
+  filter = null,
+  sort = null,
+  slots = 12,
+}) {
+  const params = new URLSearchParams({
+    groupBy: groupBy.join(","),
+    path: JSON.stringify(path),
+    slots: String(slots),
+  });
+  if (sort) params.set("sort", `${sort.by}:${sort.dir}`);
+  const fp = filter ? toQueryParam(filter) : null;
+  if (fp) params.set("filter", fp);
+  const res = await fetch(`/api/group/sample?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `group sample failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
  * @param {{groupBy: string[], path?: Array<{dimension:string,value:string}>, filter?: object|null}} opts
  * @returns {Promise<{total:number, nodes: Array<{value:string,label:string,count:number,hasChildren:boolean}>}>}
  */
-export async function fetchTreeNode({ groupBy, path = [], filter = null, sort = null }) {
+export async function fetchTreeNode({
+  groupBy,
+  path = [],
+  filter = null,
+  sort = null,
+}) {
   const params = new URLSearchParams({ groupBy: groupBy.join(",") });
   if (path.length) params.set("path", JSON.stringify(path));
   const fp = filter ? toQueryParam(filter) : null;
