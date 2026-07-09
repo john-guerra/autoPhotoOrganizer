@@ -875,6 +875,36 @@ describe("photoIdsMatchingFilter", () => {
     const ids = photoIdsMatchingFilter(db);
     expect(ids).toEqual([a.id]);
   });
+
+  it("scopes to one group via a path (per-group select)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a] = upsertScan(db, "/photos/aaa", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const bbb = upsertScan(db, "/photos/bbb", 1, [
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const ids = photoIdsMatchingFilter(db, {}, [
+      { dimension: "folder", value: "/photos/bbb" },
+    ]);
+    expect(ids.sort((x, y) => x - y)).toEqual(
+      bbb.map((r) => r.id).sort((x, y) => x - y)
+    );
+    expect(ids).not.toContain(a.id);
+  });
+
+  it("throws on an unknown dimension in the group path", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/aaa", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    expect(() =>
+      photoIdsMatchingFilter(db, {}, [{ dimension: "bogus", value: "x" }])
+    ).toThrow();
+  });
 });
 
 describe("photoCountMatchingFilter", () => {

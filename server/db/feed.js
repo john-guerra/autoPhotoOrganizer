@@ -453,15 +453,29 @@ export function getFeedPage(
  * @param {{minRating?: number, orientations?: string[]}} [filterSpec]
  * @returns {number[]}
  */
-export function photoIdsMatchingFilter(db, filterSpec = {}) {
+export function photoIdsMatchingFilter(db, filterSpec = {}, path = null) {
   const filter = buildFilter(filterSpec);
+  const clauses = [`photos.stale = 0`, `(${filter.sql})`];
+  const params = [...filter.params];
+  // Optional group scope: restrict to a hierarchy path (e.g. one folder/year),
+  // matching each dimension's own SQL expression — the "select all in this
+  // group" case. Same expr map the feed groups by, so the ids agree with what
+  // that section shows.
+  if (path && path.length) {
+    for (const { dimension, value } of path) {
+      const dim = DIMENSIONS[dimension];
+      if (!dim) throw new Error(`unknown dimension: ${dimension}`);
+      clauses.push(`${dim.expr} = ?`);
+      params.push(value);
+    }
+  }
   const rows = db
     .prepare(
       `SELECT photos.id AS id
        FROM photos JOIN folders ON folders.id = photos.folder_id
-       WHERE photos.stale = 0 AND (${filter.sql})`
+       WHERE ${clauses.join(" AND ")}`
     )
-    .all(...filter.params);
+    .all(...params);
   return rows.map((r) => r.id);
 }
 

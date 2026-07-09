@@ -108,6 +108,20 @@ function parseFilterParam(req) {
     }
     spec.orientations = raw.orientations;
   }
+  if (raw.scopeIds !== undefined) {
+    if (
+      !Array.isArray(raw.scopeIds) ||
+      !raw.scopeIds.every((n) => Number.isInteger(n))
+    ) {
+      return { spec: {}, error: "scopeIds must be an array of integers" };
+    }
+    // Guard the URL/SQL-parameter length ("keep only" a huge group). Callers
+    // should narrow before focusing on more than this.
+    if (raw.scopeIds.length > 5000) {
+      return { spec: {}, error: "scopeIds too large (max 5000)" };
+    }
+    spec.scopeIds = raw.scopeIds;
+  }
   return { spec };
 }
 
@@ -586,11 +600,25 @@ export function registerApi(app) {
   });
 
   // --- Selection ids (respects the same filter as /api/feed) ----------------
+  // Optional `path` (JSON [{dimension,value}]) scopes to one group — the
+  // "select all in this section" case.
   app.get("/api/photos/ids", (req, res) => {
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
+    let path = null;
+    if (req.query.path) {
+      try {
+        path = JSON.parse(String(req.query.path));
+      } catch {
+        return res.status(400).json({ error: "path must be JSON" });
+      }
+    }
     const db = getDb();
-    res.json({ ids: photoIdsMatchingFilter(db, filter) });
+    try {
+      res.json({ ids: photoIdsMatchingFilter(db, filter, path) });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
   });
 
   // --- Photo count (library total when unfiltered; "showing" with a filter) -

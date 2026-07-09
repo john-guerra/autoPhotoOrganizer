@@ -162,6 +162,11 @@
   // used or the next clear replaces it — no timed toast, per project taste).
   let lastClearedSelection = null;
 
+  // "Keep only" working set: when non-null, an explicit id list that the feed,
+  // counts, sidebars, albums and export all scope to, while the counts still
+  // report the true library total. null = whole library.
+  let keepIds = null;
+
   // Filter mode: does the rating/orientation filter narrow what's DISPLAYED
   // (classic), or drive the SELECTION (the grid then shows everything and the
   // matching photos join the selection)? A persisted toggle.
@@ -172,7 +177,10 @@
   // What the feed/tree/counts actually filter by. In "select" mode the grid
   // is deliberately NOT narrowed — the filter only feeds the selection — so
   // the display filter is the no-op default.
-  $: displayFilter = filterMode === "select" ? { ...DEFAULT_FILTER } : filter;
+  $: displayFilter = {
+    ...(filterMode === "select" ? DEFAULT_FILTER : filter),
+    ...(keepIds ? { scopeIds: keepIds } : {}),
+  };
 
   // Three live counts the user asked for: whole library, currently shown
   // (under displayFilter), and selected. selectedCount is reactive off the Set.
@@ -476,6 +484,62 @@
     }
   }
 
+  /** Select every photo in one section/group (respecting the display filter),
+   * unioning them into the selection. Powers the per-group "Select" action. */
+  async function selectGroup(path) {
+    if (!path || !path.length) return;
+    try {
+      const ids = await fetchPhotoIds(
+        filterIsActive(displayFilter) ? displayFilter : null,
+        path
+      );
+      selectedIds = new Set([...selectedIds, ...ids]);
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  /** Enter/replace "keep only" focus on an explicit id set. The set becomes the
+   * working universe every feed/tree/count query agrees on (via scopeIds folded
+   * into displayFilter); the library total keeps showing the real count. */
+  const MAX_KEEP = 5000; // server caps scopeIds here (URL/param length)
+  function applyKeepOnly(ids) {
+    if (ids && ids.length > MAX_KEEP) {
+      error = `Too many to keep-only (${ids.length.toLocaleString()}). Narrow to ${MAX_KEEP.toLocaleString()} or fewer first.`;
+      return;
+    }
+    keepIds = ids && ids.length ? [...ids] : null;
+    countsEpoch++;
+    headerCounts = {};
+    fetchedParents = new Set();
+    inFlightParents = new Set();
+    onGroupByChange(groupBy);
+    refreshCounts();
+  }
+
+  /** Keep only the current selection as the working set. */
+  function keepOnlySelection() {
+    if (selectedIds.size === 0) return;
+    applyKeepOnly([...selectedIds]);
+  }
+
+  /** Keep only one group/section (all its photos) as the working set. */
+  async function keepOnlyGroup(path) {
+    if (!path || !path.length) return;
+    try {
+      const ids = await fetchPhotoIds(null, path);
+      if (!ids.length) return;
+      applyKeepOnly(ids);
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  /** Leave keep-only focus, back to the whole library. */
+  function exitKeepOnly() {
+    applyKeepOnly(null);
+  }
+
   /** Toggle one photo's membership in the selection. */
   function toggleSelect(id) {
     if (typeof id !== "number") return;
@@ -590,6 +654,7 @@
     manageLibraryOpen = false;
     selectedIds = new Set();
     lastClearedSelection = null;
+    keepIds = null;
     await refreshLibrary();
     await loadInitialFeed();
     refreshCounts();
@@ -1573,11 +1638,18 @@
         // Placeholders are never a valid selection target (see
         // nextSelectable) — skip past one rather than opening it in Loupe.
         const t = nextSelectable(displayEntries, selected + 1, 1);
-        if (t !== null) selected = t;
+        // Shift+arrow extends the selection as you sweep (both endpoints).
+        if (t !== null) {
+          if (e.shiftKey) selectRange(selected, t);
+          selected = t;
+        }
       } else if (key === "ArrowLeft" || key === "ArrowUp") {
         e.preventDefault();
         const t = nextSelectable(displayEntries, selected - 1, -1);
-        if (t !== null) selected = t;
+        if (t !== null) {
+          if (e.shiftKey) selectRange(selected, t);
+          selected = t;
+        }
       }
       return;
     }
@@ -1624,6 +1696,10 @@
     else return;
 
     e.preventDefault();
+    // Shift+arrow extends the selection over every photo swept (inclusive of
+    // both the old and new focus), so a run of Shift+Right/Down builds a
+    // contiguous selection without the mouse.
+    if (e.shiftKey && next !== selected) selectRange(selected, next);
     selected = next;
     await tick();
     // focus (preventScroll) suppresses the browser's native focus scroll;
@@ -1974,7 +2050,7 @@
 
     <div
       class="counts"
-      title="Photos in the whole library · shown under the current filter · currently selected"
+      title="Photos in the whole library · shown under the current filter/focus · currently selected"
     >
       <span>{libraryTotal.toLocaleString()} <em>library</em></span>
       <span>{showingCount.toLocaleString()} <em>showing</em></span>
@@ -1983,10 +2059,26 @@
       >
     </div>
 
+    {#if keepIds}
+      <button
+        class="keep-chip"
+        on:click={exitKeepOnly}
+        title="Exit keep-only focus (back to the whole library)"
+      >
+        ● Keep-only {keepIds.length.toLocaleString()} ✕
+      </button>
+    {/if}
+
     {#if selectedCount > 0}
       <div class="cluster selection">
         <button class="sel-btn" on:click={clearSelection} title="Clear selection"
           >Clear</button
+        >
+        <button
+          class="sel-btn"
+          on:click={keepOnlySelection}
+          title="Focus the whole app on just these photos (keep only)"
+          >Keep only</button
         >
         {#if lastClearedSelection}
           <button
@@ -2146,6 +2238,24 @@
                   {#if header.path && headerCounts[pathKey(header.path)] !== undefined}
                     <span class="section-count">
                       {headerCounts[pathKey(header.path)].toLocaleString()} items
+                    </span>
+                  {/if}
+                  {#if header.path}
+                    <span class="section-actions">
+                      <button
+                        class="section-act"
+                        title="Select every photo in this group"
+                        on:click|stopPropagation={() => selectGroup(header.path)}
+                      >
+                        Select
+                      </button>
+                      <button
+                        class="section-act"
+                        title="Keep only this group as the working set"
+                        on:click|stopPropagation={() => keepOnlyGroup(header.path)}
+                      >
+                        Keep only
+                      </button>
                     </span>
                   {/if}
                 </div>
@@ -2426,6 +2536,23 @@
     color: #b9932f;
   }
 
+  .keep-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #143a2a;
+    border: 1px solid #2e8b57;
+    color: #7fe0a8;
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .keep-chip:hover {
+    background: #1a4d38;
+  }
+
   .cluster.selection {
     gap: 6px;
   }
@@ -2684,6 +2811,29 @@
     font-weight: 400;
     /* Matches the collapsed-section placeholder's own count (.placeholder-count)
        so a section reads the same expanded or collapsed. */
+  }
+  .section-actions {
+    display: inline-flex;
+    gap: 4px;
+    margin-left: 8px;
+    opacity: 0;
+    transition: opacity 0.1s ease;
+  }
+  .section-header:hover .section-actions {
+    opacity: 1;
+  }
+  .section-act {
+    background: #222;
+    border: 1px solid #3a3a3a;
+    color: #cfcfcf;
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-size: 0.72rem;
+    cursor: pointer;
+  }
+  .section-act:hover {
+    background: #2f2f2f;
+    color: #fff;
   }
   .placeholder-row {
     position: absolute;

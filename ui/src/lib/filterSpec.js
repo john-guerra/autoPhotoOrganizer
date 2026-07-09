@@ -5,21 +5,27 @@ export const ORIENTATIONS = ["landscape", "portrait", "square"];
 
 export const DEFAULT_FILTER = { minRating: 0, orientations: [...ORIENTATIONS] };
 
-/** @param {{minRating?:number, orientations?:string[]}} spec */
+/** @param {{minRating?:number, orientations?:string[], scopeIds?:number[]}} spec */
 export function isActive(spec) {
   const minRating = spec?.minRating ?? 0;
   const o = spec?.orientations ?? [];
-  return minRating > 0 || (o.length > 0 && o.length < ORIENTATIONS.length);
+  const scoped = Array.isArray(spec?.scopeIds) && spec.scopeIds.length > 0;
+  return (
+    minRating > 0 || (o.length > 0 && o.length < ORIENTATIONS.length) || scoped
+  );
 }
 
 /** The `filter` query-param JSON string, or null when nothing is constrained.
- * @param {{minRating?:number, orientations?:string[]}} spec */
+ * @param {{minRating?:number, orientations?:string[], scopeIds?:number[]}} spec */
 export function toQueryParam(spec) {
   if (!isActive(spec)) return null;
   const out = {};
   if ((spec.minRating ?? 0) > 0) out.minRating = spec.minRating;
   const o = spec?.orientations ?? [];
   if (o.length > 0 && o.length < ORIENTATIONS.length) out.orientations = o;
+  if (Array.isArray(spec?.scopeIds) && spec.scopeIds.length) {
+    out.scopeIds = spec.scopeIds;
+  }
   return JSON.stringify(out);
 }
 

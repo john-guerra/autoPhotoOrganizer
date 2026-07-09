@@ -206,13 +206,16 @@ export async function fetchTreeNode({ groupBy, path = [], filter = null }) {
 
 /**
  * Ids of all non-stale photos matching a filter (for "filter → selection").
+ * An optional group `path` scopes to one section ("select all in this group").
  * @param {{minRating?:number, orientations?:string[]}|null} [filter=null]
+ * @param {Array<{dimension:string,value:string}>|null} [path=null]
  * @returns {Promise<number[]>}
  */
-export async function fetchPhotoIds(filter = null) {
+export async function fetchPhotoIds(filter = null, path = null) {
   const params = new URLSearchParams();
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
+  if (path && path.length) params.set("path", JSON.stringify(path));
   const res = await fetch(`/api/photos/ids?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

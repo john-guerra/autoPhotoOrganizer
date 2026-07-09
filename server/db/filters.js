@@ -30,9 +30,24 @@ export function buildFilter(spec = {}) {
   );
   const orientations = ALLOWED_ORIENTATIONS.filter((o) => requested.has(o));
   // A strict, non-empty subset constrains; all three (or none) shows all.
-  if (orientations.length > 0 && orientations.length < ALLOWED_ORIENTATIONS.length) {
+  if (
+    orientations.length > 0 &&
+    orientations.length < ALLOWED_ORIENTATIONS.length
+  ) {
     const ors = orientations.map((o) => ORIENTATION_FRAGMENTS[o]).join(" OR ");
     clauses.push(`photos.width > 0 AND photos.height > 0 AND (${ors})`);
+  }
+
+  // Working-set scope ("keep only"): restrict to an explicit id set. Injection-
+  // safe — only integers survive the filter, bound as params. This is how a
+  // kept subset (a folder, a group, or the current selection) becomes the
+  // universe every feed/tree/count query agrees on.
+  const scopeIds = Array.isArray(spec?.scopeIds)
+    ? spec.scopeIds.filter((n) => Number.isInteger(n))
+    : null;
+  if (scopeIds && scopeIds.length) {
+    clauses.push(`photos.id IN (${scopeIds.map(() => "?").join(",")})`);
+    params.push(...scopeIds);
   }
 
   if (!clauses.length) return { sql: "1=1", params: [] };

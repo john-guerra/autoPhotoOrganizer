@@ -19,7 +19,10 @@ describe("buildFilter", () => {
       sql: "1=1",
       params: [],
     });
-    expect(buildFilter({ orientations: [] })).toEqual({ sql: "1=1", params: [] });
+    expect(buildFilter({ orientations: [] })).toEqual({
+      sql: "1=1",
+      params: [],
+    });
   });
 
   it("a strict orientation subset emits a positive-dimension-guarded OR", () => {
@@ -53,9 +56,30 @@ describe("buildFilter", () => {
   });
 
   it("de-duplicates orientation names before the all-off length check", () => {
-    const f = buildFilter({ orientations: ["portrait", "portrait", "landscape"] });
+    const f = buildFilter({
+      orientations: ["portrait", "portrait", "landscape"],
+    });
     expect(f.sql).toBe(
       "photos.width > 0 AND photos.height > 0 AND (photos.width > photos.height OR photos.height > photos.width)"
     );
+  });
+
+  it("scopes to an explicit id set (keep-only), integers only, bound params", () => {
+    const f = buildFilter({ scopeIds: [3, 7, 9] });
+    expect(f.sql).toBe("photos.id IN (?,?,?)");
+    expect(f.params).toEqual([3, 7, 9]);
+  });
+
+  it("drops non-integer scopeIds and treats an empty scope as no-op", () => {
+    const f = buildFilter({ scopeIds: [1, "x", 2.5, null, 4] });
+    expect(f.sql).toBe("photos.id IN (?,?)");
+    expect(f.params).toEqual([1, 4]);
+    expect(buildFilter({ scopeIds: [] })).toEqual({ sql: "1=1", params: [] });
+  });
+
+  it("combines a rating filter and a keep-only scope", () => {
+    const f = buildFilter({ minRating: 4, scopeIds: [10, 11] });
+    expect(f.sql).toBe("photos.rating >= ? AND photos.id IN (?,?)");
+    expect(f.params).toEqual([4, 10, 11]);
   });
 });
