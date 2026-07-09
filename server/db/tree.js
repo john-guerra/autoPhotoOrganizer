@@ -1,5 +1,6 @@
 import { resolveDimensions } from "./feed.js";
 import { buildFilter } from "./filters.js";
+import { applySortToDims } from "./sort.js";
 
 /**
  * One level of the grouping hierarchy tree: the distinct values (with
@@ -11,8 +12,8 @@ import { buildFilter } from "./filters.js";
  * @param {{groupBy: string[], path?: Array<{dimension:string, value:string}>, filter?: Object}} opts
  * @returns {{total: number, nodes: Array<{value:string, label:string, count:number, hasChildren:boolean}>}}
  */
-export function getTreeNode(db, { groupBy, path = [], filter: filterSpec = {} }) {
-  const dims = resolveDimensions(groupBy);
+export function getTreeNode(db, { groupBy, path = [], filter: filterSpec = {}, sort } = {}) {
+  const dims = applySortToDims(resolveDimensions(groupBy), sort ?? { by: "date_taken", dir: "desc" });
   if (path.length >= dims.length) {
     throw new Error("path is already at the deepest grouping level");
   }
@@ -75,8 +76,8 @@ function formatTreeLabel(value) {
  * @param {{groupBy: string[], filter?: Object}} opts
  * @returns {{total:number, leaves: Array<{values: Record<string,string>, count:number}>}}
  */
-export function getFlatTree(db, { groupBy, filter: filterSpec = {} }) {
-  const dims = resolveDimensions(groupBy);
+export function getFlatTree(db, { groupBy, filter: filterSpec = {}, sort } = {}) {
+  const dims = applySortToDims(resolveDimensions(groupBy), sort ?? { by: "date_taken", dir: "desc" });
 
   const filter = buildFilter(filterSpec);
 

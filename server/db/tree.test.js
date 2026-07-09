@@ -281,3 +281,22 @@ describe("getTreeNode/getFlatTree — filter", () => {
     expect(node.nodes.map((n) => n.value)).toEqual(["/photos/aaa", "/photos/bbb"]);
   });
 });
+
+describe("getFlatTree — date-source coupling", () => {
+  it("orders month groups by the sort direction (date_taken asc → ascending)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a, b] = upsertScan(db, "/p", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 2, kind: "image" },
+    ]);
+    setTakenAt(db, a.id, "2020-03-15T00:00:00Z");
+    setTakenAt(db, b.id, "2020-01-15T00:00:00Z");
+    const asc = getFlatTree(db, {
+      groupBy: ["month"],
+      sort: { by: "date_taken", dir: "asc" },
+    });
+    const values = asc.leaves.map((l) => l.values.month);
+    expect(values).toEqual([...values].sort()); // ascending
+  });
+});

@@ -568,9 +568,16 @@ export function workingSetTimeline(db, filterSpec = {}, limit = 2000) {
  */
 export function findGroupBoundary(
   db,
-  { groupBy, collapsed = [], focusId, direction, filter: filterSpec = {} }
+  {
+    groupBy,
+    collapsed = [],
+    focusId,
+    direction,
+    filter: filterSpec = {},
+    sort = { by: "date_taken", dir: "desc" },
+  }
 ) {
-  const dims = resolveDimensions(groupBy);
+  const dims = applySortToDims(resolveDimensions(groupBy), sort);
   const filter = buildFilter(filterSpec);
   const seekDims = [
     ...dims,
