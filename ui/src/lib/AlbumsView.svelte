@@ -17,7 +17,7 @@
   export let photos = []; // [{id,t,mtimeMs}] time-ordered working set
   export let truncated = false;
   export let hasNativePicker = false;
-  export let limit = 2000; // current working-set cap (server hard-caps at 20000)
+  export let limit = 20000; // current working-set cap (server hard-caps at 200000)
 
   const dispatch = createEventDispatcher();
 
@@ -196,7 +196,7 @@
       {/if}
     </label>
     <span class="albums-count">{albums.length} albums · {photos.length} photos</span>
-    <label class="maxphotos" title="Max photos to analyze. Higher is slower — the album grid isn't virtualized (server caps at 20,000).">
+    <label class="maxphotos" title="Max photos to analyze. Albums render as fisheye snapshot strips, so this stays cheap regardless of size (server caps at 200,000).">
       Max
       <input
         type="number"

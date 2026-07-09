@@ -322,10 +322,10 @@ export async function exportSelection(photoIds, destParent, folderName) {
 /**
  * The working set as a time-ordered timeline for album gap-clustering.
  * @param {{minRating?:number, orientations?:string[], scopeIds?:number[]}|null} [filter=null]
- * @param {number} [limit=2000] max photos to pull (server hard-caps at 20000)
+ * @param {number} [limit=20000] max photos to pull (server hard-caps at 200000)
  * @returns {Promise<{photos:Array<{id:number,t:number,mtimeMs:number}>, truncated:boolean, limit:number}>}
  */
-export async function fetchAlbumTimeline(filter = null, limit = 2000) {
+export async function fetchAlbumTimeline(filter = null, limit = 20000) {
   const params = new URLSearchParams();
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);

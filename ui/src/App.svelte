@@ -212,7 +212,8 @@
   let albumTruncated = false;
   let detectingAlbums = false;
   // Max photos pulled into the album timeline (user-tunable; server hard-caps).
-  let albumLimit = Number(localStorage.getItem("autogallery.albumLimit")) || 2000;
+  let albumLimit =
+    Number(localStorage.getItem("autogallery.albumLimit")) || 20000;
 
   // Filter mode: does the rating/orientation filter narrow what's DISPLAYED
   // (classic), or drive the SELECTION (the grid then shows everything and the

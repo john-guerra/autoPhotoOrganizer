@@ -968,11 +968,11 @@ export function registerApi(app) {
   app.get("/api/albums/timeline", (req, res) => {
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
-    // Client-tunable working-set cap. Hard-ceilinged because AlbumsView renders
-    // every thumbnail (no virtualization yet) — tens of thousands of <img> would
-    // choke the browser well before the DB does. Echoed back so the UI can show
-    // the clamped value.
-    const ALBUM_TIMELINE_MAX = 20000;
+    // Client-tunable working-set cap. AlbumsView renders each album as a
+    // fisheye SnapshotStrip (first/middle/last), not every thumbnail, so this
+    // is now a DB-time safety cap rather than a DOM-size one. Echoed back so
+    // the UI can show the clamped value.
+    const ALBUM_TIMELINE_MAX = 200000;
     let limit = parseInt(req.query.limit, 10);
     if (!Number.isFinite(limit) || limit < 1) limit = 2000;
     limit = Math.min(limit, ALBUM_TIMELINE_MAX);
