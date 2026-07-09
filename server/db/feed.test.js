@@ -185,6 +185,34 @@ describe("getFeedPage — filter", () => {
     const ph = items.find((i) => i.collapsed);
     expect(ph.count).toBe(1);
   });
+
+  it("applies the filter to real rows while a sibling folder is collapsed", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [ahi, alo] = upsertScan(db, "/photos/aaa", 1, [
+      { name: "ahi.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "alo.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const [bhi, blo] = upsertScan(db, "/photos/bbb", 1, [
+      { name: "bhi.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "blo.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/ccc", 1, [
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id IN (?, ?)`).run(ahi.id, bhi.id);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      after: 10,
+      filter: { minRating: 4 },
+      collapsed: [[{ dimension: "folder", value: "/photos/aaa" }]],
+    });
+    // aaa collapsed -> placeholder with filtered count 1 (ahi); bbb real row bhi (5-star);
+    // ccc has no >=4 photo so it disappears entirely.
+    const ph = items.find((i) => i.collapsed);
+    expect(ph.count).toBe(1);
+    expect(items.filter((i) => !i.collapsed).map((i) => i.name)).toEqual(["bhi.jpg"]);
+  });
 });
 
 describe("findGroupBoundary", () => {
