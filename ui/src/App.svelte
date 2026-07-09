@@ -266,6 +266,11 @@
   // Keyed by pathKey(path), reset on hierarchy change alongside collapsedPaths.
   let snapshotGroupKeys = new Set();
   const SNAPSHOT_ROW_HEIGHT = 120;
+  // Last global view action (the top-of-toolbar "cycle all" control); the
+  // per-group toggles may diverge from it, but the button just applies the
+  // next whole-view state each click: full view → snapshot all → collapse all.
+  let globalViewMode = "expanded"; // "expanded" | "snapshot" | "collapsed"
+  let cyclingAll = false;
   let treeSidebarRef; // bound to TreeSidebar, for revealCurrentLocation to call revealPath
   let items = []; // the currently-loaded feed window, ordered
   let hasMoreBefore = false;
@@ -953,6 +958,46 @@
       snapshotGroupKeys = snapshotGroupKeys; // snapshot → pill, no refetch
     } else {
       await toggleSectionCollapse(path); // server-expand
+    }
+  }
+
+  /** The top-of-toolbar "cycle all" control: flip EVERY top-level group at
+   * once through full view → snapshot all → collapse all → full view. Fetches
+   * the current top-level group list from the tree, then sets collapsedPaths /
+   * snapshotGroupKeys wholesale and rebuilds the feed from the top. */
+  async function cycleAllGroups() {
+    if (cyclingAll) return;
+    const next =
+      globalViewMode === "expanded"
+        ? "snapshot"
+        : globalViewMode === "snapshot"
+          ? "collapsed"
+          : "expanded";
+    cyclingAll = true;
+    try {
+      if (next === "expanded") {
+        collapsedPaths = [];
+        snapshotGroupKeys = new Set();
+      } else {
+        const { nodes } = await fetchTreeNode({
+          groupBy,
+          path: [],
+          filter: displayFilter,
+          sort,
+        });
+        const allPaths = nodes.map((n) => [
+          { dimension: groupBy[0], value: n.value },
+        ]);
+        collapsedPaths = allPaths;
+        snapshotGroupKeys =
+          next === "snapshot" ? new Set(allPaths.map(pathKey)) : new Set();
+      }
+      globalViewMode = next;
+      await loadInitialFeed();
+    } catch (e) {
+      error = e.message;
+    } finally {
+      cyclingAll = false;
     }
   }
 
@@ -2173,6 +2218,20 @@
         title="Reveal the current photo's location in the tree"
       >
         ⌖ Locate
+      </button>
+      <button
+        class="reveal-btn"
+        on:click={cycleAllGroups}
+        disabled={cyclingAll}
+        title="Cycle every group: full view → snapshot all → collapse all"
+      >
+        {cyclingAll
+          ? "…"
+          : globalViewMode === "snapshot"
+            ? "◐ Snapshot all"
+            : globalViewMode === "collapsed"
+              ? "▸ Collapsed all"
+              : "▦ Full view"}
       </button>
       <button
         class="reveal-btn"
