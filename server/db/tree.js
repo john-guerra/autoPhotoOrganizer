@@ -62,3 +62,46 @@ export function getTreeNode(db, { groupBy, path = [] }) {
 function formatTreeLabel(value) {
   return value === "" ? "Unknown" : value;
 }
+
+/**
+ * The full, ordered sequence of finest-level groups for `groupBy` — one row
+ * per distinct combination of ALL groupBy dimensions, each with its photo
+ * count, ordered exactly as the feed orders groups. Feeds the fisheye
+ * navigator. One GROUP BY query; bounded by the number of distinct leaf groups.
+ * @param {import("better-sqlite3").Database} db
+ * @param {{groupBy: string[]}} opts
+ * @returns {{total:number, leaves: Array<{values: Record<string,string>, count:number}>}}
+ */
+export function getFlatTree(db, { groupBy }) {
+  const dims = resolveDimensions(groupBy);
+
+  const total = db
+    .prepare(`SELECT COUNT(*) AS count FROM photos WHERE stale = 0`)
+    .get().count;
+
+  const selectCols = dims.map((dim, i) => `${dim.expr} AS d${i}`).join(", ");
+  const groupByCols = dims.map((dim) => dim.expr).join(", ");
+  const orderByCols = dims
+    .map((dim) => `${dim.expr} ${dim.direction}`)
+    .join(", ");
+
+  const rows = db
+    .prepare(
+      `SELECT ${selectCols}, COUNT(*) AS count
+       FROM photos JOIN folders ON folders.id = photos.folder_id
+       WHERE photos.stale = 0
+       GROUP BY ${groupByCols}
+       ORDER BY ${orderByCols}`
+    )
+    .all();
+
+  const leaves = rows.map((row) => {
+    const values = {};
+    dims.forEach((dim, i) => {
+      values[dim.name] = row[`d${i}`];
+    });
+    return { values, count: row.count };
+  });
+
+  return { total, leaves };
+}

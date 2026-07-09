@@ -67,6 +67,15 @@ verification), and decisions already made.
 - Every file-serving endpoint MUST route user paths through
   `server/lib/safeResolve.js` (path-traversal guard — the legacy app was flagged).
 
+## Committing
+
+- **Commit often — every stable state is a checkpoint.** The moment the app
+  builds, tests pass, and a slice works, commit it as a small, focused commit.
+  Frequent known-good points make it cheap to bisect a regression or roll back,
+  and keep the working tree from piling up into one big unreviewable batch.
+  Prefer many small checkpoint commits over one large one. (Branch/merge flow:
+  see `docs/ROADMAP.md`.)
+
 ## Agent tool usage
 
 - When driving the app with claude-in-chrome for verification, prefer

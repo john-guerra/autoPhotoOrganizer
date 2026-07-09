@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, _resetDbForTest } from "./connection.js";
 import { upsertScan } from "./photos.js";
-import { getTreeNode } from "./tree.js";
+import { getTreeNode, getFlatTree } from "./tree.js";
 
 let cacheDir;
 
@@ -143,5 +143,109 @@ describe("getTreeNode — nested path", () => {
         path: [{ dimension: "year", value: "2020" }],
       })
     ).toThrow(/dimension mismatch/);
+  });
+});
+
+describe("getFlatTree", () => {
+  it("orders single-dimension leaves by folder abs_path ASC with counts", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/b-folder", 1, [
+      { name: "b1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/a-folder", 1, [
+      { name: "a1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "a2.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { total, leaves } = getFlatTree(db, { groupBy: ["folder"] });
+    expect(total).toBe(3);
+    expect(leaves).toEqual([
+      { values: { folder: "/photos/a-folder" }, count: 2 },
+      { values: { folder: "/photos/b-folder" }, count: 1 },
+    ]);
+  });
+
+  it("returns one leaf per (folder, year) combo, ordered folder ASC then year DESC", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const rowsA = upsertScan(db, "/photos/a-folder", 1, [
+      { name: "old.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "new.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(
+      db,
+      rowsA.find((r) => r.name === "old.jpg").id,
+      "2020-01-01T00:00:00.000Z"
+    );
+    setTakenAt(
+      db,
+      rowsA.find((r) => r.name === "new.jpg").id,
+      "2024-01-01T00:00:00.000Z"
+    );
+    const rowsB = upsertScan(db, "/photos/b-folder", 1, [
+      { name: "one.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(
+      db,
+      rowsB.find((r) => r.name === "one.jpg").id,
+      "2022-01-01T00:00:00.000Z"
+    );
+
+    const { total, leaves } = getFlatTree(db, {
+      groupBy: ["folder", "year"],
+    });
+    expect(total).toBe(3);
+    expect(leaves).toEqual([
+      { values: { folder: "/photos/a-folder", year: "2024" }, count: 1 },
+      { values: { folder: "/photos/a-folder", year: "2020" }, count: 1 },
+      { values: { folder: "/photos/b-folder", year: "2022" }, count: 1 },
+    ]);
+  });
+
+  it("orders year/month/day leaves DESC/DESC/DESC and carries all three values", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const rows = upsertScan(db, "/photos/trip", 1, [
+      { name: "d1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "d2.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(
+      db,
+      rows.find((r) => r.name === "d1.jpg").id,
+      "2023-05-10T00:00:00.000Z"
+    );
+    setTakenAt(
+      db,
+      rows.find((r) => r.name === "d2.jpg").id,
+      "2024-01-02T00:00:00.000Z"
+    );
+
+    const { leaves } = getFlatTree(db, {
+      groupBy: ["year", "month", "day"],
+    });
+    expect(leaves).toEqual([
+      {
+        values: { year: "2024", month: "2024-01", day: "2024-01-02" },
+        count: 1,
+      },
+      {
+        values: { year: "2023", month: "2023-05", day: "2023-05-10" },
+        count: 1,
+      },
+    ]);
+  });
+
+  it("keeps the empty-string date sentinel unformatted for a photo with NULL taken_at", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/trip", 1, [
+      { name: "noexif.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { leaves } = getFlatTree(db, {
+      groupBy: ["folder", "year"],
+    });
+    expect(leaves).toEqual([
+      { values: { folder: "/photos/trip", year: "" }, count: 1 },
+    ]);
   });
 });
