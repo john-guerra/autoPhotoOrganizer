@@ -7,13 +7,14 @@ import { toQueryParam } from "./filterSpec.js";
 
 /**
  * @param {string} dir
- * @returns {Promise<{root:string, count:number, elapsedMs:number, items:Array<{id:number,name:string,size:number,mtimeMs:number,rating:number,preferredCover:boolean}>}>}
+ * @param {boolean} [recursive=false] scan every subfolder too ("soup folder")
+ * @returns {Promise<{root:string, count:number, folders:number, elapsedMs:number, items:Array<{id:number,name:string,size:number,mtimeMs:number,rating:number,preferredCover:boolean}>}>}
  */
-export async function scan(dir) {
+export async function scan(dir, recursive = false) {
   const res = await fetch("/api/scan", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ dir }),
+    body: JSON.stringify({ dir, recursive }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

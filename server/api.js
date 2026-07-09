@@ -18,6 +18,7 @@ import {
 } from "./lib/cacheStats.js";
 import { safeResolve } from "./lib/safeResolve.js";
 import { nextAvailablePath } from "./lib/nextAvailablePath.js";
+import { listDirsRecursive } from "./lib/walkDirs.js";
 import { getDb } from "./db/connection.js";
 import {
   volumeRootForPath,
@@ -118,6 +119,10 @@ export function registerApi(app) {
   // --- Scan ---------------------------------------------------------------
   app.post("/api/scan", async (req, res) => {
     const dir = req.body?.dir;
+    // Recursive ("soup folder") scan: point at a parent, pull in every
+    // subfolder. Each directory with media becomes its own folders row, so the
+    // on-disk structure is preserved as browsable sections.
+    const recursive = req.body?.recursive === true;
     if (typeof dir !== "string" || dir.length === 0) {
       return res.status(400).json({ error: "dir is required" });
     }
@@ -132,9 +137,30 @@ export function registerApi(app) {
     }
 
     const db = getDb();
+    // Every subfolder is under `dir`, hence on the same physical volume — one
+    // volume lookup covers the whole tree.
     const volumeId = upsertVolume(db, volumeRootForPath(dir));
 
     const t0 = performance.now();
+
+    if (recursive) {
+      const dirs = await listDirsRecursive(dir);
+      let count = 0;
+      let folders = 0;
+      for (const subdir of dirs) {
+        const files = await processing.scan(subdir);
+        if (!files.length) continue; // don't create empty folders rows
+        upsertScan(db, subdir, volumeId, files);
+        count += files.length;
+        folders += 1;
+      }
+      const elapsedMs = Math.round(performance.now() - t0);
+      hashPendingPhotos(db).catch(() => {});
+      // items intentionally omitted for a tree scan (could be tens of
+      // thousands); the client reloads the feed after any scan.
+      return res.json({ root: dir, count, folders, elapsedMs, items: [] });
+    }
+
     const files = await processing.scan(dir);
     const rows = upsertScan(db, dir, volumeId, files);
     const elapsedMs = Math.round(performance.now() - t0);
@@ -150,7 +176,7 @@ export function registerApi(app) {
       rating: r.rating,
       preferredCover: r.preferredCover === 1,
     }));
-    res.json({ root: dir, count: items.length, elapsedMs, items });
+    res.json({ root: dir, count: items.length, folders: 1, elapsedMs, items });
   });
 
   // --- Lazy metadata enrichment --------------------------------------------

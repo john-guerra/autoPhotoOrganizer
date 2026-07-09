@@ -106,6 +106,11 @@
   }
 
   let dir = localStorage.getItem(LS_KEY) || "";
+  // Recursive "soup folder" scan: pull in every subfolder. Default on — the
+  // common case is pointing at a parent of dated album folders.
+  const LS_RECURSIVE = "autogallery.recursiveScan";
+  let recursiveScan = localStorage.getItem(LS_RECURSIVE) !== "false";
+  $: localStorage.setItem(LS_RECURSIVE, String(recursiveScan));
   const LS_GROUP_BY = "autogallery.groupBy";
   const ALL_DIMENSIONS = ["folder", "year", "month", "day", "camera", "kind"];
   let groupBy = (() => {
@@ -1101,7 +1106,7 @@
     scanning = true;
     status = "scanning…";
     try {
-      await apiScan(dir.trim());
+      await apiScan(dir.trim(), recursiveScan);
       localStorage.setItem(LS_KEY, dir.trim());
       refreshLibrary();
       // The scanned folder is now indexed — reload the feed from the
@@ -1837,6 +1842,10 @@
               on:keydown={(e) => e.key === "Enter" && doScan()}
               spellcheck="false"
             />
+            <label class="recursive-opt" title="Scan this folder and all folders inside it">
+              <input type="checkbox" bind:checked={recursiveScan} />
+              <span>Include subfolders</span>
+            </label>
             <div class="add-actions">
               <button class="scan" on:click={doScan} disabled={scanning}>
                 {scanning ? "Scanning…" : "Scan"}
@@ -2325,6 +2334,14 @@
   .add-actions {
     display: flex;
     gap: 8px;
+  }
+  .recursive-opt {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: #b8b8b8;
+    cursor: pointer;
   }
 
   .view-cell {

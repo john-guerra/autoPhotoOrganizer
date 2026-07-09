@@ -115,6 +115,29 @@ describe("POST /api/scan", () => {
     });
     expect(empty.status).toBe(400);
   });
+
+  it("recursive:true scans subfolders, one folders row per subdir with media", async () => {
+    // Drop an image into the (otherwise-skipped) subdir.
+    await sharp({
+      create: {
+        width: 16,
+        height: 16,
+        channels: 3,
+        background: { r: 10, g: 10, b: 10 },
+      },
+    })
+      .jpeg()
+      .toFile(join(photosDir, "subdir", "deep.jpg"));
+
+    const res = await fetch(`${srv.base}/api/scan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dir: photosDir, recursive: true }),
+    });
+    const body = await res.json();
+    expect(body.count).toBe(5); // 4 top-level + 1 in subdir
+    expect(body.folders).toBe(2); // top-level + subdir
+  });
 });
 
 describe("GET /api/meta", () => {
