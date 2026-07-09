@@ -536,59 +536,18 @@
     tile?.scrollIntoView({ block, inline: "nearest" });
   }
 
-  /** Hold a group-jump's landing photo at the top of its group until the
-   * layout stops moving. Two reflows fight the landing after a jump, and a
-   * single one-shot reveal can't survive either: (1) at jump time the
-   * after-page tiles aren't mounted yet, so the document is too short and
-   * scrollIntoView maxes out below the target; (2) as the rows ABOVE the
-   * landing get their real (usually shorter) dimensions, the target slides up
-   * and off the top — the grid is absolutely positioned, so the browser's
-   * native scroll-anchoring can't hold it.
-   *
-   * So we re-pin every animation frame (scrollIntoView reads the REAL painted
-   * DOM, immune to the layout/paint lag that makes box.y unreliable mid-reflow)
-   * and stop when the scroll position has held steady for a few frames — the
-   * layout has settled. This is condition-based, not a fixed timer: a slow
-   * metadata load just means more frames. It bails immediately if a newer jump
-   * superseded this one (epoch) or the user took over (jumpRevealPending,
-   * cleared on keypress/wheel), so it never fights the user. A frame cap is a
-   * safety backstop against a pathological never-settling layout. */
-  let jumpPinObserver = null;
-  let pinGen = 0;
   /** Hold a group-jump's landing at revealMargin below the viewport top until
-   * the user takes over. After a jump the rows above the landing keep resizing
-   * as their metadata streams in, sliding it off the top; the grid is
-   * absolutely positioned, so the browser's native scroll-anchoring can't
-   * compensate. A ResizeObserver on the grid re-anchors on every reflow — and
-   * unlike requestAnimationFrame it keeps firing even in a backgrounded tab, so
-   * the pin can't silently die. It disconnects itself once superseded by a
-   * newer jump (epoch/gen) or the user takes over (jumpRevealPending, cleared
-   * on keypress/wheel). loadMore("before") is suppressed while pinned (see
-   * updateVisibleRange) so a prepend never fights this. */
-  function pinLandingUntilSettled(epoch) {
-    stopJumpPin();
-    if (!gridEl) return;
-    const gen = ++pinGen;
-    const observer = new ResizeObserver(() => {
-      if (gen !== pinGen) {
-        observer.disconnect(); // a newer pin owns the field now
-        return;
-      }
-      if (epoch !== feedEpoch || !jumpRevealPending) {
-        stopJumpPin();
-        return;
-      }
-      pinNow();
-    });
-    jumpPinObserver = observer;
-    observer.observe(gridEl);
-    pinNow();
-  }
-
-  /** Put the selected tile at revealMargin below the viewport top by adjusting
-   * scrollTop directly. getBoundingClientRect forces a synchronous layout, so
-   * we read the tile's REAL current position even from inside a ResizeObserver
-   * callback (where scrollIntoView can be deferred/stale). */
+   * the user takes over. Two reflows fight the landing after a jump, and a
+   * single one-shot reveal survives neither: (1) at jump time the after-page
+   * tiles aren't mounted yet, so the document is too short and the reveal maxes
+   * out below the target; (2) as the rows ABOVE the landing get their real
+   * (usually shorter) dimensions, the target slides up and off the top — the
+   * grid is absolutely positioned, so the browser's native scroll-anchoring
+   * can't hold it. Driven by the `boxes` reactive (scheduleJumpPin), which
+   * fires on every layout recompute — including height-neutral ones a
+   * ResizeObserver would miss — until jumpRevealPending is cleared on the
+   * user's first keypress/wheel. loadMore("before") is suppressed while pinned
+   * (see updateVisibleRange) so a prepend never fights this. */
   function pinNow() {
     if (!mainColumnEl || !gridEl) return;
     const entry = displayEntries[selected];
@@ -597,6 +556,8 @@
     if (!tile) return;
     const t = tile.getBoundingClientRect();
     const c = mainColumnEl.getBoundingClientRect();
+    // getBoundingClientRect forces a synchronous layout, so this reads the
+    // tile's REAL current position even mid-reflow (where box.y can lag).
     const delta = t.top - c.top - revealMargin;
     if (Math.abs(delta) > 0.5) {
       const max = mainColumnEl.scrollHeight - mainColumnEl.clientHeight;
@@ -607,11 +568,13 @@
     }
   }
 
-  function stopJumpPin() {
-    if (jumpPinObserver) {
-      jumpPinObserver.disconnect();
-      jumpPinObserver = null;
-    }
+  /** Re-pin after a layout recompute (the `boxes` reactive). tick() waits for
+   * Svelte to patch the DOM so pinNow reads the tile's post-reflow position;
+   * re-check the flag, which may have cleared (user took over) during the tick. */
+  function scheduleJumpPin() {
+    tick().then(() => {
+      if (jumpRevealPending) pinNow();
+    });
   }
 
   /** Give roving keyboard focus to the currently-selected tile's DOM element,
@@ -728,8 +691,8 @@
         const gridHeightAfter = gridEl
           ? gridEl.getBoundingClientRect().height
           : 0;
-        // While a group-jump pin is active, its ResizeObserver re-anchors the
-        // landing on THIS very prepend's resize (reading the tile's post-
+        // While a group-jump pin is active, its boxes reactive re-anchors the
+        // landing on THIS very prepend's reflow (reading the tile's post-
         // prepend position). Compensating here too would double-scroll and
         // fling the landing off by the prepended height — so let the pin be
         // the sole scroll authority during its window. Normal scrolling (no
@@ -1017,6 +980,15 @@
   // both as the tile's CSS scroll-margin-top (--reveal-margin) and by the
   // jump-landing pin below.
   $: revealMargin = HEADER_HEIGHT * groupBy.length + PAD;
+  // Re-pin the group-jump landing on every LAYOUT recompute while pinned, not
+  // just on grid-height change (the ResizeObserver's blind spot): a metadata
+  // reflow can shrink the rows above the landing while others grow, leaving
+  // total grid height ~unchanged — so the observer never fires, yet the
+  // landing slides up off the top. `boxes` is a fresh array on every layout
+  // recompute, so this fires for exactly those reflows. tick() (a microtask,
+  // unlike rAF) defers to just after Svelte patches the DOM, so pinNow reads
+  // the tile's final position — and works even in a backgrounded tab.
+  $: if (jumpRevealPending && boxes) scheduleJumpPin();
   $: gridHeight = layoutResult ? layoutResult.totalHeight + 2 * PAD : 0;
   // The first time this fires (right when `boxes` first becomes non-null,
   // e.g. after the initial feed load), the grid's layout/paint may not have
@@ -1223,7 +1195,6 @@
     // The user is driving now — cancel any pending post-jump pin (a jump
     // re-arms it at the end of jumpGroupBoundary, after this returns).
     jumpRevealPending = false;
-    stopJumpPin();
 
     // Alt+Left/Right jumps groups regardless of what has focus: unlike a
     // bare digit (typing a folder path must not rate photos), Option/Alt
@@ -1480,10 +1451,9 @@
       focusSelectedTile();
       // ...but this first reveal can't stick on its own: the rows above the
       // landing shrink as their metadata arrives, sliding it off the top.
-      // pinLandingUntilSettled re-anchors it on every reflow until the user
-      // takes over (see its doc).
+      // Arming jumpRevealPending drives the pin (the boxes reactive re-anchors
+      // it on every reflow — see pinNow) until the user takes over.
       jumpRevealPending = true;
-      pinLandingUntilSettled(epoch);
     } catch (err) {
       error = err.message;
       status = "";
@@ -1609,10 +1579,7 @@
       class="main-column"
       bind:this={mainColumnEl}
       on:scroll={scheduleVisibleRangeUpdate}
-      on:wheel={() => {
-        jumpRevealPending = false;
-        stopJumpPin();
-      }}
+      on:wheel={() => (jumpRevealPending = false)}
       style="--reveal-margin:{revealMargin}px"
     >
       {#if items.length}
