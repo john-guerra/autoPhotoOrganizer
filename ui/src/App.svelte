@@ -175,6 +175,8 @@
   let albumPhotos = [];
   let albumTruncated = false;
   let detectingAlbums = false;
+  // Max photos pulled into the album timeline (user-tunable; server hard-caps).
+  let albumLimit = Number(localStorage.getItem("autogallery.albumLimit")) || 2000;
 
   // Filter mode: does the rating/orientation filter narrow what's DISPLAYED
   // (classic), or drive the SELECTION (the grid then shows everything and the
@@ -665,17 +667,31 @@
     detectingAlbums = true;
     error = "";
     try {
-      const { photos, truncated } = await fetchAlbumTimeline(
-        filterIsActive(displayFilter) ? displayFilter : null
+      const resp = await fetchAlbumTimeline(
+        filterIsActive(displayFilter) ? displayFilter : null,
+        albumLimit
       );
-      albumPhotos = photos;
-      albumTruncated = truncated;
+      albumPhotos = resp.photos;
+      albumTruncated = resp.truncated;
+      // Reflect the server-clamped cap (e.g. a 99999 request comes back 20000).
+      if (resp.limit) {
+        albumLimit = resp.limit;
+        localStorage.setItem("autogallery.albumLimit", String(albumLimit));
+      }
       albumMode = true;
     } catch (e) {
       error = e.message;
     } finally {
       detectingAlbums = false;
     }
+  }
+
+  /** AlbumsView asked for a different max — persist it and re-pull the timeline
+   * (staying in album mode; detectAlbums keeps albumMode true). */
+  async function onAlbumRelimit(newLimit) {
+    albumLimit = Math.max(1, Math.round(Number(newLimit) || 0));
+    localStorage.setItem("autogallery.albumLimit", String(albumLimit));
+    await detectAlbums();
   }
 
   /** After a full library reset (from the Manage Library danger zone): the
@@ -2235,7 +2251,9 @@
         <AlbumsView
           photos={albumPhotos}
           truncated={albumTruncated}
+          limit={albumLimit}
           {hasNativePicker}
+          on:relimit={(e) => onAlbumRelimit(e.detail)}
           on:close={() => (albumMode = false)}
         />
       {:else if items.length}

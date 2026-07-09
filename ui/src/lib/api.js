@@ -264,12 +264,14 @@ export async function exportSelection(photoIds, destParent, folderName) {
 /**
  * The working set as a time-ordered timeline for album gap-clustering.
  * @param {{minRating?:number, orientations?:string[], scopeIds?:number[]}|null} [filter=null]
- * @returns {Promise<{photos:Array<{id:number,t:number,mtimeMs:number}>, truncated:boolean}>}
+ * @param {number} [limit=2000] max photos to pull (server hard-caps at 20000)
+ * @returns {Promise<{photos:Array<{id:number,t:number,mtimeMs:number}>, truncated:boolean, limit:number}>}
  */
-export async function fetchAlbumTimeline(filter = null) {
+export async function fetchAlbumTimeline(filter = null, limit = 2000) {
   const params = new URLSearchParams();
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
+  if (limit) params.set("limit", String(limit));
   const res = await fetch(`/api/albums/timeline?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

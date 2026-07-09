@@ -15,17 +15,28 @@
   export let photos = []; // [{id,t,mtimeMs}] time-ordered working set
   export let truncated = false;
   export let hasNativePicker = false;
+  export let limit = 2000; // current working-set cap (server hard-caps at 20000)
 
   const dispatch = createEventDispatcher();
 
   let k = 2; // threshold = mean + k·stddev (legacy default 2)
+  // When the user types an exact split gap, this overrides the k-derived auto
+  // threshold (null = follow the slider). Moving the slider clears it.
+  let manualThresholdMs = null;
+  let editingThresh = false;
+  let threshInput = "";
   let dest = localStorage.getItem("autogallery.exportDest") || "";
   let materializing = false;
   let result = null;
+  // Local mirror of the max-photos prop. Re-syncs whenever the prop changes
+  // (i.e. after a re-fetch clamps it) but survives typing in between.
+  let limitInput = limit;
+  $: limitInput = limit;
 
   $: times = photos.map((p) => p.t);
   $: stats = computeGapStats(times);
-  $: thresholdMs = autoThresholdMs(stats, k);
+  $: thresholdMs =
+    manualThresholdMs != null ? manualThresholdMs : autoThresholdMs(stats, k);
   $: albums = clusterByGap(
     photos.map((p) => ({ id: p.id, t: p.t })),
     thresholdMs
@@ -37,6 +48,47 @@
     if (h < 1) return `${Math.round(ms / 60_000)} min`;
     if (h < 48) return `${h.toFixed(1)} h`;
     return `${(h / 24).toFixed(1)} days`;
+  }
+
+  // Parse a compact duration like "6h", "90m", "2.5d", "1w", or a bare number
+  // (interpreted as days) into ms. Returns null on anything unparseable.
+  function parseDuration(s) {
+    const m = String(s).trim().match(/^([\d.]+)\s*([smhdw]?)$/i);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const mult = { s: 1e3, m: 6e4, h: 36e5, d: 864e5, w: 6048e5 };
+    return n * mult[(m[2] || "d").toLowerCase()];
+  }
+
+  // Seed the edit field with the current threshold in its most natural unit.
+  function threshAsInput(ms) {
+    const h = ms / 3600_000;
+    if (h < 1) return `${Math.round(ms / 60_000)}m`;
+    if (h < 48) return `${(+h.toFixed(1))}h`;
+    return `${+(h / 24).toFixed(1)}d`;
+  }
+
+  function startEditThresh() {
+    threshInput = threshAsInput(thresholdMs);
+    editingThresh = true;
+  }
+  function commitThresh() {
+    const ms = parseDuration(threshInput);
+    if (ms != null) manualThresholdMs = ms;
+    editingThresh = false;
+  }
+  function onSlider() {
+    // Slider is the "auto" control — dragging it drops any manual override.
+    manualThresholdMs = null;
+  }
+  function commitLimit() {
+    const v = Math.round(Number(limitInput));
+    if (!Number.isFinite(v) || v < 1) {
+      limitInput = limit; // reject garbage, restore
+      return;
+    }
+    if (v !== limit) dispatch("relimit", v);
   }
   function fmtDate(ms) {
     return new Date(ms).toLocaleDateString(undefined, {
@@ -91,10 +143,49 @@
     <strong>Auto-albums</strong>
     <label class="thresh">
       Split gap
-      <input type="range" min="0.5" max="6" step="0.25" bind:value={k} />
-      <span class="thresh-val">{k}× · {fmtDur(thresholdMs)}</span>
+      <input
+        type="range"
+        min="0.5"
+        max="6"
+        step="0.25"
+        bind:value={k}
+        on:input={onSlider}
+      />
+      {#if editingThresh}
+        <!-- svelte-ignore a11y-autofocus -->
+        <input
+          class="thresh-edit"
+          bind:value={threshInput}
+          on:keydown={(e) => {
+            if (e.key === "Enter") commitThresh();
+            if (e.key === "Escape") (editingThresh = false);
+          }}
+          on:blur={commitThresh}
+          placeholder="e.g. 6h, 2d, 90m"
+          autofocus
+        />
+      {:else}
+        <button
+          class="thresh-val"
+          title="Click to type an exact split gap (e.g. 6h, 2d, 90m)"
+          on:click={startEditThresh}
+        >
+          {manualThresholdMs != null ? "manual" : `${k}×`} · {fmtDur(thresholdMs)}
+        </button>
+      {/if}
     </label>
     <span class="albums-count">{albums.length} albums · {photos.length} photos</span>
+    <label class="maxphotos" title="Max photos to analyze. Higher is slower — the album grid isn't virtualized (server caps at 20,000).">
+      Max
+      <input
+        type="number"
+        min="100"
+        step="500"
+        bind:value={limitInput}
+        on:change={commitLimit}
+        on:keydown={(e) => e.key === "Enter" && commitLimit()}
+      />
+    </label>
     <span class="spacer"></span>
     <input
       class="dest"
@@ -122,8 +213,9 @@
   {/if}
   {#if truncated}
     <p class="albums-msg warn">
-      Showing the first {photos.length.toLocaleString()} photos. Use “Keep only”
-      to narrow the working set, then detect albums again.
+      Showing the first {photos.length.toLocaleString()} photos (Max {limit.toLocaleString()}).
+      Raise “Max” above, or use “Keep only” to narrow the working set, then detect
+      again.
     </p>
   {/if}
 
@@ -181,10 +273,46 @@
   .thresh-val {
     color: #7fe0a8;
     font-variant-numeric: tabular-nums;
+    background: none;
+    border: 1px dashed transparent;
+    border-radius: 4px;
+    padding: 1px 4px;
+    font: inherit;
+    cursor: text;
+  }
+  .thresh-val:hover {
+    border-color: #3a5a48;
+  }
+  .thresh-edit {
+    width: 90px;
+    padding: 2px 5px;
+    background: #0d0d0d;
+    border: 1px solid #4c9aff;
+    border-radius: 4px;
+    color: #7fe0a8;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
   }
   .albums-count {
     font-size: 0.8rem;
     color: #9a9a9a;
+  }
+  .maxphotos {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: #bbb;
+  }
+  .maxphotos input {
+    width: 78px;
+    padding: 3px 5px;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: inherit;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
   }
   .spacer {
     flex: 1;

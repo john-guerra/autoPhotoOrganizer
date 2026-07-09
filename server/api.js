@@ -724,9 +724,17 @@ export function registerApi(app) {
   app.get("/api/albums/timeline", (req, res) => {
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
+    // Client-tunable working-set cap. Hard-ceilinged because AlbumsView renders
+    // every thumbnail (no virtualization yet) — tens of thousands of <img> would
+    // choke the browser well before the DB does. Echoed back so the UI can show
+    // the clamped value.
+    const ALBUM_TIMELINE_MAX = 20000;
+    let limit = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(limit) || limit < 1) limit = 2000;
+    limit = Math.min(limit, ALBUM_TIMELINE_MAX);
     const db = getDb();
-    const { photos, truncated } = workingSetTimeline(db, filter, 2000);
-    res.json({ photos, truncated });
+    const { photos, truncated } = workingSetTimeline(db, filter, limit);
+    res.json({ photos, truncated, limit });
   });
 
   // --- Materialize albums: copy each album into its own dated folder ---------

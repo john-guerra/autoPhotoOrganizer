@@ -1159,6 +1159,29 @@ describe("GET /api/albums/timeline", () => {
     const res = await fetch(`${srv.base}/api/albums/timeline?filter=not-json`);
     expect(res.status).toBe(400);
   });
+
+  it("honors a smaller limit and echoes it back", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(`${srv.base}/api/albums/timeline?limit=2`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.limit).toBe(2);
+    expect(body.photos.length).toBeLessThanOrEqual(2);
+  });
+
+  it("clamps an over-large limit to the hard ceiling (20000)", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(`${srv.base}/api/albums/timeline?limit=999999`);
+    const body = await res.json();
+    expect(body.limit).toBe(20000);
+  });
+
+  it("falls back to the default limit on a non-numeric value", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(`${srv.base}/api/albums/timeline?limit=abc`);
+    const body = await res.json();
+    expect(body.limit).toBe(2000);
+  });
 });
 
 describe("POST /api/albums/materialize", () => {
