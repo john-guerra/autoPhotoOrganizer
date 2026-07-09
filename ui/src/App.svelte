@@ -519,14 +519,6 @@
     }
   }
 
-  /** Re-put the jump landing at the top after a reflow moved it. Waits a tick
-   * so the DOM reflects the new layout, then re-checks the flag (it may have
-   * cleared — metadata finished, or the user took over — during the tick). */
-  async function reAssertJumpLanding() {
-    await tick();
-    if (jumpRevealPending) revealSelected({ block: "start" });
-  }
-
   /** Bring the selected tile into view using the native scroll API — called
    * ONLY from active navigation (keyboard, group-jump). One-shot and
    * imperative: it never re-fires on reflow, so it can't hijack the user's
@@ -542,6 +534,84 @@
     const id = entry ? resolvePhoto(entry).id : null;
     const tile = id != null && gridEl?.querySelector(`[data-id="${id}"]`);
     tile?.scrollIntoView({ block, inline: "nearest" });
+  }
+
+  /** Hold a group-jump's landing photo at the top of its group until the
+   * layout stops moving. Two reflows fight the landing after a jump, and a
+   * single one-shot reveal can't survive either: (1) at jump time the
+   * after-page tiles aren't mounted yet, so the document is too short and
+   * scrollIntoView maxes out below the target; (2) as the rows ABOVE the
+   * landing get their real (usually shorter) dimensions, the target slides up
+   * and off the top — the grid is absolutely positioned, so the browser's
+   * native scroll-anchoring can't hold it.
+   *
+   * So we re-pin every animation frame (scrollIntoView reads the REAL painted
+   * DOM, immune to the layout/paint lag that makes box.y unreliable mid-reflow)
+   * and stop when the scroll position has held steady for a few frames — the
+   * layout has settled. This is condition-based, not a fixed timer: a slow
+   * metadata load just means more frames. It bails immediately if a newer jump
+   * superseded this one (epoch) or the user took over (jumpRevealPending,
+   * cleared on keypress/wheel), so it never fights the user. A frame cap is a
+   * safety backstop against a pathological never-settling layout. */
+  let jumpPinObserver = null;
+  let pinGen = 0;
+  /** Hold a group-jump's landing at revealMargin below the viewport top until
+   * the user takes over. After a jump the rows above the landing keep resizing
+   * as their metadata streams in, sliding it off the top; the grid is
+   * absolutely positioned, so the browser's native scroll-anchoring can't
+   * compensate. A ResizeObserver on the grid re-anchors on every reflow — and
+   * unlike requestAnimationFrame it keeps firing even in a backgrounded tab, so
+   * the pin can't silently die. It disconnects itself once superseded by a
+   * newer jump (epoch/gen) or the user takes over (jumpRevealPending, cleared
+   * on keypress/wheel). loadMore("before") is suppressed while pinned (see
+   * updateVisibleRange) so a prepend never fights this. */
+  function pinLandingUntilSettled(epoch) {
+    stopJumpPin();
+    if (!gridEl) return;
+    const gen = ++pinGen;
+    const observer = new ResizeObserver(() => {
+      if (gen !== pinGen) {
+        observer.disconnect(); // a newer pin owns the field now
+        return;
+      }
+      if (epoch !== feedEpoch || !jumpRevealPending) {
+        stopJumpPin();
+        return;
+      }
+      pinNow();
+    });
+    jumpPinObserver = observer;
+    observer.observe(gridEl);
+    pinNow();
+  }
+
+  /** Put the selected tile at revealMargin below the viewport top by adjusting
+   * scrollTop directly. getBoundingClientRect forces a synchronous layout, so
+   * we read the tile's REAL current position even from inside a ResizeObserver
+   * callback (where scrollIntoView can be deferred/stale). */
+  function pinNow() {
+    if (!mainColumnEl || !gridEl) return;
+    const entry = displayEntries[selected];
+    const id = entry ? resolvePhoto(entry).id : null;
+    const tile = id != null && gridEl.querySelector(`[data-id="${id}"]`);
+    if (!tile) return;
+    const t = tile.getBoundingClientRect();
+    const c = mainColumnEl.getBoundingClientRect();
+    const delta = t.top - c.top - revealMargin;
+    if (Math.abs(delta) > 0.5) {
+      const max = mainColumnEl.scrollHeight - mainColumnEl.clientHeight;
+      mainColumnEl.scrollTop = Math.max(
+        0,
+        Math.min(max, mainColumnEl.scrollTop + delta)
+      );
+    }
+  }
+
+  function stopJumpPin() {
+    if (jumpPinObserver) {
+      jumpPinObserver.disconnect();
+      jumpPinObserver = null;
+    }
   }
 
   /** Give roving keyboard focus to the currently-selected tile's DOM element,
@@ -658,7 +728,15 @@
         const gridHeightAfter = gridEl
           ? gridEl.getBoundingClientRect().height
           : 0;
-        mainColumnEl.scrollBy(0, gridHeightAfter - gridHeightBefore);
+        // While a group-jump pin is active, its ResizeObserver re-anchors the
+        // landing on THIS very prepend's resize (reading the tile's post-
+        // prepend position). Compensating here too would double-scroll and
+        // fling the landing off by the prepended height — so let the pin be
+        // the sole scroll authority during its window. Normal scrolling (no
+        // pin) still needs this compensation to stay put.
+        if (!jumpRevealPending) {
+          mainColumnEl.scrollBy(0, gridHeightAfter - gridHeightBefore);
+        }
         // scrollBy's own scroll event re-triggers updateVisibleRange,
         // which can call loadMore("before") again. Releasing
         // fetchingBefore in `finally` right after the synchronous
@@ -934,12 +1012,11 @@
         )
       : null;
   $: boxes = layoutResult ? layoutResult.boxes : null;
-  // While a jump's window is still loading metadata (jumpRevealPending), the
-  // above-the-fold rows keep resizing and drift the landing down; re-assert it
-  // to the top on every reflow until that metadata is done. Gated by an event
-  // (metadata-loaded, or the user taking over), never a timer — and self-
-  // correcting, so even rapid jumps converge on the right spot.
-  $: if (jumpRevealPending && boxes) reAssertJumpLanding();
+  // How far below the scroll viewport's top a revealed tile should sit: one
+  // sticky-header band per grouping level, plus a PAD of breathing room. Used
+  // both as the tile's CSS scroll-margin-top (--reveal-margin) and by the
+  // jump-landing pin below.
+  $: revealMargin = HEADER_HEIGHT * groupBy.length + PAD;
   $: gridHeight = layoutResult ? layoutResult.totalHeight + 2 * PAD : 0;
   // The first time this fires (right when `boxes` first becomes non-null,
   // e.g. after the initial feed load), the grid's layout/paint may not have
@@ -1101,7 +1178,15 @@
     if (renderEnd >= displayEntries.length - FETCH_THRESHOLD) {
       loadMore("after");
     }
-    if (renderStart <= FETCH_THRESHOLD) {
+    if (renderStart <= FETCH_THRESHOLD && !jumpRevealPending) {
+      // Don't prepend previous-group content while a group-jump landing is
+      // still being pinned: the prepend shifts everything below it, and the
+      // pin + loadMore's scroll compensation then fight over the landing
+      // (flinging it off screen — the intermittent bug, hit only when the
+      // jumped-to group sits near a SMALL preceding group, so renderStart
+      // lands under the threshold right after the jump). The user doesn't
+      // need earlier content the instant they land; it loads the moment they
+      // scroll up, which releases the pin (see onKeydown / on:wheel).
       loadMore("before");
     }
   }
@@ -1135,9 +1220,10 @@
 
   async function onKeydown(e) {
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
-    // The user is driving now — cancel any pending post-jump re-assert (a jump
+    // The user is driving now — cancel any pending post-jump pin (a jump
     // re-arms it at the end of jumpGroupBoundary, after this returns).
     jumpRevealPending = false;
+    stopJumpPin();
 
     // Alt+Left/Right jumps groups regardless of what has focus: unlike a
     // bare digit (typing a folder path must not rate photos), Option/Alt
@@ -1379,36 +1465,25 @@
           : null;
       selected = t ?? nextSelectable(displayEntries, 0, 1) ?? 0;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-      // Re-assert the landing once this window's metadata has fully loaded and
-      // the above-the-fold rows have stopped resizing (see enrichMeta). Guarded
-      // so it stays a no-op if a newer jump/load superseded this one (epoch) or
-      // the user has already taken over (jumpRevealPending cleared on their
-      // first keypress/scroll) — so it corrects the drift without ever fighting
-      // the user.
-      const metaDone = enrichMeta(items.map((i) => i.id));
+      // Metadata refines the layout (row heights) as it streams in — one of
+      // the two reflows the pin below rides out.
+      enrichMeta(items.map((i) => i.id));
       await tick();
-      // Put the landing photo at the top of the newly-loaded group, clear of
-      // the sticky header (native scrollIntoView + the tile's
-      // scroll-margin-top). This also moves scrollTop OFF the 0 forced above,
-      // which matters: were it left at 0, updateVisibleRange would read the
-      // render window as pinned to the start of the loaded feed and call
-      // loadMore("before") once per settled frame, walking backward through
-      // the whole library (a real, confirmed cascade — 20+ sequential
-      // /api/feed?before=60 requests from a single jump). revealSelected is
-      // one-shot and imperative, so it never re-fires on the reflows that
-      // follow — no scroll hijack.
+      // Reveal the landing (native scrollIntoView + the tile's
+      // scroll-margin-top puts it below the sticky header). This also moves
+      // scrollTop OFF the 0 forced above, which matters: were it left at 0,
+      // updateVisibleRange would read the render window as pinned to the start
+      // of the loaded feed and call loadMore("before") once per settled frame,
+      // walking backward through the whole library (a real, confirmed cascade —
+      // 20+ sequential /api/feed?before=60 requests from a single jump).
       revealSelected({ block: "start" });
       focusSelectedTile();
-      // The reactive re-assert (see jumpRevealPending) now holds this landing
-      // at the top through every metadata reflow — self-correcting, so rapid
-      // jumps converge instead of getting stuck at one bad frame. We stop as
-      // soon as this window's metadata is fully loaded (the layout has stopped
-      // resizing): an EVENT, not a timer. Epoch-guarded so a superseded jump's
-      // completion doesn't cancel a newer jump's pin.
+      // ...but this first reveal can't stick on its own: the rows above the
+      // landing shrink as their metadata arrives, sliding it off the top.
+      // pinLandingUntilSettled re-anchors it on every reflow until the user
+      // takes over (see its doc).
       jumpRevealPending = true;
-      metaDone?.then(() => {
-        if (epoch === feedEpoch) jumpRevealPending = false;
-      });
+      pinLandingUntilSettled(epoch);
     } catch (err) {
       error = err.message;
       status = "";
@@ -1534,8 +1609,11 @@
       class="main-column"
       bind:this={mainColumnEl}
       on:scroll={scheduleVisibleRangeUpdate}
-      on:wheel={() => (jumpRevealPending = false)}
-      style="--reveal-margin:{HEADER_HEIGHT * groupBy.length + PAD}px"
+      on:wheel={() => {
+        jumpRevealPending = false;
+        stopJumpPin();
+      }}
+      style="--reveal-margin:{revealMargin}px"
     >
       {#if items.length}
         <div
