@@ -1,12 +1,12 @@
 <script>
-  // Width-fitted "fisheye" strip: first few + a contiguous middle fragment +
-  // last two, standing in for a whole group/album without rendering (or
-  // fetching) every row. Two source modes:
+  // Width-fitted "fisheye" strip: an evenly-distributed sample across the whole
+  // group/album (first + last always shown), standing in for it without
+  // rendering (or fetching) every row. Two source modes:
   //   - `ids`: an explicit ordered id array (e.g. one album) — sampling runs
   //     client-side, no fetch.
   //   - `groupPath` (+ `groupBy`/`filter`/`sort`): a feed group — samples are
   //     fetched from GET /api/group/sample, which reuses the feed's ORDER BY.
-  import { onMount, createEventDispatcher } from "svelte";
+  import { createEventDispatcher } from "svelte";
   import { thumbUrl, fetchGroupSample } from "./api.js";
   import { sampleOffsets, slotCount } from "./snapshot.js";
 
@@ -31,21 +31,17 @@
 
   const dispatch = createEventDispatcher();
 
-  let el;
-  let slots = 0;
+  // Measured via Svelte's reactive `bind:clientWidth` (fires reliably on mount
+  // and on every resize — a hand-rolled ResizeObserver missed the initial
+  // layout for strips inserted into the virtualized grid, leaving slots at 0).
+  let stripWidth = 0;
   let shown = [];
   let total = count;
   let requestToken = 0;
 
-  onMount(() => {
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const next = slotCount(el.clientWidth, thumbPx, gapPx);
-      if (next !== slots) slots = next; // guard: skip a no-op resize (avoids re-sample/re-fetch churn)
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  });
+  // Only the slot COUNT matters; recomputing from width means a sub-thumbnail
+  // resize doesn't change `slots` and so doesn't re-sample/re-fetch.
+  $: slots = stripWidth > 0 ? slotCount(stripWidth, thumbPx, gapPx) : 0;
 
   // Mode 1: client-side sampling from an explicit ordered id list.
   $: if (ids) {
@@ -89,7 +85,7 @@
 
 <div
   class="snapshot-strip"
-  bind:this={el}
+  bind:clientWidth={stripWidth}
   style="height:{thumbPx}px; gap:{gapPx}px;"
 >
   {#each shown as item (item.id)}
