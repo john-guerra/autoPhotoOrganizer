@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS photos (
   filename TEXT NOT NULL,
   size INTEGER NOT NULL,
   mtime INTEGER NOT NULL,
+  btime INTEGER,
   content_hash TEXT,
   taken_at INTEGER,
   width INTEGER,
@@ -64,4 +65,14 @@ CREATE TABLE IF NOT EXISTS photo_tags (
 /** @param {import("better-sqlite3").Database} db */
 export function applySchema(db) {
   db.exec(SCHEMA_SQL);
+  ensureColumn(db, "photos", "btime", "INTEGER");
+}
+
+/** Idempotent ADD COLUMN — the app ships no migration runner, and
+ *  CREATE TABLE IF NOT EXISTS never alters an existing table. */
+function ensureColumn(db, table, column, type) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
 }

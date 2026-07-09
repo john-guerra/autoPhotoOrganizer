@@ -166,6 +166,32 @@ describe("deleteFolder", () => {
   });
 });
 
+describe("upsertScan — btime (creation date)", () => {
+  it("stores btime from the scanned file record", () => {
+    const db = getDb();
+    upsertScan(db, "/photos/a", 1, [
+      { name: "x.jpg", size: 10, mtimeMs: 200, btimeMs: 100, kind: "image" },
+    ]);
+    const row = db.prepare(`SELECT btime FROM photos WHERE filename = 'x.jpg'`).get();
+    expect(row.btime).toBe(100);
+  });
+
+  it("backfills btime for a previously-scanned file on rescan", () => {
+    const db = getDb();
+    // First scan without btime (simulates a row created before this column).
+    upsertScan(db, "/photos/a", 1, [
+      { name: "x.jpg", size: 10, mtimeMs: 200, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET btime = NULL WHERE filename = 'x.jpg'`).run();
+    // Rescan now carries btime → the unconditional upsert backfills it.
+    upsertScan(db, "/photos/a", 1, [
+      { name: "x.jpg", size: 10, mtimeMs: 200, btimeMs: 150, kind: "image" },
+    ]);
+    const row = db.prepare(`SELECT btime FROM photos WHERE filename = 'x.jpg'`).get();
+    expect(row.btime).toBe(150);
+  });
+});
+
 describe("resetLibrary", () => {
   it("clears every table and returns pre-delete counts", () => {
     const db = getDb();

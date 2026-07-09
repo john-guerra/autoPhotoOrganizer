@@ -86,6 +86,7 @@ export class NodeProcessingService extends ProcessingService {
         name: entry.name,
         size: st.size,
         mtimeMs: st.mtimeMs,
+        btimeMs: st.birthtimeMs,
         kind: isRaw ? "raw" : "image",
       });
     }

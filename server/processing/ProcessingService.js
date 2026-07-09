@@ -20,6 +20,7 @@
  * @property {string} path      Absolute path on disk.
  * @property {number} size      Bytes.
  * @property {number} mtimeMs   Last-modified time (ms) — part of the incremental scan key.
+ * @property {number} btimeMs   File creation (birth) time (ms). Falls back near mtime on filesystems without it.
  * @property {"image"|"raw"|"video"} kind
  */
 

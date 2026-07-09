@@ -22,11 +22,12 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
     .get(folderAbsPath).id;
 
   const upsertPhoto = db.prepare(`
-    INSERT INTO photos (folder_id, filename, size, mtime, kind, stale)
-    VALUES (@folderId, @filename, @size, @mtime, @kind, 0)
+    INSERT INTO photos (folder_id, filename, size, mtime, btime, kind, stale)
+    VALUES (@folderId, @filename, @size, @mtime, @btime, @kind, 0)
     ON CONFLICT(folder_id, filename) DO UPDATE SET
       size = excluded.size,
       mtime = excluded.mtime,
+      btime = excluded.btime,
       kind = excluded.kind,
       stale = 0,
       content_hash = CASE
@@ -47,6 +48,7 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
         filename: f.name,
         size: f.size,
         mtime: f.mtimeMs,
+        btime: f.btimeMs ?? null,
         kind: f.kind,
       });
     }
