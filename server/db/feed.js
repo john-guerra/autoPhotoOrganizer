@@ -1,3 +1,5 @@
+import { buildFilter } from "./filters.js";
+
 /**
  * Grouping dimensions available to the feed. Each maps to a plain SQL
  * expression over `photos`/`folders` — no new columns. Date dimensions
@@ -208,16 +210,16 @@ function keyPassesSeek(key, focusValues, dims, wantAfter) {
   return false;
 }
 
-function countCollapsedPath(db, path, dims) {
+function countCollapsedPath(db, path, dims, filter) {
   const { sql, params } = collapsedPathCondition(path, dims);
   const positiveSql = sql.replace(/^NOT /, "");
   const row = db
     .prepare(
       `SELECT COUNT(*) AS count
        FROM photos JOIN folders ON folders.id = photos.folder_id
-       WHERE photos.stale = 0 AND ${positiveSql}`
+       WHERE photos.stale = 0 AND (${filter.sql}) AND ${positiveSql}`
     )
-    .get(...params);
+    .get(...filter.params, ...params);
   return row.count;
 }
 
@@ -237,7 +239,8 @@ function selectPlaceholders(
   focusValues,
   wantAfter,
   realRows,
-  limit
+  limit,
+  filter
 ) {
   if (!collapsed.length) return [];
   // A limit of 0 means this direction wasn't requested at all (e.g. the
@@ -279,7 +282,7 @@ function selectPlaceholders(
       id: placeholderId(path),
       path,
       groupValues: pathGroupValues(path),
-      count: countCollapsedPath(db, path, dims),
+      count: countCollapsedPath(db, path, dims, filter),
     }));
 }
 
@@ -330,8 +333,10 @@ export function getFeedPage(
     startPath = null,
     before = 0,
     after = 50,
+    filter: filterSpec = {},
   }
 ) {
+  const filter = buildFilter(filterSpec);
   const dims = resolveDimensions(groupBy);
   const seekDims = [
     ...dims,
@@ -412,11 +417,11 @@ export function getFeedPage(
                 ${selectDimCols}
          FROM photos
          JOIN folders ON folders.id = photos.folder_id
-         WHERE photos.stale = 0 AND (${exclSql}) AND (${seekSql})
+         WHERE photos.stale = 0 AND (${filter.sql}) AND (${exclSql}) AND (${seekSql})
          ORDER BY ${orderCols}
          LIMIT ?`
       )
-      .all(...exclParams, ...seekParams, limit);
+      .all(...filter.params, ...exclParams, ...seekParams, limit);
     const items = rows.map((r) => rowToItem(r, dims));
     return wantAfter ? items : items.reverse();
   }
@@ -431,7 +436,8 @@ export function getFeedPage(
     focusValues,
     false,
     beforeReal,
-    before
+    before,
+    filter
   );
   const afterPlaceholders = selectPlaceholders(
     db,
@@ -440,7 +446,8 @@ export function getFeedPage(
     focusValues,
     true,
     afterReal,
-    after
+    after,
+    filter
   );
 
   const items = [

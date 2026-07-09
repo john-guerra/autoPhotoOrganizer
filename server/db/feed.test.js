@@ -125,6 +125,68 @@ describe("getFeedPage — camera/kind dimensions", () => {
   });
 });
 
+describe("getFeedPage — filter", () => {
+  it("excludes rows below the rating threshold", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a, b, c] = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(a.id);
+    db.prepare(`UPDATE photos SET rating = 3 WHERE id = ?`).run(b.id);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      after: 10,
+      filter: { minRating: 4 },
+    });
+    expect(items.map((i) => i.name)).toEqual(["a.jpg"]);
+  });
+
+  it("excludes rows by orientation (portrait only)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [land, port] = upsertScan(db, "/photos/trip", 1, [
+      { name: "land.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "port.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET width = 400, height = 300 WHERE id = ?`).run(
+      land.id
+    );
+    db.prepare(`UPDATE photos SET width = 300, height = 400 WHERE id = ?`).run(
+      port.id
+    );
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      after: 10,
+      filter: { orientations: ["portrait"] },
+    });
+    expect(items.map((i) => i.name)).toEqual(["port.jpg"]);
+  });
+
+  it("collapsed-placeholder counts reflect the filter", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a, b] = upsertScan(db, "/photos/aaa", 1, [
+      { name: "hi.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "lo.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/bbb", 1, [
+      { name: "z.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(a.id);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      after: 10,
+      filter: { minRating: 4 },
+      collapsed: [[{ dimension: "folder", value: "/photos/aaa" }]],
+    });
+    const ph = items.find((i) => i.collapsed);
+    expect(ph.count).toBe(1);
+  });
+});
+
 describe("findGroupBoundary", () => {
   it("finds the next boundary at the innermost dimension (next year, same folder)", () => {
     const db = getDb();
