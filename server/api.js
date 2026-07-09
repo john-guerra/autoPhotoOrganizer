@@ -855,8 +855,33 @@ export function registerApi(app) {
     const resolved = resolveExportTarget(db, destParent, folderName);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
 
-    const { copied, skipped } = copyIdsIntoFolder(db, resolved.target, photoIds);
-    res.json({ target: resolved.target, copied, skipped });
+    const job = registry.create("export", {
+      label: `Export ${photoIds.length} photos`,
+      total: photoIds.length,
+    });
+    res.status(202).json({ jobId: job.id });
+
+    (async () => {
+      try {
+        const { copied, skipped, moved } = copyIdsIntoFolder(
+          db,
+          resolved.target,
+          photoIds,
+          {
+            signal: job.controller.signal,
+            onProgress: (done, total, phase) =>
+              registry.update(job.id, { done, total, phase }),
+          }
+        );
+        registry.finish(job.id, {
+          target: resolved.target,
+          copied: copied + moved,
+          skipped,
+        });
+      } catch (e) {
+        registry.fail(job.id, e);
+      }
+    })();
   });
 
   // --- Album timeline (working set, time-ordered, for gap clustering) --------

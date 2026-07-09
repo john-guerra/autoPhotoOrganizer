@@ -39,6 +39,19 @@ async function scan(base, dir) {
   return res.json();
 }
 
+/** Poll the in-process registry until `id` leaves "running". */
+async function waitJob(id, { timeoutMs = 5000 } = {}) {
+  const start = Date.now();
+  for (;;) {
+    const job = registry.get(id);
+    if (job && job.status !== "running") return job;
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`job ${id} did not finish within ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 let photosDir;
 let cacheDir;
 let srv;
@@ -75,6 +88,17 @@ beforeAll(async () => {
     .toFile(join(photosDir, "note.txt.png")); // a 4th image (png)
 
   srv = await startServer();
+});
+
+// Background-job tests (export/materialize/scan/undo-move) spawn real jobs
+// via the shared `registry` singleton and don't dismiss them individually —
+// dismiss every terminal job after each test so a later test asserting on
+// `GET /api/jobs`'s full list (e.g. "returns {jobs: []} initially") isn't
+// polluted by leftovers from an earlier one.
+afterEach(() => {
+  for (const j of registry.list()) {
+    if (j.status !== "running") registry.dismiss(j.id);
+  }
 });
 
 afterAll(async () => {
@@ -1029,7 +1053,7 @@ describe("POST /api/export", () => {
     await rm(exportDestDir, { recursive: true, force: true });
   });
 
-  it("copies photos into a new dated folder and leaves sources untouched", async () => {
+  it("runs as a background job: copies photos into a new dated folder and leaves sources untouched", async () => {
     const scanBody = await scan(srv.base, exportSrcDir);
     const photoIds = scanBody.items.map((i) => i.id);
 
@@ -1042,13 +1066,17 @@ describe("POST /api/export", () => {
         folderName: "2026-07-09 Trip",
       }),
     });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.copied).toBe(2);
-    expect(body.skipped).toBe(0);
-    expect(body.target).toBe(join(exportDestDir, "2026-07-09 Trip"));
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json();
+    expect(typeof jobId).toBe("string");
 
-    const copiedFiles = (await readdir(body.target)).sort();
+    const job = await waitJob(jobId);
+    expect(job.status).toBe("done");
+    expect(job.result.copied).toBe(2);
+    expect(job.result.skipped).toBe(0);
+    expect(job.result.target).toBe(join(exportDestDir, "2026-07-09 Trip"));
+
+    const copiedFiles = (await readdir(job.result.target)).sort();
     expect(copiedFiles).toEqual(["one.jpg", "two.jpg"]);
 
     // Sources untouched.
@@ -1060,31 +1088,29 @@ describe("POST /api/export", () => {
     const scanBody = await scan(srv.base, exportSrcDir);
     const oneId = scanBody.items.find((i) => i.name === "one.jpg").id;
 
-    const first = await (
-      await fetch(`${srv.base}/api/export`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          photoIds: [oneId],
-          destParent: exportDestDir,
-          folderName: "collide",
-        }),
-      })
-    ).json();
-    expect(first.copied).toBe(1);
+    const firstRes = await fetch(`${srv.base}/api/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        photoIds: [oneId],
+        destParent: exportDestDir,
+        folderName: "collide",
+      }),
+    });
+    const first = await waitJob((await firstRes.json()).jobId);
+    expect(first.result.copied).toBe(1);
 
-    const second = await (
-      await fetch(`${srv.base}/api/export`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          photoIds: [oneId],
-          destParent: exportDestDir,
-          folderName: "collide",
-        }),
-      })
-    ).json();
-    expect(second.copied).toBe(1);
+    const secondRes = await fetch(`${srv.base}/api/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        photoIds: [oneId],
+        destParent: exportDestDir,
+        folderName: "collide",
+      }),
+    });
+    const second = await waitJob((await secondRes.json()).jobId);
+    expect(second.result.copied).toBe(1);
 
     const files = (await readdir(join(exportDestDir, "collide"))).sort();
     expect(files).toEqual(["one (2).jpg", "one.jpg"]);
@@ -1104,9 +1130,10 @@ describe("POST /api/export", () => {
         folderName: "missing-src",
       }),
     });
-    const body = await res.json();
-    expect(body.copied).toBe(0);
-    expect(body.skipped).toBe(1);
+    expect(res.status).toBe(202);
+    const job = await waitJob((await res.json()).jobId);
+    expect(job.result.copied).toBe(0);
+    expect(job.result.skipped).toBe(1);
   });
 
   it("400s on an empty photoIds array", async () => {
