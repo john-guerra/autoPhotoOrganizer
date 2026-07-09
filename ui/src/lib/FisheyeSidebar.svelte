@@ -8,7 +8,12 @@
   import { createEventDispatcher } from "svelte";
   import { pointer } from "d3";
   import { fetchFlatTree } from "./api.js";
-  import { layoutFisheye, makeBarScale } from "./fisheye.js";
+  import {
+    layoutFisheye,
+    makeBarScale,
+    FISHEYE_DEFAULTS,
+    POSITIONING_MODES,
+  } from "./fisheye.js";
   import { shortLeafLabel } from "./labels.js";
 
   export let groupBy; // string[]
@@ -16,6 +21,41 @@
   export let filter = null;
 
   const dispatch = createEventDispatcher();
+
+  // Live-tunable lens settings (algorithm + knobs), persisted. John tunes these.
+  const SETTINGS_KEY = "autogallery.fisheyeSettings";
+  const num = (v, lo, hi, dflt) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
+  };
+  function loadSettings() {
+    let raw = {};
+    try {
+      raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {};
+    } catch {
+      raw = {};
+    }
+    return {
+      positioning: POSITIONING_MODES.includes(raw.positioning)
+        ? raw.positioning
+        : FISHEYE_DEFAULTS.positioning,
+      distortion: num(raw.distortion, 1, 12, FISHEYE_DEFAULTS.distortion),
+      vicinity: Math.round(num(raw.vicinity, 0, 12, FISHEYE_DEFAULTS.vicinity)),
+      minRowPx: Math.round(num(raw.minRowPx, 6, 40, FISHEYE_DEFAULTS.minRowPx)),
+    };
+  }
+  let settings = loadSettings();
+  let settingsOpen = false;
+  $: if (typeof localStorage !== "undefined")
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  function resetSettings() {
+    settings = {
+      positioning: FISHEYE_DEFAULTS.positioning,
+      distortion: FISHEYE_DEFAULTS.distortion,
+      vicinity: FISHEYE_DEFAULTS.vicinity,
+      minRowPx: FISHEYE_DEFAULTS.minRowPx,
+    };
+  }
   const LABEL_MIN_PX = 9; // hide ordinary labels on slivers this thin
   const TRACK_X = 14; // left inset of the row track (clears the current-dot gutter)
   const TRACK_W = 210; // row track width; count fill spans 0..TRACK_W
@@ -70,13 +110,14 @@
   // away). Either way the fisheye scale keeps every checkpoint on-screen.
   $: layout =
     leaves.length && height
-      ? layoutFisheye(
-          leaves,
-          groupBy,
-          hoverY != null
-            ? { height, focusPx: hoverY }
-            : { height, focusI: currentI }
-        )
+      ? layoutFisheye(leaves, groupBy, {
+          height,
+          ...(hoverY != null ? { focusPx: hoverY } : { focusI: currentI }),
+          positioning: settings.positioning,
+          distortion: settings.distortion,
+          vicinity: settings.vicinity,
+          minRowPx: settings.minRowPx,
+        })
       : { rows: [], maxBinCount: 0, focusI: 0 };
   $: barScale = makeBarScale(layout.maxBinCount, TRACK_W);
 
@@ -121,8 +162,82 @@
 <nav class="fisheye" aria-label="Library fisheye">
   <div class="fisheye-head">
     <span class="fisheye-title">Fisheye</span>
+    <button
+      class="fisheye-gear"
+      class:on={settingsOpen}
+      title="Fisheye settings"
+      aria-label="Fisheye settings"
+      aria-expanded={settingsOpen}
+      on:click={() => (settingsOpen = !settingsOpen)}>⚙</button
+    >
     <span class="fisheye-total">{total || "…"}</span>
   </div>
+  {#if settingsOpen}
+    <div class="fisheye-settings">
+      <div class="set-row set-algo">
+        <span class="set-label">Lens</span>
+        <div class="seg" role="radiogroup" aria-label="Positioning algorithm">
+          <label class="seg-opt" class:sel={settings.positioning === "rank"}>
+            <input
+              type="radio"
+              bind:group={settings.positioning}
+              value="rank"
+            />Rank
+          </label>
+          <label
+            class="seg-opt"
+            class:sel={settings.positioning === "proportional"}
+          >
+            <input
+              type="radio"
+              bind:group={settings.positioning}
+              value="proportional"
+            />Proportional
+          </label>
+        </div>
+      </div>
+      <p class="set-hint">
+        {settings.positioning === "rank"
+          ? "Even spacing per kept row — the focus stays readable on big lists."
+          : "True folder position — dense focus can crush into slivers."}
+      </p>
+      <label class="set-row">
+        <span class="set-label">Distortion</span>
+        <input
+          type="range"
+          min="1"
+          max="12"
+          step="0.5"
+          bind:value={settings.distortion}
+        />
+        <span class="set-val">{settings.distortion}</span>
+      </label>
+      <label class="set-row">
+        <span class="set-label">Vicinity</span>
+        <input
+          type="range"
+          min="0"
+          max="12"
+          step="1"
+          bind:value={settings.vicinity}
+        />
+        <span class="set-val">±{settings.vicinity}</span>
+      </label>
+      <label class="set-row">
+        <span class="set-label">Row min</span>
+        <input
+          type="range"
+          min="6"
+          max="40"
+          step="1"
+          bind:value={settings.minRowPx}
+        />
+        <span class="set-val">{settings.minRowPx}px</span>
+      </label>
+      <button class="set-reset" on:click={resetSettings}>Reset to defaults</button
+      >
+    </div>
+  {/if}
   {#if loadError}
     <div class="fisheye-error">{loadError}</div>
   {:else}
@@ -201,6 +316,96 @@
     color: #888;
     font-size: 0.85em;
     font-weight: 400;
+  }
+  .fisheye-head {
+    gap: 6px;
+  }
+  .fisheye-title {
+    margin-right: auto;
+  }
+  .fisheye-gear {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0 2px;
+    border-radius: 4px;
+  }
+  .fisheye-gear:hover,
+  .fisheye-gear.on {
+    color: #cfcfcf;
+  }
+  .fisheye-settings {
+    flex: 0 0 auto;
+    padding: 8px;
+    border-bottom: 1px solid #2a2a2a;
+    background: #141414;
+    font-weight: 400;
+    font-size: 12px;
+  }
+  .set-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+  }
+  .set-label {
+    color: #9a9a9a;
+    flex: 0 0 62px;
+  }
+  .set-row input[type="range"] {
+    flex: 1 1 auto;
+    min-width: 0;
+    accent-color: #4c9aff;
+  }
+  .set-val {
+    color: #cfcfcf;
+    flex: 0 0 34px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .seg {
+    display: flex;
+    flex: 1 1 auto;
+    border: 1px solid #333;
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .seg-opt {
+    flex: 1 1 0;
+    text-align: center;
+    padding: 3px 4px;
+    color: #9a9a9a;
+    cursor: pointer;
+  }
+  .seg-opt.sel {
+    background: #14395e;
+    color: #fff;
+  }
+  .seg-opt input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .set-hint {
+    color: #7a7a7a;
+    margin: 0 0 6px;
+    line-height: 1.3;
+  }
+  .set-reset {
+    margin-top: 4px;
+    width: 100%;
+    background: #1d1d1d;
+    border: 1px solid #333;
+    color: #cfcfcf;
+    border-radius: 5px;
+    padding: 4px;
+    cursor: pointer;
+  }
+  .set-reset:hover {
+    background: #262626;
   }
   .fisheye-stage {
     flex: 1 1 auto;

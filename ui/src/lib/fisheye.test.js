@@ -164,3 +164,50 @@ describe("layoutFisheye", () => {
     }
   });
 });
+
+describe("layoutFisheye positioning modes on a decimated list", () => {
+  // 1000 single-dimension leaves (like real folder grouping): only index 0 is a
+  // checkpoint, so the layout is dominated by the vicinity/sampling interplay —
+  // the exact regime where positioning mode matters.
+  const many = Array.from({ length: 1000 }, (_, i) => ({
+    values: { folder: `f${String(i).padStart(4, "0")}` },
+    count: 1,
+  }));
+  const GB1 = ["folder"];
+  const height = 500;
+  const focusI = 500;
+  const nearest = (rows, i) =>
+    rows.reduce((a, b) => (Math.abs(b.i - i) < Math.abs(a.i - i) ? b : a));
+
+  it("rank mode (default) keeps the focused rows thick enough to label", () => {
+    const { rows } = layoutFisheye(many, GB1, { height, focusI });
+    // the ±vicinity rows are all present and readable, not sub-label slivers
+    const focusRow = nearest(rows, focusI);
+    expect(focusRow.thickness).toBeGreaterThan(12);
+    const vicinity = rows.filter((r) => Math.abs(r.i - focusI) <= 4);
+    expect(vicinity.length).toBeGreaterThanOrEqual(8);
+    for (const r of vicinity) expect(r.thickness).toBeGreaterThan(9);
+  });
+
+  it("proportional mode crushes the dense vicinity into slivers (legacy opt-in)", () => {
+    const { rows } = layoutFisheye(many, GB1, {
+      height,
+      focusI,
+      positioning: "proportional",
+    });
+    // consecutive vicinity leaves share a tiny proportional span → thin band
+    const focusRow = nearest(rows, focusI);
+    expect(focusRow.thickness).toBeLessThan(9);
+  });
+
+  it("rank mode pins the cursor to a magnified row even when decimated", () => {
+    const focusPx = 250;
+    const { rows } = layoutFisheye(many, GB1, { height, focusPx });
+    const hit = rows.find(
+      (r) => focusPx >= r.y - r.thickness / 2 && focusPx <= r.y + r.thickness / 2
+    );
+    expect(hit).toBeTruthy();
+    const maxThick = Math.max(...rows.map((r) => r.thickness));
+    expect(hit.thickness).toBeGreaterThan(maxThick / 2);
+  });
+});

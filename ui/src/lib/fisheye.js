@@ -26,7 +26,11 @@ export const FISHEYE_DEFAULTS = {
   distortion: 4,
   pad: 6,
   minRowPx: 14,
+  positioning: "rank",
 };
+
+/** The positioning modes the lens can magnify over (see `layoutFisheye`). */
+export const POSITIONING_MODES = ["rank", "proportional"];
 
 /**
  * PhotoRing's fisheye position function (ported from `d3_fisheye_scale`). Maps
@@ -117,6 +121,22 @@ export function sampleLeaves(leaves, checkpoints, focusI, { maxRows, vicinity })
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+/** Index within `kept` of the row whose leaf index is closest to `focusI`.
+ * `focusI` is force-kept by the vicinity, so this is usually an exact hit; the
+ * nearest-search just makes edge/empty-vicinity cases safe. */
+function keptRankOf(kept, focusI) {
+  let best = 0;
+  let bestD = Infinity;
+  for (let j = 0; j < kept.length; j++) {
+    const d = Math.abs(kept[j].i - focusI);
+    if (d < bestD) {
+      bestD = d;
+      best = j;
+    }
+  }
+  return best;
+}
+
 /**
  * The full fisheye layout. The focus is either a pinned pixel (`focusPx`, e.g.
  * the cursor while hovering) or the natural position of `focusI` (the current
@@ -156,12 +176,36 @@ export function layoutFisheye(leaves, groupBy, options) {
     vicinity: o.vicinity,
   });
 
-  const pos = (i) => fisheyePosition(base(i), a, min, max, o.distortion);
+  // How the lens magnifies over the kept rows:
+  //  - "rank" (default): magnify over the KEPT-ROW SEQUENCE. Every surviving row
+  //    gets equal base spacing, so the dense ±vicinity around the focus lands
+  //    real, readable pixels — the point of a focus+context navigator. Vertical
+  //    position no longer encodes true folder-count density (the count bars still
+  //    carry photo mass; checkpoints still anchor structure).
+  //  - "proportional": magnify over the raw leaf index. Rows sit at their true
+  //    fractional position in the list, but on a heavily decimated list the
+  //    consecutive vicinity leaves share a sub-pixel span and collapse into an
+  //    unreadable sliver band under the cursor. Kept for comparison/tuning.
+  let pos;
+  if (o.positioning === "proportional") {
+    pos = (j) => fisheyePosition(base(kept[j].i), a, min, max, o.distortion);
+  } else {
+    const K = kept.length;
+    const baseKept = scaleLinear().domain([0, K]).range([min, max]);
+    // Focus in kept-rank space: the cursor pixel when hovering (so the magnified
+    // row still pins to the pointer), else the rank of the current feed leaf.
+    const aRank =
+      o.focusPx != null
+        ? clamp(o.focusPx, min, max)
+        : baseKept(keptRankOf(kept, focusI));
+    pos = (j) => fisheyePosition(baseKept(j), aRank, min, max, o.distortion);
+  }
+
   const rows = [];
   let maxBinCount = 0;
   for (let j = 0; j < kept.length; j++) {
-    const top = pos(kept[j].i);
-    const nextTop = j + 1 < kept.length ? pos(kept[j + 1].i) : max;
+    const top = pos(j);
+    const nextTop = j + 1 < kept.length ? pos(j + 1) : max;
     const thickness = Math.max(1, nextTop - top);
     rows.push({ ...kept[j], y: top + thickness / 2, thickness });
     if (kept[j].binCount > maxBinCount) maxBinCount = kept[j].binCount;
