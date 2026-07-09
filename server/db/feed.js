@@ -1,4 +1,5 @@
 import { buildFilter } from "./filters.js";
+import { parseSort, sortSeekDim, applySortToDims } from "./sort.js";
 
 /**
  * Grouping dimensions available to the feed. Each maps to a plain SQL
@@ -322,15 +323,24 @@ export function getFeedPage(
     before = 0,
     after = 50,
     filter: filterSpec = {},
+    sort = { by: "date_taken", dir: "desc" },
   }
 ) {
   const filter = buildFilter(filterSpec);
-  const dims = resolveDimensions(groupBy);
+  const dims = applySortToDims(resolveDimensions(groupBy), sort);
+  const sortDim = sortSeekDim(sort);
   const seekDims = [
     ...dims,
+    sortDim,
     { name: "__id", expr: "photos.id", direction: "ASC" },
   ];
-  const selectDimCols = dims.map((d, i) => `${d.expr} AS dim${i}`).join(", ");
+  // Combined SELECT fragment for dims + the sort value — built with an array
+  // join (not naive string concat) so an empty groupBy (flat feed, no dims)
+  // doesn't leave a stray leading/double comma in the SQL text.
+  const selectDimAndSortCols = [
+    ...dims.map((d, i) => `${d.expr} AS dim${i}`),
+    `${sortDim.expr} AS sortval`,
+  ].join(", ");
   const { sql: exclSql, params: exclParams } = exclusionClause(collapsed, dims);
 
   let focusValues = null;
@@ -342,13 +352,15 @@ export function getFeedPage(
                 photos.mtime AS mtimeMs, photos.rating,
                 photos.preferred_cover AS preferredCover,
                 photos.width, photos.height, photos.taken_at, photos.kind,
-                ${selectDimCols}
+                ${selectDimAndSortCols}
          FROM photos JOIN folders ON folders.id = photos.folder_id
          WHERE photos.id = ?`
       )
       .get(focusId);
     if (!focusRow) throw new Error(`focusId ${focusId} not found`);
-    focusValues = dims.map((_, i) => focusRow[`dim${i}`]).concat(focusRow.id);
+    focusValues = dims
+      .map((_, i) => focusRow[`dim${i}`])
+      .concat(focusRow.sortval, focusRow.id);
     focusItem = rowToItem(focusRow, dims);
 
     // If an active filter excludes the focus photo, keep its position as the
@@ -384,7 +396,10 @@ export function getFeedPage(
     // to ascending-output order once the page itself is small.
     const orderCols = seekDims
       .map((d, i) => {
-        const col = i < dims.length ? `dim${i}` : "photos.id";
+        let col;
+        if (i < dims.length) col = `dim${i}`;
+        else if (d.name === "__sort") col = "sortval";
+        else col = "photos.id";
         const direction = wantAfter
           ? d.direction
           : d.direction === "ASC"
@@ -399,7 +414,7 @@ export function getFeedPage(
                 photos.mtime AS mtimeMs, photos.rating,
                 photos.preferred_cover AS preferredCover,
                 photos.width, photos.height, photos.taken_at, photos.kind,
-                ${selectDimCols}
+                ${selectDimAndSortCols}
          FROM photos
          JOIN folders ON folders.id = photos.folder_id
          WHERE photos.stale = 0 AND (${filter.sql}) AND (${exclSql}) AND (${seekSql})

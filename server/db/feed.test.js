@@ -988,3 +988,71 @@ describe("workingSetTimeline — album gap-clustering source", () => {
     expect(truncated).toBe(true);
   });
 });
+
+describe("getFeedPage — photo-level sort", () => {
+  it("sorts a flat feed (no groupBy) by rating desc, id-tiebroken", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a, b, c] = upsertScan(db, "/p", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 2, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 3, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(b.id);
+    db.prepare(`UPDATE photos SET rating = 3 WHERE id = ?`).run(c.id);
+    const { items } = getFeedPage(db, {
+      groupBy: [],
+      after: 10,
+      sort: { by: "rating", dir: "desc" },
+    });
+    expect(items.map((i) => i.id)).toEqual([b.id, c.id, a.id]);
+  });
+
+  it("sorts within a group by name asc without changing group order", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/p", 1, [
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "a.jpg", size: 1, mtimeMs: 2, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 3, kind: "image" },
+    ]);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      after: 10,
+      sort: { by: "name", dir: "asc" },
+    });
+    expect(items.map((i) => i.name)).toEqual(["a.jpg", "b.jpg", "c.jpg"]);
+  });
+
+  it("keeps before/after paging stable around a focus under a non-default sort", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const ids = upsertScan(
+      db,
+      "/p",
+      1,
+      Array.from({ length: 6 }, (_, i) => ({
+        name: `p${i}.jpg`,
+        size: (i % 3) + 1, // sizes 1,2,3,1,2,3
+        mtimeMs: i + 1,
+        kind: "image",
+      }))
+    );
+    const focus = ids[3].id;
+    const { items, focusItem } = getFeedPage(db, {
+      groupBy: [],
+      focusId: focus,
+      before: 2,
+      after: 2,
+      sort: { by: "size", dir: "asc" },
+    });
+    // getFeedPage's established contract (see "fetches both before and after
+    // a focusId in one call" above) is that `items` never includes the focus
+    // row itself — it's returned separately as `focusItem` — so the window's
+    // anchor is verified there, not in `items`.
+    expect(focusItem?.id).toBe(focus);
+    // window is contiguous in size-asc,id-asc order around the focus
+    const sizes = items.map((i) => i.size);
+    expect([...sizes]).toEqual([...sizes].sort((x, y) => x - y));
+  });
+});
