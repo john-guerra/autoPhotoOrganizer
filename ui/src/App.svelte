@@ -128,6 +128,38 @@
   })();
   $: localStorage.setItem(LS_GROUP_BY, JSON.stringify(groupBy));
 
+  // Global feed sort (attribute + direction). Threaded into every feed/tree/
+  // boundary call; date sorts re-derive the year/month/day grouping (server-side
+  // applySortToDims), so grouping and sorting agree on one date notion.
+  const LS_SORT = "autogallery.sort";
+  const SORT_ATTRS = [
+    "date_taken",
+    "date_created",
+    "date_modified",
+    "rating",
+    "size",
+    "name",
+  ];
+  const SORT_LABELS = {
+    date_taken: "Taken",
+    date_created: "Created",
+    date_modified: "Modified",
+    rating: "Rating",
+    size: "Size",
+    name: "Name",
+  };
+  let sort = (() => {
+    try {
+      const s = JSON.parse(localStorage.getItem(LS_SORT) ?? "null");
+      if (s && SORT_ATTRS.includes(s.by) && (s.dir === "asc" || s.dir === "desc"))
+        return s;
+    } catch {
+      /* fall through to default */
+    }
+    return { by: "date_taken", dir: "desc" };
+  })();
+  $: localStorage.setItem(LS_SORT, JSON.stringify(sort));
+
   const LS_FILTER = "autogallery.filter";
   let filter = (() => {
     try {
@@ -353,6 +385,7 @@
         collapsed: collapsedPaths,
         after: PAGE_SIZE,
         filter: displayFilter,
+        sort,
       });
       if (epoch !== feedEpoch) return;
       const merged = mergeFeedPage(
@@ -402,7 +435,7 @@
     fetchingAfter = true;
     try {
       const { items: beforePage } = focusId
-        ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0, filter: displayFilter })
+        ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0, filter: displayFilter, sort })
         : { items: [] };
       const { items: afterPage, focusItem } = await fetchFeed({
         groupBy,
@@ -410,6 +443,7 @@
         before: 0,
         after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
         filter: displayFilter,
+        sort,
       });
       if (epoch !== feedEpoch) return;
       const combined = focusId
@@ -442,6 +476,15 @@
       fetchingBefore = false;
       fetchingAfter = false;
     }
+  }
+
+  /** Change the global feed sort, then rebuild the feed centered on the current
+   * selection via onGroupByChange's guarded loader (same reuse as filter changes
+   * — see the "no 7th copy" rule). Sidebars react to the `sort` prop on their own. */
+  function onSortChange(next) {
+    if (next.by === sort.by && next.dir === sort.dir) return;
+    sort = next;
+    onGroupByChange(groupBy);
   }
 
   /** Apply a new filter spec. In "display" mode this narrows the grid: the
@@ -726,6 +769,7 @@
         startPath: path,
         after: PAGE_SIZE,
         filter: displayFilter,
+        sort,
       });
       if (epoch !== feedEpoch) return;
       const merged = mergeFeedPage(
@@ -884,6 +928,7 @@
             before: PAGE_SIZE / 2,
             after: 0,
             filter: displayFilter,
+            sort,
           })
         : { items: [] };
       const { items: afterPage, focusItem } = await fetchFeed({
@@ -893,6 +938,7 @@
         before: 0,
         after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
         filter: displayFilter,
+        sort,
       });
       if (epoch !== feedEpoch) return;
       const combined = focusId
@@ -1061,6 +1107,7 @@
         before: direction === "before" ? PAGE_SIZE : 0,
         after: direction === "after" ? PAGE_SIZE : 0,
         filter: displayFilter,
+        sort,
       });
       if (epoch !== feedEpoch) return;
       const merged = mergeFeedPage(
@@ -1328,7 +1375,7 @@
       inFlightParents.add(key);
       let node;
       try {
-        node = await fetchTreeNode({ groupBy: groupByAtCall, path: parent, filter: displayFilter });
+        node = await fetchTreeNode({ groupBy: groupByAtCall, path: parent, filter: displayFilter, sort });
       } catch {
         inFlightParents.delete(key); // transient failure — allow a retry
         continue;
@@ -1796,6 +1843,7 @@
         focusId,
         direction,
         filter: displayFilter,
+        sort,
       });
     } catch (err) {
       error = err.message;
@@ -1827,6 +1875,7 @@
         before: PAGE_SIZE,
         after: 0,
         filter: displayFilter,
+        sort,
       });
       const { items: afterPage, focusItem } = await fetchFeed({
         groupBy,
@@ -1835,6 +1884,7 @@
         before: 0,
         after: PAGE_SIZE,
         filter: displayFilter,
+        sort,
       });
       if (epoch !== feedEpoch) return;
       // A jump can land anywhere in the library, arbitrarily far from
@@ -1993,6 +2043,26 @@
     <!-- ② ORGANIZE & FILTER -->
     <div class="cluster organize">
       <div class="group-by" use:groupBySelector={groupBy}></div>
+      <div class="sort-control" title="Sort photos">
+        <select
+          class="sort-by"
+          value={sort.by}
+          on:change={(e) => onSortChange({ ...sort, by: e.target.value })}
+        >
+          {#each SORT_ATTRS as key}
+            <option value={key}>{SORT_LABELS[key]}</option>
+          {/each}
+        </select>
+        <button
+          class="sort-dir"
+          title="Toggle ascending / descending"
+          aria-label="Toggle sort direction"
+          on:click={() =>
+            onSortChange({ ...sort, dir: sort.dir === "asc" ? "desc" : "asc" })}
+        >
+          {sort.dir === "asc" ? "↑" : "↓"}
+        </button>
+      </div>
       <div
         class="seg-toggle"
         role="group"
@@ -2226,6 +2296,7 @@
         bind:this={treeSidebarRef}
         {groupBy}
         {collapsedPaths}
+        {sort}
         filter={displayFilter}
         refreshToken={libraryVersion}
         on:toggle={(e) => toggleSectionCollapse(e.detail)}
@@ -2235,6 +2306,7 @@
       <FisheyeSidebar
         {groupBy}
         {currentPath}
+        {sort}
         filter={displayFilter}
         refreshToken={libraryVersion}
         on:jump={(e) => jumpToPath(e.detail)}
@@ -2565,6 +2637,39 @@
     line-height: 1;
     font-size: 0.7rem;
     cursor: pointer;
+  }
+
+  /* Feed sort control: attribute dropdown + direction toggle. */
+  .sort-control {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: #101010;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 2px;
+  }
+  .sort-by {
+    background: transparent;
+    border: none;
+    color: #cfcfcf;
+    font-size: 0.8rem;
+    padding: 3px 4px;
+    cursor: pointer;
+  }
+  .sort-dir {
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #9a9a9a;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 3px 7px;
+    cursor: pointer;
+  }
+  .sort-dir:hover {
+    background: #222;
+    color: #e8e8e8;
   }
 
   /* Display/Select segmented toggle (matches the sidebar-view toggle). */

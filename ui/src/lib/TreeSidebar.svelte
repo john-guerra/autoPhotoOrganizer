@@ -7,6 +7,7 @@
   export let groupBy; // string[]
   export let collapsedPaths; // Array<Array<{dimension,value}>>
   export let filter = null;
+  export let sort = null; // feed sort — date sorts change the date-group order
   export let refreshToken = 0; // bump to force a reload when the index changes
 
   const dispatch = createEventDispatcher();
@@ -20,7 +21,7 @@
 
   async function loadRoot() {
     try {
-      const { total, nodes } = await fetchTreeNode({ groupBy, path: [], filter });
+      const { total, nodes } = await fetchTreeNode({ groupBy, path: [], filter, sort });
       rootTotal = total;
       rootNodes = nodes;
     } catch {
@@ -40,14 +41,14 @@
     highlightedKey = null;
     loadRoot();
   }
-  $: groupBy, filter, refreshToken, resetAndLoad();
+  $: groupBy, filter, sort, refreshToken, resetAndLoad();
 
   async function loadChildren(path) {
     const key = treeKey(path);
     if (childrenByKey.has(key) || loadingKeys.has(key)) return;
     loadingKeys = new Set(loadingKeys).add(key);
     try {
-      const { nodes } = await fetchTreeNode({ groupBy, path, filter });
+      const { nodes } = await fetchTreeNode({ groupBy, path, filter, sort });
       childrenByKey = new Map(childrenByKey).set(key, { nodes });
     } catch (e) {
       childrenByKey = new Map(childrenByKey).set(key, {

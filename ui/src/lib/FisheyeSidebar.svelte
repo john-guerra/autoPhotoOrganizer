@@ -19,6 +19,7 @@
   export let groupBy; // string[]
   export let currentPath = null; // Array<{dimension,value}> | null — feed position
   export let filter = null;
+  export let sort = null; // feed sort — date sorts change the date-group order
   export let refreshToken = 0; // bump to force a reload when the index changes
 
   const dispatch = createEventDispatcher();
@@ -73,12 +74,12 @@
 
   // Reload the whole ordered leaf sequence whenever the hierarchy changes.
   // A leaf's position is only meaningful under the groupBy it was fetched with.
-  $: filter, refreshToken, loadLeaves(groupBy);
+  $: filter, sort, refreshToken, loadLeaves(groupBy);
   async function loadLeaves(gb) {
     const mine = ++epoch;
     loadError = "";
     try {
-      const res = await fetchFlatTree(gb, filter);
+      const res = await fetchFlatTree(gb, filter, sort);
       if (mine !== epoch) return; // superseded by a newer groupBy
       leaves = res.leaves;
       total = res.total;

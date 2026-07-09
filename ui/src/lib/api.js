@@ -139,12 +139,14 @@ export async function fetchFeed({
   before = 0,
   after = 50,
   filter = null,
+  sort = null,
 }) {
   const params = new URLSearchParams({
     groupBy: groupBy.join(","),
     before: String(before),
     after: String(after),
   });
+  if (sort) params.set("sort", `${sort.by}:${sort.dir}`);
   if (focusId != null) params.set("focusId", String(focusId));
   if (startPath && startPath.length) {
     params.set("startPath", JSON.stringify(startPath));
@@ -170,12 +172,14 @@ export async function fetchGroupBoundary({
   focusId,
   direction,
   filter = null,
+  sort = null,
 }) {
   const params = new URLSearchParams({
     groupBy: groupBy.join(","),
     focusId: String(focusId),
     direction,
   });
+  if (sort) params.set("sort", `${sort.by}:${sort.dir}`);
   if (collapsed.length) params.set("collapsed", JSON.stringify(collapsed));
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
@@ -191,11 +195,12 @@ export async function fetchGroupBoundary({
  * @param {{groupBy: string[], path?: Array<{dimension:string,value:string}>, filter?: object|null}} opts
  * @returns {Promise<{total:number, nodes: Array<{value:string,label:string,count:number,hasChildren:boolean}>}>}
  */
-export async function fetchTreeNode({ groupBy, path = [], filter = null }) {
+export async function fetchTreeNode({ groupBy, path = [], filter = null, sort = null }) {
   const params = new URLSearchParams({ groupBy: groupBy.join(",") });
   if (path.length) params.set("path", JSON.stringify(path));
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
+  if (sort) params.set("sort", `${sort.by}:${sort.dir}`);
   const res = await fetch(`/api/tree?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -323,10 +328,11 @@ export async function resetLibrary() {
  * @param {{minRating?:number, orientations?:string[]}|null} [filter=null]
  * @returns {Promise<{total:number, leaves: Array<{values: Record<string,string>, count:number}>}>}
  */
-export async function fetchFlatTree(groupBy, filter = null) {
+export async function fetchFlatTree(groupBy, filter = null, sort = null) {
   const params = new URLSearchParams({ groupBy: groupBy.join(",") });
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
+  if (sort) params.set("sort", `${sort.by}:${sort.dir}`);
   const res = await fetch(`/api/tree/flat?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
