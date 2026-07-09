@@ -141,7 +141,7 @@ describe("POST /api/scan", () => {
     expect(empty.status).toBe(400);
   });
 
-  it("recursive:true scans subfolders, one folders row per subdir with media", async () => {
+  it("recursive:true runs as a background job — 202 {jobId}, job result has folders/count", async () => {
     // Drop an image into the (otherwise-skipped) subdir.
     await sharp({
       create: {
@@ -159,9 +159,16 @@ describe("POST /api/scan", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ dir: photosDir, recursive: true }),
     });
-    const body = await res.json();
-    expect(body.count).toBe(5); // 4 top-level + 1 in subdir
-    expect(body.folders).toBe(2); // top-level + subdir
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json();
+    expect(typeof jobId).toBe("string");
+
+    const job = await waitJob(jobId);
+    expect(job.status).toBe("done");
+    expect(job.result.count).toBe(5); // 4 top-level + 1 in subdir
+    expect(job.result.folders).toBe(2); // top-level + subdir
+    expect(job.result.root).toBe(photosDir);
+    expect(typeof job.result.elapsedMs).toBe("number");
   });
 });
 

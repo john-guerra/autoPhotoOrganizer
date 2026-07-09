@@ -320,20 +320,43 @@ export function registerApi(app) {
 
     if (recursive) {
       const dirs = await listDirsRecursive(dir);
-      let count = 0;
-      let folders = 0;
-      for (const subdir of dirs) {
-        const files = await processing.scan(subdir);
-        if (!files.length) continue; // don't create empty folders rows
-        upsertScan(db, subdir, volumeId, files);
-        count += files.length;
-        folders += 1;
-      }
-      const elapsedMs = Math.round(performance.now() - t0);
-      hashPendingPhotos(db).catch(() => {});
-      // items intentionally omitted for a tree scan (could be tens of
-      // thousands); the client reloads the feed after any scan.
-      return res.json({ root: dir, count, folders, elapsedMs, items: [] });
+      const job = registry.create("scan", {
+        label: `Scan ${basename(dir)}`,
+        total: dirs.length,
+      });
+      res.status(202).json({ jobId: job.id });
+
+      (async () => {
+        try {
+          let count = 0;
+          let folders = 0;
+          for (let i = 0; i < dirs.length; i++) {
+            if (job.controller.signal.aborted) {
+              const e = new Error("canceled");
+              e.name = "AbortError";
+              throw e;
+            }
+            const subdir = dirs[i];
+            const files = await processing.scan(subdir);
+            if (files.length) {
+              // don't create empty folders rows
+              upsertScan(db, subdir, volumeId, files);
+              count += files.length;
+              folders += 1;
+            }
+            registry.update(job.id, {
+              done: i + 1,
+              phase: `scanning ${basename(subdir)}`,
+            });
+          }
+          const elapsedMs = Math.round(performance.now() - t0);
+          hashPendingPhotos(db).catch(() => {});
+          registry.finish(job.id, { root: dir, count, folders, elapsedMs });
+        } catch (e) {
+          registry.fail(job.id, e);
+        }
+      })();
+      return;
     }
 
     const files = await processing.scan(dir);
