@@ -13,35 +13,28 @@ describe("sampleOffsets", () => {
     });
   });
 
-  it("front(6)/middle-cluster(4)/last(2) blocks and two gaps for a big group", () => {
+  it("evenly distributes across the whole album, first+last included", () => {
     const { offsets, gaps } = sampleOffsets(1000, 12);
     expect(offsets).toHaveLength(12);
-    // front block: ceil((12-2)*0.6) = 6 indices, 0..5
-    expect(offsets.slice(0, 6)).toEqual([0, 1, 2, 3, 4, 5]);
-    // middle: a CONTIGUOUS cluster of 12-2-6 = 4 indices, centered in the
-    // band [6, 997]. Assert contiguity + rough centering rather than pinning
-    // the exact start index.
-    const middle = offsets.slice(6, 10);
-    expect(middle).toHaveLength(4);
-    for (let i = 1; i < middle.length; i++) {
-      expect(middle[i]).toBe(middle[i - 1] + 1); // contiguous
-    }
-    expect(middle[0]).toBeGreaterThan(400);
-    expect(middle[3]).toBeLessThan(600); // roughly centered
-    // last block: the final two real indices
-    expect(offsets.slice(-2)).toEqual([998, 999]);
+    // first and last are always included
+    expect(offsets[0]).toBe(0);
+    expect(offsets.at(-1)).toBe(999);
     // strictly increasing, no duplicates, all in range
     for (let i = 1; i < offsets.length; i++) {
       expect(offsets[i]).toBeGreaterThan(offsets[i - 1]);
     }
-    for (const idx of offsets) {
-      expect(idx).toBeGreaterThanOrEqual(0);
-      expect(idx).toBeLessThan(1000);
+    // equal strides: every gap between shown thumbs is ~999/11 ≈ 91 (±2 for
+    // rounding) — a representative spread, not a contiguous slice.
+    for (let i = 1; i < offsets.length; i++) {
+      expect(Math.abs(offsets[i] - offsets[i - 1] - 91)).toBeLessThanOrEqual(2);
     }
-    // exactly two omission gaps: front→middle-cluster (after index 5) and
-    // middle-cluster→last (after index 9). The front block, the middle
-    // cluster, and the last pair are each internally contiguous.
-    expect(gaps).toEqual([5, 9]);
+    // every interior boundary skips photos, so a "…" belongs after each of
+    // the first 11 shown thumbs.
+    expect(gaps).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("degenerate slots=1 shows just the first", () => {
+    expect(sampleOffsets(500, 1)).toEqual({ offsets: [0], gaps: [] });
   });
 
   it("small slot counts still produce valid, in-range, strictly increasing offsets", () => {
