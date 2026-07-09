@@ -1899,6 +1899,18 @@
         </button>
         {#if libraryOpen}
           <ul class="library-panel">
+            <li>
+              <button
+                class="library-entry"
+                on:click={() => {
+                  libraryOpen = false;
+                  manageLibraryOpen = true;
+                }}
+              >
+                Manage library…
+              </button>
+            </li>
+            <li class="library-sep" role="separator"></li>
             {#if library.length === 0}
               <li class="library-empty">No folders scanned yet.</li>
             {/if}
@@ -1915,17 +1927,6 @@
                 </button>
               </li>
             {/each}
-            <li>
-              <button
-                class="library-entry"
-                on:click={() => {
-                  libraryOpen = false;
-                  manageLibraryOpen = true;
-                }}
-              >
-                Manage library…
-              </button>
-            </li>
           </ul>
         {/if}
       </div>
@@ -2774,6 +2775,11 @@
   .library-empty {
     padding: 6px 10px;
     color: #888;
+  }
+  .library-sep {
+    height: 1px;
+    margin: 4px 0;
+    background: #333;
   }
   .zoom {
     display: flex;
