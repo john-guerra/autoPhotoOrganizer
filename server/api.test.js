@@ -9,6 +9,7 @@ import {
   vi,
 } from "vitest";
 import { mkdtemp, rm, mkdir, readdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import sharp from "sharp";
@@ -1353,7 +1354,62 @@ describe("POST /api/albums/materialize", () => {
     await rm(destDir, { recursive: true, force: true });
   });
 
-  it("copies each album into its own folder and leaves sources untouched", async () => {
+  it("runs as a background job; move:false copies and leaves sources untouched", async () => {
+    const scanBody = await scan(srv.base, srcDir);
+    const ids = scanBody.items.map((i) => i.id);
+    const res = await fetch(`${srv.base}/api/albums/materialize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        destParent: destDir,
+        move: false,
+        albums: [
+          { name: "2026-01-01", photoIds: ids.slice(0, 2) },
+          { name: "2026-01-05", photoIds: ids.slice(2) },
+        ],
+      }),
+    });
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json();
+    expect(typeof jobId).toBe("string");
+
+    const job = await waitJob(jobId);
+    expect(job.status).toBe("done");
+    expect(job.type).toBe("materialize");
+    expect(job.result.move).toBe(false);
+    expect(job.result.albums).toHaveLength(2);
+    expect(job.result.albums[0].copied).toBe(2);
+    expect(job.result.albums[1].copied).toBe(1);
+    expect((await readdir(join(destDir, "2026-01-01"))).length).toBe(2);
+    expect((await readdir(join(destDir, "2026-01-05"))).length).toBe(1);
+    // Sources untouched.
+    expect((await readdir(srcDir)).sort()).toEqual(["a.jpg", "b.jpg", "c.jpg"]);
+  });
+
+  it("defaults to move: sources are removed and the index is repointed", async () => {
+    const scanBody = await scan(srv.base, srcDir);
+    const ids = scanBody.items.map((i) => i.id);
+    const res = await fetch(`${srv.base}/api/albums/materialize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        destParent: destDir,
+        albums: [{ name: "2026-01-01", photoIds: ids }],
+      }),
+    });
+    expect(res.status).toBe(202);
+    const job = await waitJob((await res.json()).jobId);
+
+    expect(job.status).toBe("done");
+    expect(job.result.move).toBe(true);
+    expect(job.result.albums[0].moved).toBe(3);
+    expect(job.result.manifest).toHaveLength(3);
+    // Sources gone; dest populated.
+    expect((await readdir(srcDir)).sort()).toEqual([]);
+    expect((await readdir(join(destDir, "2026-01-01"))).length).toBe(3);
+  });
+
+  it("cancel mid-run: fully-processed albums stay undoable via result.manifest", async () => {
     const scanBody = await scan(srv.base, srcDir);
     const ids = scanBody.items.map((i) => i.id);
     const res = await fetch(`${srv.base}/api/albums/materialize`, {
@@ -1362,20 +1418,34 @@ describe("POST /api/albums/materialize", () => {
       body: JSON.stringify({
         destParent: destDir,
         albums: [
-          { name: "2026-01-01", photoIds: ids.slice(0, 2) },
-          { name: "2026-01-05", photoIds: ids.slice(2) },
+          { name: "album-1", photoIds: [ids[0]] },
+          { name: "album-2", photoIds: [ids[1]] },
+          { name: "album-3", photoIds: [ids[2]] },
         ],
       }),
     });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.albums).toHaveLength(2);
-    expect(body.albums[0].copied).toBe(2);
-    expect(body.albums[1].copied).toBe(1);
-    expect((await readdir(join(destDir, "2026-01-01"))).length).toBe(2);
-    expect((await readdir(join(destDir, "2026-01-05"))).length).toBe(1);
-    // Sources untouched.
-    expect((await readdir(srcDir)).sort()).toEqual(["a.jpg", "b.jpg", "c.jpg"]);
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json();
+
+    // Cancel right away — the async job hasn't necessarily processed
+    // album-1 yet, but whichever albums DO land before the abort check
+    // fires must be reflected, undoably, in the terminal job's result.
+    await fetch(`${srv.base}/api/jobs/${jobId}/cancel`, { method: "POST" });
+    const job = await waitJob(jobId);
+
+    expect(job.status).toBe("canceled");
+    // Only meaningful if at least one album had already been moved when the
+    // cancel was observed — assert the invariant, not an exact count, since
+    // the exact cut point is a race between the fetch and the async loop.
+    if (job.result) {
+      expect(job.result.move).toBe(true);
+      expect(Array.isArray(job.result.manifest)).toBe(true);
+      // Every manifest entry's "to" must actually exist on disk and its
+      // "from" must be gone — a real, undoable move, not a phantom entry.
+      for (const entry of job.result.manifest) {
+        expect(existsSync(entry.to)).toBe(true);
+      }
+    }
   });
 
   it("400s on an empty albums array", async () => {

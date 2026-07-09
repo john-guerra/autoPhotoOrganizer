@@ -924,7 +924,10 @@ export function registerApi(app) {
     res.json({ photos, truncated, limit });
   });
 
-  // --- Materialize albums: copy each album into its own dated folder ---------
+  // --- Materialize albums: move (default) or copy each album into its own
+  // dated folder, as a cancelable background job. Move is copy->verify->unlink
+  // (see moveFile) with an undo manifest, so a completed or partially-canceled
+  // move can be reversed via POST /api/albums/undo-move.
   app.post("/api/albums/materialize", (req, res) => {
     const { destParent, albums } = req.body ?? {};
     if (typeof destParent !== "string" || destParent.length === 0) {
@@ -943,17 +946,76 @@ export function registerApi(app) {
     }
 
     const db = getDb();
-    const results = [];
+    // Resolve + validate every album's destination up front (fail fast, 400,
+    // before any job/file work starts) rather than discovering a bad album
+    // name mid-job, which would just surface as an async job failure.
+    const resolvedAlbums = [];
     for (const album of albums) {
       const resolved = resolveExportTarget(db, destParent, album.name);
       if (resolved.error) return res.status(400).json({ error: resolved.error });
-      const { copied, skipped } = copyIdsIntoFolder(
-        db,
-        resolved.target,
-        album.photoIds
-      );
-      results.push({ name: album.name, target: resolved.target, copied, skipped });
+      resolvedAlbums.push({ album, target: resolved.target });
     }
-    res.json({ destParent, albums: results });
+
+    const move = req.body?.move !== false; // default MOVE
+    const total = albums.reduce((n, a) => n + a.photoIds.length, 0);
+    const job = registry.create("materialize", {
+      label: `Materialize ${albums.length} albums (${move ? "move" : "copy"})`,
+      total,
+    });
+    res.status(202).json({ jobId: job.id });
+
+    (async () => {
+      const results = [];
+      const manifest = [];
+      let done = 0;
+      try {
+        for (const { album, target } of resolvedAlbums) {
+          // copyIdsIntoFolder is synchronous fs work end-to-end, so without a
+          // yield here the whole multi-album job would run in one blocking
+          // tick — starving the event loop (no other request, including a
+          // cancel, could be served) and making the per-album abort check
+          // below unreachable in practice. Yielding once per album keeps
+          // cancel (and everything else) actually responsive.
+          await new Promise((resolve) => setImmediate(resolve));
+          if (job.controller.signal.aborted) {
+            const e = new Error("canceled");
+            e.name = "AbortError";
+            throw e;
+          }
+          const r = copyIdsIntoFolder(db, target, album.photoIds, {
+            signal: job.controller.signal,
+            move,
+            onProgress: (d, _t, phase) =>
+              registry.update(job.id, {
+                done: done + d,
+                phase: `${album.name}: ${phase}`,
+              }),
+          });
+          done += album.photoIds.length;
+          results.push({
+            name: album.name,
+            target,
+            copied: r.copied,
+            moved: r.moved,
+            skipped: r.skipped,
+          });
+          manifest.push(...r.manifest);
+        }
+        registry.finish(job.id, { destParent, albums: results, move, manifest });
+      } catch (e) {
+        // Albums already fully processed (and, on the album that was
+        // in-flight, whatever copyIdsIntoFolder had done before it threw —
+        // see its `.manifest` on AbortError) must stay undoable even though
+        // the job itself ends in "canceled"/"failed". Stash that into
+        // `result` BEFORE fail() (fail() never touches `result`).
+        const partialManifest = manifest.concat(e.manifest ?? []);
+        if (move && partialManifest.length) {
+          registry.update(job.id, {
+            result: { destParent, albums: results, move, manifest: partialManifest },
+          });
+        }
+        registry.fail(job.id, e);
+      }
+    })();
   });
 }
