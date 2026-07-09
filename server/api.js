@@ -1,15 +1,23 @@
 import { createHash } from "node:crypto";
-import { existsSync, statSync, createReadStream } from "node:fs";
+import {
+  existsSync,
+  statSync,
+  createReadStream,
+  mkdirSync,
+  copyFileSync,
+} from "node:fs";
 import { writeFile, rename, stat } from "node:fs/promises";
-import { extname, join, basename } from "node:path";
+import { extname, join, basename, resolve, sep } from "node:path";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
-import { thumbsDir } from "./lib/cachePaths.js";
+import { thumbsDir, cacheRoot } from "./lib/cachePaths.js";
 import {
   getCacheStats,
   getCacheBreakdown,
   clearCache,
   pruneOrphanedCache,
 } from "./lib/cacheStats.js";
+import { safeResolve } from "./lib/safeResolve.js";
+import { nextAvailablePath } from "./lib/nextAvailablePath.js";
 import { getDb } from "./db/connection.js";
 import {
   volumeRootForPath,
@@ -22,11 +30,38 @@ import {
   setPhotoRating,
   setPhotoCover,
   deleteFolder,
+  resetLibrary,
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
-import { getFeedPage, findGroupBoundary, DIMENSIONS } from "./db/feed.js";
+import {
+  getFeedPage,
+  findGroupBoundary,
+  photoIdsMatchingFilter,
+  photoCountMatchingFilter,
+  DIMENSIONS,
+} from "./db/feed.js";
 import { getTreeNode, getFlatTree } from "./db/tree.js";
 import { ALLOWED_ORIENTATIONS } from "./db/filters.js";
+
+/**
+ * True if `target` is `root` itself or nested anywhere inside it. Same
+ * resolve+startsWith(root+sep) primitive as safeResolve.js, but for testing
+ * containment of an already-resolved path rather than joining/validating a
+ * user-supplied relative segment.
+ * @param {string} root
+ * @param {string} target
+ * @returns {boolean}
+ */
+function isPathContainedIn(root, target) {
+  const resolvedRoot = resolve(root);
+  const resolvedTarget = resolve(target);
+  const rootWithSep = resolvedRoot.endsWith(sep)
+    ? resolvedRoot
+    : resolvedRoot + sep;
+  return (
+    resolvedTarget === resolvedRoot || resolvedTarget.startsWith(rootWithSep)
+  );
+}
 
 const processing = new NodeProcessingService();
 
@@ -66,7 +101,8 @@ function parseFilterParam(req) {
     ) {
       return {
         spec: {},
-        error: "orientations must be a subset of " + ALLOWED_ORIENTATIONS.join("/"),
+        error:
+          "orientations must be a subset of " + ALLOWED_ORIENTATIONS.join("/"),
       };
     }
     spec.orientations = raw.orientations;
@@ -152,7 +188,13 @@ export function registerApi(app) {
         const takenAtMs = m.createDate
           ? new Date(m.createDate).getTime()
           : null;
-        update.run(takenAtMs, m.width ?? 0, m.height ?? 0, m.camera ?? "", photo.id);
+        update.run(
+          takenAtMs,
+          m.width ?? 0,
+          m.height ?? 0,
+          m.camera ?? "",
+          photo.id
+        );
         photosById.set(photo.id, {
           ...photo,
           taken_at: takenAtMs,
@@ -515,5 +557,103 @@ export function registerApi(app) {
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // --- Selection ids (respects the same filter as /api/feed) ----------------
+  app.get("/api/photos/ids", (req, res) => {
+    const { spec: filter, error: filterError } = parseFilterParam(req);
+    if (filterError) return res.status(400).json({ error: filterError });
+    const db = getDb();
+    res.json({ ids: photoIdsMatchingFilter(db, filter) });
+  });
+
+  // --- Photo count (library total when unfiltered; "showing" with a filter) -
+  app.get("/api/photos/count", (req, res) => {
+    const { spec: filter, error: filterError } = parseFilterParam(req);
+    if (filterError) return res.status(400).json({ error: filterError });
+    const db = getDb();
+    res.json({ count: photoCountMatchingFilter(db, filter) });
+  });
+
+  // --- Library reset (danger zone: wipes the index, not the photos) --------
+  app.post("/api/library/reset", (req, res) => {
+    if (req.body?.confirm !== "DELETE") {
+      return res.status(400).json({ error: "confirmation required" });
+    }
+    const db = getDb();
+    const cleared = resetLibrary(db);
+    const cacheResult = clearCache();
+    res.json({
+      ...cleared,
+      cacheFreedFiles: cacheResult.freedFiles,
+      cacheFreedBytes: cacheResult.freedBytes,
+    });
+  });
+
+  // --- Export selected photos into a new folder -----------------------------
+  app.post("/api/export", (req, res) => {
+    const { photoIds, destParent, folderName } = req.body ?? {};
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "photoIds must be a non-empty array" });
+    }
+    if (typeof destParent !== "string" || destParent.length === 0) {
+      return res.status(400).json({ error: "destParent is required" });
+    }
+    if (typeof folderName !== "string" || folderName.length === 0) {
+      return res.status(400).json({ error: "folderName is required" });
+    }
+
+    let destSt;
+    try {
+      destSt = statSync(destParent);
+    } catch {
+      return res.status(400).json({ error: "destination not found" });
+    }
+    if (!destSt.isDirectory()) {
+      return res.status(400).json({ error: "destination is not a directory" });
+    }
+
+    let target;
+    try {
+      target = safeResolve(destParent, folderName);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    if (isPathContainedIn(cacheRoot(), target)) {
+      return res.status(400).json({
+        error: "export destination cannot be inside the AutoGallery cache",
+      });
+    }
+
+    const db = getDb();
+    const sourceFolders = db.prepare(`SELECT abs_path FROM folders`).all();
+    const insideSource = sourceFolders.some((f) =>
+      isPathContainedIn(f.abs_path, target)
+    );
+    if (insideSource) {
+      return res.status(400).json({
+        error: "export destination cannot be inside a scanned source folder",
+      });
+    }
+
+    mkdirSync(target, { recursive: true });
+
+    let copied = 0;
+    let skipped = 0;
+    for (const id of photoIds) {
+      const photo = getPhotoById(db, Number(id));
+      if (!photo || !existsSync(photo.path)) {
+        skipped++;
+        continue;
+      }
+      const destPath = nextAvailablePath(target, basename(photo.path));
+      copyFileSync(photo.path, destPath);
+      copied++;
+    }
+
+    res.json({ target, copied, skipped });
   });
 }

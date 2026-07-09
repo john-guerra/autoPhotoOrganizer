@@ -1,4 +1,13 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  afterAll,
+  vi,
+} from "vitest";
 import { mkdtemp, rm, mkdir, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
@@ -455,7 +464,12 @@ describe("DELETE /api/folders/:id", () => {
   it("removes the folder and its photos; real files on disk are untouched", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "ag-removeme-"));
     await sharp({
-      create: { width: 40, height: 30, channels: 3, background: { r: 1, g: 2, b: 3 } },
+      create: {
+        width: 40,
+        height: 30,
+        channels: 3,
+        background: { r: 1, g: 2, b: 3 },
+      },
     })
       .jpeg()
       .toFile(join(tempDir, "x.jpg"));
@@ -516,7 +530,9 @@ describe("cache management routes", () => {
     const scanBody = await scan(srv.base, photosDir);
     const id = scanBody.items[0].id;
     await fetch(`${srv.base}/api/thumb/${id}?size=160`);
-    expect((await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles).toBeGreaterThan(0);
+    expect(
+      (await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles
+    ).toBeGreaterThan(0);
 
     const result = await (
       await fetch(`${srv.base}/api/cache/clear`, { method: "POST" })
@@ -533,7 +549,12 @@ describe("cache management routes", () => {
     await fetch(`${srv.base}/api/cache/clear`, { method: "POST" });
     const tempDir = await mkdtemp(join(tmpdir(), "ag-prunetest-"));
     await sharp({
-      create: { width: 40, height: 30, channels: 3, background: { r: 9, g: 9, b: 9 } },
+      create: {
+        width: 40,
+        height: 30,
+        channels: 3,
+        background: { r: 9, g: 9, b: 9 },
+      },
     })
       .jpeg()
       .toFile(join(tempDir, "z.jpg"));
@@ -541,7 +562,9 @@ describe("cache management routes", () => {
     const scanBody = await scan(srv.base, tempDir);
     const id = scanBody.items[0].id;
     await fetch(`${srv.base}/api/thumb/${id}?size=160`);
-    expect((await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles).toBe(1);
+    expect(
+      (await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles
+    ).toBe(1);
 
     const lib = await (await fetch(`${srv.base}/api/library`)).json();
     const entry = lib.find((e) => e.path === tempDir);
@@ -765,6 +788,326 @@ describe("GET /api/feed/boundary", () => {
       `${srv.base}/api/feed/boundary?groupBy=folder&focusId=999999&direction=next`
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/photos/ids", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+  });
+
+  it("returns every non-stale photo id with no filter", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const res = await fetch(`${srv.base}/api/photos/ids`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ids.sort((a, b) => a - b)).toEqual(
+      scanBody.items.map((i) => i.id).sort((a, b) => a - b)
+    );
+  });
+
+  it("respects a minRating filter", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const ratedId = scanBody.items[0].id;
+    await fetch(`${srv.base}/api/rating`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: ratedId, rating: 5 }),
+    });
+
+    const filter = encodeURIComponent(JSON.stringify({ minRating: 5 }));
+    const res = await fetch(`${srv.base}/api/photos/ids?filter=${filter}`);
+    const body = await res.json();
+    expect(body.ids).toEqual([ratedId]);
+  });
+
+  it("400s on malformed filter JSON", async () => {
+    const res = await fetch(`${srv.base}/api/photos/ids?filter=not-json`);
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/photos/count", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+  });
+
+  it("counts every non-stale photo with no filter", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const res = await fetch(`${srv.base}/api/photos/count`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.count).toBe(scanBody.items.length);
+  });
+
+  it("counts only matches under a filter", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const ratedId = scanBody.items[0].id;
+    await fetch(`${srv.base}/api/rating`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: ratedId, rating: 5 }),
+    });
+    const filter = encodeURIComponent(JSON.stringify({ minRating: 5 }));
+    const res = await fetch(`${srv.base}/api/photos/count?filter=${filter}`);
+    const body = await res.json();
+    expect(body.count).toBe(1);
+  });
+
+  it("400s on malformed filter JSON", async () => {
+    const res = await fetch(`${srv.base}/api/photos/count?filter=not-json`);
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/library/reset", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+  });
+
+  it("400s without confirm: DELETE", async () => {
+    const res = await fetch(`${srv.base}/api/library/reset`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s with the wrong confirm value", async () => {
+    const res = await fetch(`${srv.base}/api/library/reset`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "yes" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("clears the index and cache, and never touches source files", async () => {
+    await fetch(`${srv.base}/api/cache/clear`, { method: "POST" });
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
+    await fetch(`${srv.base}/api/thumb/${id}?size=64`);
+
+    const cacheBefore = await (
+      await fetch(`${srv.base}/api/cache/stats`)
+    ).json();
+    expect(cacheBefore.totalFiles).toBeGreaterThan(0);
+
+    const res = await fetch(`${srv.base}/api/library/reset`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "DELETE" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.folders).toBeGreaterThan(0);
+    expect(body.photos).toBeGreaterThan(0);
+    expect(body.cacheFreedFiles).toBeGreaterThan(0);
+    expect(body.cacheFreedBytes).toBeGreaterThan(0);
+
+    const lib = await (await fetch(`${srv.base}/api/library`)).json();
+    expect(lib).toEqual([]);
+    const cacheAfter = await (
+      await fetch(`${srv.base}/api/cache/stats`)
+    ).json();
+    expect(cacheAfter).toEqual({ totalBytes: 0, totalFiles: 0 });
+
+    // Real source files on disk are untouched.
+    const stillOnDisk = await readdir(photosDir);
+    expect(stillOnDisk.length).toBeGreaterThan(0);
+  });
+});
+
+describe("POST /api/export", () => {
+  let exportSrcDir;
+  let exportDestDir;
+
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+    exportSrcDir = await mkdtemp(join(tmpdir(), "ag-export-src-"));
+    exportDestDir = await mkdtemp(join(tmpdir(), "ag-export-dest-"));
+    await sharp({
+      create: {
+        width: 20,
+        height: 20,
+        channels: 3,
+        background: { r: 5, g: 5, b: 5 },
+      },
+    })
+      .jpeg()
+      .toFile(join(exportSrcDir, "one.jpg"));
+    await sharp({
+      create: {
+        width: 20,
+        height: 20,
+        channels: 3,
+        background: { r: 6, g: 6, b: 6 },
+      },
+    })
+      .jpeg()
+      .toFile(join(exportSrcDir, "two.jpg"));
+  });
+
+  afterEach(async () => {
+    await rm(exportSrcDir, { recursive: true, force: true });
+    await rm(exportDestDir, { recursive: true, force: true });
+  });
+
+  it("copies photos into a new dated folder and leaves sources untouched", async () => {
+    const scanBody = await scan(srv.base, exportSrcDir);
+    const photoIds = scanBody.items.map((i) => i.id);
+
+    const res = await fetch(`${srv.base}/api/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        photoIds,
+        destParent: exportDestDir,
+        folderName: "2026-07-09 Trip",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.copied).toBe(2);
+    expect(body.skipped).toBe(0);
+    expect(body.target).toBe(join(exportDestDir, "2026-07-09 Trip"));
+
+    const copiedFiles = (await readdir(body.target)).sort();
+    expect(copiedFiles).toEqual(["one.jpg", "two.jpg"]);
+
+    // Sources untouched.
+    const sourceFiles = (await readdir(exportSrcDir)).sort();
+    expect(sourceFiles).toEqual(["one.jpg", "two.jpg"]);
+  });
+
+  it("never overwrites: suffixes ' (2)' on a filename collision", async () => {
+    const scanBody = await scan(srv.base, exportSrcDir);
+    const oneId = scanBody.items.find((i) => i.name === "one.jpg").id;
+
+    const first = await (
+      await fetch(`${srv.base}/api/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          photoIds: [oneId],
+          destParent: exportDestDir,
+          folderName: "collide",
+        }),
+      })
+    ).json();
+    expect(first.copied).toBe(1);
+
+    const second = await (
+      await fetch(`${srv.base}/api/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          photoIds: [oneId],
+          destParent: exportDestDir,
+          folderName: "collide",
+        }),
+      })
+    ).json();
+    expect(second.copied).toBe(1);
+
+    const files = (await readdir(join(exportDestDir, "collide"))).sort();
+    expect(files).toEqual(["one (2).jpg", "one.jpg"]);
+  });
+
+  it("skips a photo whose source file is missing on disk", async () => {
+    const scanBody = await scan(srv.base, exportSrcDir);
+    const missingId = scanBody.items.find((i) => i.name === "two.jpg").id;
+    await rm(join(exportSrcDir, "two.jpg"));
+
+    const res = await fetch(`${srv.base}/api/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        photoIds: [missingId],
+        destParent: exportDestDir,
+        folderName: "missing-src",
+      }),
+    });
+    const body = await res.json();
+    expect(body.copied).toBe(0);
+    expect(body.skipped).toBe(1);
+  });
+
+  it("400s on an empty photoIds array", async () => {
+    const res = await fetch(`${srv.base}/api/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        photoIds: [],
+        destParent: exportDestDir,
+        folderName: "empty",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s when destParent does not exist", async () => {
+    const res = await fetch(`${srv.base}/api/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        photoIds: [1],
+        destParent: join(exportDestDir, "nope"),
+        folderName: "x",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on a folderName that attempts path traversal", async () => {
+    const scanBody = await scan(srv.base, exportSrcDir);
+    const res = await fetch(`${srv.base}/api/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        photoIds: [scanBody.items[0].id],
+        destParent: exportDestDir,
+        folderName: "../escape",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses a destParent inside the AutoGallery cache root", async () => {
+    const scanBody = await scan(srv.base, exportSrcDir);
+    const res = await fetch(`${srv.base}/api/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        photoIds: [scanBody.items[0].id],
+        destParent: cacheDir,
+        folderName: "sneaky",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses a target nested inside a scanned source folder", async () => {
+    const scanBody = await scan(srv.base, exportSrcDir);
+    const res = await fetch(`${srv.base}/api/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        photoIds: [scanBody.items[0].id],
+        destParent: exportSrcDir,
+        folderName: "nested-in-source",
+      }),
+    });
+    expect(res.status).toBe(400);
   });
 });
 

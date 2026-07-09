@@ -357,7 +357,9 @@ export function getFeedPage(
     // (consistency-invariant violation; spec §5 "otherwise reload from top").
     if (filter.sql !== "1=1") {
       const passes = db
-        .prepare(`SELECT 1 FROM photos WHERE id = ? AND (${filter.sql}) LIMIT 1`)
+        .prepare(
+          `SELECT 1 FROM photos WHERE id = ? AND (${filter.sql}) LIMIT 1`
+        )
         .get(focusId, ...filter.params);
       if (!passes) focusItem = null;
     }
@@ -438,6 +440,51 @@ export function getFeedPage(
     ...spliceInPlaceholders(afterReal, afterPlaceholders, dims),
   ];
   return { items, focusItem };
+}
+
+/**
+ * All non-stale photo ids matching a filter spec, with no grouping/ordering
+ * overhead — the lightweight companion to getFeedPage for callers that only
+ * need the matching id set (e.g. "select all" for export). Scopes rows
+ * identically to getFeedPage/getTreeNode: `photos.stale = 0` plus the same
+ * compiled filter, so the id set this returns always agrees with what the
+ * grid shows.
+ * @param {import("better-sqlite3").Database} db
+ * @param {{minRating?: number, orientations?: string[]}} [filterSpec]
+ * @returns {number[]}
+ */
+export function photoIdsMatchingFilter(db, filterSpec = {}) {
+  const filter = buildFilter(filterSpec);
+  const rows = db
+    .prepare(
+      `SELECT photos.id AS id
+       FROM photos JOIN folders ON folders.id = photos.folder_id
+       WHERE photos.stale = 0 AND (${filter.sql})`
+    )
+    .all(...filter.params);
+  return rows.map((r) => r.id);
+}
+
+/**
+ * COUNT of non-stale photos matching a filter spec — the id-free companion to
+ * photoIdsMatchingFilter, for the "N photos" counters in the toolbar (a 10k
+ * library shouldn't ship 10k ids just to show a number). Scopes rows
+ * identically (`photos.stale = 0` + compiled filter), so an empty spec yields
+ * the true library total and a filter spec yields the "showing" count.
+ * @param {import("better-sqlite3").Database} db
+ * @param {{minRating?: number, orientations?: string[]}} [filterSpec]
+ * @returns {number}
+ */
+export function photoCountMatchingFilter(db, filterSpec = {}) {
+  const filter = buildFilter(filterSpec);
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM photos JOIN folders ON folders.id = photos.folder_id
+       WHERE photos.stale = 0 AND (${filter.sql})`
+    )
+    .get(...filter.params);
+  return row.count;
 }
 
 /**

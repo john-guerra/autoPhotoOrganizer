@@ -35,7 +35,9 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
         ELSE NULL
       END
   `);
-  const markAllStale = db.prepare(`UPDATE photos SET stale = 1 WHERE folder_id = ?`);
+  const markAllStale = db.prepare(
+    `UPDATE photos SET stale = 1 WHERE folder_id = ?`
+  );
 
   const tx = db.transaction((files) => {
     markAllStale.run(folderId);
@@ -107,4 +109,31 @@ export function deleteFolder(db, folderId) {
     return true;
   });
   return tx(folderId);
+}
+
+/**
+ * Wipe the entire index — every scanned folder, photo, album, tag, and known
+ * volume — in one transaction. This is the "start over" nuclear option (see
+ * POST /api/library/reset); real files on disk are never touched, only the
+ * SQLite rows that mirror them. Deletion order (children before parents)
+ * doesn't matter today since foreign_keys enforcement isn't turned on, but
+ * is kept anyway so this stays correct if that ever changes.
+ * @param {import("better-sqlite3").Database} db
+ * @returns {{folders: number, photos: number}} row counts as of just before
+ *   the delete.
+ */
+export function resetLibrary(db) {
+  const tx = db.transaction(() => {
+    const folders = db.prepare(`SELECT COUNT(*) AS c FROM folders`).get().c;
+    const photos = db.prepare(`SELECT COUNT(*) AS c FROM photos`).get().c;
+    db.prepare(`DELETE FROM photo_tags`).run();
+    db.prepare(`DELETE FROM tags`).run();
+    db.prepare(`DELETE FROM photo_album`).run();
+    db.prepare(`DELETE FROM albums`).run();
+    db.prepare(`DELETE FROM photos`).run();
+    db.prepare(`DELETE FROM folders`).run();
+    db.prepare(`DELETE FROM volumes`).run();
+    return { folders, photos };
+  });
+  return tx();
 }

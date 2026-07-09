@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, _resetDbForTest } from "./connection.js";
 import { upsertScan } from "./photos.js";
-import { getFeedPage, findGroupBoundary } from "./feed.js";
+import {
+  getFeedPage,
+  findGroupBoundary,
+  photoIdsMatchingFilter,
+  photoCountMatchingFilter,
+} from "./feed.js";
 
 let cacheDir;
 
@@ -108,7 +113,10 @@ describe("getFeedPage — camera/kind dimensions", () => {
       { name: "canon.jpg", size: 1, mtimeMs: 1, kind: "image" },
       { name: "nocam.jpg", size: 1, mtimeMs: 1, kind: "image" },
     ]);
-    db.prepare(`UPDATE photos SET camera = ? WHERE id = ?`).run("Canon R6", a.id);
+    db.prepare(`UPDATE photos SET camera = ? WHERE id = ?`).run(
+      "Canon R6",
+      a.id
+    );
     const { items } = getFeedPage(db, { groupBy: ["camera"], after: 10 });
     expect(items.map((i) => i.groupValues.camera)).toEqual(["", "Canon R6"]);
   });
@@ -200,7 +208,10 @@ describe("getFeedPage — filter", () => {
     upsertScan(db, "/photos/ccc", 1, [
       { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
     ]);
-    db.prepare(`UPDATE photos SET rating = 5 WHERE id IN (?, ?)`).run(ahi.id, bhi.id);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id IN (?, ?)`).run(
+      ahi.id,
+      bhi.id
+    );
     const { items } = getFeedPage(db, {
       groupBy: ["folder"],
       after: 10,
@@ -211,7 +222,9 @@ describe("getFeedPage — filter", () => {
     // ccc has no >=4 photo so it disappears entirely.
     const ph = items.find((i) => i.collapsed);
     expect(ph.count).toBe(1);
-    expect(items.filter((i) => !i.collapsed).map((i) => i.name)).toEqual(["bhi.jpg"]);
+    expect(items.filter((i) => !i.collapsed).map((i) => i.name)).toEqual([
+      "bhi.jpg",
+    ]);
   });
 
   it("nulls out focusItem when the focus photo fails the filter", () => {
@@ -224,12 +237,21 @@ describe("getFeedPage — filter", () => {
     db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(hi.id);
     // focus on the 0-star lo.jpg while filtering to >=4
     const { items, focusItem } = getFeedPage(db, {
-      groupBy: ["folder"], focusId: lo.id, before: 5, after: 5, filter: { minRating: 4 },
+      groupBy: ["folder"],
+      focusId: lo.id,
+      before: 5,
+      after: 5,
+      filter: { minRating: 4 },
     });
     expect(focusItem).toBe(null);
     expect(items.map((i) => i.name)).not.toContain("lo.jpg");
     // a matching focus still returns its focusItem
-    const r2 = getFeedPage(db, { groupBy: ["folder"], focusId: hi.id, after: 5, filter: { minRating: 4 } });
+    const r2 = getFeedPage(db, {
+      groupBy: ["folder"],
+      focusId: hi.id,
+      after: 5,
+      filter: { minRating: 4 },
+    });
     expect(r2.focusItem?.name).toBe("hi.jpg");
   });
 });
@@ -811,5 +833,75 @@ describe("getFeedPage — focusItem", () => {
     ]);
     const { focusItem } = getFeedPage(db, { groupBy: ["folder"], after: 10 });
     expect(focusItem).toBeNull();
+  });
+});
+
+describe("photoIdsMatchingFilter", () => {
+  it("returns all non-stale photo ids with no filter", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const rows = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const ids = photoIdsMatchingFilter(db);
+    expect(ids.sort((a, b) => a - b)).toEqual(
+      rows.map((r) => r.id).sort((a, b) => a - b)
+    );
+  });
+
+  it("respects a minRating filter", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a, b] = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(a.id);
+    const ids = photoIdsMatchingFilter(db, { minRating: 4 });
+    expect(ids).toEqual([a.id]);
+  });
+
+  it("excludes stale photos", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a, b] = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]); // b.jpg no longer scanned -> stale
+    const ids = photoIdsMatchingFilter(db);
+    expect(ids).toEqual([a.id]);
+  });
+});
+
+describe("photoCountMatchingFilter", () => {
+  it("counts all non-stale photos with no filter (library total)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    expect(photoCountMatchingFilter(db)).toBe(3);
+  });
+
+  it("counts only matches under a filter (the 'showing' count)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a, b, c] = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id IN (?, ?)`).run(
+      a.id,
+      b.id
+    );
+    expect(photoCountMatchingFilter(db, { minRating: 4 })).toBe(2);
+    expect(photoCountMatchingFilter(db)).toBe(3);
   });
 });

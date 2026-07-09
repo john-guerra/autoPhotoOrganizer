@@ -9,6 +9,7 @@ import {
   setPhotoRating,
   setPhotoCover,
   deleteFolder,
+  resetLibrary,
 } from "./photos.js";
 
 let cacheDir;
@@ -153,12 +154,68 @@ describe("deleteFolder", () => {
       .get();
     expect(folderBRow).toBeDefined();
     expect(
-      db.prepare(`SELECT filename FROM photos WHERE folder_id = ?`).all(folderBRow.id)
+      db
+        .prepare(`SELECT filename FROM photos WHERE folder_id = ?`)
+        .all(folderBRow.id)
     ).toEqual([{ filename: "2.jpg" }]);
   });
 
   it("returns false for an unknown folder id", () => {
     const db = getDb();
     expect(deleteFolder(db, 999999)).toBe(false);
+  });
+});
+
+describe("resetLibrary", () => {
+  it("clears every table and returns pre-delete counts", () => {
+    const db = getDb();
+    upsertScan(db, "/a", 1, [
+      { name: "1.jpg", size: 10, mtimeMs: 1, kind: "image" },
+      { name: "2.jpg", size: 20, mtimeMs: 2, kind: "image" },
+    ]);
+    upsertScan(db, "/b", 1, [
+      { name: "3.jpg", size: 30, mtimeMs: 3, kind: "image" },
+    ]);
+    db.prepare(`INSERT INTO albums (id, name) VALUES (1, 'Trip')`).run();
+    db.prepare(
+      `INSERT INTO photo_album (photo_id, album_id) VALUES (1, 1)`
+    ).run();
+    db.prepare(
+      `INSERT INTO tags (id, dimension_name, value) VALUES (1, 'kind', 'sunset')`
+    ).run();
+    db.prepare(
+      `INSERT INTO photo_tags (photo_id, tag_id, source) VALUES (1, 1, 'manual')`
+    ).run();
+
+    const result = resetLibrary(db);
+    expect(result).toEqual({ folders: 2, photos: 3 });
+
+    for (const table of [
+      "volumes",
+      "folders",
+      "photos",
+      "albums",
+      "photo_album",
+      "tags",
+      "photo_tags",
+    ]) {
+      const count = db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get().c;
+      expect(count).toBe(0);
+    }
+  });
+
+  it("never touches files on disk", async () => {
+    const db = getDb();
+    upsertScan(db, cacheDir, 1, [
+      { name: "untouched.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { writeFile: wf } = await import("node:fs/promises");
+    const filePath = join(cacheDir, "untouched.jpg");
+    await wf(filePath, "not a real image");
+
+    resetLibrary(db);
+
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(filePath)).toBe(true);
   });
 });
