@@ -262,6 +262,43 @@ export async function exportSelection(photoIds, destParent, folderName) {
 }
 
 /**
+ * The working set as a time-ordered timeline for album gap-clustering.
+ * @param {{minRating?:number, orientations?:string[], scopeIds?:number[]}|null} [filter=null]
+ * @returns {Promise<{photos:Array<{id:number,t:number,mtimeMs:number}>, truncated:boolean}>}
+ */
+export async function fetchAlbumTimeline(filter = null) {
+  const params = new URLSearchParams();
+  const fp = filter ? toQueryParam(filter) : null;
+  if (fp) params.set("filter", fp);
+  const res = await fetch(`/api/albums/timeline?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `album timeline failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Materialize albums to disk: copy each album into its own folder under
+ * destParent (copies, never moves).
+ * @param {string} destParent
+ * @param {Array<{name:string, photoIds:number[]}>} albums
+ * @returns {Promise<{destParent:string, albums:Array<{name:string,target:string,copied:number,skipped:number}>}>}
+ */
+export async function materializeAlbums(destParent, albums) {
+  const res = await fetch("/api/albums/materialize", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ destParent, albums }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `materialize failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
  * Danger zone: wipe the entire index + thumbnail cache. Requires the literal
  * confirmation string "DELETE". Source photos on disk are never touched.
  * @returns {Promise<{folders:number, photos:number, cacheFreedFiles:number, cacheFreedBytes:number}>}

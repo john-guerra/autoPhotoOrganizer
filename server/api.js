@@ -39,6 +39,7 @@ import {
   findGroupBoundary,
   photoIdsMatchingFilter,
   photoCountMatchingFilter,
+  workingSetTimeline,
   DIMENSIONS,
 } from "./db/feed.js";
 import { getTreeNode, getFlatTree } from "./db/tree.js";
@@ -62,6 +63,58 @@ function isPathContainedIn(root, target) {
   return (
     resolvedTarget === resolvedRoot || resolvedTarget.startsWith(rootWithSep)
   );
+}
+
+/**
+ * Validate + resolve an export destination folder, shared by /api/export and
+ * /api/albums/materialize. Guards traversal (safeResolve) and refuses to write
+ * inside the app cache or any scanned source folder (the read-only invariant).
+ * @returns {{target:string}|{error:string}}
+ */
+function resolveExportTarget(db, destParent, folderName) {
+  let destSt;
+  try {
+    destSt = statSync(destParent);
+  } catch {
+    return { error: "destination not found" };
+  }
+  if (!destSt.isDirectory()) return { error: "destination is not a directory" };
+  let target;
+  try {
+    target = safeResolve(destParent, folderName);
+  } catch (err) {
+    return { error: err.message };
+  }
+  if (isPathContainedIn(cacheRoot(), target)) {
+    return { error: "export destination cannot be inside the AutoGallery cache" };
+  }
+  const sourceFolders = db.prepare(`SELECT abs_path FROM folders`).all();
+  if (sourceFolders.some((f) => isPathContainedIn(f.abs_path, target))) {
+    return { error: "export destination cannot be inside a scanned source folder" };
+  }
+  return { target };
+}
+
+/**
+ * Copy the given photo ids into `targetDir` (created if needed). Never moves or
+ * overwrites — collisions get a " (2)" suffix; missing/unmounted sources are
+ * counted as skipped. Shared by export and materialize.
+ * @returns {{copied:number, skipped:number}}
+ */
+function copyIdsIntoFolder(db, targetDir, ids) {
+  mkdirSync(targetDir, { recursive: true });
+  let copied = 0;
+  let skipped = 0;
+  for (const id of ids) {
+    const photo = getPhotoById(db, Number(id));
+    if (!photo || !existsSync(photo.path)) {
+      skipped++;
+      continue;
+    }
+    copyFileSync(photo.path, nextAvailablePath(targetDir, basename(photo.path)));
+    copied++;
+  }
+  return { copied, skipped };
 }
 
 const processing = new NodeProcessingService();
@@ -659,55 +712,53 @@ export function registerApi(app) {
       return res.status(400).json({ error: "folderName is required" });
     }
 
-    let destSt;
-    try {
-      destSt = statSync(destParent);
-    } catch {
-      return res.status(400).json({ error: "destination not found" });
-    }
-    if (!destSt.isDirectory()) {
-      return res.status(400).json({ error: "destination is not a directory" });
-    }
+    const db = getDb();
+    const resolved = resolveExportTarget(db, destParent, folderName);
+    if (resolved.error) return res.status(400).json({ error: resolved.error });
 
-    let target;
-    try {
-      target = safeResolve(destParent, folderName);
-    } catch (err) {
-      return res.status(400).json({ error: err.message });
-    }
+    const { copied, skipped } = copyIdsIntoFolder(db, resolved.target, photoIds);
+    res.json({ target: resolved.target, copied, skipped });
+  });
 
-    if (isPathContainedIn(cacheRoot(), target)) {
-      return res.status(400).json({
-        error: "export destination cannot be inside the AutoGallery cache",
-      });
+  // --- Album timeline (working set, time-ordered, for gap clustering) --------
+  app.get("/api/albums/timeline", (req, res) => {
+    const { spec: filter, error: filterError } = parseFilterParam(req);
+    if (filterError) return res.status(400).json({ error: filterError });
+    const db = getDb();
+    const { photos, truncated } = workingSetTimeline(db, filter, 2000);
+    res.json({ photos, truncated });
+  });
+
+  // --- Materialize albums: copy each album into its own dated folder ---------
+  app.post("/api/albums/materialize", (req, res) => {
+    const { destParent, albums } = req.body ?? {};
+    if (typeof destParent !== "string" || destParent.length === 0) {
+      return res.status(400).json({ error: "destParent is required" });
+    }
+    if (!Array.isArray(albums) || albums.length === 0) {
+      return res.status(400).json({ error: "albums must be a non-empty array" });
+    }
+    for (const a of albums) {
+      if (typeof a?.name !== "string" || !a.name.length) {
+        return res.status(400).json({ error: "each album needs a name" });
+      }
+      if (!Array.isArray(a.photoIds) || a.photoIds.length === 0) {
+        return res.status(400).json({ error: `album "${a.name}" has no photos` });
+      }
     }
 
     const db = getDb();
-    const sourceFolders = db.prepare(`SELECT abs_path FROM folders`).all();
-    const insideSource = sourceFolders.some((f) =>
-      isPathContainedIn(f.abs_path, target)
-    );
-    if (insideSource) {
-      return res.status(400).json({
-        error: "export destination cannot be inside a scanned source folder",
-      });
+    const results = [];
+    for (const album of albums) {
+      const resolved = resolveExportTarget(db, destParent, album.name);
+      if (resolved.error) return res.status(400).json({ error: resolved.error });
+      const { copied, skipped } = copyIdsIntoFolder(
+        db,
+        resolved.target,
+        album.photoIds
+      );
+      results.push({ name: album.name, target: resolved.target, copied, skipped });
     }
-
-    mkdirSync(target, { recursive: true });
-
-    let copied = 0;
-    let skipped = 0;
-    for (const id of photoIds) {
-      const photo = getPhotoById(db, Number(id));
-      if (!photo || !existsSync(photo.path)) {
-        skipped++;
-        continue;
-      }
-      const destPath = nextAvailablePath(target, basename(photo.path));
-      copyFileSync(photo.path, destPath);
-      copied++;
-    }
-
-    res.json({ target, copied, skipped });
+    res.json({ destParent, albums: results });
   });
 }

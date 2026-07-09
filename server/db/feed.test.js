@@ -9,6 +9,7 @@ import {
   findGroupBoundary,
   photoIdsMatchingFilter,
   photoCountMatchingFilter,
+  workingSetTimeline,
 } from "./feed.js";
 
 let cacheDir;
@@ -933,5 +934,57 @@ describe("photoCountMatchingFilter", () => {
     );
     expect(photoCountMatchingFilter(db, { minRating: 4 })).toBe(2);
     expect(photoCountMatchingFilter(db)).toBe(3);
+  });
+});
+
+describe("workingSetTimeline — album gap-clustering source", () => {
+  it("returns photos time-ascending by taken_at (mtime fallback)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a, b, c] = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 300, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 100, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 200, kind: "image" },
+    ]);
+    // b has an explicit taken_at that reorders it after a's mtime.
+    setTakenAt(db, b.id, "2020-01-01T00:00:10.000Z");
+    const { photos, truncated } = workingSetTimeline(db);
+    expect(truncated).toBe(false);
+    // c(mtime 200), a(mtime 300), b(taken_at 2020…) — ascending by t.
+    expect(photos.map((p) => p.id)).toEqual([c.id, a.id, b.id]);
+    expect(photos.every((p) => typeof p.t === "number")).toBe(true);
+    expect(photos.map((p) => p.mtimeMs)).toEqual([200, 300, 100]);
+  });
+
+  it("respects a filter spec (minRating narrows the working set)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a, b, c] = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 2, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 3, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id IN (?, ?)`).run(a.id, c.id);
+    const { photos } = workingSetTimeline(db, { minRating: 4 });
+    expect(photos.map((p) => p.id).sort()).toEqual([a.id, c.id].sort());
+  });
+
+  it("sets truncated=true and caps at the limit", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(
+      db,
+      "/photos/many",
+      1,
+      Array.from({ length: 5 }, (_, i) => ({
+        name: `p${i}.jpg`,
+        size: 1,
+        mtimeMs: i + 1,
+        kind: "image",
+      }))
+    );
+    const { photos, truncated } = workingSetTimeline(db, {}, 3);
+    expect(photos).toHaveLength(3);
+    expect(truncated).toBe(true);
   });
 });

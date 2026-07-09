@@ -1134,6 +1134,126 @@ describe("POST /api/export", () => {
   });
 });
 
+describe("GET /api/albums/timeline", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+  });
+
+  it("returns the working set as a time-ordered timeline", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(`${srv.base}/api/albums/timeline`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.photos)).toBe(true);
+    expect(body.photos.length).toBeGreaterThan(0);
+    expect(body).toHaveProperty("truncated");
+    const ts = body.photos.map((p) => p.t);
+    expect(ts).toEqual([...ts].sort((a, b) => a - b));
+    expect(body.photos[0]).toHaveProperty("id");
+    expect(body.photos[0]).toHaveProperty("mtimeMs");
+  });
+
+  it("400s on a malformed filter param", async () => {
+    const res = await fetch(`${srv.base}/api/albums/timeline?filter=not-json`);
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/albums/materialize", () => {
+  let srcDir;
+  let destDir;
+
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+    srcDir = await mkdtemp(join(tmpdir(), "ag-mat-src-"));
+    destDir = await mkdtemp(join(tmpdir(), "ag-mat-dest-"));
+    for (const [name, shade] of [
+      ["a.jpg", 5],
+      ["b.jpg", 6],
+      ["c.jpg", 7],
+    ]) {
+      await sharp({
+        create: {
+          width: 20,
+          height: 20,
+          channels: 3,
+          background: { r: shade, g: shade, b: shade },
+        },
+      })
+        .jpeg()
+        .toFile(join(srcDir, name));
+    }
+  });
+
+  afterEach(async () => {
+    await rm(srcDir, { recursive: true, force: true });
+    await rm(destDir, { recursive: true, force: true });
+  });
+
+  it("copies each album into its own folder and leaves sources untouched", async () => {
+    const scanBody = await scan(srv.base, srcDir);
+    const ids = scanBody.items.map((i) => i.id);
+    const res = await fetch(`${srv.base}/api/albums/materialize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        destParent: destDir,
+        albums: [
+          { name: "2026-01-01", photoIds: ids.slice(0, 2) },
+          { name: "2026-01-05", photoIds: ids.slice(2) },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.albums).toHaveLength(2);
+    expect(body.albums[0].copied).toBe(2);
+    expect(body.albums[1].copied).toBe(1);
+    expect((await readdir(join(destDir, "2026-01-01"))).length).toBe(2);
+    expect((await readdir(join(destDir, "2026-01-05"))).length).toBe(1);
+    // Sources untouched.
+    expect((await readdir(srcDir)).sort()).toEqual(["a.jpg", "b.jpg", "c.jpg"]);
+  });
+
+  it("400s on an empty albums array", async () => {
+    const res = await fetch(`${srv.base}/api/albums/materialize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ destParent: destDir, albums: [] }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on an album with no photos", async () => {
+    const res = await fetch(`${srv.base}/api/albums/materialize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        destParent: destDir,
+        albums: [{ name: "empty", photoIds: [] }],
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses an album name that attempts path traversal", async () => {
+    const scanBody = await scan(srv.base, srcDir);
+    const res = await fetch(`${srv.base}/api/albums/materialize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        destParent: destDir,
+        albums: [{ name: "../escape", photoIds: [scanBody.items[0].id] }],
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("GET /api/tree", () => {
   beforeEach(async () => {
     const db = getDb();

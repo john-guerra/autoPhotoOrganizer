@@ -31,12 +31,14 @@
     fetchPhotoIds,
     fetchPhotoCount,
     exportSelection,
+    fetchAlbumTimeline,
   } from "./lib/api.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
+  import AlbumsView from "./lib/AlbumsView.svelte";
   import RatingFilter from "./lib/RatingFilter.svelte";
   import OrientationFilter from "./lib/OrientationFilter.svelte";
   import {
@@ -166,6 +168,13 @@
   // counts, sidebars, albums and export all scope to, while the counts still
   // report the true library total. null = whole library.
   let keepIds = null;
+
+  // Auto-albums review mode: replaces the grid with a time-gap-clustered view
+  // of the working set (see AlbumsView).
+  let albumMode = false;
+  let albumPhotos = [];
+  let albumTruncated = false;
+  let detectingAlbums = false;
 
   // Filter mode: does the rating/orientation filter narrow what's DISPLAYED
   // (classic), or drive the SELECTION (the grid then shows everything and the
@@ -646,6 +655,27 @@
   async function chooseExportDest() {
     const path = await window.autogallery?.pickFolder();
     if (path) exportDest = path;
+  }
+
+  /** Auto-albums: pull the current working set as a time-ordered timeline and
+   * hand it to AlbumsView, which clusters it by gap client-side (instant slider
+   * re-clustering). Respects displayFilter — including a "Keep only" scope — so
+   * you can narrow first, then detect. */
+  async function detectAlbums() {
+    detectingAlbums = true;
+    error = "";
+    try {
+      const { photos, truncated } = await fetchAlbumTimeline(
+        filterIsActive(displayFilter) ? displayFilter : null
+      );
+      albumPhotos = photos;
+      albumTruncated = truncated;
+      albumMode = true;
+    } catch (e) {
+      error = e.message;
+    } finally {
+      detectingAlbums = false;
+    }
   }
 
   /** After a full library reset (from the Manage Library danger zone): the
@@ -2015,6 +2045,15 @@
       >
         ⌖ Locate
       </button>
+      <button
+        class="reveal-btn"
+        class:active={albumMode}
+        on:click={() => (albumMode ? (albumMode = false) : detectAlbums())}
+        disabled={detectingAlbums}
+        title="Split the current working set into albums by time gaps"
+      >
+        {detectingAlbums ? "Detecting…" : albumMode ? "✕ Albums" : "▤ Albums"}
+      </button>
       <div class="view-cell">
         <label class="zoom" title="Grid zoom (also + / - keys)">
           <span class="zoom-icon small">▦</span>
@@ -2191,7 +2230,14 @@
       on:wheel={() => (jumpRevealPending = false)}
       style="--reveal-margin:{revealMargin}px"
     >
-      {#if items.length}
+      {#if albumMode}
+        <AlbumsView
+          photos={albumPhotos}
+          truncated={albumTruncated}
+          {hasNativePicker}
+          on:close={() => (albumMode = false)}
+        />
+      {:else if items.length}
         <div
           class="grid"
           bind:this={gridEl}
@@ -2363,6 +2409,16 @@
   }
   .reveal-btn:hover {
     background: #2a2a2a;
+  }
+  .reveal-btn.active {
+    background: #2e8b57;
+    border-color: #2e8b57;
+    color: #06121f;
+    font-weight: 600;
+  }
+  .reveal-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
   .topbar {
     position: sticky;

@@ -502,6 +502,34 @@ export function photoCountMatchingFilter(db, filterSpec = {}) {
 }
 
 /**
+ * The working set as a time-ordered timeline for album clustering: each photo's
+ * id, effective time (taken_at, falling back to mtime for undated files), and
+ * mtime version (for thumbnails), ordered ascending by that time. Respects the
+ * same filter/scope as the feed. Capped at `limit`; `truncated` signals the
+ * caller to narrow (keep-only) first — album detection is meant for a bounded
+ * working set, not the whole library.
+ * @param {import("better-sqlite3").Database} db
+ * @param {{minRating?:number, orientations?:string[], scopeIds?:number[]}} [filterSpec]
+ * @param {number} [limit=2000]
+ * @returns {{photos: Array<{id:number,t:number,mtimeMs:number}>, truncated:boolean}}
+ */
+export function workingSetTimeline(db, filterSpec = {}, limit = 2000) {
+  const filter = buildFilter(filterSpec);
+  const rows = db
+    .prepare(
+      `SELECT photos.id AS id,
+              COALESCE(photos.taken_at, photos.mtime) AS t,
+              photos.mtime AS mtimeMs
+       FROM photos JOIN folders ON folders.id = photos.folder_id
+       WHERE photos.stale = 0 AND (${filter.sql})
+       ORDER BY t ASC, photos.id ASC
+       LIMIT ?`
+    )
+    .all(...filter.params, limit + 1);
+  return { photos: rows.slice(0, limit), truncated: rows.length > limit };
+}
+
+/**
  * Find the id of the first real row (in true forward composite order) of
  * the next/previous DIFFERENT group after/before focusId's own group, at
  * any dimension depth — e.g. the next year within the same folder, or the
