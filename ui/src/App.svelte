@@ -36,6 +36,7 @@
   } from "./lib/api.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
+  import JobsPanel from "./lib/JobsPanel.svelte";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
@@ -2455,6 +2456,8 @@
     </div>
   </div>
 </div>
+
+<JobsPanel />
 
 {#if loupeOpen}
   <Loupe
