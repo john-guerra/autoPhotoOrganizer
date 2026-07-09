@@ -101,7 +101,7 @@ describe("getFeedPage — composite ordering", () => {
 });
 
 describe("getFeedPage — camera/kind dimensions", () => {
-  it("groups by camera, Unknown ('') last under ASC", () => {
+  it("groups by camera, Unknown ('') first under ASC (empty string sorts before non-empty)", () => {
     const db = getDb();
     seedVolume(db, 1);
     const [a, b] = upsertScan(db, "/photos/trip", 1, [
@@ -110,7 +110,7 @@ describe("getFeedPage — camera/kind dimensions", () => {
     ]);
     db.prepare(`UPDATE photos SET camera = ? WHERE id = ?`).run("Canon R6", a.id);
     const { items } = getFeedPage(db, { groupBy: ["camera"], after: 10 });
-    expect(items.map((i) => i.groupValues.camera)).toEqual(["Canon R6", ""]);
+    expect(items.map((i) => i.groupValues.camera)).toEqual(["", "Canon R6"]);
   });
 
   it("groups by kind", () => {
