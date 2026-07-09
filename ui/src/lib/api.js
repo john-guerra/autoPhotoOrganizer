@@ -3,6 +3,8 @@
  * server-side against the current scan session — never raw paths.
  */
 
+import { toQueryParam } from "./filterSpec.js";
+
 /**
  * @param {string} dir
  * @returns {Promise<{root:string, count:number, elapsedMs:number, items:Array<{id:number,name:string,size:number,mtimeMs:number,rating:number,preferredCover:boolean}>}>}
@@ -125,7 +127,7 @@ export async function pruneCache() {
 }
 
 /**
- * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId?: number|null, startPath?: Array<{dimension:string,value:string}>|null, before?: number, after?: number}} opts
+ * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId?: number|null, startPath?: Array<{dimension:string,value:string}>|null, before?: number, after?: number, filter?: object|null}} opts
  * @returns {Promise<{items: object[], focusItem: object|null}>}
  */
 export async function fetchFeed({
@@ -135,6 +137,7 @@ export async function fetchFeed({
   startPath = null,
   before = 0,
   after = 50,
+  filter = null,
 }) {
   const params = new URLSearchParams({
     groupBy: groupBy.join(","),
@@ -146,6 +149,8 @@ export async function fetchFeed({
     params.set("startPath", JSON.stringify(startPath));
   }
   if (collapsed.length) params.set("collapsed", JSON.stringify(collapsed));
+  const fp = filter ? toQueryParam(filter) : null;
+  if (fp) params.set("filter", fp);
   const res = await fetch(`/api/feed?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -155,7 +160,7 @@ export async function fetchFeed({
 }
 
 /**
- * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId: number, direction: "next"|"prev"}} opts
+ * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId: number, direction: "next"|"prev", filter?: object|null}} opts
  * @returns {Promise<{id: number|null}>}
  */
 export async function fetchGroupBoundary({
@@ -163,6 +168,7 @@ export async function fetchGroupBoundary({
   collapsed = [],
   focusId,
   direction,
+  filter = null,
 }) {
   const params = new URLSearchParams({
     groupBy: groupBy.join(","),
@@ -170,6 +176,8 @@ export async function fetchGroupBoundary({
     direction,
   });
   if (collapsed.length) params.set("collapsed", JSON.stringify(collapsed));
+  const fp = filter ? toQueryParam(filter) : null;
+  if (fp) params.set("filter", fp);
   const res = await fetch(`/api/feed/boundary?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -179,12 +187,14 @@ export async function fetchGroupBoundary({
 }
 
 /**
- * @param {{groupBy: string[], path?: Array<{dimension:string,value:string}>}} opts
+ * @param {{groupBy: string[], path?: Array<{dimension:string,value:string}>, filter?: object|null}} opts
  * @returns {Promise<{total:number, nodes: Array<{value:string,label:string,count:number,hasChildren:boolean}>}>}
  */
-export async function fetchTreeNode({ groupBy, path = [] }) {
+export async function fetchTreeNode({ groupBy, path = [], filter = null }) {
   const params = new URLSearchParams({ groupBy: groupBy.join(",") });
   if (path.length) params.set("path", JSON.stringify(path));
+  const fp = filter ? toQueryParam(filter) : null;
+  if (fp) params.set("filter", fp);
   const res = await fetch(`/api/tree?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -195,10 +205,13 @@ export async function fetchTreeNode({ groupBy, path = [] }) {
 
 /**
  * @param {string[]} groupBy
+ * @param {{minRating?:number, orientations?:string[]}|null} [filter=null]
  * @returns {Promise<{total:number, leaves: Array<{values: Record<string,string>, count:number}>}>}
  */
-export async function fetchFlatTree(groupBy) {
+export async function fetchFlatTree(groupBy, filter = null) {
   const params = new URLSearchParams({ groupBy: groupBy.join(",") });
+  const fp = filter ? toQueryParam(filter) : null;
+  if (fp) params.set("filter", fp);
   const res = await fetch(`/api/tree/flat?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
