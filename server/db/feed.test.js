@@ -327,6 +327,33 @@ describe("findGroupBoundary", () => {
   });
 });
 
+describe("findGroupBoundary — filter", () => {
+  it("skips a next group that has no photos matching the filter", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a1] = upsertScan(db, "/photos/aaa", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/bbb", 1, [
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const [c1] = upsertScan(db, "/photos/ccc", 1, [
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id IN (?, ?)`).run(
+      a1.id,
+      c1.id
+    );
+    const res = findGroupBoundary(db, {
+      groupBy: ["folder"],
+      focusId: a1.id,
+      direction: "next",
+      filter: { minRating: 4 },
+    });
+    expect(res.id).toBe(c1.id);
+  });
+});
+
 describe("getFeedPage — kind", () => {
   it("includes each item's kind (image vs raw)", () => {
     const db = getDb();

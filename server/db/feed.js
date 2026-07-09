@@ -481,9 +481,10 @@ export function getFeedPage(
  */
 export function findGroupBoundary(
   db,
-  { groupBy, collapsed = [], focusId, direction }
+  { groupBy, collapsed = [], focusId, direction, filter: filterSpec = {} }
 ) {
   const dims = resolveDimensions(groupBy);
+  const filter = buildFilter(filterSpec);
   const seekDims = [
     ...dims,
     { name: "__id", expr: "photos.id", direction: "ASC" },
@@ -536,11 +537,11 @@ export function findGroupBoundary(
     .prepare(
       `SELECT photos.id, ${selectDimCols}
        FROM photos JOIN folders ON folders.id = photos.folder_id
-       WHERE photos.stale = 0 AND (${exclSql}) AND (${seekSql}) AND (${notCurrentSql})
+       WHERE photos.stale = 0 AND (${filter.sql}) AND (${exclSql}) AND (${seekSql}) AND (${notCurrentSql})
        ORDER BY ${orderCols}
        LIMIT 1`
     )
-    .get(...exclParams, ...seekParams, ...notCurrentParams);
+    .get(...filter.params, ...exclParams, ...seekParams, ...notCurrentParams);
   if (!row) return null;
   if (wantAfter) return { id: row.id };
 
@@ -567,10 +568,10 @@ export function findGroupBoundary(
     .prepare(
       `SELECT photos.id, ${selectDimCols}
        FROM photos JOIN folders ON folders.id = photos.folder_id
-       WHERE photos.stale = 0 AND (${exclSql}) AND (${matchSql})
+       WHERE photos.stale = 0 AND (${filter.sql}) AND (${exclSql}) AND (${matchSql})
        ORDER BY ${forwardOrderCols}
        LIMIT 1`
     )
-    .get(...exclParams, ...matchParams);
+    .get(...filter.params, ...exclParams, ...matchParams);
   return firstRow ? { id: firstRow.id } : null;
 }
