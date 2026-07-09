@@ -389,9 +389,43 @@
     refreshCounts();
   });
 
-  async function loadInitialFeed() {
+  /** THE one guarded feed-window-replace transaction (issue #42). Every
+   * function that discards `items` and rebuilds the window from scratch shares
+   * this exact guard, so it lives here once instead of being hand-copied: reset
+   * error/status, bump `feedEpoch`, and hold `fetchingBefore`/`fetchingAfter`
+   * for the whole duration so a concurrent scroll-triggered `loadMore` started
+   * against the OLD window can't resolve afterwards and splice its now-stale
+   * page into the NEW `items` — that produced duplicate rows and duplicate
+   * Svelte keys (`{#each}` throws and the grid "freezes"). `body` receives the
+   * epoch it owns and MUST re-check `epoch !== feedEpoch` after each await
+   * before mutating shared state (a fetch it awaited may have been superseded
+   * by a newer transaction). On a thrown error this sets `error`, clears
+   * `status`, and returns `onError`. Replaces six near-identical copies of this
+   * pattern — see CLAUDE.md's "no 7th copy" rule.
+   * @template T
+   * @param {(epoch: number) => Promise<T>} body
+   * @param {{ onError?: T }} [opts]
+   * @returns {Promise<T | undefined>}
+   */
+  async function withFeedTransaction(body, { onError } = {}) {
     error = "";
     status = "loading…";
+    const epoch = ++feedEpoch;
+    fetchingBefore = true;
+    fetchingAfter = true;
+    try {
+      return await body(epoch);
+    } catch (e) {
+      error = e.message;
+      status = "";
+      return onError;
+    } finally {
+      fetchingBefore = false;
+      fetchingAfter = false;
+    }
+  }
+
+  async function loadInitialFeed() {
     thumbStatus = new Map();
     thumbStatusTick++;
     // A rescan can add/remove photos, changing group counts — invalidate the
@@ -401,16 +435,7 @@
     headerCounts = {};
     fetchedParents = new Set();
     inFlightParents = new Set();
-    const epoch = ++feedEpoch;
-    // Block loadMore (scroll-triggered) from firing while this operation
-    // replaces the whole `items` window — otherwise a concurrent loadMore
-    // started against the OLD window can resolve after this one finishes
-    // and splice its (now-stale) page into the NEW items, producing
-    // duplicate rows and duplicate Svelte keys (`{#each}` then throws and
-    // the grid stops updating, which reads as the UI "freezing").
-    fetchingBefore = true;
-    fetchingAfter = true;
-    try {
+    await withFeedTransaction(async (epoch) => {
       const { items: page } = await fetchFeed({
         groupBy,
         collapsed: collapsedPaths,
@@ -441,13 +466,7 @@
       focusPending = true;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       enrichMeta(page.map((i) => i.id));
-    } catch (e) {
-      error = e.message;
-      status = "";
-    } finally {
-      fetchingBefore = false;
-      fetchingAfter = false;
-    }
+    });
   }
 
   /** Rebuild the feed for a new grouping order, re-centering on whatever
@@ -775,14 +794,7 @@
    * from (the target section may never have been loaded), so this uses
    * getFeedPage's startPath seek instead of a focusId. */
   async function jumpToPath(path) {
-    error = "";
-    status = "loading…";
-    const epoch = ++feedEpoch;
-    // See loadInitialFeed's comment: blocks a concurrent scroll-triggered
-    // loadMore from splicing a stale page into the window this replaces.
-    fetchingBefore = true;
-    fetchingAfter = true;
-    try {
+    await withFeedTransaction(async (epoch) => {
       const { items: page } = await fetchFeed({
         groupBy,
         collapsed: collapsedPaths,
@@ -809,13 +821,7 @@
       focusPending = true;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       enrichMeta(page.map((i) => i.id));
-    } catch (e) {
-      error = e.message;
-      status = "";
-    } finally {
-      fetchingBefore = false;
-      fetchingAfter = false;
-    }
+    });
   }
 
   /** "Reveal current location": walks the tree down to whatever photo is
@@ -910,54 +916,43 @@
    * resolved `selected` index, or -1 if the epoch was superseded/errored.
    * onGroupByChange and toggleSectionCollapse both route through this. */
   async function recenterFeedOnId(focusId, { collapsed = collapsedPaths } = {}) {
-    error = "";
-    status = "loading…";
-    const epoch = ++feedEpoch;
-    // See loadInitialFeed's comment: blocks a concurrent scroll-triggered
-    // loadMore from splicing a stale page into the window this replaces.
-    fetchingBefore = true;
-    fetchingAfter = true;
-    try {
-      const { items: beforePage } = focusId
-        ? await fetchFeed({
-            groupBy,
-            collapsed,
-            focusId,
-            before: PAGE_SIZE / 2,
-            after: 0,
-            filter: displayFilter,
-            sort,
-          })
-        : { items: [] };
-      const { items: afterPage, focusItem } = await fetchFeed({
-        groupBy,
-        collapsed,
-        focusId,
-        before: 0,
-        after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
-        filter: displayFilter,
-        sort,
-      });
-      if (epoch !== feedEpoch) return -1;
-      items = focusId
-        ? dedupeById([...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage])
-        : afterPage;
-      hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
-      hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
-      await tick();
-      selected = resolveSelectedIndex(displayEntries, focusId);
-      focusPending = true;
-      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-      enrichMeta(items.map((i) => i.id));
-      return selected;
-    } catch (e) {
-      error = e.message;
-      status = "";
-      return -1;
-    } finally {
-      fetchingBefore = false;
-      fetchingAfter = false;
-    }
+    return withFeedTransaction(
+      async (epoch) => {
+        const { items: beforePage } = focusId
+          ? await fetchFeed({
+              groupBy,
+              collapsed,
+              focusId,
+              before: PAGE_SIZE / 2,
+              after: 0,
+              filter: displayFilter,
+              sort,
+            })
+          : { items: [] };
+        const { items: afterPage, focusItem } = await fetchFeed({
+          groupBy,
+          collapsed,
+          focusId,
+          before: 0,
+          after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
+          filter: displayFilter,
+          sort,
+        });
+        if (epoch !== feedEpoch) return -1;
+        items = focusId
+          ? dedupeById([...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage])
+          : afterPage;
+        hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
+        hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
+        await tick();
+        selected = resolveSelectedIndex(displayEntries, focusId);
+        focusPending = true;
+        status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+        enrichMeta(items.map((i) => i.id));
+        return selected;
+      },
+      { onError: -1 }
+    );
   }
 
   /** Toggle a section's collapsed state and re-center the feed on whatever
@@ -1967,14 +1962,7 @@
     }
     if (boundary.id == null) return; // already at the first/last group
     const targetId = boundary.id;
-    error = "";
-    status = "loading…";
-    const epoch = ++feedEpoch;
-    // See loadInitialFeed's comment: blocks a concurrent scroll-triggered
-    // loadMore from splicing a stale page into the window this replaces.
-    fetchingBefore = true;
-    fetchingAfter = true;
-    try {
+    await withFeedTransaction(async (epoch) => {
       // Full PAGE_SIZE each side, not PAGE_SIZE/2 — a jump's initial window
       // used to load only 30+30, so any group bigger than that needed one
       // or more follow-up loadMore round-trips (each a separate network
@@ -2053,13 +2041,7 @@
       // Arming jumpRevealPending drives the pin (the boxes reactive re-anchors
       // it on every reflow — see pinNow) until the user takes over.
       jumpRevealPending = true;
-    } catch (err) {
-      error = err.message;
-      status = "";
-    } finally {
-      fetchingBefore = false;
-      fetchingAfter = false;
-    }
+    });
   }
 </script>
 
