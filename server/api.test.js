@@ -554,6 +554,58 @@ describe("DELETE /api/folders/:id", () => {
   });
 });
 
+describe("POST /api/folders/remove", () => {
+  it("removes an indexed folder by its on-disk path; files untouched", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "ag-rmpath-"));
+    await sharp({
+      create: {
+        width: 40,
+        height: 30,
+        channels: 3,
+        background: { r: 4, g: 5, b: 6 },
+      },
+    })
+      .jpeg()
+      .toFile(join(tempDir, "y.jpg"));
+
+    await scan(srv.base, tempDir);
+    const lib = await (await fetch(`${srv.base}/api/library`)).json();
+    expect(lib.some((e) => e.path === tempDir)).toBe(true);
+
+    const res = await fetch(`${srv.base}/api/folders/remove`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: tempDir }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).removed).toBe(true);
+
+    const lib2 = await (await fetch(`${srv.base}/api/library`)).json();
+    expect(lib2.some((e) => e.path === tempDir)).toBe(false);
+    expect(await readdir(tempDir)).toEqual(["y.jpg"]);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("404s for a path not in the index", async () => {
+    const res = await fetch(`${srv.base}/api/folders/remove`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "/nope/not/indexed" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("400s when path is missing", async () => {
+    const res = await fetch(`${srv.base}/api/folders/remove`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("cache management routes", () => {
   it("GET /api/cache/stats reflects real cache dir contents", async () => {
     await fetch(`${srv.base}/api/cache/clear`, { method: "POST" });

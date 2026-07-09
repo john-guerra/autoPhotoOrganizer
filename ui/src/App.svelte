@@ -39,6 +39,7 @@
     fetchPhotoCount,
     fetchAlbumTimeline,
     setScope,
+    removeFolderByPath,
   } from "./lib/api.js";
   import { waitForJob } from "./lib/jobs.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
@@ -271,6 +272,10 @@
   // next whole-view state each click: full view → snapshot all → collapse all.
   let globalViewMode = "expanded"; // "expanded" | "snapshot" | "collapsed"
   let cyclingAll = false;
+  // Two-click confirm for "remove album from library" (drops the folder's rows
+  // + ratings from the index; files on disk are untouched). Holds the pathKey
+  // of the group armed for removal; the next click on the same group commits.
+  let removeArmedKey = null;
   let treeSidebarRef; // bound to TreeSidebar, for revealCurrentLocation to call revealPath
   let items = []; // the currently-loaded feed window, ordered
   let hasMoreBefore = false;
@@ -525,6 +530,30 @@
         path
       );
       selectedIds = new Set([...selectedIds, ...ids]);
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  /** Remove an album (folder group) from the library index — a two-click
+   * confirm because it drops the folder's photo rows AND their ratings from
+   * SQLite (files on disk are untouched; a rescan re-adds the photos, unrated).
+   * Only meaningful for a folder group; the button is gated on a folder leaf. */
+  async function removeAlbum(path) {
+    const folderPath = path?.find((p) => p.dimension === "folder")?.value;
+    if (!folderPath) return;
+    const key = pathKey(path);
+    if (removeArmedKey !== key) {
+      removeArmedKey = key; // first click arms the confirm
+      return;
+    }
+    removeArmedKey = null;
+    try {
+      await removeFolderByPath(folderPath);
+      collapsedPaths = collapsedPaths.filter((p) => pathKey(p) !== key);
+      snapshotGroupKeys.delete(key);
+      snapshotGroupKeys = snapshotGroupKeys;
+      await loadInitialFeed();
     } catch (e) {
       error = e.message;
     }
@@ -2495,6 +2524,18 @@
                       >
                         Keep only
                       </button>
+                      {#if header.path.at(-1)?.dimension === "folder"}
+                        <button
+                          class="section-act"
+                          class:danger={removeArmedKey === pathKey(header.path)}
+                          title="Remove this album from the library (files on disk are untouched; ratings are lost)"
+                          on:click|stopPropagation={() => removeAlbum(header.path)}
+                        >
+                          {removeArmedKey === pathKey(header.path)
+                            ? "Confirm remove"
+                            : "Remove"}
+                        </button>
+                      {/if}
                     </span>
                   {/if}
                 </div>
@@ -2522,6 +2563,41 @@
                         {entry.item.path
                           .map((p) => formatGroupValue(p.dimension, p.value))
                           .join(" / ")}
+                      </span>
+                      <span class="section-count">
+                        {entry.item.count.toLocaleString()} items
+                      </span>
+                      <span class="section-actions">
+                        <button
+                          class="section-act"
+                          title="Select every photo in this group"
+                          on:click|stopPropagation={() =>
+                            selectGroup(entry.item.path)}
+                        >
+                          Select
+                        </button>
+                        <button
+                          class="section-act"
+                          title="Keep only this group as the working set"
+                          on:click|stopPropagation={() =>
+                            keepOnlyGroup(entry.item.path)}
+                        >
+                          Keep only
+                        </button>
+                        {#if entry.item.path.at(-1)?.dimension === "folder"}
+                          <button
+                            class="section-act"
+                            class:danger={removeArmedKey ===
+                              pathKey(entry.item.path)}
+                            title="Remove this album from the library (files on disk are untouched; ratings are lost)"
+                            on:click|stopPropagation={() =>
+                              removeAlbum(entry.item.path)}
+                          >
+                            {removeArmedKey === pathKey(entry.item.path)
+                              ? "Confirm remove"
+                              : "Remove"}
+                          </button>
+                        {/if}
                       </span>
                     </div>
                     <div class="snap-wrap">
@@ -2555,6 +2631,19 @@
                     <span class="placeholder-count">
                       {entry.item.count.toLocaleString()} items
                     </span>
+                    {#if entry.item.path.at(-1)?.dimension === "folder"}
+                      <button
+                        class="section-act"
+                        class:danger={removeArmedKey === pathKey(entry.item.path)}
+                        title="Remove this album from the library (files on disk are untouched; ratings are lost)"
+                        on:click|stopPropagation={() =>
+                          removeAlbum(entry.item.path)}
+                      >
+                        {removeArmedKey === pathKey(entry.item.path)
+                          ? "Confirm remove"
+                          : "Remove"}
+                      </button>
+                    {/if}
                   </div>
                 {/if}
               {:else}
@@ -3159,6 +3248,14 @@
   .section-act:hover {
     background: #2f2f2f;
     color: #fff;
+  }
+  .section-act.danger {
+    background: #5a1a1a;
+    border-color: #a33;
+    color: #ffd7d7;
+  }
+  .section-act.danger:hover {
+    background: #7a2020;
   }
   .snapshot-row {
     position: absolute;

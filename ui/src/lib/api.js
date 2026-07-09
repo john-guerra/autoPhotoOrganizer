@@ -99,6 +99,21 @@ export async function deleteFolder(id) {
   return res.json();
 }
 
+/** Remove an indexed folder from the library by its on-disk path (index-only;
+ * files on disk are untouched). @param {string} path */
+export async function removeFolderByPath(path) {
+  const res = await fetch(`/api/folders/remove`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `remove folder failed (${res.status})`);
+  }
+  return res.json();
+}
+
 /** @returns {Promise<{totalBytes:number, totalFiles:number}>} */
 export async function fetchCacheStats() {
   const res = await fetch("/api/cache/stats");

@@ -594,6 +594,24 @@ export function registerApi(app) {
     res.json({ removed: true });
   });
 
+  // Remove a folder from the index by its on-disk path (how the feed knows a
+  // group). Index-only: real files on disk are never touched (see
+  // deleteFolder). Ratings for those photos live in SQLite, so they DO go with
+  // the rows — the client confirms before calling this.
+  app.post("/api/folders/remove", (req, res) => {
+    const path = req.body?.path;
+    if (typeof path !== "string" || !path.length) {
+      return res.status(400).json({ error: "path is required" });
+    }
+    const db = getDb();
+    const row = db
+      .prepare(`SELECT id FROM folders WHERE abs_path = ?`)
+      .get(path);
+    if (!row) return res.status(404).json({ error: `not indexed: ${path}` });
+    deleteFolder(db, row.id);
+    res.json({ removed: true, id: row.id });
+  });
+
   app.get("/api/cache/stats", (_req, res) => {
     res.json(getCacheStats());
   });
