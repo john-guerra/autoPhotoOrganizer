@@ -61,7 +61,10 @@
         <span class="job-label">{job.label}</span>
 
         {#if job.status === "running"}
-          <progress class="job-progress" value={job.done} max={job.total || undefined}
+          <progress
+            class="job-progress"
+            value={job.total ? job.done : undefined}
+            max={job.total || undefined}
           ></progress>
           <span class="job-phase">{job.phase}</span>
           <button class="job-btn" on:click={() => cancelJob(job.id)}>Cancel</button>
