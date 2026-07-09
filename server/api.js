@@ -1018,4 +1018,61 @@ export function registerApi(app) {
       }
     })();
   });
+
+  // --- Undo a materialize-with-move: move every manifest entry back to its
+  // original location and repoint the index. Skips entries whose `to` no
+  // longer exists (e.g. the user already moved/renamed it via Finder).
+  app.post("/api/albums/undo-move", (req, res) => {
+    const { manifest } = req.body ?? {};
+    if (!Array.isArray(manifest) || manifest.length === 0) {
+      return res.status(400).json({ error: "manifest must be a non-empty array" });
+    }
+    for (const m of manifest) {
+      if (
+        !Number.isInteger(m?.id) ||
+        typeof m?.from !== "string" ||
+        typeof m?.to !== "string"
+      ) {
+        return res
+          .status(400)
+          .json({ error: "each manifest entry needs id, from, to" });
+      }
+    }
+
+    const db = getDb();
+    const job = registry.create("undo-move", {
+      label: `Undo move (${manifest.length} photos)`,
+      total: manifest.length,
+    });
+    res.status(202).json({ jobId: job.id });
+
+    (async () => {
+      try {
+        let restored = 0;
+        let skipped = 0;
+        for (let i = 0; i < manifest.length; i++) {
+          // Same rationale as the materialize loop above: moveFile is
+          // synchronous, so yield periodically to keep cancel responsive.
+          if (i % 50 === 0) await new Promise((resolve) => setImmediate(resolve));
+          if (job.controller.signal.aborted) {
+            const e = new Error("canceled");
+            e.name = "AbortError";
+            throw e;
+          }
+          const entry = manifest[i];
+          if (!existsSync(entry.to)) {
+            skipped++;
+          } else {
+            moveFile(entry.to, entry.from);
+            repointPhoto(db, Number(entry.id), entry.from);
+            restored++;
+          }
+          registry.update(job.id, { done: i + 1, phase: "restoring" });
+        }
+        registry.finish(job.id, { restored, skipped });
+      } catch (e) {
+        registry.fail(job.id, e);
+      }
+    })();
+  });
 }

@@ -15,6 +15,7 @@ import { join, basename } from "node:path";
 import sharp from "sharp";
 import { createApp } from "./index.js";
 import { getDb, _resetDbForTest } from "./db/connection.js";
+import { getPhotoById } from "./db/photos.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { registry } from "./jobs/registry.js";
 
@@ -1478,6 +1479,120 @@ describe("POST /api/albums/materialize", () => {
         destParent: destDir,
         albums: [{ name: "../escape", photoIds: [scanBody.items[0].id] }],
       }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/albums/undo-move", () => {
+  let srcDir;
+  let destDir;
+
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+    srcDir = await mkdtemp(join(tmpdir(), "ag-undo-src-"));
+    destDir = await mkdtemp(join(tmpdir(), "ag-undo-dest-"));
+    for (const [name, shade] of [
+      ["a.jpg", 5],
+      ["b.jpg", 6],
+    ]) {
+      await sharp({
+        create: {
+          width: 20,
+          height: 20,
+          channels: 3,
+          background: { r: shade, g: shade, b: shade },
+        },
+      })
+        .jpeg()
+        .toFile(join(srcDir, name));
+    }
+  });
+
+  afterEach(async () => {
+    await rm(srcDir, { recursive: true, force: true });
+    await rm(destDir, { recursive: true, force: true });
+  });
+
+  /** Materialize (move, default) srcDir's photos into one album; return the manifest. */
+  async function moveIntoAlbum(name) {
+    const scanBody = await scan(srv.base, srcDir);
+    const ids = scanBody.items.map((i) => i.id);
+    const res = await fetch(`${srv.base}/api/albums/materialize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ destParent: destDir, albums: [{ name, photoIds: ids }] }),
+    });
+    const job = await waitJob((await res.json()).jobId);
+    expect(job.status).toBe("done");
+    return job.result.manifest;
+  }
+
+  it("restores every moved photo to its original location and repoints the index", async () => {
+    const manifest = await moveIntoAlbum("2026-01-01");
+    // Sanity: the move actually happened.
+    expect((await readdir(srcDir)).sort()).toEqual([]);
+    expect((await readdir(join(destDir, "2026-01-01"))).sort()).toEqual([
+      "a.jpg",
+      "b.jpg",
+    ]);
+
+    const res = await fetch(`${srv.base}/api/albums/undo-move`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ manifest }),
+    });
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json();
+    const job = await waitJob(jobId);
+
+    expect(job.status).toBe("done");
+    expect(job.type).toBe("undo-move");
+    expect(job.result).toEqual({ restored: 2, skipped: 0 });
+
+    // Originals restored, dest emptied.
+    expect((await readdir(srcDir)).sort()).toEqual(["a.jpg", "b.jpg"]);
+    expect((await readdir(join(destDir, "2026-01-01"))).sort()).toEqual([]);
+
+    // Index repointed back.
+    const db = getDb();
+    for (const entry of manifest) {
+      expect(getPhotoById(db, entry.id).path).toBe(entry.from);
+    }
+  });
+
+  it("skips an entry whose destination no longer exists, without throwing", async () => {
+    const manifest = await moveIntoAlbum("2026-01-02");
+    // Simulate the user deleting/renaming the moved file via Finder.
+    await rm(manifest[0].to);
+
+    const res = await fetch(`${srv.base}/api/albums/undo-move`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ manifest }),
+    });
+    const job = await waitJob((await res.json()).jobId);
+
+    expect(job.status).toBe("done");
+    expect(job.result).toEqual({ restored: 1, skipped: 1 });
+  });
+
+  it("400s on an empty manifest", async () => {
+    const res = await fetch(`${srv.base}/api/albums/undo-move`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ manifest: [] }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on a manifest entry missing id/from/to", async () => {
+    const res = await fetch(`${srv.base}/api/albums/undo-move`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ manifest: [{ from: "/a", to: "/b" }] }),
     });
     expect(res.status).toBe(400);
   });
