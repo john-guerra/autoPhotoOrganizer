@@ -4,7 +4,7 @@
   // instantly (all client-side — see albums.js) so you can preview boundaries
   // before materializing them to dated folders on disk.
   import { createEventDispatcher } from "svelte";
-  import { thumbUrl, startMaterialize } from "./api.js";
+  import { startMaterialize } from "./api.js";
   import { waitForJob } from "./jobs.js";
   import {
     computeGapStats,
@@ -12,6 +12,7 @@
     clusterByGap,
     defaultAlbumName,
   } from "./albums.js";
+  import SnapshotStrip from "./SnapshotStrip.svelte";
 
   export let photos = []; // [{id,t,mtimeMs}] time-ordered working set
   export let truncated = false;
@@ -269,15 +270,12 @@
           )}</span
         >
       </div>
-      <div class="album-grid">
-        {#each album.ids as id (id)}
-          <img
-            class="album-thumb"
-            src={thumbUrl(id, 240, mtimeById.get(id))}
-            loading="lazy"
-            alt=""
-          />
-        {/each}
+      <div class="album-snapshot">
+        <SnapshotStrip
+          ids={album.ids}
+          {mtimeById}
+          on:select={(e) => dispatch("openphoto", e.detail)}
+        />
       </div>
     {/each}
   </div>
@@ -442,18 +440,7 @@
     font-size: 0.8rem;
     color: #9a9a9a;
   }
-  .album-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
+  .album-snapshot {
     margin-bottom: 18px;
-  }
-  .album-thumb {
-    width: 120px;
-    height: 120px;
-    object-fit: cover;
-    border-radius: 4px;
-    background: #1a1a1a;
-    display: block;
   }
 </style>
