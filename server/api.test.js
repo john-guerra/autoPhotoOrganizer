@@ -1312,11 +1312,13 @@ describe("GET /api/albums/timeline", () => {
     expect(body.photos.length).toBeLessThanOrEqual(2);
   });
 
-  it("clamps an over-large limit to the hard ceiling (20000)", async () => {
+  it("clamps an over-large limit to the hard ceiling (200000)", async () => {
     await scan(srv.base, photosDir);
-    const res = await fetch(`${srv.base}/api/albums/timeline?limit=999999`);
+    const res = await fetch(
+      `${srv.base}/api/albums/timeline?limit=999999999`
+    );
     const body = await res.json();
-    expect(body.limit).toBe(20000);
+    expect(body.limit).toBe(200000);
   });
 
   it("falls back to the default limit on a non-numeric value", async () => {
