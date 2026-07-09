@@ -5,6 +5,7 @@
  * modularization: these three functions were already pure (took their
  * dependencies as arguments, not closure reads), just living inline.
  */
+import { resolvePhoto } from "./displayEntries.js";
 
 /**
  * Placeholders (in-place folded rows for a collapsed section) are never a
@@ -91,4 +92,44 @@ export function navVertical(boxes, displayEntries, selected, dir) {
     if (displayEntries[next]?.kind !== "placeholder") return next;
     cur = next; // placeholder row — keep looking past it
   }
+}
+
+/** Finds the displayEntries index whose entry represents photo `id` —
+ * either directly (a plain photo entry, or a stack entry whose cover IS
+ * id), or as a collapsed stack's non-cover member. resolvePhoto(entry)
+ * only ever returns a stack's cover photo, so `resolvePhoto(e).id ===
+ * id` alone can never match a member id that isn't the cover — a
+ * server-resolved focusId/targetId lands on whichever raw photo the
+ * seek found, with no awareness of this client-side burst grouping, so
+ * it can legitimately be a hidden member. Landing on that member's
+ * stack (showing its cover) is the correct behavior, not a fallback.
+ * Moved out of App.svelte (issue #42).
+ * @param {Array<object>} entries
+ * @param {number|string} id
+ * @returns {number}
+ */
+export function findEntryIndexForId(entries, id) {
+  return entries.findIndex((e) =>
+    e.kind === "stack"
+      ? e.stack.memberIds.includes(id)
+      : resolvePhoto(e).id === id
+  );
+}
+
+/** Resolves the `selected` index for a feed re-center: lands on `targetId`
+ * when it's present in `entries`, otherwise falls back to the first
+ * non-placeholder entry in `fallbackDir` from the start (or 0 if every
+ * entry is a placeholder). Shared by the canonical
+ * recenterFeedOnId helper and any other re-center path (issue #42).
+ * @param {Array<object>} entries
+ * @param {number|string|null} targetId
+ * @param {1|-1} [fallbackDir]
+ * @returns {number}
+ */
+export function resolveSelectedIndex(entries, targetId, fallbackDir = 1) {
+  if (targetId != null) {
+    const idx = findEntryIndexForId(entries, targetId);
+    if (idx !== -1) return idx;
+  }
+  return nextSelectable(entries, 0, fallbackDir) ?? 0;
 }

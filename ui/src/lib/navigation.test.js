@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { nextSelectable, nearestBoxInAdjacentRow, navVertical } from "./navigation.js";
+import {
+  nextSelectable,
+  nearestBoxInAdjacentRow,
+  navVertical,
+  findEntryIndexForId,
+  resolveSelectedIndex,
+} from "./navigation.js";
 
 describe("nextSelectable", () => {
   it("returns the starting index when it's already selectable", () => {
@@ -17,12 +23,20 @@ describe("nextSelectable", () => {
   });
 
   it("skips backward past placeholders", () => {
-    const entries = [{ kind: "photo" }, { kind: "placeholder" }, { kind: "placeholder" }];
+    const entries = [
+      { kind: "photo" },
+      { kind: "placeholder" },
+      { kind: "placeholder" },
+    ];
     expect(nextSelectable(entries, 2, -1)).toBe(0);
   });
 
   it("returns null when every remaining entry in that direction is a placeholder", () => {
-    const entries = [{ kind: "photo" }, { kind: "placeholder" }, { kind: "placeholder" }];
+    const entries = [
+      { kind: "photo" },
+      { kind: "placeholder" },
+      { kind: "placeholder" },
+    ];
     expect(nextSelectable(entries, 1, 1)).toBeNull();
   });
 });
@@ -76,12 +90,81 @@ describe("navVertical", () => {
   });
 
   it("skips a placeholder row and keeps advancing in the same direction", () => {
-    const entries = [{ kind: "photo" }, { kind: "placeholder" }, { kind: "photo" }];
+    const entries = [
+      { kind: "photo" },
+      { kind: "placeholder" },
+      { kind: "photo" },
+    ];
     expect(navVertical(boxes, entries, 0, 1)).toBe(2);
   });
 
   it("keeps the original selection when there's no further row that direction", () => {
     const entries = [{ kind: "photo" }, { kind: "photo" }, { kind: "photo" }];
     expect(navVertical(boxes, entries, 2, 1)).toBe(2);
+  });
+});
+
+describe("findEntryIndexForId", () => {
+  it("matches a plain photo entry by its resolved id", () => {
+    const entries = [
+      { kind: "photo", item: { id: 1 } },
+      { kind: "photo", item: { id: 2 } },
+    ];
+    expect(findEntryIndexForId(entries, 2)).toBe(1);
+  });
+
+  it("matches a stack entry whose memberIds include the id, even when it's not the cover", () => {
+    const entries = [
+      { kind: "photo", item: { id: 1 } },
+      {
+        kind: "stack",
+        stack: { id: "s1", memberIds: [2, 3, 4] },
+        coverItem: { id: 3 },
+      },
+    ];
+    expect(findEntryIndexForId(entries, 4)).toBe(1);
+    // the cover id itself also matches — it's in memberIds too.
+    expect(findEntryIndexForId(entries, 3)).toBe(1);
+  });
+
+  it("returns -1 when the id isn't present anywhere", () => {
+    const entries = [{ kind: "photo", item: { id: 1 } }];
+    expect(findEntryIndexForId(entries, 99)).toBe(-1);
+  });
+});
+
+describe("resolveSelectedIndex", () => {
+  const entries = [
+    { kind: "photo", item: { id: 1 } },
+    { kind: "photo", item: { id: 2 } },
+    { kind: "photo", item: { id: 3 } },
+  ];
+
+  it("returns the index of the resolved targetId", () => {
+    expect(resolveSelectedIndex(entries, 2)).toBe(1);
+  });
+
+  it("falls back to the first non-placeholder entry when targetId is null", () => {
+    expect(resolveSelectedIndex(entries, null)).toBe(0);
+  });
+
+  it("falls back to the first non-placeholder entry when targetId isn't found", () => {
+    expect(resolveSelectedIndex(entries, 999)).toBe(0);
+  });
+
+  it("skips a leading placeholder when falling back", () => {
+    const withPlaceholder = [
+      { kind: "placeholder", item: { id: "collapsed:x" } },
+      { kind: "photo", item: { id: 5 } },
+    ];
+    expect(resolveSelectedIndex(withPlaceholder, null)).toBe(1);
+  });
+
+  it("returns 0 when every entry is a placeholder", () => {
+    const allPlaceholders = [
+      { kind: "placeholder", item: { id: "collapsed:a" } },
+      { kind: "placeholder", item: { id: "collapsed:b" } },
+    ];
+    expect(resolveSelectedIndex(allPlaceholders, null)).toBe(0);
   });
 });

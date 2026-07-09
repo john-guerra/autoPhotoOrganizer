@@ -25,8 +25,8 @@
   /** @type {Map<number, number>|null} optional id->mtimeMs for thumb cache-busting */
   export let mtimeById = null;
   /** When true, thumbnails are clickable buttons that dispatch `select`.
-   * AlbumsView passes false for now — opening an arbitrary album photo needs
-   * a feed-recenter helper (issue #42) we deliberately don't duplicate here. */
+   * AlbumsView listens for `select` and routes it through App.svelte's
+   * canonical feed-recenter helper (issue #42) rather than duplicating it. */
   export let interactive = true;
 
   const dispatch = createEventDispatcher();

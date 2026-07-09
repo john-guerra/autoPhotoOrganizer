@@ -3,7 +3,12 @@
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
-  import { nextSelectable, navVertical } from "./lib/navigation.js";
+  import {
+    nextSelectable,
+    navVertical,
+    findEntryIndexForId,
+    resolveSelectedIndex,
+  } from "./lib/navigation.js";
   import {
     buildDisplayEntries,
     entryDomId,
@@ -432,57 +437,7 @@
   async function onGroupByChange(newGroupBy) {
     groupBy = newGroupBy;
     collapsedPaths = [];
-    const focusId = safeFocusId(selected);
-    error = "";
-    status = "loading…";
-    const epoch = ++feedEpoch;
-    // See loadInitialFeed's comment: blocks a concurrent scroll-triggered
-    // loadMore from splicing a stale page into the window this replaces.
-    fetchingBefore = true;
-    fetchingAfter = true;
-    try {
-      const { items: beforePage } = focusId
-        ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0, filter: displayFilter, sort })
-        : { items: [] };
-      const { items: afterPage, focusItem } = await fetchFeed({
-        groupBy,
-        focusId,
-        before: 0,
-        after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
-        filter: displayFilter,
-        sort,
-      });
-      if (epoch !== feedEpoch) return;
-      const combined = focusId
-        ? dedupeById([...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage])
-        : afterPage;
-      items = combined;
-      hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
-      hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
-      // `selected` indexes displayEntries (the burst-stack-collapsed view),
-      // not raw items — beforePage.length would drift as soon as any burst
-      // among the "before" items collapses into a single display entry.
-      // displayEntries is a reactive statement over `items`, so it only
-      // reflects the assignment above after the next microtask flush.
-      await tick();
-      const focusIndex = focusId
-        ? findEntryIndexForId(displayEntries, focusId)
-        : -1;
-      // No nextSelectable() needed here: fetchFeed above is never called
-      // with a `collapsed` list (it defaults to `[]` in both api.js and the
-      // server), so this window can never contain a placeholder entry —
-      // findIndex above always lands on a real photo/stack or -1.
-      selected = focusIndex !== -1 ? focusIndex : 0;
-      focusPending = true;
-      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-      enrichMeta(items.map((i) => i.id));
-    } catch (e) {
-      error = e.message;
-      status = "";
-    } finally {
-      fetchingBefore = false;
-      fetchingAfter = false;
-    }
+    await recenterFeedOnId(safeFocusId(selected));
   }
 
   /** Change the global feed sort, then rebuild the feed centered on the current
@@ -852,21 +807,6 @@
   }
   $: currentPath = deriveCurrentPath(renderStart, displayEntries, groupBy);
 
-  /** Finds the displayEntries index whose entry represents photo `id` —
-   * either directly (a plain photo entry, or a stack entry whose cover IS
-   * id), or as a collapsed stack's non-cover member. resolvePhoto(entry)
-   * only ever returns a stack's cover photo, so `resolvePhoto(e).id ===
-   * id` alone can never match a member id that isn't the cover — a
-   * server-resolved focusId/targetId lands on whichever raw photo the
-   * seek found, with no awareness of this client-side burst grouping, so
-   * it can legitimately be a hidden member. Landing on that member's
-   * stack (showing its cover) is the correct behavior, not a fallback. */
-  function findEntryIndexForId(entries, id) {
-    return entries.findIndex((e) =>
-      e.kind === "stack" ? e.stack.memberIds.includes(id) : resolvePhoto(e).id === id
-    );
-  }
-
   /** Keeps the first occurrence of each id, dropping later repeats. Guards
    * against a real, observed case: fetching "before" and "after" a focusId
    * as two independent seeks (used when re-centering on a known photo —
@@ -919,32 +859,25 @@
     return entry ? resolvePhoto(entry).id : null;
   }
 
-  /** Toggle a section's collapsed state and re-center the feed on whatever
-   * photo is currently selected, so the user doesn't lose their place —
-   * mirrors onGroupByChange's re-centering. */
-  async function toggleSectionCollapse(path) {
-    const key = pathKey(path);
-    const collapsing = !collapsedPaths.some((p) => pathKey(p) === key);
-    collapsedPaths = collapsing
-      ? [...collapsedPaths, path]
-      : collapsedPaths.filter((p) => pathKey(p) !== key);
-
-    const focusId = safeFocusId(selected, collapsing ? path : null);
+  /** THE canonical focusId-centered feed replace (issue #42). Fetches a
+   * half-page before+after `focusId` under the current collapsed paths,
+   * dedupes the two seeks, replaces `items`, and re-anchors `selected` on
+   * that photo. Guarded by feedEpoch + fetchingBefore/After. Returns the
+   * resolved `selected` index, or -1 if the epoch was superseded/errored.
+   * onGroupByChange and toggleSectionCollapse both route through this. */
+  async function recenterFeedOnId(focusId, { collapsed = collapsedPaths } = {}) {
     error = "";
     status = "loading…";
     const epoch = ++feedEpoch;
     // See loadInitialFeed's comment: blocks a concurrent scroll-triggered
-    // loadMore from splicing a stale page into the window this replaces —
-    // collapsing a large section can shrink the rendered grid enough that
-    // the current scroll position crosses loadMore's own auto-fetch
-    // threshold, firing it while this function's own fetch is in flight.
+    // loadMore from splicing a stale page into the window this replaces.
     fetchingBefore = true;
     fetchingAfter = true;
     try {
       const { items: beforePage } = focusId
         ? await fetchFeed({
             groupBy,
-            collapsed: collapsedPaths,
+            collapsed,
             focusId,
             before: PAGE_SIZE / 2,
             after: 0,
@@ -954,34 +887,45 @@
         : { items: [] };
       const { items: afterPage, focusItem } = await fetchFeed({
         groupBy,
-        collapsed: collapsedPaths,
+        collapsed,
         focusId,
         before: 0,
         after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
         filter: displayFilter,
         sort,
       });
-      if (epoch !== feedEpoch) return;
-      const combined = focusId
+      if (epoch !== feedEpoch) return -1;
+      items = focusId
         ? dedupeById([...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage])
         : afterPage;
-      items = combined;
       hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
       hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
       await tick();
-      const focusIndex = focusId ? findEntryIndexForId(displayEntries, focusId) : -1;
-      selected =
-        focusIndex !== -1 ? focusIndex : (nextSelectable(displayEntries, 0, 1) ?? 0);
+      selected = resolveSelectedIndex(displayEntries, focusId);
       focusPending = true;
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       enrichMeta(items.map((i) => i.id));
+      return selected;
     } catch (e) {
       error = e.message;
       status = "";
+      return -1;
     } finally {
       fetchingBefore = false;
       fetchingAfter = false;
     }
+  }
+
+  /** Toggle a section's collapsed state and re-center the feed on whatever
+   * photo is currently selected, so the user doesn't lose their place —
+   * mirrors onGroupByChange's re-centering. */
+  async function toggleSectionCollapse(path) {
+    const key = pathKey(path);
+    const collapsing = !collapsedPaths.some((p) => pathKey(p) === key);
+    collapsedPaths = collapsing
+      ? [...collapsedPaths, path]
+      : collapsedPaths.filter((p) => pathKey(p) !== key);
+    await recenterFeedOnId(safeFocusId(selected, collapsing ? path : null));
   }
 
   /** Bring the selected tile into view using the native scroll API — called
@@ -1557,6 +1501,17 @@
   function openLoupe(index) {
     selected = index;
     loupeOpen = true;
+  }
+
+  /** Open an arbitrary photo by id (from an album/feed snapshot strip):
+   * leave album mode, re-center the feed on it, and open the loupe if the
+   * photo landed in the window. Reuses the canonical recenter helper — no
+   * new copy of the feed-window guard pattern (issue #42). */
+  async function openPhotoById(id) {
+    albumMode = false;
+    await recenterFeedOnId(id);
+    const idx = findEntryIndexForId(displayEntries, id);
+    if (idx !== -1) openLoupe(idx);
   }
 
   async function closeLoupe() {
@@ -2365,6 +2320,7 @@
           {hasNativePicker}
           on:relimit={(e) => onAlbumRelimit(e.detail)}
           on:close={() => (albumMode = false)}
+          on:openphoto={(e) => openPhotoById(e.detail.id)}
         />
       {:else if items.length}
         <div
