@@ -14,13 +14,15 @@ import { justifiedLayout, layoutHeight } from "./justified.js";
  * ui/src/lib/displayEntries.js's "placeholder" entry kind) also forces a
  * row-break on both sides and reserves its own full-width band, sized by
  * `placeholderHeight` — it never participates in the photo-packing rows.
+ * A placeholder may carry its own `height` (e.g. a taller snapshot-strip
+ * row); when present it overrides `placeholderHeight` for that one band.
  * Every original index still contributes exactly one entry to `boxes`
  * (either a real photo box or a placeholder box), so `boxes` stays
  * index-aligned 1:1 with the input `items` array — callers can keep using
  * a positional `boxes[i]` lookup rather than needing a separate id-keyed
  * map.
  *
- * @param {Array<{id: number|string, aspectRatio: number} | {id: number|string, placeholder: true}>} items
+ * @param {Array<{id: number|string, aspectRatio: number} | {id: number|string, placeholder: true, height?: number}>} items
  * @param {Array<{index: number, depth: number, dimension: string, value: string, label: string}>} headers
  *   from deriveSectionHeaders, indices into `items`, ascending order.
  * @param {{ targetRowHeight?: number, containerWidth: number, gap?: number, headerHeight?: number, placeholderHeight?: number }} opts
@@ -105,15 +107,16 @@ export function sectionedJustifiedLayout(
       // `box.x + box.width / 2` for ANY box, placeholder or not; leaving
       // these undefined would silently produce NaN and desync arrow-key
       // navigation around a placeholder row.
+      const height = items[i].height ?? placeholderHeight;
       boxes.push({
         id: items[i].id,
         x: 0,
         y: yOffset,
         width: containerWidth,
-        height: placeholderHeight,
+        height,
         placeholder: true,
       });
-      yOffset += placeholderHeight + gap;
+      yOffset += height + gap;
       chunkStart = i + 1;
     }
   }

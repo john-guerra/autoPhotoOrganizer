@@ -138,6 +138,37 @@ describe("sectionedJustifiedLayout", () => {
     );
   });
 
+  it("uses a placeholder's own height when present, falling back to placeholderHeight otherwise", () => {
+    const its = [
+      { id: "ph-tall", placeholder: true, height: 120 },
+      { id: "ph-default", placeholder: true },
+    ];
+    const { boxes, totalHeight } = sectionedJustifiedLayout(its, [], {
+      ...opts,
+      headerHeight,
+      placeholderHeight: 40,
+      gap: 8,
+    });
+    expect(boxes).toHaveLength(2);
+    expect(boxes[0]).toEqual({
+      id: "ph-tall",
+      x: 0,
+      y: 0,
+      width: opts.containerWidth,
+      height: 120,
+      placeholder: true,
+    });
+    expect(boxes[1]).toEqual({
+      id: "ph-default",
+      x: 0,
+      y: 128, // 120 + gap(8)
+      width: opts.containerWidth,
+      height: 40,
+      placeholder: true,
+    });
+    expect(totalHeight).toBe(176); // 120 + 8 + 40 + 8
+  });
+
   it("combines a placeholder with a header at the same index without conflict", () => {
     const its = [
       ...items(3),

@@ -48,6 +48,7 @@
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
   import AlbumsView from "./lib/AlbumsView.svelte";
+  import SnapshotStrip from "./lib/SnapshotStrip.svelte";
   import RatingFilter from "./lib/RatingFilter.svelte";
   import OrientationFilter from "./lib/OrientationFilter.svelte";
   import {
@@ -257,6 +258,14 @@
     localStorage.getItem(LS_SIDEBAR_MODE) === "fisheye" ? "fisheye" : "tree";
   $: localStorage.setItem(LS_SIDEBAR_MODE, sidebarMode);
   let collapsedPaths = []; // Array<Array<{dimension,value}>>, reset on hierarchy change
+  // Groups rendered as a one-line SnapshotStrip instead of the collapsed
+  // pill. A group in this set is ALSO server-collapsed (its path lives in
+  // collapsedPaths, per the tri-state design in
+  // docs/superpowers/specs/2026-07-09-fisheye-snapshot-view-design.md) —
+  // this set only decides how the client renders that collapsed placeholder.
+  // Keyed by pathKey(path), reset on hierarchy change alongside collapsedPaths.
+  let snapshotGroupKeys = new Set();
+  const SNAPSHOT_ROW_HEIGHT = 120;
   let treeSidebarRef; // bound to TreeSidebar, for revealCurrentLocation to call revealPath
   let items = []; // the currently-loaded feed window, ordered
   let hasMoreBefore = false;
@@ -437,6 +446,7 @@
   async function onGroupByChange(newGroupBy) {
     groupBy = newGroupBy;
     collapsedPaths = [];
+    snapshotGroupKeys = new Set();
     await recenterFeedOnId(safeFocusId(selected));
   }
 
@@ -928,6 +938,24 @@
     await recenterFeedOnId(safeFocusId(selected, collapsing ? path : null));
   }
 
+  /** Feed group tri-state: expanded → snapshot → collapsed → expanded.
+   * snapshot is a server-collapsed group the client renders as a strip. */
+  async function cycleGroupState(path) {
+    const key = pathKey(path);
+    const isCollapsed = collapsedPaths.some((p) => pathKey(p) === key);
+    const isSnapshot = snapshotGroupKeys.has(key);
+    if (!isCollapsed) {
+      snapshotGroupKeys.add(key);
+      snapshotGroupKeys = snapshotGroupKeys; // reassign → reactivity
+      await toggleSectionCollapse(path); // server-collapse
+    } else if (isSnapshot) {
+      snapshotGroupKeys.delete(key);
+      snapshotGroupKeys = snapshotGroupKeys; // snapshot → pill, no refetch
+    } else {
+      await toggleSectionCollapse(path); // server-expand
+    }
+  }
+
   /** Bring the selected tile into view using the native scroll API — called
    * ONLY from active navigation (keyboard, group-jump). One-shot and
    * imperative: it never re-fires on reflow, so it can't hijack the user's
@@ -1380,7 +1408,13 @@
       ? sectionedJustifiedLayout(
           displayEntries.map((e) => {
             if (e.kind === "placeholder") {
-              return { id: entryDomId(e), placeholder: true };
+              return snapshotGroupKeys.has(pathKey(e.item.path))
+                ? {
+                    id: entryDomId(e),
+                    placeholder: true,
+                    height: SNAPSHOT_ROW_HEIGHT,
+                  }
+                : { id: entryDomId(e), placeholder: true };
             }
             const photo = resolvePhoto(e);
             const baseRatio =
@@ -2349,9 +2383,9 @@
                 >
                   <button
                     class="section-toggle-icon"
-                    title="Collapse/expand this section"
+                    title="Cycle: expanded → snapshot → collapsed"
                     on:click={() =>
-                      toggleSectionCollapse(
+                      cycleGroupState(
                         groupBy.slice(0, header.depth + 1).map((d) => ({
                           dimension: d,
                           value: resolvedPhotos[header.index]?.groupValues[d],
@@ -2394,25 +2428,52 @@
             {/each}
             {#each visibleItems as { i, entry } (entryDomId(entry))}
               {#if entry.kind === "placeholder"}
-                <div
-                  class="placeholder-row"
-                  style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
-                  role="button"
-                  tabindex="0"
-                  on:click={() => toggleSectionCollapse(entry.item.path)}
-                  on:keydown={(e) =>
-                    e.key === "Enter" && toggleSectionCollapse(entry.item.path)}
-                >
-                  <span class="placeholder-icon">▸</span>
-                  <span class="placeholder-label">
-                    {entry.item.path
-                      .map((p) => formatGroupValue(p.dimension, p.value))
-                      .join(" / ")}
-                  </span>
-                  <span class="placeholder-count">
-                    {entry.item.count.toLocaleString()} items
-                  </span>
-                </div>
+                {#if snapshotGroupKeys.has(pathKey(entry.item.path))}
+                  <div
+                    class="snapshot-row"
+                    style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
+                  >
+                    <button
+                      class="snap-cycle"
+                      title="Cycle: expanded → snapshot → collapsed"
+                      on:click|stopPropagation={() =>
+                        cycleGroupState(entry.item.path)}
+                    >
+                      ◐
+                    </button>
+                    <div class="snap-wrap">
+                      <SnapshotStrip
+                        groupPath={entry.item.path}
+                        count={entry.item.count}
+                        filter={displayFilter}
+                        {sort}
+                        {groupBy}
+                        thumbPx={SNAPSHOT_ROW_HEIGHT - 16}
+                        on:select={(e) => openPhotoById(e.detail.id)}
+                      />
+                    </div>
+                  </div>
+                {:else}
+                  <div
+                    class="placeholder-row"
+                    style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
+                    role="button"
+                    tabindex="0"
+                    on:click={() => cycleGroupState(entry.item.path)}
+                    on:keydown={(e) =>
+                      e.key === "Enter" && cycleGroupState(entry.item.path)}
+                  >
+                    <span class="placeholder-icon">▸</span>
+                    <span class="placeholder-label">
+                      {entry.item.path
+                        .map((p) => formatGroupValue(p.dimension, p.value))
+                        .join(" / ")}
+                    </span>
+                    <span class="placeholder-count">
+                      {entry.item.count.toLocaleString()} items
+                    </span>
+                  </div>
+                {/if}
               {:else}
                 <Thumb
                   item={resolvePhoto(entry)}
@@ -3015,6 +3076,28 @@
   .section-act:hover {
     background: #2f2f2f;
     color: #fff;
+  }
+  .snapshot-row {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+  }
+  .snap-wrap {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .snap-cycle {
+    flex: 0 0 auto;
+    background: #222;
+    border: 1px solid #3a3a3a;
+    color: #ccc;
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 2px 8px;
   }
   .placeholder-row {
     position: absolute;
