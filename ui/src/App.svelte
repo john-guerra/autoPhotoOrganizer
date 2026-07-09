@@ -34,6 +34,8 @@
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
+  import FilterPanel from "./lib/FilterPanel.svelte";
+  import { DEFAULT_FILTER } from "./lib/filterSpec.js";
   import MultiAutoSelect from "multi-auto-select";
 
   const LS_KEY = "autogallery.lastDir";
@@ -94,7 +96,7 @@
 
   let dir = localStorage.getItem(LS_KEY) || "";
   const LS_GROUP_BY = "autogallery.groupBy";
-  const ALL_DIMENSIONS = ["folder", "year", "month", "day"];
+  const ALL_DIMENSIONS = ["folder", "year", "month", "day", "camera", "kind"];
   let groupBy = (() => {
     try {
       const stored = JSON.parse(localStorage.getItem(LS_GROUP_BY) ?? "null");
@@ -107,6 +109,18 @@
     return ["folder"];
   })();
   $: localStorage.setItem(LS_GROUP_BY, JSON.stringify(groupBy));
+
+  const LS_FILTER = "autogallery.filter";
+  let filter = (() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(LS_FILTER) ?? "null");
+      if (stored && typeof stored === "object") return { ...DEFAULT_FILTER, ...stored };
+    } catch {
+      /* fall through to default */
+    }
+    return { ...DEFAULT_FILTER };
+  })();
+  $: localStorage.setItem(LS_FILTER, JSON.stringify(filter));
 
   // Sidebar view: classic "tree" or focus+context "fisheye" (toggle, persisted).
   const LS_SIDEBAR_MODE = "autogallery.sidebarMode";
@@ -247,6 +261,7 @@
         groupBy,
         collapsed: collapsedPaths,
         after: PAGE_SIZE,
+        filter,
       });
       if (epoch !== feedEpoch) return;
       const merged = mergeFeedPage(
@@ -296,13 +311,14 @@
     fetchingAfter = true;
     try {
       const { items: beforePage } = focusId
-        ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0 })
+        ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0, filter })
         : { items: [] };
       const { items: afterPage, focusItem } = await fetchFeed({
         groupBy,
         focusId,
         before: 0,
         after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
+        filter,
       });
       if (epoch !== feedEpoch) return;
       const combined = focusId
@@ -337,6 +353,18 @@
     }
   }
 
+  /** Apply a new filter spec: the header-count cache is now stale (same paths,
+   * different counts), so invalidate it, then rebuild the feed centered on the
+   * current selection via onGroupByChange's existing guarded loader. */
+  function onFilterChange(next) {
+    filter = next;
+    countsEpoch++;
+    headerCounts = {};
+    fetchedParents = new Set();
+    inFlightParents = new Set();
+    onGroupByChange(groupBy);
+  }
+
   /** Jump the feed to an arbitrary hierarchy path from the tree — unlike
    * onGroupByChange's re-centering, there's no specific photo id to seek
    * from (the target section may never have been loaded), so this uses
@@ -355,6 +383,7 @@
         collapsed: collapsedPaths,
         startPath: path,
         after: PAGE_SIZE,
+        filter,
       });
       if (epoch !== feedEpoch) return;
       const merged = mergeFeedPage(
@@ -512,6 +541,7 @@
             focusId,
             before: PAGE_SIZE / 2,
             after: 0,
+            filter,
           })
         : { items: [] };
       const { items: afterPage, focusItem } = await fetchFeed({
@@ -520,6 +550,7 @@
         focusId,
         before: 0,
         after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
+        filter,
       });
       if (epoch !== feedEpoch) return;
       const combined = focusId
@@ -687,6 +718,7 @@
         focusId,
         before: direction === "before" ? PAGE_SIZE : 0,
         after: direction === "after" ? PAGE_SIZE : 0,
+        filter,
       });
       if (epoch !== feedEpoch) return;
       const merged = mergeFeedPage(
@@ -948,7 +980,7 @@
       inFlightParents.add(key);
       let node;
       try {
-        node = await fetchTreeNode({ groupBy: groupByAtCall, path: parent });
+        node = await fetchTreeNode({ groupBy: groupByAtCall, path: parent, filter });
       } catch {
         inFlightParents.delete(key); // transient failure — allow a retry
         continue;
@@ -1390,6 +1422,7 @@
         collapsed: collapsedPaths,
         focusId,
         direction,
+        filter,
       });
     } catch (err) {
       error = err.message;
@@ -1420,6 +1453,7 @@
         focusId: targetId,
         before: PAGE_SIZE,
         after: 0,
+        filter,
       });
       const { items: afterPage, focusItem } = await fetchFeed({
         groupBy,
@@ -1427,6 +1461,7 @@
         focusId: targetId,
         before: 0,
         after: PAGE_SIZE,
+        filter,
       });
       if (epoch !== feedEpoch) return;
       // A jump can land anywhere in the library, arbitrarily far from
@@ -1495,6 +1530,7 @@
   <header class="topbar">
     <h1>AutoGallery</h1>
     <div class="group-by" use:groupBySelector={groupBy}></div>
+    <FilterPanel {filter} on:change={(e) => onFilterChange(e.detail)} />
     <div
       class="sidebar-toggle"
       role="group"
@@ -1625,6 +1661,7 @@
         bind:this={treeSidebarRef}
         {groupBy}
         {collapsedPaths}
+        filter={filter}
         on:toggle={(e) => toggleSectionCollapse(e.detail)}
         on:jump={(e) => jumpToPath(e.detail)}
       />
@@ -1632,6 +1669,7 @@
       <FisheyeSidebar
         {groupBy}
         {currentPath}
+        filter={filter}
         on:jump={(e) => jumpToPath(e.detail)}
       />
     {/if}

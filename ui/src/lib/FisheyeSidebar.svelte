@@ -13,6 +13,7 @@
 
   export let groupBy; // string[]
   export let currentPath = null; // Array<{dimension,value}> | null — feed position
+  export let filter = null;
 
   const dispatch = createEventDispatcher();
   const LABEL_MIN_PX = 9; // hide ordinary labels on slivers this thin
@@ -31,12 +32,12 @@
 
   // Reload the whole ordered leaf sequence whenever the hierarchy changes.
   // A leaf's position is only meaningful under the groupBy it was fetched with.
-  $: loadLeaves(groupBy);
+  $: filter, loadLeaves(groupBy);
   async function loadLeaves(gb) {
     const mine = ++epoch;
     loadError = "";
     try {
-      const res = await fetchFlatTree(gb);
+      const res = await fetchFlatTree(gb, filter);
       if (mine !== epoch) return; // superseded by a newer groupBy
       leaves = res.leaves;
       total = res.total;

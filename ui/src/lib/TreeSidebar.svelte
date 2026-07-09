@@ -6,6 +6,7 @@
 
   export let groupBy; // string[]
   export let collapsedPaths; // Array<Array<{dimension,value}>>
+  export let filter = null;
 
   const dispatch = createEventDispatcher();
 
@@ -18,7 +19,7 @@
 
   async function loadRoot() {
     try {
-      const { total, nodes } = await fetchTreeNode({ groupBy, path: [] });
+      const { total, nodes } = await fetchTreeNode({ groupBy, path: [], filter });
       rootTotal = total;
       rootNodes = nodes;
     } catch {
@@ -38,14 +39,14 @@
     highlightedKey = null;
     loadRoot();
   }
-  $: groupBy, resetAndLoad();
+  $: groupBy, filter, resetAndLoad();
 
   async function loadChildren(path) {
     const key = treeKey(path);
     if (childrenByKey.has(key) || loadingKeys.has(key)) return;
     loadingKeys = new Set(loadingKeys).add(key);
     try {
-      const { nodes } = await fetchTreeNode({ groupBy, path });
+      const { nodes } = await fetchTreeNode({ groupBy, path, filter });
       childrenByKey = new Map(childrenByKey).set(key, { nodes });
     } catch (e) {
       childrenByKey = new Map(childrenByKey).set(key, {
