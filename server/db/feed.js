@@ -350,6 +350,17 @@ export function getFeedPage(
     if (!focusRow) throw new Error(`focusId ${focusId} not found`);
     focusValues = dims.map((_, i) => focusRow[`dim${i}`]).concat(focusRow.id);
     focusItem = rowToItem(focusRow, dims);
+
+    // If an active filter excludes the focus photo, keep its position as the
+    // seek anchor (focusValues) but don't surface the photo itself — otherwise a
+    // filtered-out selected photo shows in the grid while counts exclude it
+    // (consistency-invariant violation; spec §5 "otherwise reload from top").
+    if (filter.sql !== "1=1") {
+      const passes = db
+        .prepare(`SELECT 1 FROM photos WHERE id = ? AND (${filter.sql}) LIMIT 1`)
+        .get(focusId, ...filter.params);
+      if (!passes) focusItem = null;
+    }
   }
 
   function fetchRealRows(wantAfter, limit) {

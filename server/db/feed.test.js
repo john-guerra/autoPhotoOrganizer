@@ -213,6 +213,25 @@ describe("getFeedPage — filter", () => {
     expect(ph.count).toBe(1);
     expect(items.filter((i) => !i.collapsed).map((i) => i.name)).toEqual(["bhi.jpg"]);
   });
+
+  it("nulls out focusItem when the focus photo fails the filter", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [hi, lo] = upsertScan(db, "/photos/trip", 1, [
+      { name: "hi.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "lo.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(hi.id);
+    // focus on the 0-star lo.jpg while filtering to >=4
+    const { items, focusItem } = getFeedPage(db, {
+      groupBy: ["folder"], focusId: lo.id, before: 5, after: 5, filter: { minRating: 4 },
+    });
+    expect(focusItem).toBe(null);
+    expect(items.map((i) => i.name)).not.toContain("lo.jpg");
+    // a matching focus still returns its focusItem
+    const r2 = getFeedPage(db, { groupBy: ["folder"], focusId: hi.id, after: 5, filter: { minRating: 4 } });
+    expect(r2.focusItem?.name).toBe("hi.jpg");
+  });
 });
 
 describe("findGroupBoundary", () => {
