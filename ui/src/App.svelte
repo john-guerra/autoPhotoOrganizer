@@ -355,7 +355,11 @@
 
   /** Apply a new filter spec: the header-count cache is now stale (same paths,
    * different counts), so invalidate it, then rebuild the feed centered on the
-   * current selection via onGroupByChange's existing guarded loader. */
+   * current selection via onGroupByChange's existing guarded loader (reused
+   * deliberately rather than duplicating its fetchingBefore/After/feedEpoch
+   * guard — see CLAUDE.md's "no 7th copy" rule). Side effect: onGroupByChange
+   * also clears collapsedPaths, so applying a filter un-collapses any folded
+   * sections — intended, since a filter can shrink or empty a collapsed group. */
   function onFilterChange(next) {
     filter = next;
     countsEpoch++;
