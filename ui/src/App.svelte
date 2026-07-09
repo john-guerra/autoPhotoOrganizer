@@ -34,8 +34,12 @@
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
-  import FilterPanel from "./lib/FilterPanel.svelte";
-  import { DEFAULT_FILTER } from "./lib/filterSpec.js";
+  import RatingFilter from "./lib/RatingFilter.svelte";
+  import OrientationFilter from "./lib/OrientationFilter.svelte";
+  import {
+    DEFAULT_FILTER,
+    isActive as filterIsActive,
+  } from "./lib/filterSpec.js";
   import MultiAutoSelect from "multi-auto-select";
 
   const LS_KEY = "autogallery.lastDir";
@@ -67,6 +71,10 @@
     ? storedBurstGap
     : DEFAULT_BURST_GAP_MS;
   $: localStorage.setItem(LS_BURST_GAP, String(burstGapMs));
+
+  const LS_BURST_ENABLED = "autogallery.burstEnabled";
+  let burstEnabled = localStorage.getItem(LS_BURST_ENABLED) !== "false"; // default on
+  $: localStorage.setItem(LS_BURST_ENABLED, String(burstEnabled));
   // Request thumbs at the size actually displayed (row height × device pixel
   // ratio), snapped to a few buckets so the disk cache isn't fragmented per
   // pixel. The server caps size at 1024.
@@ -180,6 +188,7 @@
   let feedEpoch = 0; // invalidates in-flight meta fetches when the window resets
   let library = [];
   let libraryOpen = false;
+  let addFolderOpen = false;
   let manageLibraryOpen = false;
 
   let selected = 0; // index into displayEntries; must never land on a
@@ -950,7 +959,9 @@
       : 0;
   }
 
-  $: stacks = detectBurstsByGroup(items, groupBy, { gapMs: burstGapMs });
+  $: stacks = detectBurstsByGroup(items, groupBy, {
+    gapMs: burstEnabled ? burstGapMs : 0,
+  });
   $: displayEntries = buildDisplayEntries(items, stacks, expandedStackIds);
   $: resolvedPhotos = displayEntries.map(resolvePhoto); // passed to Loupe
   // deriveSectionHeaders' `index` must land in the same index space as the
@@ -1533,129 +1544,189 @@
 <div class="app">
   <header class="topbar">
     <h1>AutoGallery</h1>
-    <div class="group-by" use:groupBySelector={groupBy}></div>
-    <FilterPanel {filter} on:change={(e) => onFilterChange(e.detail)} />
-    <div
-      class="sidebar-toggle"
-      role="group"
-      aria-label="Sidebar view"
-      style="display:flex;gap:2px;background:#101010;border:1px solid #333;border-radius:6px;padding:2px;"
-    >
-      <button
-        type="button"
-        on:click={() => (sidebarMode = "tree")}
-        style="border:none;border-radius:4px;padding:3px 9px;font-size:0.8rem;cursor:pointer;{sidebarMode ===
-        'tree'
-          ? 'background:#4c9aff;color:#06121f;font-weight:600;'
-          : 'background:transparent;color:#9a9a9a;'}"
-      >
-        Tree
-      </button>
-      <button
-        type="button"
-        on:click={() => (sidebarMode = "fisheye")}
-        style="border:none;border-radius:4px;padding:3px 9px;font-size:0.8rem;cursor:pointer;{sidebarMode ===
-        'fisheye'
-          ? 'background:#4c9aff;color:#06121f;font-weight:600;'
-          : 'background:transparent;color:#9a9a9a;'}"
-      >
-        Fisheye
-      </button>
-    </div>
-    <button
-      class="reveal-btn"
-      on:click={revealCurrentLocation}
-      title="Reveal the current photo's location in the tree"
-    >
-      Locate
-    </button>
-    <input
-      class="dir"
-      type="text"
-      placeholder="/path/to/photos"
-      bind:value={dir}
-      on:keydown={(e) => e.key === "Enter" && doScan()}
-      spellcheck="false"
-    />
-    <button class="scan" on:click={doScan} disabled={scanning}>
-      {scanning ? "Scanning…" : "Scan"}
-    </button>
-    {#if hasNativePicker}
-      <button class="choose-folder" on:click={chooseFolder} disabled={scanning}>
-        Choose Folder…
-      </button>
-    {/if}
-    <div class="library">
-      <button
-        class="library-toggle"
-        on:click={() => (libraryOpen = !libraryOpen)}
-        title="Recently scanned folders"
-      >
-        Library ▾
-      </button>
-      {#if libraryOpen}
-        <ul class="library-panel">
-          {#if library.length === 0}
-            <li class="library-empty">No folders scanned yet.</li>
-          {/if}
-          {#each library as entry (entry.path)}
+
+    <!-- ① SOURCE -->
+    <div class="cluster source">
+      <div class="library">
+        <button
+          class="library-toggle"
+          on:click={() => (libraryOpen = !libraryOpen)}
+          title="Recently scanned folders"
+        >
+          Library ▾
+        </button>
+        {#if libraryOpen}
+          <ul class="library-panel">
+            {#if library.length === 0}
+              <li class="library-empty">No folders scanned yet.</li>
+            {/if}
+            {#each library as entry (entry.path)}
+              <li>
+                <button
+                  class="library-entry"
+                  class:offline={!entry.mounted}
+                  on:click={() => selectFromLibrary(entry)}
+                  title={entry.path}
+                >
+                  {entry.name}
+                  {#if !entry.mounted}<span class="offline-badge">offline</span>{/if}
+                </button>
+              </li>
+            {/each}
             <li>
               <button
                 class="library-entry"
-                class:offline={!entry.mounted}
-                on:click={() => selectFromLibrary(entry)}
-                title={entry.path}
+                on:click={() => {
+                  libraryOpen = false;
+                  manageLibraryOpen = true;
+                }}
               >
-                {entry.name}
-                {#if !entry.mounted}<span class="offline-badge">offline</span>{/if}
+                Manage library…
               </button>
             </li>
-          {/each}
-          <li>
-            <button
-              class="library-entry"
-              on:click={() => {
-                libraryOpen = false;
-                manageLibraryOpen = true;
-              }}
-            >
-              Manage library…
-            </button>
-          </li>
-        </ul>
+          </ul>
+        {/if}
+      </div>
+      <div class="add-folder">
+        <button
+          class="add-toggle"
+          on:click={() => (addFolderOpen = !addFolderOpen)}
+          title="Add / scan a folder"
+          aria-label="Add folder"
+        >
+          ＋
+        </button>
+        {#if addFolderOpen}
+          <div class="add-panel">
+            <input
+              class="dir"
+              type="text"
+              placeholder="/path/to/photos"
+              bind:value={dir}
+              on:keydown={(e) => e.key === "Enter" && doScan()}
+              spellcheck="false"
+            />
+            <div class="add-actions">
+              <button class="scan" on:click={doScan} disabled={scanning}>
+                {scanning ? "Scanning…" : "Scan"}
+              </button>
+              {#if hasNativePicker}
+                <button
+                  class="choose-folder"
+                  on:click={chooseFolder}
+                  disabled={scanning}
+                >
+                  Choose Folder…
+                </button>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ② ORGANIZE & FILTER -->
+    <div class="cluster organize">
+      <div class="group-by" use:groupBySelector={groupBy}></div>
+      <RatingFilter {filter} on:change={(e) => onFilterChange(e.detail)} />
+      <OrientationFilter {filter} on:change={(e) => onFilterChange(e.detail)} />
+      {#if filterIsActive(filter)}
+        <button
+          class="clear-filter"
+          title="Clear filters"
+          aria-label="Clear filters"
+          on:click={() => onFilterChange({ ...DEFAULT_FILTER })}
+        >
+          ✕
+        </button>
       {/if}
     </div>
+
+    <div class="divider"></div>
+
+    <!-- ③ VIEW -->
+    <div class="cluster view">
+      <div
+        class="sidebar-toggle"
+        role="group"
+        aria-label="Sidebar view"
+        style="display:flex;gap:2px;background:#101010;border:1px solid #333;border-radius:6px;padding:2px;"
+      >
+        <button
+          type="button"
+          on:click={() => (sidebarMode = "tree")}
+          style="border:none;border-radius:4px;padding:3px 9px;font-size:0.8rem;cursor:pointer;{sidebarMode ===
+          'tree'
+            ? 'background:#4c9aff;color:#06121f;font-weight:600;'
+            : 'background:transparent;color:#9a9a9a;'}"
+        >
+          Tree
+        </button>
+        <button
+          type="button"
+          on:click={() => (sidebarMode = "fisheye")}
+          style="border:none;border-radius:4px;padding:3px 9px;font-size:0.8rem;cursor:pointer;{sidebarMode ===
+          'fisheye'
+            ? 'background:#4c9aff;color:#06121f;font-weight:600;'
+            : 'background:transparent;color:#9a9a9a;'}"
+        >
+          Fisheye
+        </button>
+      </div>
+      <button
+        class="reveal-btn"
+        on:click={revealCurrentLocation}
+        title="Reveal the current photo's location in the tree"
+      >
+        ⌖ Locate
+      </button>
+      <div class="view-cell">
+        <label class="zoom" title="Grid zoom (also + / - keys)">
+          <span class="zoom-icon small">▦</span>
+          <input
+            type="range"
+            min="0"
+            max={ZOOM_LEVELS.length - 1}
+            step="1"
+            bind:value={zoom}
+          />
+          <span class="zoom-icon">▦</span>
+        </label>
+        <label
+          class="burst"
+          title="Group photos taken close in time as a burst"
+        >
+          <input type="checkbox" bind:checked={burstEnabled} />
+          <span class="burst-label">Burst</span>
+          <input
+            type="range"
+            min="0"
+            max="10000"
+            step="500"
+            bind:value={burstGapMs}
+            disabled={!burstEnabled}
+          />
+          <span class="burst-value" class:off={!burstEnabled}
+            >{(burstGapMs / 1000).toFixed(1)}s</span
+          >
+        </label>
+      </div>
+    </div>
+
+    <span class="status" class:err={!!error}>{error || status}</span>
+    {#if thumbProgress}
+      <span class="thumb-progress" class:err={thumbCounts.error > 0}>
+        {thumbProgress}
+      </span>
+    {/if}
     {#if manageLibraryOpen}
       <ManageLibrary
         {library}
         on:close={() => (manageLibraryOpen = false)}
         on:folderRemoved={onFolderRemoved}
       />
-    {/if}
-    <label class="zoom" title="Grid zoom (also + / - keys)">
-      <span class="zoom-icon small">▦</span>
-      <input
-        type="range"
-        min="0"
-        max={ZOOM_LEVELS.length - 1}
-        step="1"
-        bind:value={zoom}
-      />
-      <span class="zoom-icon">▦</span>
-    </label>
-    <label
-      class="burst-gap"
-      title="Group photos taken within this many seconds as a burst"
-    >
-      <span class="burst-gap-icon">⧉</span>
-      <input type="range" min="0" max="10000" step="500" bind:value={burstGapMs} />
-      <span class="burst-gap-value">{(burstGapMs / 1000).toFixed(1)}s</span>
-    </label>
-    <span class="status" class:err={!!error}>{error || status}</span>
-    {#if thumbProgress}
-      <span class="thumb-progress" class:err={thumbCounts.error > 0}>
-        {thumbProgress}
-      </span>
     {/if}
   </header>
 
@@ -1853,6 +1924,95 @@
     background: #1c1c1c;
     border-bottom: 1px solid #2a2a2a;
   }
+  .cluster {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+  }
+  .cluster.organize {
+    flex-wrap: wrap;
+  } /* pills wrap WITHIN the cluster, not pushing siblings */
+  .divider {
+    width: 1px;
+    align-self: stretch;
+    background: #2a2a2a;
+    margin: 2px 0;
+  }
+  .status {
+    margin-left: auto;
+  } /* push status + progress to the far right */
+
+  .add-folder {
+    position: relative;
+  }
+  .add-toggle {
+    background: #101010;
+    border: 1px solid #333;
+    color: #cfcfcf;
+    border-radius: 6px;
+    padding: 3px 9px;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .add-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 50;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 260px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .add-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .view-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #141414;
+    border: 1px solid #2f2f2f;
+    border-radius: 6px;
+    padding: 3px 8px;
+  }
+  .burst {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.78rem;
+    color: #9a9a9a;
+  }
+  .burst input[type="range"] {
+    width: 90px;
+    accent-color: #4c9aff;
+  }
+  .burst input[type="range"]:disabled {
+    opacity: 0.4;
+  }
+  .burst-value.off {
+    opacity: 0.4;
+  }
+  .clear-filter {
+    background: transparent;
+    border: 1px solid #444;
+    color: #cfcfcf;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    line-height: 1;
+    font-size: 0.7rem;
+    cursor: pointer;
+  }
   h1 {
     font-size: 1rem;
     font-weight: 600;
@@ -1973,24 +2133,6 @@
   }
   .zoom-icon.small {
     font-size: 0.7rem;
-  }
-  .burst-gap {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: #777;
-  }
-  .burst-gap input[type="range"] {
-    width: 90px;
-    accent-color: #4c9aff;
-  }
-  .burst-gap-icon {
-    font-size: 1rem;
-    line-height: 1;
-  }
-  .burst-gap-value {
-    font-size: 0.75rem;
-    min-width: 2.5em;
   }
   .status {
     color: #9a9a9a;
