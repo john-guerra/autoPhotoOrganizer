@@ -343,6 +343,106 @@ export async function resetLibrary() {
 }
 
 /**
+ * Recursive scan runs as a cancelable background job (progress via the jobs
+ * SSE stream / JobsPanel). Single-folder (non-recursive) scan still returns
+ * items synchronously via `scan()` above — leave that path alone.
+ * @param {string} dir
+ * @param {{recursive?: boolean}} [opts]
+ * @returns {Promise<{jobId: string}>}
+ */
+export async function startScan(dir, { recursive = true } = {}) {
+  const res = await fetch("/api/scan", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ dir, recursive }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `scan failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Start an export as a background job. Job `result` is
+ * `{target, copied, skipped}` once `status` leaves "running" — poll via
+ * `waitForJob(jobId)` from `./jobs.js`.
+ * @param {{photoIds:number[], destParent:string, folderName:string}} opts
+ * @returns {Promise<{jobId: string}>}
+ */
+export async function startExport({ photoIds, destParent, folderName }) {
+  const res = await fetch("/api/export", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ photoIds, destParent, folderName }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `export failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Materialize albums to disk as a background job. `move` defaults to true
+ * server-side when omitted; job `result` is
+ * `{destParent, albums:[{name,target,copied,moved,skipped}], move, manifest}`.
+ * @param {{destParent:string, albums:Array<{name:string,photoIds:number[]}>, move?:boolean}} opts
+ * @returns {Promise<{jobId: string}>}
+ */
+export async function startMaterialize({ destParent, albums, move }) {
+  const res = await fetch("/api/albums/materialize", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ destParent, albums, move }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `materialize failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Undo a completed move-materialize job: restores each `{from,to}` pair in
+ * the job's result manifest. Runs as a background job too.
+ * @param {Array<{id:number, from:string, to:string}>} manifest
+ * @returns {Promise<{jobId: string}>}
+ */
+export async function undoMove(manifest) {
+  const res = await fetch("/api/albums/undo-move", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ manifest }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `undo failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** @param {string} id */
+export async function cancelJob(id) {
+  const res = await fetch(`/api/jobs/${id}/cancel`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `cancel failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** @param {string} id */
+export async function dismissJob(id) {
+  const res = await fetch(`/api/jobs/${id}/dismiss`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `dismiss failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
  * @param {string[]} groupBy
  * @param {{minRating?:number, orientations?:string[]}|null} [filter=null]
  * @returns {Promise<{total:number, leaves: Array<{values: Record<string,string>, count:number}>}>}
