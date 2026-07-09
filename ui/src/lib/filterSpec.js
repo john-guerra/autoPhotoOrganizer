@@ -22,3 +22,18 @@ export function toQueryParam(spec) {
   if (o.length > 0 && o.length < ORIENTATIONS.length) out.orientations = o;
   return JSON.stringify(out);
 }
+
+/** Click star k (1..5): set the threshold to k, or clear to 0 if k is already
+ * the current threshold (click-again-to-clear). @returns a new spec. */
+export function applyRatingClick(spec, k) {
+  const current = spec?.minRating ?? 0;
+  return { ...spec, minRating: current === k ? 0 : k };
+}
+
+/** Toggle orientation `o` in/out of the included set, result in canonical
+ * ORIENTATIONS order. @returns a new spec. */
+export function toggleOrientation(spec, o) {
+  const set = new Set(spec?.orientations ?? []);
+  set.has(o) ? set.delete(o) : set.add(o);
+  return { ...spec, orientations: ORIENTATIONS.filter((x) => set.has(x)) };
+}
