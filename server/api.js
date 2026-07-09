@@ -46,11 +46,14 @@ import {
   photoIdsMatchingFilter,
   photoCountMatchingFilter,
   workingSetTimeline,
+  countGroupPath,
+  fetchGroupRowsAtOffsets,
   DIMENSIONS,
 } from "./db/feed.js";
 import { getTreeNode, getFlatTree } from "./db/tree.js";
 import { ALLOWED_ORIENTATIONS } from "./db/filters.js";
 import { parseSort } from "./db/sort.js";
+import { sampleOffsets } from "./db/sampleGroup.js";
 import { setKeepScope } from "./db/keepScope.js";
 import { registry } from "./jobs/registry.js";
 
@@ -95,11 +98,15 @@ function resolveExportTarget(db, destParent, folderName) {
     return { error: err.message };
   }
   if (isPathContainedIn(cacheRoot(), target)) {
-    return { error: "export destination cannot be inside the AutoGallery cache" };
+    return {
+      error: "export destination cannot be inside the AutoGallery cache",
+    };
   }
   const sourceFolders = db.prepare(`SELECT abs_path FROM folders`).all();
   if (sourceFolders.some((f) => isPathContainedIn(f.abs_path, target))) {
-    return { error: "export destination cannot be inside a scanned source folder" };
+    return {
+      error: "export destination cannot be inside a scanned source folder",
+    };
   }
   return { target };
 }
@@ -150,7 +157,12 @@ function moveFile(src, dst) {
  * @param {{signal?: AbortSignal, onProgress?: (done:number, total:number, phase:string) => void, move?: boolean}} [opts]
  * @returns {{copied:number, moved:number, skipped:number, manifest:Array<{id:number, from:string, to:string}>}}
  */
-export function copyIdsIntoFolder(db, targetDir, ids, { signal, onProgress, move = false } = {}) {
+export function copyIdsIntoFolder(
+  db,
+  targetDir,
+  ids,
+  { signal, onProgress, move = false } = {}
+) {
   mkdirSync(targetDir, { recursive: true });
   let copied = 0;
   let moved = 0;
@@ -614,9 +626,7 @@ export function registerApi(app) {
     }
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
-    const sort = parseSort(
-      req.query.sort ? String(req.query.sort) : undefined
-    );
+    const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
 
     let collapsed = [];
     if (req.query.collapsed) {
@@ -690,9 +700,7 @@ export function registerApi(app) {
     }
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
-    const sort = parseSort(
-      req.query.sort ? String(req.query.sort) : undefined
-    );
+    const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
 
     const direction = String(req.query.direction ?? "");
     if (direction !== "next" && direction !== "prev") {
@@ -731,6 +739,59 @@ export function registerApi(app) {
     }
   });
 
+  // --- Fisheye snapshot: first/middle/last of a group, without paging
+  // through the whole thing --------------------------------------------------
+  app.get("/api/group/sample", (req, res) => {
+    const groupBy = String(req.query.groupBy ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!groupBy.length) {
+      return res.status(400).json({ error: "groupBy is required" });
+    }
+    if (groupBy.some((d) => !DIMENSIONS[d])) {
+      return res.status(400).json({
+        error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
+      });
+    }
+    const { spec: filter, error: filterError } = parseFilterParam(req);
+    if (filterError) return res.status(400).json({ error: filterError });
+    const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
+
+    let path;
+    try {
+      path = req.query.path ? JSON.parse(String(req.query.path)) : null;
+    } catch {
+      return res.status(400).json({ error: "path must be JSON" });
+    }
+    if (!Array.isArray(path) || !path.length) {
+      return res.status(400).json({ error: "path is required" });
+    }
+
+    const slots = Math.min(64, Math.max(1, Number(req.query.slots) || 12));
+
+    const db = getDb();
+    try {
+      const count = countGroupPath(db, { path, groupBy, filter, sort });
+      const { offsets, gaps } = sampleOffsets(count, slots);
+      const rows = fetchGroupRowsAtOffsets(db, {
+        path,
+        groupBy,
+        offsets,
+        filter,
+        sort,
+      });
+      const samples = rows.map((row, i) => ({
+        ...row,
+        offset: offsets[i],
+        gapAfter: gaps.includes(i),
+      }));
+      res.json({ count, samples });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   // --- Hierarchy tree (lazy, per-level) --------------------------------------
   app.get("/api/tree", (req, res) => {
     const groupBy = String(req.query.groupBy ?? "")
@@ -747,9 +808,7 @@ export function registerApi(app) {
     }
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
-    const sort = parseSort(
-      req.query.sort ? String(req.query.sort) : undefined
-    );
+    const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
 
     let path = [];
     if (req.query.path) {
@@ -789,9 +848,7 @@ export function registerApi(app) {
     }
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
-    const sort = parseSort(
-      req.query.sort ? String(req.query.sort) : undefined
-    );
+    const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
 
     const db = getDb();
     try {
@@ -934,14 +991,18 @@ export function registerApi(app) {
       return res.status(400).json({ error: "destParent is required" });
     }
     if (!Array.isArray(albums) || albums.length === 0) {
-      return res.status(400).json({ error: "albums must be a non-empty array" });
+      return res
+        .status(400)
+        .json({ error: "albums must be a non-empty array" });
     }
     for (const a of albums) {
       if (typeof a?.name !== "string" || !a.name.length) {
         return res.status(400).json({ error: "each album needs a name" });
       }
       if (!Array.isArray(a.photoIds) || a.photoIds.length === 0) {
-        return res.status(400).json({ error: `album "${a.name}" has no photos` });
+        return res
+          .status(400)
+          .json({ error: `album "${a.name}" has no photos` });
       }
     }
 
@@ -952,7 +1013,8 @@ export function registerApi(app) {
     const resolvedAlbums = [];
     for (const album of albums) {
       const resolved = resolveExportTarget(db, destParent, album.name);
-      if (resolved.error) return res.status(400).json({ error: resolved.error });
+      if (resolved.error)
+        return res.status(400).json({ error: resolved.error });
       resolvedAlbums.push({ album, target: resolved.target });
     }
 
@@ -1001,7 +1063,12 @@ export function registerApi(app) {
           });
           manifest.push(...r.manifest);
         }
-        registry.finish(job.id, { destParent, albums: results, move, manifest });
+        registry.finish(job.id, {
+          destParent,
+          albums: results,
+          move,
+          manifest,
+        });
       } catch (e) {
         // Albums already fully processed (and, on the album that was
         // in-flight, whatever copyIdsIntoFolder had done before it threw —
@@ -1011,7 +1078,12 @@ export function registerApi(app) {
         const partialManifest = manifest.concat(e.manifest ?? []);
         if (move && partialManifest.length) {
           registry.update(job.id, {
-            result: { destParent, albums: results, move, manifest: partialManifest },
+            result: {
+              destParent,
+              albums: results,
+              move,
+              manifest: partialManifest,
+            },
           });
         }
         registry.fail(job.id, e);
@@ -1025,7 +1097,9 @@ export function registerApi(app) {
   app.post("/api/albums/undo-move", (req, res) => {
     const { manifest } = req.body ?? {};
     if (!Array.isArray(manifest) || manifest.length === 0) {
-      return res.status(400).json({ error: "manifest must be a non-empty array" });
+      return res
+        .status(400)
+        .json({ error: "manifest must be a non-empty array" });
     }
     for (const m of manifest) {
       if (
@@ -1053,7 +1127,8 @@ export function registerApi(app) {
         for (let i = 0; i < manifest.length; i++) {
           // Same rationale as the materialize loop above: moveFile is
           // synchronous, so yield periodically to keep cancel responsive.
-          if (i % 50 === 0) await new Promise((resolve) => setImmediate(resolve));
+          if (i % 50 === 0)
+            await new Promise((resolve) => setImmediate(resolve));
           if (job.controller.signal.aborted) {
             const e = new Error("canceled");
             e.name = "AbortError";

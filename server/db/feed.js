@@ -458,6 +458,107 @@ export function getFeedPage(
 }
 
 /**
+ * COUNT of a group at `path` — the same equality-predicate scoping the feed
+ * uses for a collapsed section's count (reuses `countCollapsedPath`, which
+ * despite its name just counts rows matching a `{dimension,value}[]` path).
+ * @param {import("better-sqlite3").Database} db
+ * @param {{path: Array<{dimension:string,value:string}>, groupBy: string[], filter?: Object, sort?: {by:string,dir:string}}} opts
+ * @returns {number}
+ */
+export function countGroupPath(
+  db,
+  {
+    path,
+    groupBy,
+    filter: filterSpec = {},
+    sort = { by: "date_taken", dir: "desc" },
+  }
+) {
+  const filter = buildFilter(filterSpec);
+  const dims = applySortToDims(resolveDimensions(groupBy), sort);
+  return countCollapsedPath(db, path, dims, filter);
+}
+
+/**
+ * Fetch specific 0-indexed rows of a group at `path`, in the SAME composite
+ * order `getFeedPage` produces for a forward, no-focus page — the snapshot
+ * strip's "first few + middle fragment + last two" query. Consecutive
+ * offsets are grouped into contiguous runs (one `LIMIT/OFFSET` query per
+ * run) so the SQL cost stays proportional to the number of *distinct* picks,
+ * not to how far apart they are — front/last blocks are one query each;
+ * only genuinely scattered middle picks each pay for their own query.
+ *
+ * Ordering here MUST match `getFeedPage`'s `fetchRealRows(wantAfter=true)`
+ * exactly (same dims, same sortDim, same trailing `photos.id ASC`
+ * tiebreaker) — this is what makes "expand the group" and "snapshot the
+ * group" agree on order (CLAUDE.md debugging-discipline note: reuse, don't
+ * hand-roll a parallel ORDER BY).
+ * @param {import("better-sqlite3").Database} db
+ * @param {{path: Array<{dimension:string,value:string}>, groupBy: string[], offsets: number[], filter?: Object, sort?: {by:string,dir:string}}} opts
+ * @returns {Array<object>} rowToItem-shaped items, one per offset, in the
+ *   same order as `offsets` (sampleOffsets always returns them sorted).
+ */
+export function fetchGroupRowsAtOffsets(
+  db,
+  {
+    path,
+    groupBy,
+    offsets,
+    filter: filterSpec = {},
+    sort = { by: "date_taken", dir: "desc" },
+  }
+) {
+  if (!offsets.length) return [];
+  const filter = buildFilter(filterSpec);
+  const dims = applySortToDims(resolveDimensions(groupBy), sort);
+  const sortDim = sortSeekDim(sort);
+  const { sql: notPathSql, params: pathParams } = collapsedPathCondition(
+    path,
+    dims
+  );
+  const pathSql = notPathSql.replace(/^NOT /, "");
+  const selectDimAndSortCols = [
+    ...dims.map((d, i) => `${d.expr} AS dim${i}`),
+    `${sortDim.expr} AS sortval`,
+  ].join(", ");
+  const orderCols = [
+    ...dims.map((d, i) => `dim${i} ${d.direction}`),
+    `sortval ${sortDim.direction}`,
+    `photos.id ASC`,
+  ].join(", ");
+
+  const stmt = db.prepare(
+    `SELECT photos.id, photos.filename AS name, photos.size,
+            photos.mtime AS mtimeMs, photos.rating,
+            photos.preferred_cover AS preferredCover,
+            photos.width, photos.height, photos.taken_at, photos.kind,
+            ${selectDimAndSortCols}
+     FROM photos
+     JOIN folders ON folders.id = photos.folder_id
+     WHERE photos.stale = 0 AND (${filter.sql}) AND (${pathSql})
+     ORDER BY ${orderCols}
+     LIMIT ? OFFSET ?`
+  );
+
+  // sampleOffsets always returns offsets sorted/strictly increasing, so a
+  // simple linear scan finds every contiguous run.
+  const runs = [];
+  for (const offset of offsets) {
+    const run = runs[runs.length - 1];
+    if (run && run.start + run.length === offset) run.length += 1;
+    else runs.push({ start: offset, length: 1 });
+  }
+
+  const rows = [];
+  for (const run of runs) {
+    rows.push(
+      ...stmt.all(...filter.params, ...pathParams, run.length, run.start)
+    );
+  }
+  return rows.map((r) => rowToItem(r, dims));
+}
+
+/**
  * All non-stale photo ids matching a filter spec, with no grouping/ordering
  * overhead — the lightweight companion to getFeedPage for callers that only
  * need the matching id set (e.g. "select all" for export). Scopes rows

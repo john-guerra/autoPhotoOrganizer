@@ -18,6 +18,7 @@ import { getDb, _resetDbForTest } from "./db/connection.js";
 import { getPhotoById } from "./db/photos.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { registry } from "./jobs/registry.js";
+import { sampleOffsets } from "./db/sampleGroup.js";
 
 /** Start the app on an ephemeral port; return { base, close }. */
 async function startServer() {
@@ -1235,14 +1236,18 @@ describe("POST /api/scope + keepScope filter", () => {
     expect((await setRes.json()).count).toBe(1);
 
     const filter = encodeURIComponent(JSON.stringify({ keepScope: true }));
-    const countRes = await fetch(`${srv.base}/api/photos/count?filter=${filter}`);
+    const countRes = await fetch(
+      `${srv.base}/api/photos/count?filter=${filter}`
+    );
     expect((await countRes.json()).count).toBe(1);
 
     const feedRes = await fetch(
       `${srv.base}/api/feed?groupBy=folder&after=100&filter=${filter}`
     );
     const feed = await feedRes.json();
-    const feedIds = feed.items.filter((i) => i.kind !== undefined).map((i) => i.id);
+    const feedIds = feed.items
+      .filter((i) => i.kind !== undefined)
+      .map((i) => i.id);
     expect(feedIds).toEqual([ids[0]]);
   });
 
@@ -1523,7 +1528,10 @@ describe("POST /api/albums/undo-move", () => {
     const res = await fetch(`${srv.base}/api/albums/materialize`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ destParent: destDir, albums: [{ name, photoIds: ids }] }),
+      body: JSON.stringify({
+        destParent: destDir,
+        albums: [{ name, photoIds: ids }],
+      }),
     });
     const job = await waitJob((await res.json()).jobId);
     expect(job.status).toBe("done");
@@ -1654,6 +1662,127 @@ describe("GET /api/tree", () => {
       JSON.stringify([{ dimension: "folder", value: photosDir }])
     );
     const res = await fetch(`${srv.base}/api/tree?groupBy=folder&path=${path}`);
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/group/sample", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+  });
+
+  /** Insert `count` synthetic photo rows directly into `folderId`, spread
+   * one second apart starting at `baseMs` — fast (no sharp round-trip) since
+   * this endpoint only reads DB rows, never pixels. */
+  function insertSyntheticPhotos(db, folderId, count, baseMs) {
+    const insert = db.prepare(
+      `INSERT INTO photos (folder_id, filename, size, mtime, taken_at, kind, stale)
+       VALUES (?, ?, 1000, ?, ?, 'photo', 0)`
+    );
+    const insertMany = db.transaction((n) => {
+      for (let i = 0; i < n; i++) {
+        const t = baseMs + i * 1000;
+        insert.run(folderId, `synthetic_${i}.jpg`, t, t);
+      }
+    });
+    insertMany(count);
+  }
+
+  it("count/samples match the same-ordered slice of GET /api/feed's group order", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const db = getDb();
+    const folder = db
+      .prepare("SELECT id FROM folders WHERE abs_path = ?")
+      .get(photosDir);
+    insertSyntheticPhotos(db, folder.id, 40, Date.UTC(2024, 0, 1));
+
+    const path = encodeURIComponent(
+      JSON.stringify([{ dimension: "folder", value: photosDir }])
+    );
+
+    // Single folder ⇒ the whole feed IS the group; pull it in full composite
+    // order as the ground truth to slice against.
+    const feedRes = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&after=1000`
+    );
+    const feedBody = await feedRes.json();
+    const orderedIds = feedBody.items.map((i) => i.id);
+    // Whatever the fixture folder holds at scan time (other describe blocks
+    // may have permanently added sibling files on disk) + the 40 synthetic
+    // rows just inserted.
+    expect(orderedIds.length).toBe(scanBody.items.length + 40);
+
+    const sampleRes = await fetch(
+      `${srv.base}/api/group/sample?groupBy=folder&path=${path}&slots=5`
+    );
+    expect(sampleRes.status).toBe(200);
+    const sampleBody = await sampleRes.json();
+    expect(sampleBody.count).toBe(orderedIds.length);
+    expect(sampleBody.samples).toHaveLength(5);
+
+    const { offsets, gaps } = sampleOffsets(orderedIds.length, 5);
+    const expectedIds = offsets.map((o) => orderedIds[o]);
+    expect(sampleBody.samples.map((s) => s.id)).toEqual(expectedIds);
+    sampleBody.samples.forEach((s, i) => {
+      expect(s.offset).toBe(offsets[i]);
+      expect(s.gapAfter).toBe(gaps.includes(i));
+    });
+  });
+
+  it("returns every item with no gaps when count <= slots", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const path = encodeURIComponent(
+      JSON.stringify([{ dimension: "folder", value: photosDir }])
+    );
+    const res = await fetch(
+      `${srv.base}/api/group/sample?groupBy=folder&path=${path}&slots=50`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.count).toBe(scanBody.items.length);
+    expect(body.samples).toHaveLength(scanBody.items.length);
+    expect(body.samples.every((s) => s.gapAfter === false)).toBe(true);
+  });
+
+  it("respects filter/sort scoping like the feed does", async () => {
+    await scan(srv.base, photosDir);
+    const db = getDb();
+    const ids = db.prepare("SELECT id FROM photos ORDER BY id").all();
+    db.prepare("UPDATE photos SET rating = 5 WHERE id = ?").run(ids[0].id);
+    const path = encodeURIComponent(
+      JSON.stringify([{ dimension: "folder", value: photosDir }])
+    );
+    const filter = encodeURIComponent(JSON.stringify({ minRating: 5 }));
+    const res = await fetch(
+      `${srv.base}/api/group/sample?groupBy=folder&path=${path}&slots=12&filter=${filter}`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.count).toBe(1);
+    expect(body.samples.map((s) => s.id)).toEqual([ids[0].id]);
+  });
+
+  it("400s when path is missing", async () => {
+    const res = await fetch(`${srv.base}/api/group/sample?groupBy=folder`);
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on an unknown groupBy dimension", async () => {
+    const path = encodeURIComponent(
+      JSON.stringify([{ dimension: "folder", value: photosDir }])
+    );
+    const res = await fetch(
+      `${srv.base}/api/group/sample?groupBy=bogus&path=${path}`
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on malformed path JSON", async () => {
+    const res = await fetch(
+      `${srv.base}/api/group/sample?groupBy=folder&path=not-json`
+    );
     expect(res.status).toBe(400);
   });
 });
