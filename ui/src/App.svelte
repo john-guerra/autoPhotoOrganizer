@@ -265,7 +265,7 @@
   // this set only decides how the client renders that collapsed placeholder.
   // Keyed by pathKey(path), reset on hierarchy change alongside collapsedPaths.
   let snapshotGroupKeys = new Set();
-  const SNAPSHOT_ROW_HEIGHT = 120;
+  const SNAPSHOT_ROW_HEIGHT = 148; // group label row on top + the strip beneath
   // Last global view action (the top-of-toolbar "cycle all" control); the
   // per-group toggles may diverge from it, but the button just applies the
   // next whole-view state each click: full view → snapshot all → collapse all.
@@ -2507,14 +2507,23 @@
                     class="snapshot-row"
                     style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
                   >
-                    <button
-                      class="snap-cycle"
-                      title="Cycle: expanded → snapshot → collapsed"
-                      on:click|stopPropagation={() =>
-                        cycleGroupState(entry.item.path)}
-                    >
-                      ◐
-                    </button>
+                    <div class="snapshot-head">
+                      <button
+                        class="snap-cycle"
+                        title="Cycle: expanded → snapshot → collapsed"
+                        on:click|stopPropagation={() =>
+                          cycleGroupState(entry.item.path)}
+                      >
+                        ◐
+                      </button>
+                      <span class="snapshot-label" title={entry.item.path
+                        .map((p) => formatGroupValue(p.dimension, p.value))
+                        .join(" / ")}>
+                        {entry.item.path
+                          .map((p) => formatGroupValue(p.dimension, p.value))
+                          .join(" / ")}
+                      </span>
+                    </div>
                     <div class="snap-wrap">
                       <SnapshotStrip
                         groupPath={entry.item.path}
@@ -2522,7 +2531,7 @@
                         filter={displayFilter}
                         {sort}
                         {groupBy}
-                        thumbPx={SNAPSHOT_ROW_HEIGHT - 16}
+                        thumbPx={SNAPSHOT_ROW_HEIGHT - 44}
                         on:select={(e) => openPhotoById(e.detail.id, entry.item.path)}
                       />
                     </div>
@@ -3156,9 +3165,30 @@
     left: 0;
     width: 100%;
     display: flex;
+    flex-direction: column;
+    gap: 4px;
+    box-sizing: border-box;
+  }
+  .snapshot-head {
+    flex: 0 0 auto;
+    display: flex;
     align-items: center;
     gap: 8px;
-    box-sizing: border-box;
+    min-width: 0;
+  }
+  .snapshot-label {
+    flex: 1 1 auto;
+    color: #cfcfcf;
+    font-size: 0.82rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .snapshot-count {
+    flex: 0 0 auto;
+    color: #888;
+    font-size: 0.78rem;
   }
   .snap-wrap {
     flex: 1 1 auto;
