@@ -37,6 +37,7 @@ import {
   setPhotoCover,
   deleteFolder,
   resetLibrary,
+  repointPhoto,
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
 import {
@@ -171,7 +172,7 @@ export function copyIdsIntoFolder(db, targetDir, ids, { signal, onProgress, move
       const dst = nextAvailablePath(targetDir, basename(photo.path));
       if (move) {
         moveFile(photo.path, dst);
-        // TODO(task4): repoint index
+        repointPhoto(db, Number(id), dst);
         moved++;
       } else {
         copyFileSync(photo.path, dst);

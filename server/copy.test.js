@@ -4,7 +4,7 @@ import { existsSync, statSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, _resetDbForTest } from "./db/connection.js";
-import { upsertScan } from "./db/photos.js";
+import { upsertScan, getPhotoById } from "./db/photos.js";
 import { copyIdsIntoFolder } from "./api.js";
 
 // Toggle flags read by the node:fs mock below — let individual tests force
@@ -138,6 +138,8 @@ describe("copyIdsIntoFolder — move mode (same volume)", () => {
     expect(existsSync(join(srcDir, "a.jpg"))).toBe(false);
     expect(existsSync(join(destDir, "a.jpg"))).toBe(true);
 
+    const photo = getPhotoById(db, id);
+    expect(photo.path).toBe(join(destDir, "a.jpg"));
   });
 
   it("never overwrites on collision in move mode — suffixes ' (2)'", async () => {

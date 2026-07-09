@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { join, dirname, basename } from "node:path";
+import { volumeRootForPath, upsertVolume } from "./volumes.js";
 
 /**
  * @param {import("better-sqlite3").Database} db
@@ -89,6 +90,53 @@ export function setPhotoRating(db, id, rating) {
 export function setPhotoCover(db, id, isCover) {
   db.prepare(`UPDATE photos SET preferred_cover = ? WHERE id = ?`).run(
     isCover ? 1 : 0,
+    id
+  );
+}
+
+/**
+ * Ensure a `folders` row exists for `absPath`, using the same
+ * insert-or-update shape `upsertScan` uses for the folders table (so a
+ * moved-into directory becomes a normal, browsable scanned folder). Does NOT
+ * touch `photos` rows for that folder — unlike `upsertScan`, which would
+ * mark every other photo in the destination folder stale if called with a
+ * single-file list.
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} absPath
+ * @param {number} volumeId
+ * @returns {number} the folder's id
+ */
+function ensureFolderRow(db, absPath, volumeId) {
+  db.prepare(
+    `INSERT INTO folders (abs_path, volume_id, last_scanned_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(abs_path) DO UPDATE SET
+       volume_id = excluded.volume_id`
+  ).run(absPath, volumeId, Date.now());
+  return db.prepare(`SELECT id FROM folders WHERE abs_path = ?`).get(absPath)
+    .id;
+}
+
+/**
+ * Repoint a photo's index row to a new absolute path after it has been
+ * MOVED on disk (e.g. materialize-with-move into an album folder). Ensures a
+ * `folders` row exists for the destination directory — via the same
+ * folder-upsert shape the scanner uses, so the destination becomes a normal
+ * browsable section — then updates the photo's `folder_id` + `filename` so
+ * `getPhotoById(db, id).path` reflects the new location and the photo is no
+ * longer reported "missing". The source folder row is left untouched.
+ * @param {import("better-sqlite3").Database} db
+ * @param {number} id
+ * @param {string} newAbsPath
+ */
+export function repointPhoto(db, id, newAbsPath) {
+  const dir = dirname(newAbsPath);
+  const filename = basename(newAbsPath);
+  const volumeId = upsertVolume(db, volumeRootForPath(dir));
+  const folderId = ensureFolderRow(db, dir, volumeId);
+  db.prepare(`UPDATE photos SET folder_id = ?, filename = ? WHERE id = ?`).run(
+    folderId,
+    filename,
     id
   );
 }

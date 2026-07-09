@@ -10,6 +10,7 @@ import {
   setPhotoCover,
   deleteFolder,
   resetLibrary,
+  repointPhoto,
 } from "./photos.js";
 
 let cacheDir;
@@ -189,6 +190,44 @@ describe("upsertScan — btime (creation date)", () => {
     ]);
     const row = db.prepare(`SELECT btime FROM photos WHERE filename = 'x.jpg'`).get();
     expect(row.btime).toBe(150);
+  });
+});
+
+describe("repointPhoto", () => {
+  it("moves the photo to a new folder row and updates its filename, leaving the old folder row untouched", () => {
+    const db = getDb();
+    const [row] = upsertScan(db, "/photos/trip", 1, [FILES[0]]);
+
+    repointPhoto(db, row.id, "/photos/album-2026-01-01/a-renamed.jpg");
+
+    const photo = getPhotoById(db, row.id);
+    expect(photo.path).toBe(
+      join("/photos/album-2026-01-01", "a-renamed.jpg")
+    );
+    expect(photo.filename).toBe("a-renamed.jpg");
+
+    const newFolder = db
+      .prepare(`SELECT * FROM folders WHERE abs_path = ?`)
+      .get("/photos/album-2026-01-01");
+    expect(newFolder).toBeDefined();
+
+    const oldFolder = db
+      .prepare(`SELECT * FROM folders WHERE abs_path = ?`)
+      .get("/photos/trip");
+    expect(oldFolder).toBeDefined(); // source folder row is untouched
+  });
+
+  it("reuses an existing folder row for the destination dir instead of duplicating it", () => {
+    const db = getDb();
+    const [a] = upsertScan(db, "/photos/trip", 1, [FILES[0]]);
+    upsertScan(db, "/photos/album", 1, [FILES[1]]); // pre-existing dest folder
+
+    repointPhoto(db, a.id, "/photos/album/a.jpg");
+
+    const count = db
+      .prepare(`SELECT COUNT(*) AS c FROM folders WHERE abs_path = ?`)
+      .get("/photos/album").c;
+    expect(count).toBe(1);
   });
 });
 
