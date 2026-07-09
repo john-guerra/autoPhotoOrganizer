@@ -247,6 +247,25 @@ export async function fetchPhotoCount(filter = null) {
 }
 
 /**
+ * Store the "keep only" working set server-side (any size — the ids go in the
+ * POST body, not a URL param). An empty array clears the scope.
+ * @param {number[]} ids
+ * @returns {Promise<{count:number}>}
+ */
+export async function setScope(ids) {
+  const res = await fetch("/api/scope", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `scope failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
  * Copy the given photos into a new folder on disk (never moves/deletes).
  * @param {number[]} photoIds
  * @param {string} destParent existing parent directory

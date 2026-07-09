@@ -82,4 +82,18 @@ describe("buildFilter", () => {
     expect(f.sql).toBe("photos.rating >= ? AND photos.id IN (?,?)");
     expect(f.params).toEqual([4, 10, 11]);
   });
+
+  it("keepScope emits a table subquery with no params (unbounded size)", () => {
+    const f = buildFilter({ keepScope: true });
+    expect(f.sql).toBe("photos.id IN (SELECT photo_id FROM keep_scope)");
+    expect(f.params).toEqual([]);
+  });
+
+  it("combines a rating filter with keepScope", () => {
+    const f = buildFilter({ minRating: 3, keepScope: true });
+    expect(f.sql).toBe(
+      "photos.rating >= ? AND photos.id IN (SELECT photo_id FROM keep_scope)"
+    );
+    expect(f.params).toEqual([3]);
+  });
 });

@@ -1177,6 +1177,64 @@ describe("POST /api/export", () => {
   });
 });
 
+describe("POST /api/scope + keepScope filter", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+    db.prepare("DELETE FROM keep_scope").run();
+  });
+
+  it("restricts feed/count to the stored scope, any size, no URL cap", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const ids = scanBody.items.map((i) => i.id);
+    // Keep only the first photo.
+    const setRes = await fetch(`${srv.base}/api/scope`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: [ids[0]] }),
+    });
+    expect(setRes.status).toBe(200);
+    expect((await setRes.json()).count).toBe(1);
+
+    const filter = encodeURIComponent(JSON.stringify({ keepScope: true }));
+    const countRes = await fetch(`${srv.base}/api/photos/count?filter=${filter}`);
+    expect((await countRes.json()).count).toBe(1);
+
+    const feedRes = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&after=100&filter=${filter}`
+    );
+    const feed = await feedRes.json();
+    const feedIds = feed.items.filter((i) => i.kind !== undefined).map((i) => i.id);
+    expect(feedIds).toEqual([ids[0]]);
+  });
+
+  it("accepts a scope far larger than the old 5000 cap", async () => {
+    const big = Array.from({ length: 15000 }, (_, i) => i + 1);
+    const res = await fetch(`${srv.base}/api/scope`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: big }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).count).toBe(15000);
+  });
+
+  it("clears the scope on an empty POST", async () => {
+    await fetch(`${srv.base}/api/scope`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: [1, 2, 3] }),
+    });
+    const res = await fetch(`${srv.base}/api/scope`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: [] }),
+    });
+    expect((await res.json()).count).toBe(0);
+  });
+});
+
 describe("GET /api/albums/timeline", () => {
   beforeEach(async () => {
     const db = getDb();

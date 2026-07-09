@@ -50,6 +50,13 @@ export function buildFilter(spec = {}) {
     params.push(...scopeIds);
   }
 
+  // "Keep only" working set stored server-side (server/db/keepScope.js): the
+  // filter carries only a boolean, so the scope can be any size (no URL-length
+  // cap, unlike scopeIds above). Restrict to whatever is in the keep_scope table.
+  if (spec?.keepScope) {
+    clauses.push(`photos.id IN (SELECT photo_id FROM keep_scope)`);
+  }
+
   if (!clauses.length) return { sql: "1=1", params: [] };
   return { sql: clauses.join(" AND "), params };
 }

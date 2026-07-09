@@ -32,6 +32,7 @@
     fetchPhotoCount,
     exportSelection,
     fetchAlbumTimeline,
+    setScope,
   } from "./lib/api.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
@@ -222,7 +223,9 @@
   // the display filter is the no-op default.
   $: displayFilter = {
     ...(filterMode === "select" ? DEFAULT_FILTER : filter),
-    ...(keepIds ? { scopeIds: keepIds } : {}),
+    // keep-only ids live server-side in the keep_scope table (POSTed by
+    // applyKeepOnly); the filter carries only a flag, so the scope is unbounded.
+    ...(keepIds ? { keepScope: true } : {}),
   };
 
   // Three live counts the user asked for: whole library, currently shown
@@ -553,16 +556,20 @@
     }
   }
 
-  /** Enter/replace "keep only" focus on an explicit id set. The set becomes the
-   * working universe every feed/tree/count query agrees on (via scopeIds folded
-   * into displayFilter); the library total keeps showing the real count. */
-  const MAX_KEEP = 5000; // server caps scopeIds here (URL/param length)
-  function applyKeepOnly(ids) {
-    if (ids && ids.length > MAX_KEEP) {
-      error = `Too many to keep-only (${ids.length.toLocaleString()}). Narrow to ${MAX_KEEP.toLocaleString()} or fewer first.`;
+  /** Enter/replace "keep only" focus on an explicit id set. The set is stored
+   * server-side (keep_scope table via setScope) and referenced by displayFilter's
+   * keepScope flag, so it can be any size; the library total keeps showing the
+   * real count. Passing null (or an empty set) leaves keep-only. */
+  async function applyKeepOnly(ids) {
+    const next = ids && ids.length ? [...ids] : null;
+    try {
+      // Push the scope to the server BEFORE any feed/tree/count query reads it.
+      await setScope(next ?? []);
+    } catch (e) {
+      error = e.message;
       return;
     }
-    keepIds = ids && ids.length ? [...ids] : null;
+    keepIds = next;
     countsEpoch++;
     headerCounts = {};
     fetchedParents = new Set();

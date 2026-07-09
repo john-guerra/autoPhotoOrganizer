@@ -45,6 +45,7 @@ import {
 import { getTreeNode, getFlatTree } from "./db/tree.js";
 import { ALLOWED_ORIENTATIONS } from "./db/filters.js";
 import { parseSort } from "./db/sort.js";
+import { setKeepScope } from "./db/keepScope.js";
 
 /**
  * True if `target` is `root` itself or nested anywhere inside it. Same
@@ -176,6 +177,9 @@ function parseFilterParam(req) {
     }
     spec.scopeIds = raw.scopeIds;
   }
+  // "Keep only" working set, referenced by flag; the ids live in the keep_scope
+  // table (set via POST /api/scope), so there is no size cap here.
+  if (raw.keepScope) spec.keepScope = true;
   return { spec };
 }
 
@@ -700,6 +704,18 @@ export function registerApi(app) {
     if (filterError) return res.status(400).json({ error: filterError });
     const db = getDb();
     res.json({ count: photoCountMatchingFilter(db, filter) });
+  });
+
+  // --- "Keep only" working set: store the id list server-side so the filter
+  // only carries a boolean (keepScope), lifting the URL-length cap on its size.
+  app.post("/api/scope", (req, res) => {
+    const ids = req.body?.ids;
+    if (ids !== undefined && !Array.isArray(ids)) {
+      return res.status(400).json({ error: "ids must be an array" });
+    }
+    const db = getDb();
+    const count = setKeepScope(db, ids ?? []);
+    res.json({ count });
   });
 
   // --- Library reset (danger zone: wipes the index, not the photos) --------

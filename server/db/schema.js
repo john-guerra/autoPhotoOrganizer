@@ -60,6 +60,12 @@ CREATE TABLE IF NOT EXISTS photo_tags (
   source TEXT NOT NULL,
   PRIMARY KEY (photo_id, tag_id)
 );
+-- The single active "keep only" working set. Membership is referenced by the
+-- filter's keepScope flag (photos.id IN (SELECT photo_id FROM keep_scope)) so an
+-- arbitrarily large scope never has to travel in a URL query param.
+CREATE TABLE IF NOT EXISTS keep_scope (
+  photo_id INTEGER PRIMARY KEY
+);
 `;
 
 /** @param {import("better-sqlite3").Database} db */
