@@ -711,6 +711,14 @@ describe("/api/feed filter param", () => {
     expect(body.items.length).toBeGreaterThan(0);
     expect(body.items.every((i) => i.id === ratedId)).toBe(true);
   });
+
+  it("treats filter=null as no filter instead of 500", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&filter=null&after=50`
+    );
+    expect(res.status).toBe(200);
+  });
 });
 
 describe("GET /api/feed/boundary", () => {

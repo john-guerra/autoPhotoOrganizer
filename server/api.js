@@ -50,6 +50,7 @@ function parseFilterParam(req) {
   } catch {
     return { spec: {}, error: "filter must be JSON" };
   }
+  if (!raw || typeof raw !== "object") return { spec: {} };
   const spec = {};
   if (raw.minRating !== undefined) {
     const r = Number(raw.minRating);
