@@ -30,10 +30,10 @@ buckets labeled `2002-12`.
 - **Manual entry + brush.** Two native date inputs for exact from/to, kept in
   sync with a d3 `brushX` drag-select over the chart.
 - **Month grouping aggregates across years** (`strftime('%m')` → "December"),
-  labeled with month names. Ordered **DESC to match the other date dimensions**,
-  and — new — the group **order dimension and direction are user-controllable**
-  (see "Group ordering control" below), so month asc-vs-desc becomes a toggle
-  rather than a baked-in choice.
+  labeled with month names. Ordered **DESC by default to match the other date
+  dimensions**; flipping month asc/desc is handled by the separate **feed-sort
+  feature** (its own spec — the sort direction drives the date group dimensions),
+  not baked in here.
 - **Configurable series cap.** The stack's top-N cap is a user-adjustable value
   (like the albums "Max"); everything past it rolls into an **"Others"** band.
 - **Undated photos** (`taken_at` NULL) surface as a **selectable "Unknown"**
@@ -54,15 +54,14 @@ buckets labeled `2002-12`.
    configurable series cap + a selectable "Unknown" (undated) segment.
 4. Redefine the `month` grouping dimension to month-of-year with month-name
    labels.
-5. A **group ordering control** — pick the order dimension (a groupBy dim or
-   `count`) and direction (asc/desc).
 
 ## Non-goals (this slice)
 
 - Not virtualizing or infinite-zooming the timeline; adaptive fixed buckets only.
 - Not a d3 album-boundary timeline (that remains a separate deferred issue).
-- Not multi-level ordering: the order control reorders one (outer) group level,
-  not an independent sort per nested level.
+- **No feed/group sorting here** — that is a separate spec (feed sort). This spec
+  only sets the `month` dimension's *default* direction; the sort feature makes it
+  adjustable.
 
 ---
 
@@ -208,9 +207,9 @@ Redefine the `month` dimension in `server/db/feed.js`:
 ```js
 // was: strftime('%Y-%m', …) → "2002-12"
 month: { expr: "COALESCE(strftime('%m', photos.taken_at/1000,'unixepoch'), '')",
-         direction: "DESC" },  // "01".."12"; matches the other date dims. The
-                               // per-dimension `direction` is now only the
-                               // *default* — overridable at query time (below).
+         direction: "DESC" },  // "01".."12"; matches the other date dims. This
+                               // is only the *default* — the separate feed-sort
+                               // feature can drive date-dimension direction.
 ```
 
 - Full chronological month is still reachable via `groupBy: [year, month]` → 2003
@@ -222,38 +221,10 @@ month: { expr: "COALESCE(strftime('%m', photos.taken_at/1000,'unixepoch'), '')",
   **`formatTreeLabel`** (`server/db/tree.js`) — these are already documented as
   hand-synced twins. `""` still → `"Unknown"`.
 
-### 6. Group ordering control (order dimension + direction)
-
-Today each `DIMENSIONS[dim].direction` is fixed and groups sort by the groupBy
-dimensions in sequence. This adds a UI-controllable **order dimension** and
-**direction**, so (e.g.) months can flip asc/desc, or albums can sort by size
-instead of date, without code changes.
-
-- **Query params** on the feed/tree/fisheye calls: `orderBy` and `orderDir`.
-  - `orderBy` ∈ the active `groupBy` dimensions **or** `count` (photos per
-    group). Absent → today's behavior (each dim's default direction, in groupBy
-    order).
-  - `orderDir` ∈ `asc` | `desc`. Absent → the dimension's default `direction`.
-- **Semantics.** `orderBy` reorders the **outermost** group level (the one that
-  visually reorders the feed); inner levels keep their default order. `count`
-  orders groups by their photo count (needs the count already computed in the
-  grouping query — the tree/fisheye have it; the feed's group seek would compute
-  it per outer group). This is the one piece with real reach into the feed
-  ordering SQL, so it is built and verified on its **own checkpoint** and, if it
-  grows, split into its own plan (it is orthogonal to the timeline viz — they
-  only meet at "month order").
-- **UI.** A small `order by ▾ [dim|count]  ⇅ [asc|desc]` control in the toolbar's
-  organize cluster (near group-by). Persisted in localStorage like other view
-  prefs.
-- **Validation** (`server`): `orderBy` must be one of the current groupBy dims or
-  `count`; `orderDir` ∈ {asc,desc}; otherwise ignored (fall back to defaults) —
-  a display nicety, never a 400.
-
-> Scope note: items 1–5 are the timeline + month feature. Item 6 is a closely
-> related but separable enhancement John asked for in the same breath ("change
-> the order dimension and direction too"). It is speced here for coherence; at
-> planning time it may become a sibling plan if the feed-ordering work is larger
-> than a single checkpoint.
+> **Sorting/order is out of scope here.** Feed sort (a global photo-level sort
+> attribute + direction) and the way it drives date-dimension order live in a
+> **separate spec** (`2026-07-09-feed-sort-design.md`). This spec only sets the
+> `month` default direction; nothing here reorders the feed.
 
 ---
 
@@ -267,9 +238,9 @@ User drags brush / types dates in TimelinePopup   (or clicks the Unknown bar)
       → sparkline + popup re-query histogram (date bounds STRIPPED) and redraw the overlay
 ```
 
-Grouping and ordering are orthogonal to the filter: the redefined `month` expr
-changes how the feed/tree/fisheye bucket + label groups, and `orderBy`/`orderDir`
-change how they sort — neither interacts with `dateFrom`/`dateTo`/`undated`.
+Grouping is orthogonal to the filter: the redefined `month` expr changes how the
+feed/tree/fisheye bucket + label groups — it does not interact with
+`dateFrom`/`dateTo`/`undated`.
 
 ## Error handling
 
@@ -284,7 +255,7 @@ change how they sort — neither interacts with `dateFrom`/`dateTo`/`undated`.
 - Undated-only set → `buckets: []` with `unknown > 0`; the popup shows just the
   Unknown bar.
 - Invalid `maxSeries` (non-integer / out of `[1,100]`) → clamped to the default,
-  not a 400. Invalid `orderBy`/`orderDir` → ignored, defaults used.
+  not a 400.
 - `undated: true` **and** a date range both set → `undated` wins (range ignored),
   as coded in `buildFilter`; the UI never sets both (selecting Unknown clears the
   range and vice-versa).
@@ -301,9 +272,6 @@ change how they sort — neither interacts with `dateFrom`/`dateTo`/`undated`.
   splits into series; **configurable `maxSeries`** + "Others" rollup past the cap
   (and clamp of an out-of-range `maxSeries`); `unknown` counts NULL `taken_at`;
   `bucket=auto` resolves per span; adaptive fallback server-side.
-- Ordering: `orderBy`/`orderDir` reorder the outer group level; `orderBy=count`
-  sorts by group size; invalid values fall back to defaults. (`feed.test.js` /
-  `tree.test.js`)
 - Month-of-year: dimension expr yields "01".."12"; `formatGroupValue` /
   `formatTreeLabel` both map "12"→"December" and ""→"Unknown" (twin-sync guard).
 - `filterSpec.js`: `isActive`/`toQueryParam` round-trip `dateFrom`/`dateTo`/`undated`.
@@ -321,8 +289,6 @@ aren't "done" on a green suite alone):**
   selected state; clicking again (or Clear) restores.
 - Group by `month` alone → month-name headers, all years merged; `[year, month]`
   → chronological.
-- `order by ▾` + direction toggle → the outer group level reorders (by dimension
-  value or by count, asc/desc), verified live in feed + tree.
 
 ---
 
@@ -335,11 +301,8 @@ aren't "done" on a green suite alone):**
    configurable `maxSeries`, "Others", `unknown`) + `histogram.js` pure helpers +
    tests. Verify via `curl`. **Commit.**
 3. Month-of-year dimension + label twins + tests + live-verify grouping. **Commit.**
-4. **Group ordering** (`orderBy`/`orderDir` in feed/tree + toolbar control) +
-   tests + live-verify. Its own checkpoint because it reaches the feed-ordering
-   SQL; promote to a sibling plan if it outgrows one commit. **Commit.**
-5. `TimelineSparkline` in the toolbar (single band, click to open). **Commit.**
-6. `TimelinePopup` (streamgraph + brush + date inputs + stack-by + `Max series` +
+4. `TimelineSparkline` in the toolbar (single band, click to open). **Commit.**
+5. `TimelinePopup` (streamgraph + brush + date inputs + stack-by + `Max series` +
    selectable Unknown) wired to the filter; full live-verify. **Commit.**
 
 Each step builds, tests pass, and a slice works before the next — per the
@@ -347,9 +310,9 @@ project's commit-often checkpoint discipline.
 
 ## Resolved in review
 
-1. **Month order** — **match the other date dims (DESC)**, and the order
-   dimension + direction are made user-configurable (§6) so it is no longer a
-   baked-in choice.
+1. **Month order** — **match the other date dims (DESC)** as the default;
+   asc/desc control moves to the separate feed-sort spec (sort direction drives
+   the date group dimensions), so it is no longer a baked-in choice.
 2. **Series cap** — **configurable** (`maxSeries`, default 20), rest → **"Others"**.
 3. **Unknown** — a **selectable** segment: visible, and clicking it filters to the
    undated photos (`filter.undated`).
@@ -358,7 +321,6 @@ project's commit-often checkpoint discipline.
 
 - d3 album-boundary timeline (existing separate ask).
 - Timeline zoom / drill from year→month→day by clicking a bucket.
-- Independent sort per nested group level (this slice orders one outer level).
 - **Migrate the whole app to Svelte 5 runes** (`$state`/`$derived`/`$props`,
   callback props). One-pass migration via `svelte-migrate`, then live-verify —
   its own issue, decided after this feature lands.
