@@ -19,17 +19,14 @@ function dayLeaves(spec) {
 const GB = ["year", "month", "day"];
 
 describe("doiWeight", () => {
-  it("is flat (=1) inside the vicinity and decays outside it", () => {
+  it("peaks at the focus and decays smoothly and symmetrically", () => {
     const p = FISHEYE_DEFAULTS;
     expect(doiWeight(0, p)).toBe(1);
-    expect(doiWeight(p.vicinity, p)).toBe(1);
-    expect(doiWeight(p.vicinity + 1, p)).toBeLessThan(1);
-    // monotonic decay further out
+    expect(doiWeight(1, p)).toBeLessThan(1); // no flat plateau
+    expect(doiWeight(2, p)).toBeLessThan(doiWeight(1, p));
     expect(doiWeight(20, p)).toBeLessThan(doiWeight(10, p));
-    // symmetric
-    expect(doiWeight(-8, p)).toBeCloseTo(doiWeight(8, p));
-    // always positive
-    expect(doiWeight(10000, p)).toBeGreaterThan(0);
+    expect(doiWeight(-8, p)).toBeCloseTo(doiWeight(8, p)); // symmetric
+    expect(doiWeight(10000, p)).toBeGreaterThan(0); // always positive
   });
 });
 
@@ -123,13 +120,13 @@ describe("layoutFisheye", () => {
     }
   });
 
-  it("gives near-focus rows more thickness than far context rows", () => {
+  it("makes the focus row the single tallest (a lens peak)", () => {
     const { rows } = layoutFisheye(leaves, GB, { height: 600, focusI: 60 });
-    const nearRow = rows.find((r) => r.i === 60);
-    const farRow = rows.reduce((a, b) =>
-      Math.abs(b.i - 60) > Math.abs(a.i - 60) ? b : a
-    );
-    expect(nearRow.thickness).toBeGreaterThan(farRow.thickness);
+    const focusRow = rows.find((r) => r.i === 60);
+    expect(focusRow).toBeTruthy();
+    for (const r of rows) {
+      if (r.i !== 60) expect(r.thickness).toBeLessThanOrEqual(focusRow.thickness);
+    }
   });
 
   it("works at both edges without error", () => {

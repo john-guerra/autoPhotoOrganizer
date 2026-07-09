@@ -24,22 +24,20 @@ import { scaleLinear } from "d3";
  * checkpointWeight: minimum weight floor so year/month bands never vanish.
  * minRowPx: target min row height → bounds how many rows we sample. */
 export const FISHEYE_DEFAULTS = {
-  vicinity: 4,
-  falloff: 6,
-  distortion: 1,
-  checkpointWeight: 0.5,
-  minRowPx: 15,
+  vicinity: 4, // ± leaves force-kept & kept readable around the focus
+  distortion: 1.8, // higher = sharper lens peak
+  checkpointWeight: 0.4, // floor so year/month bands stay visible
+  minRowPx: 14, // target min row height → bounds how many rows we sample
 };
 
 /**
- * Degree-of-interest weight for a leaf `dist` leaves away from the focus.
- * Flat (=1) inside the near zone, smooth lens decay outside it.
+ * Smooth fisheye lens weight: 1 at the focus, decaying with distance so row
+ * heights form a *visible gradient* (the lens). No flat plateau — the focus is
+ * always the single tallest row, and its neighbours step down smoothly.
  * @returns {number} in (0, 1]
  */
-export function doiWeight(dist, { vicinity, falloff, distortion } = FISHEYE_DEFAULTS) {
-  const a = Math.abs(dist);
-  if (a <= vicinity) return 1;
-  const d = (a - vicinity) / falloff;
+export function doiWeight(dist, { vicinity, distortion } = FISHEYE_DEFAULTS) {
+  const d = dist / Math.max(1e-6, vicinity);
   return 1 / (1 + distortion * d * d);
 }
 

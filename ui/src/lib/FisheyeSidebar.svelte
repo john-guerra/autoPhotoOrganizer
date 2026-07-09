@@ -1,12 +1,11 @@
 <script>
   // Fisheye / focus+context library navigator. A single fixed-height column
   // over the FINEST grouping level of `groupBy`, magnifying where you are
-  // (currentPath, from the feed) and where you point (hover), with outer-level
-  // checkpoint bands (year/month) to leap without scrolling. Distortion math
-  // lives in the pure, tested lib/fisheye.js; this component is just the view +
-  // interaction. Inspired by PhotoRing's navigationList.js.
+  // (currentPath, from the feed) — the lens follows the feed as you scroll —
+  // with outer-level checkpoint bands (year/month) to leap without scrolling.
+  // Distortion math lives in the pure, tested lib/fisheye.js; this component is
+  // just the view + interaction. Inspired by PhotoRing's navigationList.js.
   import { createEventDispatcher } from "svelte";
-  import { pointer } from "d3";
   import { fetchFlatTree } from "./api.js";
   import { layoutFisheye, makeBarScale } from "./fisheye.js";
   import { shortLeafLabel } from "./labels.js";
@@ -16,13 +15,13 @@
 
   const dispatch = createEventDispatcher();
   const LABEL_MIN_PX = 9; // hide ordinary labels on slivers this thin
+  const TRACK_X = 14; // left inset of the row track (clears the current-dot gutter)
+  const TRACK_W = 210; // row track width; count fill spans 0..TRACK_W
 
   let leaves = [];
   let total = 0;
   let loadError = "";
   let height = 0; // measured column height
-  let svgEl;
-  let hoverI = null; // transient focus under the mouse
   let epoch = 0;
 
   $: finestDim = groupBy[groupBy.length - 1];
@@ -38,7 +37,6 @@
       if (mine !== epoch) return; // superseded by a newer groupBy
       leaves = res.leaves;
       total = res.total;
-      hoverI = null;
     } catch (e) {
       if (mine !== epoch) return;
       leaves = [];
@@ -62,32 +60,14 @@
     return idx === -1 ? prev : idx;
   }
 
-  // Focus drives the distortion: the hover wins while pointing, else "you are here".
-  $: focusI = hoverI ?? currentI;
+  // The lens focus is the current feed position — it follows the feed as you
+  // scroll and never reflows on hover, so every checkpoint stays a stable,
+  // clickable target.
   $: layout =
     leaves.length && height
-      ? layoutFisheye(leaves, groupBy, { height, focusI })
+      ? layoutFisheye(leaves, groupBy, { height, focusI: currentI })
       : { rows: [], maxBinCount: 0 };
-  $: barScale = makeBarScale(layout.maxBinCount, 120);
-
-  function onMove(event) {
-    if (!svgEl || !layout.rows.length) return;
-    const my = pointer(event, svgEl)[1];
-    // Snap focus to the rendered row nearest the pointer.
-    let best = null;
-    let bestDist = Infinity;
-    for (const r of layout.rows) {
-      const d = Math.abs(r.y - my);
-      if (d < bestDist) {
-        bestDist = d;
-        best = r.i;
-      }
-    }
-    hoverI = best;
-  }
-  function onLeave() {
-    hoverI = null; // snap back to the current position
-  }
+  $: barScale = makeBarScale(layout.maxBinCount, TRACK_W);
 
   function leafPath(row) {
     return groupBy.map((d) => ({ dimension: d, value: row.values[d] }));
@@ -130,18 +110,16 @@
   {:else}
     <div class="fisheye-stage" bind:clientHeight={height}>
       <svg
-        bind:this={svgEl}
         class="fisheye-svg"
         width="100%"
         {height}
-      on:mousemove={onMove}
-      on:mouseleave={onLeave}
-      role="listbox"
-      tabindex="-1"
-    >
+        role="listbox"
+        tabindex="-1"
+      >
       {#each layout.rows as row, j (row.i)}
         {@const isCurrent = row.i === currentI}
         {@const isChk = row.checkpointDepth != null}
+        {@const h = Math.max(1, row.thickness - 1.2)}
         {@const showLabel = isChk || isCurrent || row.thickness >= LABEL_MIN_PX}
         <g
           class="row"
@@ -152,22 +130,22 @@
           role="option"
           aria-selected={isCurrent}
         >
-          <!-- full-width hit target -->
-          <rect class="hit" x="0" y={-row.thickness / 2} width="100%" height={row.thickness} />
-          <!-- count-weighted bar (histogram silhouette) -->
+          <!-- row band: HEIGHT encodes the fisheye lens (tall at focus) -->
+          <rect class="band" x={TRACK_X} y={-h / 2} width={TRACK_W} height={h} rx="2" />
+          <!-- count fill: LENGTH encodes photo mass (histogram silhouette) -->
           <rect
-            class="bar"
-            x="18"
-            y={-Math.max(1, row.thickness - 1.5) / 2}
+            class="count"
+            x={TRACK_X}
+            y={-h / 2}
             width={barScale(row.binCount)}
-            height={Math.max(1, row.thickness - 1.5)}
-            rx="1.5"
+            height={h}
+            rx="2"
           />
           {#if isCurrent}
-            <circle class="dot" cx="8" cy="0" r="4.5" />
+            <circle class="dot" cx="7" cy="0" r="4" />
           {/if}
           {#if showLabel}
-            <text class="lab" x={22 + barScale(row.binCount)} y="0">
+            <text class="lab" x={TRACK_X + 6} y="0">
               {rowLabel(row, layout.rows[j - 1])}
             </text>
           {/if}
@@ -223,29 +201,38 @@
   .row {
     cursor: pointer;
   }
-  .hit {
-    fill: transparent;
+  .band {
+    fill: #1d1d1d;
   }
-  .bar {
-    fill: #3a3a3a;
+  .row:hover .band {
+    fill: #262626;
   }
-  .row:hover .bar {
-    fill: #4a4a4a;
+  .count {
+    fill: #35506b;
+  }
+  .row:hover .count {
+    fill: #3d5c7c;
   }
   .lab {
-    fill: #b8b8b8;
+    fill: #cfcfcf;
     dominant-baseline: middle;
     pointer-events: none;
   }
-  .row.checkpoint .bar {
-    fill: #4a3a18;
+  .row.checkpoint .band {
+    fill: #2a2010;
+  }
+  .row.checkpoint .count {
+    fill: #6b5320;
   }
   .row.checkpoint .lab {
-    fill: #e0a94c;
+    fill: #f0c065;
     font-weight: 700;
   }
-  .row.current .bar {
-    fill: #1e4a72;
+  .row.current .band {
+    fill: #143a5e;
+  }
+  .row.current .count {
+    fill: #2f6aa8;
   }
   .row.current .lab {
     fill: #fff;
