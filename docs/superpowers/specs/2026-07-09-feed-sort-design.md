@@ -31,10 +31,13 @@ this spec is what makes date order adjustable.)
   `taken_at` (EXIF) but **not** file creation time. Add a `btime` column, captured
   from the *same* `stat()` the scanner already calls (`st.birthtimeMs` — free, no
   extra I/O), backfilled on the next rescan.
-- **Group sorting (v1):** only the **trivial case** — when the sort attribute is
-  *also* a group dimension (sort by date while grouped by year/month/day), the
-  date group dimensions follow the sort direction. Ordering groups by an aggregate
-  of a *non-grouped* attribute (folders by newest photo / by count) is deferred.
+- **Grouping follows the sort's date source.** The year/month/day dimensions
+  re-derive their *column* (taken / created / modified) and *direction* from the
+  current date sort, so buckets, group order, photo order, and the sidebar all
+  agree on one date. Non-date sorts leave the date dims at their default
+  (taken, DESC) and only reorder photos within groups. Ordering groups by an
+  aggregate of a *non-grouped* attribute (folders by newest photo / by count) is
+  deferred.
 
 ## Goals
 
@@ -43,10 +46,10 @@ this spec is what makes date order adjustable.)
 2. Sortable attributes: **date_taken, date_created, date_modified, rating, size,
    name**, each asc/desc.
 3. A toolbar **sort control** (attribute + direction), persisted.
-4. **Date-sort ↔ date-dimension coupling:** when sorting by date, the year/month/
-   day group dimensions (in the feed *and* the tree/fisheye sidebars) follow the
-   sort direction, so groups and photos agree — this is how month asc/desc becomes
-   a toggle.
+4. **Date-sort ↔ date-dimension coupling:** the year/month/day group dimensions
+   (feed *and* tree/fisheye sidebars) re-derive their date **column and direction**
+   from the current date sort — so grouping by month while sorting by creation date
+   buckets by *creation* month, and month asc/desc is just the sort direction.
 
 ## Non-goals (this slice)
 
@@ -55,9 +58,9 @@ this spec is what makes date order adjustable.)
 - Random / shuffle sort — deferred; true random breaks keyset pagination unless
   seeded, which is separate work.
 - Camera / orientation / megapixels sort attributes — not in the v1 set.
-- Making the **date filter / grouping / albums** honor the taken-vs-created-vs-
-  modified choice — v1 gives the choice only to *sort*; those keep using `taken_at`
-  (see Open Questions).
+- Making the **date filter / timeline / albums** honor the taken-vs-created-vs-
+  modified choice — grouping *does* follow the sort's date source (§3), but the
+  filter/timeline/albums keep using `taken_at` in v1.
 - Independent sort per nested group level.
 
 ---
@@ -138,35 +141,61 @@ sort. No change.
 
 ### 3. Date-sort ↔ date-dimension direction coupling
 
-The one place sort touches *group* order. A helper:
+**The date group dimensions use the same date source as the sort** (John: "the
+group-by time attributes should match the sorting one used"). So year/month/day
+are not hardwired to `taken_at` — they re-derive their column *and* direction from
+the current date sort.
 
 ```js
-// The year/month/day dimensions derive from taken_at, so only the EXIF/taken
-// sort corresponds to them. date_created / date_modified sort *within* groups
-// but do not reorder the (taken_at-based) date groups.
-const SORT_DIM_FAMILY = { date_taken: ["year", "month", "day"] };
+// One place defines each date source's SQL expr; the three date sort attributes
+// and the date group dimensions both read from it.
+export const DATE_SOURCES = {
+  date_taken:    "COALESCE(photos.taken_at, photos.mtime)",
+  date_created:  "COALESCE(photos.btime, photos.mtime)",
+  date_modified: "photos.mtime",
+};
 
-/** Return dims with directions overridden to follow the sort, where they correspond. */
+// The effective date source for grouping = the sort's source when sorting by a
+// date, else the default (taken). year/month/day exprs are built from it.
+function effectiveDateSource(sort) {
+  return DATE_SOURCES[sort?.by] ?? DATE_SOURCES.date_taken;
+}
+function dateDimExpr(unit, srcExpr) {
+  const fmt = { year: "%Y", month: "%m", day: "%Y-%m-%d" }[unit]; // month = month-of-year (timeline spec)
+  return `COALESCE(strftime('${fmt}', (${srcExpr}) / 1000, 'unixepoch'), '')`;
+}
+
+/** Rebuild the date dims' expr (which date column) + direction (asc/desc) from the sort. */
 export function applySortToDims(dims, sort) {
-  const family = SORT_DIM_FAMILY[sort?.by];
-  if (!family) return dims;
+  const src = effectiveDateSource(sort);
+  const dateDir = DATE_SOURCES[sort?.by] ? sort.dir.toUpperCase() : "DESC";
   return dims.map((d) =>
-    family.includes(d.name) ? { ...d, direction: sort.dir.toUpperCase() } : d
+    ["year", "month", "day"].includes(d.name)
+      ? { ...d, expr: dateDimExpr(d.name, src), direction: dateDir }
+      : d
   );
 }
 ```
 
-Applied **wherever group order is resolved**, so groups and photos agree
-everywhere:
+Applied **wherever group order is resolved**, so the buckets, their order, the
+photo order, and the sidebar all agree on one date notion:
 
 - `getFeedPage` and `findGroupBoundary` (feed.js) — feed + next/prev-group nav.
 - `getTreeNode` and `getFlatTree` (`server/db/tree.js`) — the tree sidebar and the
-  fisheye navigator, so the sidebar's month order matches the feed.
+  fisheye navigator.
 
-So: group by `month`, sort `date_taken` ascending → the sidebar and the feed both
-read January → December. The other attributes (date_created, date_modified,
-rating, size, name) have no dimension family, so they only sort *within* leaf
-groups (and the flat feed) — groups keep their default order.
+So: group by `month`, sort `date_created` ascending → both the sidebar and the
+feed bucket photos by **creation** month and read January → December. Switch the
+sort to `date_modified` desc → the same groups re-form by modified date, newest
+first. Non-date sorts (rating, size, name) leave the date dims at their default
+(taken, DESC) and only reorder photos *within* leaf groups.
+
+> **Composes with the timeline spec.** That spec redefines `month` as month-of-
+> year (`strftime('%m', …)`); here the `…` becomes `effectiveDateSource(sort)`
+> instead of a hardcoded `taken_at`. Whichever lands second wires the date-source
+> into the same `year/month/day` exprs — they are the single seam both specs
+> touch. The **date filter/timeline still queries `taken_at`** (its own spec); a
+> future unification of the filter's date source is noted there.
 
 ### 4. Server: parse & validate
 
@@ -221,11 +250,12 @@ Filter and grouping are orthogonal: sort changes only *order*, never *membership
   leaves group order unchanged but reorders within; `before`/`after` paging around
   a focus is stable and gap-free under a non-default sort; NULL attributes land
   predictably.
-- `applySortToDims` (`feed.test.js`): `date_taken` sort overrides year/month/day
-  direction; `date_created`/`date_modified`/non-date sort is a no-op; unknown `by`
-  is a no-op.
-- Coupling reaches the tree: `getFlatTree`/`getTreeNode` month order flips with
-  `date_taken` `dir` (`tree.test.js`).
+- `applySortToDims` (`feed.test.js`): each date sort rewrites year/month/day to
+  its source column (taken/created/modified) + direction; a non-date sort leaves
+  them at the default (taken, DESC); unknown `by` → default. A photo whose
+  created-month ≠ taken-month lands in the expected bucket per the active sort.
+- Coupling reaches the tree: `getFlatTree`/`getTreeNode` bucket + order by the
+  sort's date source (`tree.test.js`).
 - Param parse (`api.test.js`): `sort=rating:asc` honored; garbage → date_taken:desc.
 - `btime` capture + backfill: a scan writes `btime`; a rescan of an existing
   folder backfills a previously-NULL `btime`; `date_created` falls back to `mtime`
@@ -238,6 +268,8 @@ Filter and grouping are orthogonal: sort changes only *order*, never *membership
   order unchanged.
 - Group by month, sort `date_taken` asc vs desc → **both the month headers and the
   sidebar** flip Jan↔Dec; the feed photos within follow.
+- Group by month, switch sort taken → created → modified → the buckets re-form by
+  that date source (a photo copied/edited in a different month moves groups).
 - Sort persists across reload; seek/focus (arrow nav, group jump) stays correct.
 
 ---
@@ -256,20 +288,18 @@ Filter and grouping are orthogonal: sort changes only *order*, never *membership
 
 Each step builds, tests pass, and a slice works before the next.
 
-## Open questions (confirm during spec review)
+## Resolved in review
 
-1. **Default sort = `date_taken:desc`.** This changes within-*folder* (and any
-   non-date group) order from today's scan-order (`id`) to date-descending.
-   Intended, or keep `id` as the default and only sort when the user picks one?
-2. **Date-source choice is sort-only in v1.** The date *filter* (timeline),
-   *grouping* (year/month/day), and *albums* keep using `taken_at`. Want any of
-   those to also honor taken/created/modified later, or is sort-only right?
-3. **Date fallbacks.** `date_taken`/`date_created` fall back to `mtime` when
-   EXIF/creation is missing (keeps them non-null and deterministic). Prefer that,
-   or sort missing values strictly last?
-
-_Resolved in review: "mbs" = megabytes → covered by `size` (bytes; identical
-ordering), megapixels dropped. Name sort is case-insensitive (`COLLATE NOCASE`)._
+1. **Default sort = `date_taken:desc`** — confirmed. Within-folder (and any
+   non-date group) order changes from today's scan-order (`id`) to date-desc.
+2. **Grouping follows the sort's date source** — confirmed. The year/month/day
+   dimensions re-derive their column from the current date sort (§3); the date
+   *filter/timeline* and *albums* still use `taken_at` (a future unification is
+   noted in the timeline spec).
+3. **Date fallbacks to `mtime`** — confirmed. `date_taken`/`date_created` fall
+   back to `mtime` when EXIF/creation is missing (non-null, deterministic).
+4. **"mbs" = megabytes** → covered by `size` (bytes; identical ordering);
+   megapixels dropped. **Name sort case-insensitive** (`COLLATE NOCASE`).
 
 ## Deferred / follow-up issues (not built here)
 
