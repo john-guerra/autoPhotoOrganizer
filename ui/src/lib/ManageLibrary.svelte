@@ -6,6 +6,7 @@
     fetchCacheBreakdown,
     clearCache,
     pruneCache,
+    resetLibrary,
   } from "./api.js";
 
   export let library = [];
@@ -17,6 +18,9 @@
   let breakdownLoading = false;
   let busy = false;
   let message = "";
+  // Danger zone: typing this exact word arms the full-reset button.
+  const RESET_WORD = "DELETE";
+  let resetConfirm = "";
 
   function formatBytes(n) {
     if (n < 1024) return `${n} B`;
@@ -76,6 +80,21 @@
       message = `Pruned ${result.freedFiles} orphaned file(s), freed ${formatBytes(result.freedBytes)}.`;
       breakdown = null;
       await loadStats();
+    } catch (e) {
+      message = e.message;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function doResetLibrary() {
+    if (resetConfirm !== RESET_WORD) return;
+    busy = true;
+    try {
+      const result = await resetLibrary();
+      message = `Library reset — removed ${result.folders} folder(s), ${result.photos} photo(s), and cleared the thumbnail cache. Photos on disk are untouched.`;
+      resetConfirm = "";
+      dispatch("libraryReset", result);
     } catch (e) {
       message = e.message;
     } finally {
@@ -145,6 +164,35 @@
           </ul>
         {/if}
       {/if}
+    </section>
+
+    <section class="danger">
+      <h3>Danger zone</h3>
+      <p class="danger-warn">
+        Resetting wipes the entire index — <strong
+          >every rating and cover choice</strong
+        >
+        and the thumbnail cache. Your photos on disk are never touched, but the
+        ratings live only here and cannot be recovered. Type
+        <code>{RESET_WORD}</code> to confirm.
+      </p>
+      <div class="danger-actions">
+        <input
+          class="reset-confirm"
+          type="text"
+          placeholder={RESET_WORD}
+          bind:value={resetConfirm}
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <button
+          class="reset-btn"
+          disabled={busy || resetConfirm !== RESET_WORD}
+          on:click={doResetLibrary}
+        >
+          Reset library
+        </button>
+      </div>
     </section>
   </div>
 </div>
@@ -261,5 +309,57 @@
   .breakdown-list li span:last-child {
     font-size: 0.8rem;
     color: #aaa;
+  }
+  .danger {
+    border: 1px solid #5a2020;
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    margin-top: 1rem;
+    background: #1a0f0f;
+  }
+  .danger h3 {
+    color: #ff8a80;
+  }
+  .danger-warn {
+    font-size: 0.8rem;
+    color: #c9a3a3;
+    line-height: 1.4;
+  }
+  .danger-warn code {
+    background: #2a1414;
+    padding: 0 4px;
+    border-radius: 3px;
+    color: #ff8a80;
+  }
+  .danger-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  .reset-confirm {
+    flex: 1;
+    background: #101010;
+    border: 1px solid #5a2020;
+    border-radius: 4px;
+    color: inherit;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.85rem;
+  }
+  .reset-btn {
+    background: #7a1f1f;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 0.3rem 0.8rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .reset-btn:hover:not(:disabled) {
+    background: #a02828;
+  }
+  .reset-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 </style>

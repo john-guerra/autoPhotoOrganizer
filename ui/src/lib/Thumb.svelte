@@ -18,6 +18,7 @@
   export let pad = 0; // grid frame inset (abs children ignore CSS padding)
   export let size = 640; // thumb longest edge; higher zoom requests sharper
   export let selected = false;
+  export let inSelection = false; // member of the multi-select set (batch export)
   export let stackCount = undefined; // set when this tile is a collapsed stack's cover
   export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
   export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
@@ -166,11 +167,15 @@
     bind:this={el}
     class="thumb"
     class:selected
+    class:in-selection={inSelection}
     data-id={item.id}
     title={item.name}
     style={stackMarginPx ? `inset: 0 ${stackMarginPx}px;` : ""}
     on:click
   >
+    {#if inSelection}
+      <span class="select-check" title="Selected" aria-hidden="true">✓</span>
+    {/if}
     {#if src && previewSrc && !loaded}
       <img
         src={previewSrc}
@@ -259,6 +264,31 @@
   .thumb.selected {
     border-color: #4c9aff;
     box-shadow: 0 0 0 2px rgba(76, 154, 255, 0.35);
+  }
+  /* Multi-select membership: a gold ring, distinct from the blue focus
+     border so the two can coexist on the same tile. */
+  .thumb.in-selection {
+    border-color: #ffd24c;
+  }
+  .thumb.selected.in-selection {
+    box-shadow: 0 0 0 2px rgba(255, 210, 76, 0.5);
+  }
+  .select-check {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    z-index: 100;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffd24c;
+    color: #1a1400;
+    border-radius: 50%;
+    font-size: 0.72rem;
+    font-weight: 700;
+    pointer-events: none;
   }
   img.cover,
   .stack-peek {

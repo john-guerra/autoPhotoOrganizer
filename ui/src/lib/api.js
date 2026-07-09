@@ -204,6 +204,78 @@ export async function fetchTreeNode({ groupBy, path = [], filter = null }) {
 }
 
 /**
+ * Ids of all non-stale photos matching a filter (for "filter → selection").
+ * @param {{minRating?:number, orientations?:string[]}|null} [filter=null]
+ * @returns {Promise<number[]>}
+ */
+export async function fetchPhotoIds(filter = null) {
+  const params = new URLSearchParams();
+  const fp = filter ? toQueryParam(filter) : null;
+  if (fp) params.set("filter", fp);
+  const res = await fetch(`/api/photos/ids?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `photo ids failed (${res.status})`);
+  }
+  return (await res.json()).ids;
+}
+
+/**
+ * COUNT of matching photos. Empty filter ⇒ library total; a filter ⇒ "showing".
+ * @param {{minRating?:number, orientations?:string[]}|null} [filter=null]
+ * @returns {Promise<number>}
+ */
+export async function fetchPhotoCount(filter = null) {
+  const params = new URLSearchParams();
+  const fp = filter ? toQueryParam(filter) : null;
+  if (fp) params.set("filter", fp);
+  const res = await fetch(`/api/photos/count?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `photo count failed (${res.status})`);
+  }
+  return (await res.json()).count;
+}
+
+/**
+ * Copy the given photos into a new folder on disk (never moves/deletes).
+ * @param {number[]} photoIds
+ * @param {string} destParent existing parent directory
+ * @param {string} folderName new subfolder to create inside destParent
+ * @returns {Promise<{target:string, copied:number, skipped:number}>}
+ */
+export async function exportSelection(photoIds, destParent, folderName) {
+  const res = await fetch("/api/export", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ photoIds, destParent, folderName }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `export failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Danger zone: wipe the entire index + thumbnail cache. Requires the literal
+ * confirmation string "DELETE". Source photos on disk are never touched.
+ * @returns {Promise<{folders:number, photos:number, cacheFreedFiles:number, cacheFreedBytes:number}>}
+ */
+export async function resetLibrary() {
+  const res = await fetch("/api/library/reset", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirm: "DELETE" }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `reset failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
  * @param {string[]} groupBy
  * @param {{minRating?:number, orientations?:string[]}|null} [filter=null]
  * @returns {Promise<{total:number, leaves: Array<{values: Record<string,string>, count:number}>}>}

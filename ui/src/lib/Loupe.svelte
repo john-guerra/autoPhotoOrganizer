@@ -4,6 +4,8 @@
 
   export let items;
   export let index; // current position in items
+  export let inSelection = false; // is the current photo in the selection?
+  export let selectedCount = 0; // total selected, for the HUD
 
   // `items` is App.svelte's resolvedPhotos — 1:1 with displayEntries so
   // positional indexing lines up elsewhere, which means a collapsed
@@ -52,7 +54,15 @@
       <span class="name">{item?.name ?? ""}</span>
       <span class="count">{index + 1} of {items.length}</span>
     </div>
-    <Stars rating={item?.rating ?? 0} full />
+    <div class="right">
+      <span class="select-state" class:on={inSelection} title="Press X to select">
+        {inSelection ? "✓ Selected" : "Press X to select"}
+      </span>
+      {#if selectedCount > 0}
+        <span class="select-total">{selectedCount} selected</span>
+      {/if}
+      <Stars rating={item?.rating ?? 0} full />
+    </div>
   </div>
 </div>
 
@@ -104,5 +114,27 @@
   }
   .count {
     color: #888;
+  }
+  .right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .select-state {
+    font-size: 0.8rem;
+    color: #777;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 3px 8px;
+  }
+  .select-state.on {
+    color: #1a1400;
+    background: #ffd24c;
+    border-color: #ffd24c;
+    font-weight: 600;
+  }
+  .select-total {
+    font-size: 0.8rem;
+    color: #ffd24c;
   }
 </style>

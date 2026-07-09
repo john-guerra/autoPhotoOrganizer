@@ -28,6 +28,9 @@
     fetchMeta,
     fetchLibrary,
     scan as apiScan,
+    fetchPhotoIds,
+    fetchPhotoCount,
+    exportSelection,
   } from "./lib/api.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
@@ -129,6 +132,56 @@
     return { ...DEFAULT_FILTER };
   })();
   $: localStorage.setItem(LS_FILTER, JSON.stringify(filter));
+
+  // --- Selection (multi-select for batch export) --------------------------
+  // A persistent Set of photo ids the user has picked. Culling a trip is a
+  // long, expensive process, so the selection survives reloads/quits via
+  // localStorage (like `filter` above). Ids are stable DB row ids, valid
+  // across rescans of the same folder; ids that later vanish (folder removed)
+  // are simply skipped by export server-side, so no pruning is needed here.
+  const LS_SELECTION = "autogallery.selection";
+  let selectedIds = new Set(
+    (() => {
+      try {
+        const stored = JSON.parse(localStorage.getItem(LS_SELECTION) ?? "null");
+        if (Array.isArray(stored))
+          return stored.filter((n) => Number.isInteger(n));
+      } catch {
+        /* fall through to empty */
+      }
+      return [];
+    })()
+  );
+  $: localStorage.setItem(LS_SELECTION, JSON.stringify([...selectedIds]));
+  // Stash of the last cleared selection, so Clear is undoable (persists until
+  // used or the next clear replaces it — no timed toast, per project taste).
+  let lastClearedSelection = null;
+
+  // Filter mode: does the rating/orientation filter narrow what's DISPLAYED
+  // (classic), or drive the SELECTION (the grid then shows everything and the
+  // matching photos join the selection)? A persisted toggle.
+  const LS_FILTER_MODE = "autogallery.filterMode";
+  let filterMode =
+    localStorage.getItem(LS_FILTER_MODE) === "select" ? "select" : "display";
+  $: localStorage.setItem(LS_FILTER_MODE, filterMode);
+  // What the feed/tree/counts actually filter by. In "select" mode the grid
+  // is deliberately NOT narrowed — the filter only feeds the selection — so
+  // the display filter is the no-op default.
+  $: displayFilter = filterMode === "select" ? { ...DEFAULT_FILTER } : filter;
+
+  // Three live counts the user asked for: whole library, currently shown
+  // (under displayFilter), and selected. selectedCount is reactive off the Set.
+  let libraryTotal = 0;
+  let showingCount = 0;
+  $: selectedCount = selectedIds.size;
+
+  // Export popover state (mirrors the add-folder popover).
+  const LS_EXPORT_DEST = "autogallery.exportDest";
+  let exportOpen = false;
+  let exportDest = localStorage.getItem(LS_EXPORT_DEST) || "";
+  let exportName = defaultExportName();
+  let exporting = false;
+  let exportResult = null;
 
   // Sidebar view: classic "tree" or focus+context "fisheye" (toggle, persisted).
   const LS_SIDEBAR_MODE = "autogallery.sidebarMode";
@@ -242,6 +295,7 @@
   onMount(() => {
     refreshLibrary();
     loadInitialFeed();
+    refreshCounts();
   });
 
   async function loadInitialFeed() {
@@ -270,7 +324,7 @@
         groupBy,
         collapsed: collapsedPaths,
         after: PAGE_SIZE,
-        filter,
+        filter: displayFilter,
       });
       if (epoch !== feedEpoch) return;
       const merged = mergeFeedPage(
@@ -320,14 +374,14 @@
     fetchingAfter = true;
     try {
       const { items: beforePage } = focusId
-        ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0, filter })
+        ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0, filter: displayFilter })
         : { items: [] };
       const { items: afterPage, focusItem } = await fetchFeed({
         groupBy,
         focusId,
         before: 0,
         after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
-        filter,
+        filter: displayFilter,
       });
       if (epoch !== feedEpoch) return;
       const combined = focusId
@@ -362,20 +416,174 @@
     }
   }
 
-  /** Apply a new filter spec: the header-count cache is now stale (same paths,
-   * different counts), so invalidate it, then rebuild the feed centered on the
-   * current selection via onGroupByChange's existing guarded loader (reused
-   * deliberately rather than duplicating its fetchingBefore/After/feedEpoch
-   * guard — see CLAUDE.md's "no 7th copy" rule). Side effect: onGroupByChange
-   * also clears collapsedPaths, so applying a filter un-collapses any folded
-   * sections — intended, since a filter can shrink or empty a collapsed group. */
+  /** Apply a new filter spec. In "display" mode this narrows the grid: the
+   * header-count cache is now stale (same paths, different counts), so
+   * invalidate it, then rebuild the feed centered on the current selection via
+   * onGroupByChange's existing guarded loader (reused deliberately rather than
+   * duplicating its fetchingBefore/After/feedEpoch guard — see CLAUDE.md's "no
+   * 7th copy" rule). In "select" mode the grid is NOT narrowed (displayFilter
+   * stays default), so the feed is untouched — instead the matching photos are
+   * unioned into the selection. */
   function onFilterChange(next) {
     filter = next;
+    if (filterMode === "select") {
+      // The grid already shows everything; just grow the selection to match.
+      if (filterIsActive(next)) selectMatching(next);
+      refreshCounts();
+      return;
+    }
     countsEpoch++;
     headerCounts = {};
     fetchedParents = new Set();
     inFlightParents = new Set();
     onGroupByChange(groupBy);
+    refreshCounts();
+  }
+
+  /** Toggle the Display/Select filter mode. Switching flips displayFilter, so
+   * the feed content changes (narrowed ⇄ full) — rebuild it like a filter
+   * change. Entering select mode with an active filter immediately selects the
+   * matches, so "flip to Select" turns the current filter into a selection. */
+  function onFilterModeChange(mode) {
+    if (mode === filterMode) return;
+    filterMode = mode;
+    countsEpoch++;
+    headerCounts = {};
+    fetchedParents = new Set();
+    inFlightParents = new Set();
+    onGroupByChange(groupBy);
+    refreshCounts();
+    if (mode === "select" && filterIsActive(filter)) selectMatching(filter);
+  }
+
+  /** Union every photo matching `spec` into the selection (never removes — so
+   * lowering a star threshold or manual picks accumulate rather than fight). */
+  async function selectMatching(spec) {
+    try {
+      const ids = await fetchPhotoIds(filterIsActive(spec) ? spec : null);
+      selectedIds = new Set([...selectedIds, ...ids]);
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  /** Toggle one photo's membership in the selection. */
+  function toggleSelect(id) {
+    if (typeof id !== "number") return;
+    if (selectedIds.has(id)) selectedIds.delete(id);
+    else selectedIds.add(id);
+    selectedIds = selectedIds; // reassign to trigger reactivity
+  }
+
+  /** Add every real photo between two displayEntries indices (inclusive) to
+   * the selection — the shift-click range. Collapsed-stack entries contribute
+   * their cover photo only. */
+  function selectRange(a, b) {
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    for (let k = lo; k <= hi; k++) {
+      const p = resolvedPhotos[k];
+      if (p && typeof p.id === "number") selectedIds.add(p.id);
+    }
+    selectedIds = selectedIds;
+  }
+
+  /** Grid tile click: Cmd/Ctrl toggles selection, Shift selects a range from
+   * the focused tile, a plain click keeps the existing open/expand behavior. */
+  function onTileClick(e, entry, i) {
+    if (e.metaKey || e.ctrlKey) {
+      toggleSelect(resolvePhoto(entry)?.id);
+      return;
+    }
+    if (e.shiftKey) {
+      selectRange(selected, i);
+      return;
+    }
+    if (entry.kind === "stack") toggleExpand(entry.stack);
+    else openLoupe(i);
+  }
+
+  /** Clear the whole selection — guarded (it can represent a lot of work) and
+   * undoable until the next clear replaces the stash. */
+  function clearSelection() {
+    if (selectedIds.size === 0) return;
+    const n = selectedIds.size;
+    if (
+      !confirm(`Clear all ${n} selected photo${n === 1 ? "" : "s"}? (undoable)`)
+    )
+      return;
+    lastClearedSelection = new Set(selectedIds);
+    selectedIds = new Set();
+  }
+
+  function undoClearSelection() {
+    if (!lastClearedSelection) return;
+    selectedIds = new Set([...selectedIds, ...lastClearedSelection]);
+    lastClearedSelection = null;
+  }
+
+  /** Refresh the library-total and showing counts (cheap COUNT queries). */
+  async function refreshCounts() {
+    try {
+      libraryTotal = await fetchPhotoCount(null);
+      showingCount = filterIsActive(displayFilter)
+        ? await fetchPhotoCount(displayFilter)
+        : libraryTotal;
+    } catch {
+      /* leave last-known counts on a transient error */
+    }
+  }
+
+  function defaultExportName() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_selected`;
+  }
+
+  /** Copy the selected photos into a new folder on disk (server copies, never
+   * moves — originals are the read-only source of truth). */
+  async function doExport() {
+    if (selectedIds.size === 0) return;
+    if (!exportDest.trim() || !exportName.trim()) {
+      error = "Choose a destination folder and a name.";
+      return;
+    }
+    exporting = true;
+    exportResult = null;
+    error = "";
+    try {
+      const res = await exportSelection(
+        [...selectedIds],
+        exportDest.trim(),
+        exportName.trim()
+      );
+      exportResult = res;
+      localStorage.setItem(LS_EXPORT_DEST, exportDest.trim());
+      status = `Exported ${res.copied} photo${res.copied === 1 ? "" : "s"}${
+        res.skipped ? `, ${res.skipped} skipped` : ""
+      } → ${res.target}`;
+    } catch (e) {
+      error = e.message;
+    } finally {
+      exporting = false;
+    }
+  }
+
+  /** Electron-only native picker for the export destination parent folder. */
+  async function chooseExportDest() {
+    const path = await window.autogallery?.pickFolder();
+    if (path) exportDest = path;
+  }
+
+  /** After a full library reset (from the Manage Library danger zone): the
+   * index and every rating are gone, so clear the selection and reload. */
+  async function onLibraryReset() {
+    manageLibraryOpen = false;
+    selectedIds = new Set();
+    lastClearedSelection = null;
+    await refreshLibrary();
+    await loadInitialFeed();
+    refreshCounts();
   }
 
   /** Jump the feed to an arbitrary hierarchy path from the tree — unlike
@@ -396,7 +604,7 @@
         collapsed: collapsedPaths,
         startPath: path,
         after: PAGE_SIZE,
-        filter,
+        filter: displayFilter,
       });
       if (epoch !== feedEpoch) return;
       const merged = mergeFeedPage(
@@ -554,7 +762,7 @@
             focusId,
             before: PAGE_SIZE / 2,
             after: 0,
-            filter,
+            filter: displayFilter,
           })
         : { items: [] };
       const { items: afterPage, focusItem } = await fetchFeed({
@@ -563,7 +771,7 @@
         focusId,
         before: 0,
         after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
-        filter,
+        filter: displayFilter,
       });
       if (epoch !== feedEpoch) return;
       const combined = focusId
@@ -731,7 +939,7 @@
         focusId,
         before: direction === "before" ? PAGE_SIZE : 0,
         after: direction === "after" ? PAGE_SIZE : 0,
-        filter,
+        filter: displayFilter,
       });
       if (epoch !== feedEpoch) return;
       const merged = mergeFeedPage(
@@ -877,7 +1085,8 @@
 
   async function onFolderRemoved() {
     await refreshLibrary();
-    loadInitialFeed();
+    await loadInitialFeed();
+    refreshCounts();
   }
 
   async function doScan() {
@@ -894,6 +1103,7 @@
       // in the current grouping, not necessarily at the loaded window's
       // edge, so a full reset is simpler and correct here).
       await loadInitialFeed();
+      refreshCounts();
     } catch (e) {
       error = e.message;
       status = "";
@@ -995,7 +1205,7 @@
       inFlightParents.add(key);
       let node;
       try {
-        node = await fetchTreeNode({ groupBy: groupByAtCall, path: parent, filter });
+        node = await fetchTreeNode({ groupBy: groupByAtCall, path: parent, filter: displayFilter });
       } catch {
         inFlightParents.delete(key); // transient failure — allow a retry
         continue;
@@ -1328,6 +1538,20 @@
       return;
     }
 
+    // 'X' toggles the focused photo's selection. Works in both grid and loupe
+    // so a trip can be culled photo-by-photo from the detail view; in the
+    // loupe it auto-advances (like rating) to keep the "look, pick, next" flow.
+    if (key.toLowerCase() === "x") {
+      e.preventDefault();
+      const p = resolvedPhotos[selected];
+      if (p && typeof p.id === "number") toggleSelect(p.id);
+      if (loupeOpen) {
+        const t = nextSelectable(displayEntries, selected + 1, 1);
+        if (t !== null) selected = t;
+      }
+      return;
+    }
+
     if (loupeOpen) {
       if (key === "Escape") {
         e.preventDefault();
@@ -1437,7 +1661,7 @@
         collapsed: collapsedPaths,
         focusId,
         direction,
-        filter,
+        filter: displayFilter,
       });
     } catch (err) {
       error = err.message;
@@ -1468,7 +1692,7 @@
         focusId: targetId,
         before: PAGE_SIZE,
         after: 0,
-        filter,
+        filter: displayFilter,
       });
       const { items: afterPage, focusItem } = await fetchFeed({
         groupBy,
@@ -1476,7 +1700,7 @@
         focusId: targetId,
         before: 0,
         after: PAGE_SIZE,
-        filter,
+        filter: displayFilter,
       });
       if (epoch !== feedEpoch) return;
       // A jump can land anywhere in the library, arbitrarily far from
@@ -1630,6 +1854,23 @@
     <!-- ② ORGANIZE & FILTER -->
     <div class="cluster organize">
       <div class="group-by" use:groupBySelector={groupBy}></div>
+      <div
+        class="seg-toggle"
+        role="group"
+        aria-label="Filter mode"
+        title="Does the filter narrow the view (Display), or add matches to the selection (Select)?"
+      >
+        <button
+          type="button"
+          class:active={filterMode === "display"}
+          on:click={() => onFilterModeChange("display")}>Display</button
+        >
+        <button
+          type="button"
+          class:active={filterMode === "select"}
+          on:click={() => onFilterModeChange("select")}>Select</button
+        >
+      </div>
       <RatingFilter {filter} on:change={(e) => onFilterChange(e.detail)} />
       <OrientationFilter {filter} on:change={(e) => onFilterChange(e.detail)} />
       {#if filterIsActive(filter)}
@@ -1715,6 +1956,90 @@
       </div>
     </div>
 
+    <div
+      class="counts"
+      title="Photos in the whole library · shown under the current filter · currently selected"
+    >
+      <span>{libraryTotal.toLocaleString()} <em>library</em></span>
+      <span>{showingCount.toLocaleString()} <em>showing</em></span>
+      <span class:has-sel={selectedCount > 0}
+        >{selectedCount.toLocaleString()} <em>selected</em></span
+      >
+    </div>
+
+    {#if selectedCount > 0}
+      <div class="cluster selection">
+        <button class="sel-btn" on:click={clearSelection} title="Clear selection"
+          >Clear</button
+        >
+        {#if lastClearedSelection}
+          <button
+            class="sel-btn undo"
+            on:click={undoClearSelection}
+            title="Restore the selection you just cleared">Undo</button
+          >
+        {/if}
+        <div class="export-wrap">
+          <button
+            class="sel-btn export"
+            on:click={() => (exportOpen = !exportOpen)}
+            title="Copy the selected photos into a new folder">Export…</button
+          >
+          {#if exportOpen}
+            <div class="export-panel">
+              <label class="export-field">
+                <span>Destination folder</span>
+                <div class="export-row">
+                  <input
+                    class="dir"
+                    type="text"
+                    placeholder="/path/to/destination"
+                    bind:value={exportDest}
+                    spellcheck="false"
+                  />
+                  {#if hasNativePicker}
+                    <button class="choose-folder" on:click={chooseExportDest}>
+                      Choose…
+                    </button>
+                  {/if}
+                </div>
+              </label>
+              <label class="export-field">
+                <span>New folder name</span>
+                <input
+                  class="dir"
+                  type="text"
+                  placeholder="album-name"
+                  bind:value={exportName}
+                  spellcheck="false"
+                />
+              </label>
+              <div class="export-actions">
+                <button
+                  class="scan"
+                  on:click={doExport}
+                  disabled={exporting ||
+                    !exportDest.trim() ||
+                    !exportName.trim()}
+                >
+                  {exporting
+                    ? "Copying…"
+                    : `Copy ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
+                </button>
+              </div>
+              {#if exportResult}
+                <p class="export-result">
+                  Copied {exportResult.copied}{exportResult.skipped
+                    ? `, skipped ${exportResult.skipped}`
+                    : ""} → {exportResult.target}
+                </p>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
     <span class="status" class:err={!!error}>{error || status}</span>
     {#if thumbProgress}
       <span class="thumb-progress" class:err={thumbCounts.error > 0}>
@@ -1726,6 +2051,7 @@
         {library}
         on:close={() => (manageLibraryOpen = false)}
         on:folderRemoved={onFolderRemoved}
+        on:libraryReset={onLibraryReset}
       />
     {/if}
   </header>
@@ -1736,7 +2062,7 @@
         bind:this={treeSidebarRef}
         {groupBy}
         {collapsedPaths}
-        filter={filter}
+        filter={displayFilter}
         on:toggle={(e) => toggleSectionCollapse(e.detail)}
         on:jump={(e) => jumpToPath(e.detail)}
       />
@@ -1744,7 +2070,7 @@
       <FisheyeSidebar
         {groupBy}
         {currentPath}
-        filter={filter}
+        filter={displayFilter}
         on:jump={(e) => jumpToPath(e.detail)}
       />
     {/if}
@@ -1835,6 +2161,7 @@
                   pad={PAD}
                   size={thumbSize}
                   selected={i === selected}
+                  inSelection={selectedIds.has(resolvePhoto(entry).id)}
                   stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
                   stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
                   stackMarginPx={stackMarginPx(entry)}
@@ -1842,8 +2169,7 @@
                   isCurrentCover={entry.kind === "photo" &&
                     entry.stackId !== null &&
                     stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
-                  on:click={() =>
-                    entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
+                  on:click={(e) => onTileClick(e, entry, i)}
                   on:attempt={handleThumbAttempt}
                   on:settled={handleThumbSettled}
                 />
@@ -1859,7 +2185,13 @@
 </div>
 
 {#if loupeOpen}
-  <Loupe items={resolvedPhotos} bind:index={selected} />
+  <Loupe
+    items={resolvedPhotos}
+    bind:index={selected}
+    inSelection={typeof resolvedPhotos[selected]?.id === "number" &&
+      selectedIds.has(resolvedPhotos[selected].id)}
+    selectedCount={selectedCount}
+  />
 {/if}
 
 <style>
@@ -2022,6 +2354,113 @@
     line-height: 1;
     font-size: 0.7rem;
     cursor: pointer;
+  }
+
+  /* Display/Select segmented toggle (matches the sidebar-view toggle). */
+  .seg-toggle {
+    display: flex;
+    gap: 2px;
+    background: #101010;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 2px;
+  }
+  .seg-toggle button {
+    border: none;
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    background: transparent;
+    color: #9a9a9a;
+  }
+  .seg-toggle button.active {
+    background: #4c9aff;
+    color: #06121f;
+    font-weight: 600;
+  }
+
+  /* Three-level counts: library / showing / selected. */
+  .counts {
+    display: flex;
+    gap: 10px;
+    font-size: 0.8rem;
+    color: #cfcfcf;
+    white-space: nowrap;
+  }
+  .counts em {
+    font-style: normal;
+    color: #808080;
+  }
+  .counts .has-sel {
+    color: #ffd24c;
+    font-weight: 600;
+  }
+  .counts .has-sel em {
+    color: #b9932f;
+  }
+
+  .cluster.selection {
+    gap: 6px;
+  }
+  .sel-btn {
+    background: #222;
+    border: 1px solid #3a3a3a;
+    color: #e8e8e8;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .sel-btn:hover {
+    background: #2c2c2c;
+  }
+  .sel-btn.export {
+    background: #4c9aff;
+    border-color: #4c9aff;
+    color: #06121f;
+    font-weight: 600;
+  }
+  .sel-btn.undo {
+    color: #ffd24c;
+  }
+  .export-wrap {
+    position: relative;
+  }
+  .export-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 50;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 300px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .export-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.75rem;
+    color: #9a9a9a;
+  }
+  .export-row {
+    display: flex;
+    gap: 8px;
+  }
+  .export-actions {
+    display: flex;
+  }
+  .export-result {
+    margin: 0;
+    font-size: 0.75rem;
+    color: #8fd18f;
+    word-break: break-all;
   }
   h1 {
     font-size: 1rem;
