@@ -22,6 +22,20 @@ export const DIMENSIONS = {
     expr: "COALESCE(strftime('%Y-%m-%d', photos.taken_at / 1000, 'unixepoch'), '')",
     direction: "DESC",
   },
+  // Unlike the date dimensions above, camera is ASC (real camera names sort
+  // alphabetically forward, not newest-first), so the "empty string sorts
+  // before everything" trick would put Unknown FIRST, not last. `sortExpr`
+  // is an opt-in second column used ONLY for ORDER BY (never for display or
+  // for equality/seek comparisons, which still use `expr`): it prefixes
+  // known values with "0" and Unknown with "1", so a single plain ASC sort
+  // on that string yields real names in order, Unknown last.
+  camera: {
+    expr: "COALESCE(photos.camera, '')",
+    sortExpr:
+      "CASE WHEN COALESCE(photos.camera, '') = '' THEN '1' ELSE '0' END || COALESCE(photos.camera, '')",
+    direction: "ASC",
+  },
+  kind: { expr: "photos.kind", direction: "ASC" },
 };
 
 /** @param {string[]} groupBy @returns {Array<{name:string, expr:string, direction:string}>} */
@@ -323,7 +337,18 @@ export function getFeedPage(
     ...dims,
     { name: "__id", expr: "photos.id", direction: "ASC" },
   ];
-  const selectDimCols = dims.map((d, i) => `${d.expr} AS dim${i}`).join(", ");
+  // Most dims are ordered on their own displayed value (dim{i}); a dim may
+  // opt into a separate `sortExpr` (see camera above) when the value best
+  // for display isn't also the value that sorts correctly — selected here
+  // as an extra, ORDER-BY-only column so display/groupValues/seek equality
+  // (all keyed on `expr`/dim{i}) are unaffected.
+  const selectDimCols = dims
+    .map((d, i) => {
+      const cols = [`${d.expr} AS dim${i}`];
+      if (d.sortExpr) cols.push(`${d.sortExpr} AS dim${i}Sort`);
+      return cols.join(", ");
+    })
+    .join(", ");
   const { sql: exclSql, params: exclParams } = exclusionClause(collapsed, dims);
 
   let focusValues = null;
@@ -364,7 +389,12 @@ export function getFeedPage(
     // to ascending-output order once the page itself is small.
     const orderCols = seekDims
       .map((d, i) => {
-        const col = i < dims.length ? `dim${i}` : "photos.id";
+        const col =
+          i < dims.length
+            ? dims[i].sortExpr
+              ? `dim${i}Sort`
+              : `dim${i}`
+            : "photos.id";
         const direction = wantAfter
           ? d.direction
           : d.direction === "ASC"

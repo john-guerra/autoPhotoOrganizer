@@ -100,6 +100,31 @@ describe("getFeedPage — composite ordering", () => {
   });
 });
 
+describe("getFeedPage — camera/kind dimensions", () => {
+  it("groups by camera, Unknown ('') last under ASC", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [a, b] = upsertScan(db, "/photos/trip", 1, [
+      { name: "canon.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "nocam.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET camera = ? WHERE id = ?`).run("Canon R6", a.id);
+    const { items } = getFeedPage(db, { groupBy: ["camera"], after: 10 });
+    expect(items.map((i) => i.groupValues.camera)).toEqual(["Canon R6", ""]);
+  });
+
+  it("groups by kind", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.mp4", size: 1, mtimeMs: 1, kind: "video" },
+    ]);
+    const { items } = getFeedPage(db, { groupBy: ["kind"], after: 10 });
+    expect(items.map((i) => i.groupValues.kind)).toEqual(["image", "video"]);
+  });
+});
+
 describe("findGroupBoundary", () => {
   it("finds the next boundary at the innermost dimension (next year, same folder)", () => {
     const db = getDb();
