@@ -24,6 +24,10 @@
   export let gapPx = 4;
   /** @type {Map<number, number>|null} optional id->mtimeMs for thumb cache-busting */
   export let mtimeById = null;
+  /** When true, thumbnails are clickable buttons that dispatch `select`.
+   * AlbumsView passes false for now — opening an arbitrary album photo needs
+   * a feed-recenter helper (issue #42) we deliberately don't duplicate here. */
+  export let interactive = true;
 
   const dispatch = createEventDispatcher();
 
@@ -89,17 +93,19 @@
   style="height:{thumbPx}px; gap:{gapPx}px;"
 >
   {#each shown as item (item.id)}
-    <button
+    <svelte:element
+      this={interactive ? "button" : "div"}
       class="snap-thumb"
+      class:static={!interactive}
       style="width:{thumbPx}px; height:{thumbPx}px;"
-      on:click={() => pick(item.id)}
+      on:click={() => interactive && pick(item.id)}
     >
       <img
         src={thumbUrl(item.id, 160, mtimeById?.get(item.id))}
         loading="lazy"
         alt=""
       />
-    </button>
+    </svelte:element>
     {#if item.gapAfter}
       <span class="snap-gap">…</span>
     {/if}
@@ -127,6 +133,9 @@
     cursor: pointer;
     overflow: hidden;
     display: block;
+  }
+  .snap-thumb.static {
+    cursor: default;
   }
   .snap-thumb img {
     width: 100%;

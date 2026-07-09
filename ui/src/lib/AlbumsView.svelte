@@ -271,11 +271,7 @@
         >
       </div>
       <div class="album-snapshot">
-        <SnapshotStrip
-          ids={album.ids}
-          {mtimeById}
-          on:select={(e) => dispatch("openphoto", e.detail)}
-        />
+        <SnapshotStrip ids={album.ids} {mtimeById} interactive={false} />
       </div>
     {/each}
   </div>
