@@ -138,25 +138,26 @@ export function registerApi(app) {
       const photo = getPhotoById(db, id);
       if (!photo) continue;
       photosById.set(id, photo);
-      if (photo.width === null) need.push(photo);
+      if (photo.width === null || photo.camera === null) need.push(photo);
     }
 
     if (need.length) {
       const metas = await processing.metadata(need.map((p) => p.path));
       const update = db.prepare(
-        `UPDATE photos SET taken_at = ?, width = ?, height = ? WHERE id = ?`
+        `UPDATE photos SET taken_at = ?, width = ?, height = ?, camera = ? WHERE id = ?`
       );
       metas.forEach((m, i) => {
         const photo = need[i];
         const takenAtMs = m.createDate
           ? new Date(m.createDate).getTime()
           : null;
-        update.run(takenAtMs, m.width ?? 0, m.height ?? 0, photo.id);
+        update.run(takenAtMs, m.width ?? 0, m.height ?? 0, m.camera ?? "", photo.id);
         photosById.set(photo.id, {
           ...photo,
           taken_at: takenAtMs,
           width: m.width ?? 0,
           height: m.height ?? 0,
+          camera: m.camera ?? "",
         });
       });
     }

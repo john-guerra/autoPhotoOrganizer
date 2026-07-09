@@ -172,6 +172,30 @@ describe("GET /api/meta", () => {
       spy.mockRestore();
     }
   });
+
+  it("persists camera as '' (tried, none) for a photo with no EXIF Make/Model, and does not re-enrich on a later request", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
+    // Synthetic sharp-created fixtures carry no EXIF Make/Model.
+    await fetch(`${srv.base}/api/meta?ids=${id}`);
+
+    const db = getDb();
+    const row = db.prepare("SELECT camera FROM photos WHERE id = ?").get(id);
+    expect(row.camera).toBe(""); // not null — "tried, no camera EXIF"
+
+    const spy = vi
+      .spyOn(NodeProcessingService.prototype, "metadata")
+      .mockRejectedValue(
+        new Error("must not re-attempt metadata for an already-enriched photo")
+      );
+    try {
+      const res = await fetch(`${srv.base}/api/meta?ids=${id}`);
+      expect(res.status).toBe(200);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe("GET /api/thumb/:id", () => {

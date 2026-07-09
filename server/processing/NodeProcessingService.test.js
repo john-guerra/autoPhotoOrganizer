@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
-import { NodeProcessingService } from "./NodeProcessingService.js";
+import { NodeProcessingService, formatCamera } from "./NodeProcessingService.js";
 
 let dir;
 let svc;
@@ -81,5 +81,15 @@ describe("extractPreview", () => {
     await expect(
       svc.extractPreview(join(dir, "does-not-exist.jpg"))
     ).rejects.toThrow();
+  });
+});
+
+describe("formatCamera", () => {
+  it("combines Make and Model, de-duplicating when Model repeats Make", () => {
+    expect(formatCamera("Canon", "Canon EOS R6")).toBe("Canon EOS R6");
+    expect(formatCamera("Google", "Pixel 9 Pro")).toBe("Google Pixel 9 Pro");
+    expect(formatCamera(undefined, "iPhone 15")).toBe("iPhone 15");
+    expect(formatCamera("Sony", undefined)).toBe("Sony");
+    expect(formatCamera(undefined, undefined)).toBe("");
   });
 });

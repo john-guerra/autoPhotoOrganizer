@@ -46,6 +46,16 @@ export const RAW_EXTS = new Set([
   ".raf",
 ]);
 
+/** A human camera label from EXIF Make/Model, de-duplicated (Model often
+ * already includes the Make, e.g. Model "EOS R6" with Make "Canon", or Model
+ * "Canon EOS R6"). Returns "" when neither is present. */
+export function formatCamera(make, model) {
+  const mk = (make ?? "").trim();
+  const md = (model ?? "").trim();
+  if (md && mk && !md.toLowerCase().startsWith(mk.toLowerCase())) return `${mk} ${md}`;
+  return md || mk || "";
+}
+
 /**
  * NodeProcessingService — the MVP implementation (sharp + exifr).
  *
@@ -158,10 +168,11 @@ export class NodeProcessingService extends ProcessingService {
         }
         try {
           const exif = await exifr.parse(path, {
-            pick: ["DateTimeOriginal", "CreateDate"],
+            pick: ["DateTimeOriginal", "CreateDate", "Make", "Model"],
           });
           const createDate = exif?.DateTimeOriginal || exif?.CreateDate;
           if (createDate) meta.createDate = createDate;
+          meta.camera = formatCamera(exif?.Make, exif?.Model);
         } catch {
           /* no EXIF */
         }
