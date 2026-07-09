@@ -240,6 +240,10 @@
   let scanning = false;
   let feedEpoch = 0; // invalidates in-flight meta fetches when the window resets
   let library = [];
+  // Bumped whenever the library's photo set changes (scan, folder removal,
+  // full reset). The sidebars key their refetch on this so they always mirror
+  // the real index, not just groupBy/filter changes.
+  let libraryVersion = 0;
   let libraryOpen = false;
   let addFolderOpen = false;
   let manageLibraryOpen = false;
@@ -584,6 +588,7 @@
     await refreshLibrary();
     await loadInitialFeed();
     refreshCounts();
+    libraryVersion++;
   }
 
   /** Jump the feed to an arbitrary hierarchy path from the tree — unlike
@@ -1087,6 +1092,7 @@
     await refreshLibrary();
     await loadInitialFeed();
     refreshCounts();
+    libraryVersion++;
   }
 
   async function doScan() {
@@ -1104,6 +1110,7 @@
       // edge, so a full reset is simpler and correct here).
       await loadInitialFeed();
       refreshCounts();
+      libraryVersion++;
     } catch (e) {
       error = e.message;
       status = "";
@@ -2063,6 +2070,7 @@
         {groupBy}
         {collapsedPaths}
         filter={displayFilter}
+        refreshToken={libraryVersion}
         on:toggle={(e) => toggleSectionCollapse(e.detail)}
         on:jump={(e) => jumpToPath(e.detail)}
       />
@@ -2071,6 +2079,7 @@
         {groupBy}
         {currentPath}
         filter={displayFilter}
+        refreshToken={libraryVersion}
         on:jump={(e) => jumpToPath(e.detail)}
       />
     {/if}

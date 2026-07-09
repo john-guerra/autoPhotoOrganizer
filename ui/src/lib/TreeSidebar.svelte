@@ -7,6 +7,7 @@
   export let groupBy; // string[]
   export let collapsedPaths; // Array<Array<{dimension,value}>>
   export let filter = null;
+  export let refreshToken = 0; // bump to force a reload when the index changes
 
   const dispatch = createEventDispatcher();
 
@@ -39,7 +40,7 @@
     highlightedKey = null;
     loadRoot();
   }
-  $: groupBy, filter, resetAndLoad();
+  $: groupBy, filter, refreshToken, resetAndLoad();
 
   async function loadChildren(path) {
     const key = treeKey(path);
