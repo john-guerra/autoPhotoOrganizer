@@ -1,44 +1,48 @@
 /**
- * Pure fisheye / degree-of-interest layout for the sidebar navigator — no DOM,
- * no Svelte. Same "pure logic module + thin Svelte view" split as
+ * Pure fisheye / focus+context layout for the sidebar navigator — no DOM, no
+ * Svelte. Same "pure logic module + thin Svelte view" split as
  * justified.js / windowing.js / feed.js / navigation.js.
  *
- * Inspired by John's PhotoRing `navigationList.js` (d3 v3): a near zone with
- * uniform, readable spacing; a far zone compressed by a fisheye falloff;
- * count-weighted bars (a histogram silhouette); count-aggregating sampling so
- * huge lists stay cheap without dropping photos from the silhouette; and a
- * distinction between where you ARE (currentI) and where you POINT (focusI).
- *
- * Reformulated from PhotoRing's absolute-position fisheye scale to a
- * degree-of-interest **weight → cumulative layout**: each kept leaf gets a
- * weight, rows are laid out by normalized cumulative sum. This guarantees the
- * column fills `height` exactly, y is monotonic, and every thickness is > 0.
+ * Ports PhotoRing `navigationList.js`'s `d3_fisheye_scale` (d3 v3 → pure JS):
+ * a fisheye scale maps each leaf's linear position to a distorted position that
+ * magnifies around a *focus pixel* and compresses far from it, while still
+ * filling the whole column. Pinning the focus pixel to the cursor keeps the
+ * magnified row exactly under the pointer — smooth hover magnification AND
+ * reliable clicks (the target never slides away). Plus: count-aggregating
+ * sampling so huge lists stay cheap without dropping photos from the
+ * silhouette, and outer-level checkpoints (year/month) for long jumps.
  */
 
 import { scaleLinear } from "d3";
 
 /** Tuning knobs — John's domain (see ROADMAP "John authors/tunes thresholds").
- * vicinity: half-width (in leaves) of the uniform near zone.
- * falloff: how many leaves it takes the far-zone lens to decay.
- * distortion: >1 sharpens the focus vs. context contrast.
- * checkpointWeight: minimum weight floor so year/month bands never vanish.
+ * vicinity: ± leaves force-kept & readable around the focus.
+ * distortion: fisheye strength `d` — higher = stronger magnification at the
+ *   focus and harder compression far away.
+ * pad: top/bottom inset in px.
  * minRowPx: target min row height → bounds how many rows we sample. */
 export const FISHEYE_DEFAULTS = {
-  vicinity: 4, // ± leaves force-kept & kept readable around the focus
-  distortion: 1.8, // higher = sharper lens peak
-  checkpointWeight: 0.4, // floor so year/month bands stay visible
-  minRowPx: 14, // target min row height → bounds how many rows we sample
+  vicinity: 4,
+  distortion: 4,
+  pad: 6,
+  minRowPx: 14,
 };
 
 /**
- * Smooth fisheye lens weight: 1 at the focus, decaying with distance so row
- * heights form a *visible gradient* (the lens). No flat plateau — the focus is
- * always the single tallest row, and its neighbours step down smoothly.
- * @returns {number} in (0, 1]
+ * PhotoRing's fisheye position function (ported from `d3_fisheye_scale`). Maps
+ * a base linear position `x` (within `[min,max]`) to a distorted position that
+ * magnifies around focus pixel `a` and compresses away from it. Monotonic in
+ * `x`; `x === a → a`; the endpoints map to the endpoints. Larger `d` = gentler
+ * (less) distortion, smaller `d` = sharper lens.
+ * @returns {number}
  */
-export function doiWeight(dist, { vicinity, distortion } = FISHEYE_DEFAULTS) {
-  const d = dist / Math.max(1e-6, vicinity);
-  return 1 / (1 + distortion * d * d);
+export function fisheyePosition(x, a, min, max, d) {
+  const left = x < a;
+  let m = left ? a - min : max - a;
+  if (m === 0) m = max - min;
+  const dx = Math.abs(x - a);
+  if (dx < 1e-9) return a;
+  return ((left ? -1 : 1) * (m * (d + 1))) / (d + m / dx) + a;
 }
 
 /**
@@ -111,19 +115,39 @@ export function sampleLeaves(leaves, checkpoints, focusI, { maxRows, vicinity })
   return kept;
 }
 
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
 /**
- * The full fisheye layout: derive checkpoints, sample, weight, and lay rows
- * out along `height` by normalized cumulative weight.
+ * The full fisheye layout. The focus is either a pinned pixel (`focusPx`, e.g.
+ * the cursor while hovering) or the natural position of `focusI` (the current
+ * feed position). Rows are positioned by the fisheye scale and tile the column
+ * (each row's thickness is the gap to the next kept row).
  * @param {Array<{values:Record<string,string>, count:number}>} leaves ordered
  * @param {string[]} groupBy
- * @param {{height:number, focusI:number} & Partial<typeof FISHEYE_DEFAULTS> & {maxRows?:number}} options
+ * @param {{height:number, focusI?:number, focusPx?:number} & Partial<typeof FISHEYE_DEFAULTS> & {maxRows?:number}} options
  * @returns {{rows: Array<{i:number, values:object, count:number, binCount:number,
- *   checkpointDepth:number|null, y:number, thickness:number}>, maxBinCount:number}}
+ *   checkpointDepth:number|null, y:number, thickness:number}>, maxBinCount:number, focusI:number}}
  */
 export function layoutFisheye(leaves, groupBy, options) {
   const o = { ...FISHEYE_DEFAULTS, ...options };
-  const { height, focusI } = o;
-  if (!leaves?.length || !height) return { rows: [], maxBinCount: 0 };
+  const { height } = o;
+  if (!leaves?.length || !height) return { rows: [], maxBinCount: 0, focusI: 0 };
+
+  const n = leaves.length;
+  const min = o.pad;
+  const max = height - o.pad;
+  // Domain [0, n] (not n-1): leaf i owns the CELL [base(i), base(i+1)], so the
+  // last leaf gets a real cell instead of collapsing onto the bottom edge.
+  const base = scaleLinear().domain([0, n]).range([min, max]);
+
+  // Focus pixel: pinned to the cursor (focusPx) or the natural spot of focusI.
+  // When pinned, the focused leaf is whichever one sits under that pixel.
+  const a =
+    o.focusPx != null ? clamp(o.focusPx, min, max) : base(o.focusI ?? 0);
+  const focusI =
+    o.focusPx != null
+      ? clamp(Math.round(base.invert(a)), 0, n - 1)
+      : clamp(o.focusI ?? 0, 0, n - 1);
 
   const checkpoints = deriveCheckpointDepth(leaves, groupBy);
   const maxRows = o.maxRows ?? Math.max(8, Math.floor(height / o.minRowPx));
@@ -132,23 +156,17 @@ export function layoutFisheye(leaves, groupBy, options) {
     vicinity: o.vicinity,
   });
 
-  const weights = kept.map((k) => {
-    let w = doiWeight(k.i - focusI, o);
-    if (k.checkpointDepth != null) w = Math.max(w, o.checkpointWeight);
-    return w;
-  });
-  const sumW = weights.reduce((s, w) => s + w, 0) || 1;
-
+  const pos = (i) => fisheyePosition(base(i), a, min, max, o.distortion);
   const rows = [];
-  let acc = 0;
   let maxBinCount = 0;
   for (let j = 0; j < kept.length; j++) {
-    const thickness = (weights[j] / sumW) * height;
-    rows.push({ ...kept[j], y: acc + thickness / 2, thickness });
-    acc += thickness;
+    const top = pos(kept[j].i);
+    const nextTop = j + 1 < kept.length ? pos(kept[j + 1].i) : max;
+    const thickness = Math.max(1, nextTop - top);
+    rows.push({ ...kept[j], y: top + thickness / 2, thickness });
     if (kept[j].binCount > maxBinCount) maxBinCount = kept[j].binCount;
   }
-  return { rows, maxBinCount };
+  return { rows, maxBinCount, focusI };
 }
 
 /**

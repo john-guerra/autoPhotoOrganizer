@@ -6,6 +6,7 @@
   // Distortion math lives in the pure, tested lib/fisheye.js; this component is
   // just the view + interaction. Inspired by PhotoRing's navigationList.js.
   import { createEventDispatcher } from "svelte";
+  import { pointer } from "d3";
   import { fetchFlatTree } from "./api.js";
   import { layoutFisheye, makeBarScale } from "./fisheye.js";
   import { shortLeafLabel } from "./labels.js";
@@ -22,6 +23,8 @@
   let total = 0;
   let loadError = "";
   let height = 0; // measured column height
+  let svgEl;
+  let hoverY = null; // cursor y while hovering → pins the lens focus
   let epoch = 0;
 
   $: finestDim = groupBy[groupBy.length - 1];
@@ -60,14 +63,28 @@
     return idx === -1 ? prev : idx;
   }
 
-  // The lens focus is the current feed position — it follows the feed as you
-  // scroll and never reflows on hover, so every checkpoint stays a stable,
-  // clickable target.
+  // The lens focus follows the feed position (currentI); while hovering it
+  // pins to the cursor pixel, so the magnified row stays exactly under the
+  // pointer — smooth magnification AND reliable clicks (the target never slides
+  // away). Either way the fisheye scale keeps every checkpoint on-screen.
   $: layout =
     leaves.length && height
-      ? layoutFisheye(leaves, groupBy, { height, focusI: currentI })
-      : { rows: [], maxBinCount: 0 };
+      ? layoutFisheye(
+          leaves,
+          groupBy,
+          hoverY != null
+            ? { height, focusPx: hoverY }
+            : { height, focusI: currentI }
+        )
+      : { rows: [], maxBinCount: 0, focusI: 0 };
   $: barScale = makeBarScale(layout.maxBinCount, TRACK_W);
+
+  function onMove(event) {
+    if (svgEl) hoverY = pointer(event, svgEl)[1];
+  }
+  function onLeave() {
+    hoverY = null; // snap the lens back to the current feed position
+  }
 
   function leafPath(row) {
     return groupBy.map((d) => ({ dimension: d, value: row.values[d] }));
@@ -110,9 +127,12 @@
   {:else}
     <div class="fisheye-stage" bind:clientHeight={height}>
       <svg
+        bind:this={svgEl}
         class="fisheye-svg"
         width="100%"
         {height}
+        on:mousemove={onMove}
+        on:mouseleave={onLeave}
         role="listbox"
         tabindex="-1"
       >

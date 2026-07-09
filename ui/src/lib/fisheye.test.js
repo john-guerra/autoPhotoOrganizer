@@ -1,14 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
-  doiWeight,
+  fisheyePosition,
   deriveCheckpointDepth,
   sampleLeaves,
   layoutFisheye,
-  FISHEYE_DEFAULTS,
 } from "./fisheye.js";
 
-/** Build `n` day leaves across years/months from a compact spec so tests read
- * clearly. Each entry: ["YYYY-MM-DD", count]. */
+/** Build day leaves from a compact spec: ["YYYY-MM-DD", count]. */
 function dayLeaves(spec) {
   return spec.map(([day, count]) => {
     const [y, m] = day.split("-");
@@ -18,25 +16,35 @@ function dayLeaves(spec) {
 
 const GB = ["year", "month", "day"];
 
-describe("doiWeight", () => {
-  it("peaks at the focus and decays smoothly and symmetrically", () => {
-    const p = FISHEYE_DEFAULTS;
-    expect(doiWeight(0, p)).toBe(1);
-    expect(doiWeight(1, p)).toBeLessThan(1); // no flat plateau
-    expect(doiWeight(2, p)).toBeLessThan(doiWeight(1, p));
-    expect(doiWeight(20, p)).toBeLessThan(doiWeight(10, p));
-    expect(doiWeight(-8, p)).toBeCloseTo(doiWeight(8, p)); // symmetric
-    expect(doiWeight(10000, p)).toBeGreaterThan(0); // always positive
+describe("fisheyePosition", () => {
+  it("keeps the focus, maps endpoints to endpoints, and is monotonic", () => {
+    const [min, max, a, d] = [0, 100, 40, 4];
+    expect(fisheyePosition(a, a, min, max, d)).toBeCloseTo(a);
+    expect(fisheyePosition(min, a, min, max, d)).toBeCloseTo(min);
+    expect(fisheyePosition(max, a, min, max, d)).toBeCloseTo(max);
+    let prev = -Infinity;
+    for (let x = min; x <= max; x += 5) {
+      const p = fisheyePosition(x, a, min, max, d);
+      expect(p).toBeGreaterThan(prev);
+      prev = p;
+    }
+  });
+
+  it("magnifies near the focus (a small step there spans more pixels than far away)", () => {
+    const [min, max, a, d] = [0, 100, 50, 4];
+    const nearSpan = fisheyePosition(51, a, min, max, d) - fisheyePosition(49, a, min, max, d);
+    const farSpan = fisheyePosition(11, a, min, max, d) - fisheyePosition(9, a, min, max, d);
+    expect(nearSpan).toBeGreaterThan(farSpan);
   });
 });
 
 describe("deriveCheckpointDepth", () => {
   it("marks index 0, year changes (depth 0) and month changes (depth 1); nulls day-only changes", () => {
     const leaves = dayLeaves([
-      ["2024-06-13", 1], // 0 -> start (depth 0)
-      ["2024-06-14", 1], // day-only change -> null
-      ["2024-07-01", 1], // month change -> depth 1
-      ["2025-01-02", 1], // year change -> depth 0
+      ["2024-06-13", 1],
+      ["2024-06-14", 1],
+      ["2024-07-01", 1],
+      ["2025-01-02", 1],
     ]);
     expect(deriveCheckpointDepth(leaves, GB)).toEqual([0, null, 1, 0]);
   });
@@ -77,7 +85,7 @@ describe("sampleLeaves", () => {
     expect(kept.length).toBeLessThan(many.length);
     const keptMass = kept.reduce((s, k) => s + k.binCount, 0);
     const trueMass = many.reduce((s, l) => s + l.count, 0);
-    expect(keptMass).toBe(trueMass); // no photo dropped from the silhouette
+    expect(keptMass).toBe(trueMass);
   });
 
   it("always keeps the near zone, every checkpoint, and the endpoints", () => {
@@ -102,38 +110,57 @@ describe("layoutFisheye", () => {
       return [`2024-${month}-${day}`, (i % 7) + 1];
     })
   );
+  const PAD = 6;
 
   it("returns empty for empty input or zero height", () => {
     expect(layoutFisheye([], GB, { height: 500, focusI: 0 }).rows).toEqual([]);
     expect(layoutFisheye(leaves, GB, { height: 0, focusI: 0 }).rows).toEqual([]);
   });
 
-  it("fills the viewport exactly and keeps rows ordered with positive thickness", () => {
+  it("tiles the padded column, ordered, with positive thickness", () => {
     const height = 600;
-    const { rows } = layoutFisheye(leaves, GB, { height, focusI: 60 });
-    const total = rows.reduce((s, r) => s + r.thickness, 0);
-    expect(total).toBeCloseTo(height, 4);
+    const { rows } = layoutFisheye(leaves, GB, { height, focusI: 60, pad: PAD });
+    expect(rows[0].y - rows[0].thickness / 2).toBeCloseTo(PAD, 1); // top edge
+    const last = rows[rows.length - 1];
+    expect(last.y + last.thickness / 2).toBeCloseTo(height - PAD, 1); // bottom edge
     for (const r of rows) expect(r.thickness).toBeGreaterThan(0);
     for (let j = 1; j < rows.length; j++) {
-      expect(rows[j].i).toBeGreaterThan(rows[j - 1].i); // sample stays ordered
-      expect(rows[j].y).toBeGreaterThan(rows[j - 1].y); // centers monotonic
+      expect(rows[j].i).toBeGreaterThan(rows[j - 1].i);
+      expect(rows[j].y).toBeGreaterThan(rows[j - 1].y);
     }
   });
 
-  it("makes the focus row the single tallest (a lens peak)", () => {
+  it("makes rows near the focus thicker than the far edges (the lens)", () => {
     const { rows } = layoutFisheye(leaves, GB, { height: 600, focusI: 60 });
-    const focusRow = rows.find((r) => r.i === 60);
-    expect(focusRow).toBeTruthy();
-    for (const r of rows) {
-      if (r.i !== 60) expect(r.thickness).toBeLessThanOrEqual(focusRow.thickness);
-    }
+    const focusRow = rows.reduce((a, b) =>
+      Math.abs(b.i - 60) < Math.abs(a.i - 60) ? b : a
+    );
+    expect(focusRow.thickness).toBeGreaterThan(rows[0].thickness);
+    expect(focusRow.thickness).toBeGreaterThan(rows[rows.length - 1].thickness);
+  });
+
+  it("pins the focus to a supplied pixel: the cursor lands inside a magnified row", () => {
+    const height = 600;
+    const focusPx = 300;
+    const { rows, focusI } = layoutFisheye(leaves, GB, { height, focusPx });
+    const hit = rows.find(
+      (r) => focusPx >= r.y - r.thickness / 2 && focusPx <= r.y + r.thickness / 2
+    );
+    expect(hit).toBeTruthy(); // some rendered row's band contains the cursor
+    expect(Math.abs(hit.i - focusI)).toBeLessThanOrEqual(1);
+    // the row under the cursor is one of the magnified (thick) ones
+    const maxThick = Math.max(...rows.map((r) => r.thickness));
+    expect(hit.thickness).toBeGreaterThan(maxThick / 2);
   });
 
   it("works at both edges without error", () => {
     for (const focusI of [0, leaves.length - 1]) {
-      const { rows } = layoutFisheye(leaves, GB, { height: 500, focusI });
-      const total = rows.reduce((s, r) => s + r.thickness, 0);
-      expect(total).toBeCloseTo(500, 4);
+      const { rows } = layoutFisheye(leaves, GB, { height: 500, focusI, pad: PAD });
+      expect(rows[0].y - rows[0].thickness / 2).toBeCloseTo(PAD, 0);
+      const last = rows[rows.length - 1];
+      const bottom = last.y + last.thickness / 2;
+      expect(bottom).toBeGreaterThan(500 - PAD - 2);
+      expect(bottom).toBeLessThanOrEqual(500 - PAD + 2);
     }
   });
 });
