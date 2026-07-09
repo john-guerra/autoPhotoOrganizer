@@ -1644,7 +1644,7 @@
       {/if}
     </div>
 
-    <div class="divider"></div>
+    <div class="divider push"></div>
 
     <!-- ③ VIEW -->
     <div class="cluster view">
@@ -1939,9 +1939,15 @@
     background: #2a2a2a;
     margin: 2px 0;
   }
-  .status {
+  /* The View cluster + status form the right-aligned group; the flexible gap
+     lands between Organize and View. Pushing the divider (not status) keeps
+     status flowing normally after the view cell so it can't overlap it. */
+  .divider.push {
     margin-left: auto;
-  } /* push status + progress to the far right */
+  }
+  .cluster.view {
+    flex-shrink: 0;
+  }
 
   .add-folder {
     position: relative;
@@ -2138,6 +2144,8 @@
     color: #9a9a9a;
     font-size: 0.85rem;
     white-space: nowrap;
+    flex-shrink: 0;
+    margin-left: 0.25rem;
   }
   .status.err {
     color: #ff6b6b;
