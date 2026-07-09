@@ -632,6 +632,63 @@ describe("GET /api/feed", () => {
   });
 });
 
+describe("/api/feed filter param", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+  });
+
+  it("400s on non-JSON filter", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&filter=not-json&after=50`
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on out-of-range minRating", async () => {
+    await scan(srv.base, photosDir);
+    const filter = encodeURIComponent(JSON.stringify({ minRating: 9 }));
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&filter=${filter}&after=50`
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on unknown orientation", async () => {
+    await scan(srv.base, photosDir);
+    const filter = encodeURIComponent(
+      JSON.stringify({ orientations: ["diagonal"] })
+    );
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&filter=${filter}&after=50`
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns only photos meeting minRating once one photo is rated", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const ratedId = scanBody.items[0].id;
+
+    const set = await fetch(`${srv.base}/api/rating`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: ratedId, rating: 4 }),
+    });
+    expect(set.status).toBe(200);
+
+    const filter = encodeURIComponent(JSON.stringify({ minRating: 4 }));
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&filter=${filter}&after=50`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.every((i) => i.id === ratedId)).toBe(true);
+  });
+});
+
 describe("GET /api/feed/boundary", () => {
   it("finds the next group boundary", async () => {
     const scanBody = await scan(srv.base, photosDir);

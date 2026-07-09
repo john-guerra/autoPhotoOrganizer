@@ -26,6 +26,7 @@ import {
 import { hashPendingPhotos } from "./db/hashing.js";
 import { getFeedPage, findGroupBoundary, DIMENSIONS } from "./db/feed.js";
 import { getTreeNode, getFlatTree } from "./db/tree.js";
+import { ALLOWED_ORIENTATIONS } from "./db/filters.js";
 
 const processing = new NodeProcessingService();
 
@@ -36,6 +37,41 @@ const MIME_BY_EXT = {
   ".webp": "image/webp",
   ".gif": "image/gif",
 };
+
+/**
+ * Parses + validates the optional `filter` query param into a filter spec.
+ * @returns {{spec: object, error?: string}} `error` set ⇒ respond 400.
+ */
+function parseFilterParam(req) {
+  if (!req.query.filter) return { spec: {} };
+  let raw;
+  try {
+    raw = JSON.parse(String(req.query.filter));
+  } catch {
+    return { spec: {}, error: "filter must be JSON" };
+  }
+  const spec = {};
+  if (raw.minRating !== undefined) {
+    const r = Number(raw.minRating);
+    if (!Number.isInteger(r) || r < 0 || r > 5) {
+      return { spec: {}, error: "minRating must be an integer 0-5" };
+    }
+    spec.minRating = r;
+  }
+  if (raw.orientations !== undefined) {
+    if (
+      !Array.isArray(raw.orientations) ||
+      !raw.orientations.every((o) => ALLOWED_ORIENTATIONS.includes(o))
+    ) {
+      return {
+        spec: {},
+        error: "orientations must be a subset of " + ALLOWED_ORIENTATIONS.join("/"),
+      };
+    }
+    spec.orientations = raw.orientations;
+  }
+  return { spec };
+}
 
 /**
  * Register the API routes on an Express app.
@@ -308,6 +344,8 @@ export function registerApi(app) {
         error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
       });
     }
+    const { spec: filter, error: filterError } = parseFilterParam(req);
+    if (filterError) return res.status(400).json({ error: filterError });
 
     let collapsed = [];
     if (req.query.collapsed) {
@@ -357,6 +395,7 @@ export function registerApi(app) {
         startPath,
         before,
         after,
+        filter,
       });
       res.json({ items, focusItem });
     } catch (err) {
@@ -377,6 +416,8 @@ export function registerApi(app) {
         error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
       });
     }
+    const { spec: filter, error: filterError } = parseFilterParam(req);
+    if (filterError) return res.status(400).json({ error: filterError });
 
     const direction = String(req.query.direction ?? "");
     if (direction !== "next" && direction !== "prev") {
@@ -406,6 +447,7 @@ export function registerApi(app) {
         collapsed,
         focusId,
         direction,
+        filter,
       });
       res.json(result ?? { id: null });
     } catch (e) {
@@ -427,6 +469,8 @@ export function registerApi(app) {
         error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
       });
     }
+    const { spec: filter, error: filterError } = parseFilterParam(req);
+    if (filterError) return res.status(400).json({ error: filterError });
 
     let path = [];
     if (req.query.path) {
@@ -439,7 +483,7 @@ export function registerApi(app) {
 
     const db = getDb();
     try {
-      const { total, nodes } = getTreeNode(db, { groupBy, path });
+      const { total, nodes } = getTreeNode(db, { groupBy, path, filter });
       res.json({ total, nodes });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -459,10 +503,12 @@ export function registerApi(app) {
         error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
       });
     }
+    const { spec: filter, error: filterError } = parseFilterParam(req);
+    if (filterError) return res.status(400).json({ error: filterError });
 
     const db = getDb();
     try {
-      const { total, leaves } = getFlatTree(db, { groupBy });
+      const { total, leaves } = getFlatTree(db, { groupBy, filter });
       res.json({ total, leaves });
     } catch (err) {
       res.status(400).json({ error: err.message });
