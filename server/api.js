@@ -44,6 +44,7 @@ import {
 } from "./db/feed.js";
 import { getTreeNode, getFlatTree } from "./db/tree.js";
 import { ALLOWED_ORIENTATIONS } from "./db/filters.js";
+import { parseSort } from "./db/sort.js";
 
 /**
  * True if `target` is `root` itself or nested anywhere inside it. Same
@@ -483,6 +484,9 @@ export function registerApi(app) {
     }
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
+    const sort = parseSort(
+      req.query.sort ? String(req.query.sort) : undefined
+    );
 
     let collapsed = [];
     if (req.query.collapsed) {
@@ -533,6 +537,7 @@ export function registerApi(app) {
         before,
         after,
         filter,
+        sort,
       });
       res.json({ items, focusItem });
     } catch (err) {
@@ -555,6 +560,9 @@ export function registerApi(app) {
     }
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
+    const sort = parseSort(
+      req.query.sort ? String(req.query.sort) : undefined
+    );
 
     const direction = String(req.query.direction ?? "");
     if (direction !== "next" && direction !== "prev") {
@@ -585,6 +593,7 @@ export function registerApi(app) {
         focusId,
         direction,
         filter,
+        sort,
       });
       res.json(result ?? { id: null });
     } catch (e) {
@@ -608,6 +617,9 @@ export function registerApi(app) {
     }
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
+    const sort = parseSort(
+      req.query.sort ? String(req.query.sort) : undefined
+    );
 
     let path = [];
     if (req.query.path) {
@@ -620,7 +632,12 @@ export function registerApi(app) {
 
     const db = getDb();
     try {
-      const { total, nodes } = getTreeNode(db, { groupBy, path, filter });
+      const { total, nodes } = getTreeNode(db, {
+        groupBy,
+        path,
+        filter,
+        sort,
+      });
       res.json({ total, nodes });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -642,10 +659,13 @@ export function registerApi(app) {
     }
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
+    const sort = parseSort(
+      req.query.sort ? String(req.query.sort) : undefined
+    );
 
     const db = getDb();
     try {
-      const { total, leaves } = getFlatTree(db, { groupBy, filter });
+      const { total, leaves } = getFlatTree(db, { groupBy, filter, sort });
       res.json({ total, leaves });
     } catch (err) {
       res.status(400).json({ error: err.message });

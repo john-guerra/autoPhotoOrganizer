@@ -702,6 +702,49 @@ describe("GET /api/feed", () => {
   });
 });
 
+describe("GET /api/feed — sort param", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+  });
+
+  it("orders a flat feed by rating desc when sort=rating:desc", async () => {
+    await scan(srv.base, photosDir);
+    const db = getDb();
+    const rows = db.prepare(`SELECT id FROM photos ORDER BY id`).all();
+    const starredId = rows[0].id;
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(starredId);
+
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&after=200&sort=rating:desc`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Real photo items only — collapsed group placeholders use a synthetic
+    // string id, not a numeric one.
+    const realItems = body.items.filter(
+      (i) => typeof i.id === "number" && !i.collapsed
+    );
+    const starredIndex = realItems.findIndex((i) => i.id === starredId);
+    const zeroRatedIndex = realItems.findIndex(
+      (i) => i.id !== starredId && (i.rating ?? 0) === 0
+    );
+    expect(starredIndex).toBeGreaterThanOrEqual(0);
+    expect(zeroRatedIndex).toBeGreaterThanOrEqual(0);
+    // rating:desc must place the 5-star photo ahead of an unrated one.
+    expect(starredIndex).toBeLessThan(zeroRatedIndex);
+  });
+
+  it("never 400s on a bad sort — falls back to the default", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(
+      `${srv.base}/api/feed?groupBy=folder&sort=bogus:sideways`
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("/api/feed filter param", () => {
   beforeEach(async () => {
     const db = getDb();
