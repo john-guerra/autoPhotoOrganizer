@@ -4,7 +4,8 @@
   // instantly (all client-side — see albums.js) so you can preview boundaries
   // before materializing them to dated folders on disk.
   import { createEventDispatcher } from "svelte";
-  import { thumbUrl, materializeAlbums } from "./api.js";
+  import { thumbUrl, startMaterialize } from "./api.js";
+  import { waitForJob } from "./jobs.js";
   import {
     computeGapStats,
     autoThresholdMs,
@@ -28,6 +29,10 @@
   let dest = localStorage.getItem("autogallery.exportDest") || "";
   let materializing = false;
   let result = null;
+  // Materialize defaults to MOVE (relocates originals out of the source
+  // folders) — Copy is the safer opt-in. A completed/partially-canceled move
+  // job can be undone from the JobsPanel via its result manifest.
+  let move = true;
   // Local mirror of the max-photos prop. Re-syncs whenever the prop changes
   // (i.e. after a re-fetch clamps it) but survives typing in between.
   let limitInput = limit;
@@ -120,6 +125,9 @@
     if (p) dest = p;
   }
 
+  /** Runs as a cancelable background job — live progress shows in the
+   * JobsPanel (including a Cancel button and, once done, Undo for a move).
+   * This just waits for the terminal result to update the local summary. */
   async function doMaterialize() {
     if (!dest.trim()) {
       result = { error: "Choose a destination folder first." };
@@ -128,8 +136,20 @@
     materializing = true;
     result = null;
     try {
-      result = await materializeAlbums(dest.trim(), namedAlbums());
+      const { jobId } = await startMaterialize({
+        destParent: dest.trim(),
+        albums: namedAlbums(),
+        move,
+      });
       localStorage.setItem("autogallery.exportDest", dest.trim());
+      const job = await waitForJob(jobId);
+      if (job.status === "done") {
+        result = job.result;
+      } else if (job.status === "canceled") {
+        result = { error: "Materialize canceled." };
+      } else {
+        result = { error: job.error || "Materialize failed." };
+      }
     } catch (e) {
       result = { error: e.message };
     } finally {
@@ -187,6 +207,16 @@
       />
     </label>
     <span class="spacer"></span>
+    <div class="move-toggle" role="radiogroup" aria-label="Move or copy into the album folders">
+      <label class="move-opt">
+        <input type="radio" name="materialize-mode" value={true} bind:group={move} />
+        Move
+      </label>
+      <label class="move-opt">
+        <input type="radio" name="materialize-mode" value={false} bind:group={move} />
+        Copy
+      </label>
+    </div>
     <input
       class="dest"
       type="text"
@@ -198,16 +228,26 @@
       <button class="mat-btn" on:click={pickDest}>Choose…</button>
     {/if}
     <button class="mat-btn primary" on:click={doMaterialize} disabled={materializing}>
-      {materializing ? "Copying…" : "Materialize to folders"}
+      {materializing
+        ? move
+          ? "Moving…"
+          : "Copying…"
+        : `Materialize to folders (${move ? "move" : "copy"})`}
     </button>
     <button class="mat-btn" on:click={() => dispatch("close")}>Done</button>
   </div>
+
+  {#if move}
+    <p class="albums-msg warn">
+      Move relocates originals out of the source folders — undoable from the jobs panel.
+    </p>
+  {/if}
 
   {#if result?.error}
     <p class="albums-msg err">{result.error}</p>
   {:else if result}
     <p class="albums-msg ok">
-      Materialized {result.albums.length} album(s) →
+      {result.move ? "Moved" : "Materialized"} {result.albums.length} album(s) →
       {result.destParent}
     </p>
   {/if}
@@ -316,6 +356,19 @@
   }
   .spacer {
     flex: 1;
+  }
+  .move-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.8rem;
+    color: #bbb;
+  }
+  .move-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
   }
   .dest {
     width: 260px;

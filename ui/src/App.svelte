@@ -28,12 +28,14 @@
     fetchMeta,
     fetchLibrary,
     scan as apiScan,
+    startScan,
+    startExport,
     fetchPhotoIds,
     fetchPhotoCount,
-    exportSelection,
     fetchAlbumTimeline,
     setScope,
   } from "./lib/api.js";
+  import { waitForJob } from "./lib/jobs.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
   import JobsPanel from "./lib/JobsPanel.svelte";
@@ -676,7 +678,9 @@
   }
 
   /** Copy the selected photos into a new folder on disk (server copies, never
-   * moves — originals are the read-only source of truth). */
+   * moves — originals are the read-only source of truth). Runs as a
+   * cancelable background job; live progress shows in the JobsPanel, this
+   * just waits for the terminal result to update the local UI. */
   async function doExport() {
     if (selectedIds.size === 0) return;
     if (!exportDest.trim() || !exportName.trim()) {
@@ -687,16 +691,24 @@
     exportResult = null;
     error = "";
     try {
-      const res = await exportSelection(
-        [...selectedIds],
-        exportDest.trim(),
-        exportName.trim()
-      );
-      exportResult = res;
+      const { jobId } = await startExport({
+        photoIds: [...selectedIds],
+        destParent: exportDest.trim(),
+        folderName: exportName.trim(),
+      });
       localStorage.setItem(LS_EXPORT_DEST, exportDest.trim());
-      status = `Exported ${res.copied} photo${res.copied === 1 ? "" : "s"}${
-        res.skipped ? `, ${res.skipped} skipped` : ""
-      } → ${res.target}`;
+      const job = await waitForJob(jobId);
+      if (job.status === "done") {
+        const res = job.result;
+        exportResult = res;
+        status = `Exported ${res.copied} photo${res.copied === 1 ? "" : "s"}${
+          res.skipped ? `, ${res.skipped} skipped` : ""
+        } → ${res.target}`;
+      } else if (job.status === "canceled") {
+        status = "Export canceled";
+      } else {
+        error = job.error || "Export failed";
+      }
     } catch (e) {
       error = e.message;
     } finally {
@@ -1272,7 +1284,24 @@
     scanning = true;
     status = "scanning…";
     try {
-      await apiScan(dir.trim(), recursiveScan);
+      if (recursiveScan) {
+        // Recursive ("soup folder") scans run as a cancelable background
+        // job — live progress shows in the JobsPanel. Single-folder scan
+        // stays synchronous below (fast; returns items for immediate render).
+        const { jobId } = await startScan(dir.trim(), { recursive: true });
+        const job = await waitForJob(jobId);
+        if (job.status === "canceled") {
+          status = "Scan canceled";
+          return;
+        }
+        if (job.status !== "done") {
+          error = job.error || "Scan failed";
+          status = "";
+          return;
+        }
+      } else {
+        await apiScan(dir.trim(), false);
+      }
       localStorage.setItem(LS_KEY, dir.trim());
       refreshLibrary();
       // The scanned folder is now indexed — reload the feed from the
