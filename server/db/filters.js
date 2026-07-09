@@ -21,15 +21,18 @@ export function buildFilter(spec = {}) {
     params.push(minRating);
   }
 
-  const orientations = Array.isArray(spec?.orientations)
-    ? spec.orientations.filter((o) => ORIENTATION_FRAGMENTS[o])
-    : [];
+  // De-duplicate and normalize to canonical (ALLOWED_ORIENTATIONS) order in
+  // one pass: filtering ALLOWED_ORIENTATIONS by requested membership both
+  // drops unknown names and collapses duplicates, and keeps the emitted SQL
+  // fragment order deterministic regardless of the caller's input order.
+  const requested = new Set(
+    Array.isArray(spec?.orientations) ? spec.orientations : []
+  );
+  const orientations = ALLOWED_ORIENTATIONS.filter((o) => requested.has(o));
   // A strict, non-empty subset constrains; all three (or none) shows all.
   if (orientations.length > 0 && orientations.length < ALLOWED_ORIENTATIONS.length) {
     const ors = orientations.map((o) => ORIENTATION_FRAGMENTS[o]).join(" OR ");
-    clauses.push(
-      `photos.width IS NOT NULL AND photos.height IS NOT NULL AND (${ors})`
-    );
+    clauses.push(`photos.width > 0 AND photos.height > 0 AND (${ors})`);
   }
 
   if (!clauses.length) return { sql: "1=1", params: [] };

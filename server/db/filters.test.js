@@ -22,10 +22,10 @@ describe("buildFilter", () => {
     expect(buildFilter({ orientations: [] })).toEqual({ sql: "1=1", params: [] });
   });
 
-  it("a strict orientation subset emits a non-null-guarded OR", () => {
+  it("a strict orientation subset emits a positive-dimension-guarded OR", () => {
     const f = buildFilter({ orientations: ["landscape", "portrait"] });
     expect(f.sql).toBe(
-      "photos.width IS NOT NULL AND photos.height IS NOT NULL AND (photos.width > photos.height OR photos.height > photos.width)"
+      "photos.width > 0 AND photos.height > 0 AND (photos.width > photos.height OR photos.height > photos.width)"
     );
     expect(f.params).toEqual([]);
   });
@@ -33,14 +33,14 @@ describe("buildFilter", () => {
   it("single orientation: portrait", () => {
     const f = buildFilter({ orientations: ["portrait"] });
     expect(f.sql).toBe(
-      "photos.width IS NOT NULL AND photos.height IS NOT NULL AND (photos.height > photos.width)"
+      "photos.width > 0 AND photos.height > 0 AND (photos.height > photos.width)"
     );
   });
 
   it("combines rating and orientation with AND, rating first", () => {
     const f = buildFilter({ minRating: 5, orientations: ["square"] });
     expect(f.sql).toBe(
-      "photos.rating >= ? AND photos.width IS NOT NULL AND photos.height IS NOT NULL AND (photos.width = photos.height)"
+      "photos.rating >= ? AND photos.width > 0 AND photos.height > 0 AND (photos.width = photos.height)"
     );
     expect(f.params).toEqual([5]);
   });
@@ -48,7 +48,14 @@ describe("buildFilter", () => {
   it("ignores unknown orientation names", () => {
     const f = buildFilter({ orientations: ["portrait", "bogus"] });
     expect(f.sql).toBe(
-      "photos.width IS NOT NULL AND photos.height IS NOT NULL AND (photos.height > photos.width)"
+      "photos.width > 0 AND photos.height > 0 AND (photos.height > photos.width)"
+    );
+  });
+
+  it("de-duplicates orientation names before the all-off length check", () => {
+    const f = buildFilter({ orientations: ["portrait", "portrait", "landscape"] });
+    expect(f.sql).toBe(
+      "photos.width > 0 AND photos.height > 0 AND (photos.width > photos.height OR photos.height > photos.width)"
     );
   });
 });
