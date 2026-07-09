@@ -13,20 +13,23 @@ describe("sampleOffsets", () => {
     });
   });
 
-  it("front(6)/middle(4)/last(2) block sizes and gap positions for a big group", () => {
+  it("front(6)/middle-cluster(4)/last(2) blocks and two gaps for a big group", () => {
     const { offsets, gaps } = sampleOffsets(1000, 12);
     expect(offsets).toHaveLength(12);
     // front block: ceil((12-2)*0.6) = 6 indices, 0..5
     expect(offsets.slice(0, 6)).toEqual([0, 1, 2, 3, 4, 5]);
-    // last block: the final two real indices
-    expect(offsets.slice(-2)).toEqual([998, 999]);
-    // middle block: 12-2-6 = 4 indices strictly between the front and last
+    // middle: a CONTIGUOUS cluster of 12-2-6 = 4 indices, centered in the
+    // band [6, 997]. Assert contiguity + rough centering rather than pinning
+    // the exact start index.
     const middle = offsets.slice(6, 10);
     expect(middle).toHaveLength(4);
-    for (const idx of middle) {
-      expect(idx).toBeGreaterThan(5);
-      expect(idx).toBeLessThan(998);
+    for (let i = 1; i < middle.length; i++) {
+      expect(middle[i]).toBe(middle[i - 1] + 1); // contiguous
     }
+    expect(middle[0]).toBeGreaterThan(400);
+    expect(middle[3]).toBeLessThan(600); // roughly centered
+    // last block: the final two real indices
+    expect(offsets.slice(-2)).toEqual([998, 999]);
     // strictly increasing, no duplicates, all in range
     for (let i = 1; i < offsets.length; i++) {
       expect(offsets[i]).toBeGreaterThan(offsets[i - 1]);
@@ -35,12 +38,10 @@ describe("sampleOffsets", () => {
       expect(idx).toBeGreaterThanOrEqual(0);
       expect(idx).toBeLessThan(1000);
     }
-    // gaps mark every point where the next offset doesn't immediately
-    // follow: front→middle (after index 5), each middle pick (they're
-    // spread ~200 apart, not contiguous with each other), and middle→last
-    // (after index 9). Only the last block (998,999) is contiguous, so
-    // index 10 is NOT a gap.
-    expect(gaps).toEqual([5, 6, 7, 8, 9]);
+    // exactly two omission gaps: front→middle-cluster (after index 5) and
+    // middle-cluster→last (after index 9). The front block, the middle
+    // cluster, and the last pair are each internally contiguous.
+    expect(gaps).toEqual([5, 9]);
   });
 
   it("small slot counts still produce valid, in-range, strictly increasing offsets", () => {

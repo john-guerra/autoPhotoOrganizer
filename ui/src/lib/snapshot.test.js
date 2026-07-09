@@ -13,17 +13,18 @@ describe("sampleOffsets (client twin of server/db/sampleGroup.js)", () => {
     });
   });
 
-  it("front(6)/middle(4)/last(2) block sizes and gap positions for a big group", () => {
+  it("front(6)/middle-cluster(4)/last(2) blocks and two gaps for a big group", () => {
     const { offsets, gaps } = sampleOffsets(1000, 12);
     expect(offsets).toHaveLength(12);
     expect(offsets.slice(0, 6)).toEqual([0, 1, 2, 3, 4, 5]);
     expect(offsets.slice(-2)).toEqual([998, 999]);
     const middle = offsets.slice(6, 10);
     expect(middle).toHaveLength(4);
-    for (const idx of middle) {
-      expect(idx).toBeGreaterThan(5);
-      expect(idx).toBeLessThan(998);
+    for (let i = 1; i < middle.length; i++) {
+      expect(middle[i]).toBe(middle[i - 1] + 1); // contiguous cluster
     }
+    expect(middle[0]).toBeGreaterThan(400);
+    expect(middle[3]).toBeLessThan(600);
     for (let i = 1; i < offsets.length; i++) {
       expect(offsets[i]).toBeGreaterThan(offsets[i - 1]);
     }
@@ -31,8 +32,8 @@ describe("sampleOffsets (client twin of server/db/sampleGroup.js)", () => {
       expect(idx).toBeGreaterThanOrEqual(0);
       expect(idx).toBeLessThan(1000);
     }
-    // See server/db/sampleGroup.test.js for why every index 5..9 is a gap.
-    expect(gaps).toEqual([5, 6, 7, 8, 9]);
+    // Exactly two omission gaps: front→middle-cluster, middle-cluster→last.
+    expect(gaps).toEqual([5, 9]);
   });
 
   it("small slot counts still produce valid, in-range, strictly increasing offsets", () => {

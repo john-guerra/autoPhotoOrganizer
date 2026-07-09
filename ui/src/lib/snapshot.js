@@ -22,15 +22,17 @@ export function sampleOffsets(count, slots) {
   const mid = slots - last - first;
   const offsets = [];
   for (let i = 0; i < first; i++) offsets.push(i);
-  // middle: evenly sample `mid` indices strictly inside (first-1, count-last)
-  const lo = first,
-    hi = count - last - 1; // inclusive middle band
-  for (let k = 0; k < mid; k++) {
-    const t = (k + 1) / (mid + 1);
-    let idx = Math.round(lo + t * (hi - lo));
-    if (offsets.length && idx <= offsets[offsets.length - 1])
-      idx = offsets[offsets.length - 1] + 1;
-    if (idx <= hi) offsets.push(idx);
+  // middle: a CONTIGUOUS cluster (a "fragment" of the middle) centered in the
+  // band between the front and last blocks — so the strip reads as
+  // "first few … middle cluster … last two" with just two omission gaps,
+  // not a sparse filmstrip with a gap between every middle thumbnail.
+  if (mid > 0) {
+    const bandLo = first; // first free index after the front block
+    const bandHi = count - last - 1; // last free index before the last block
+    let start = bandLo + Math.floor((bandHi - bandLo + 1 - mid) / 2);
+    if (start < bandLo) start = bandLo;
+    if (start + mid - 1 > bandHi) start = bandHi - mid + 1;
+    for (let i = 0; i < mid; i++) offsets.push(start + i);
   }
   for (let i = count - last; i < count; i++) offsets.push(i);
   // gaps: after any offset whose successor skips ≥2
