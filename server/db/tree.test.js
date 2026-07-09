@@ -223,13 +223,14 @@ describe("getFlatTree", () => {
     const { leaves } = getFlatTree(db, {
       groupBy: ["year", "month", "day"],
     });
+    // month is month-of-year ("%m") now; day stays full ISO date.
     expect(leaves).toEqual([
       {
-        values: { year: "2024", month: "2024-01", day: "2024-01-02" },
+        values: { year: "2024", month: "01", day: "2024-01-02" },
         count: 1,
       },
       {
-        values: { year: "2023", month: "2023-05", day: "2023-05-10" },
+        values: { year: "2023", month: "05", day: "2023-05-10" },
         count: 1,
       },
     ]);
@@ -246,6 +247,27 @@ describe("getFlatTree", () => {
     });
     expect(leaves).toEqual([
       { values: { folder: "/photos/trip", year: "" }, count: 1 },
+    ]);
+  });
+
+  it("month-of-year: aggregates the same month across years into one node, labeled by name", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const rows = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    // Two Decembers (different years) + one March.
+    setTakenAt(db, rows[0].id, "2002-12-10T00:00:00.000Z");
+    setTakenAt(db, rows[1].id, "2019-12-24T00:00:00.000Z");
+    setTakenAt(db, rows[2].id, "2010-03-05T00:00:00.000Z");
+
+    const { nodes } = getTreeNode(db, { groupBy: ["month"] });
+    // Both Decembers collapse into one "12" node with count 2; DESC order.
+    expect(nodes).toEqual([
+      { value: "12", label: "December", count: 2, hasChildren: false },
+      { value: "03", label: "March", count: 1, hasChildren: false },
     ]);
   });
 });

@@ -3,9 +3,29 @@
  * displayEntries.js/bursts.js — App.svelte composes these.
  */
 
+// Month-of-year full names. The `month` dimension is now "%m" ("01".."12"),
+// aggregating all Decembers regardless of year — so it labels as the month name.
+// Kept in sync with server/db/tree.js's twin (no shared server/client module).
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
 /** @param {string} dimension @param {string} value @returns {string} */
-export function formatGroupValue(_dimension, value) {
-  return value === "" ? "Unknown" : value;
+export function formatGroupValue(dimension, value) {
+  if (value === "") return "Unknown";
+  if (dimension === "month") return MONTH_NAMES[Number(value) - 1] ?? value;
+  return value;
 }
 
 /**

@@ -18,7 +18,7 @@ export const DIMENSIONS = {
     direction: "DESC",
   },
   month: {
-    expr: "COALESCE(strftime('%Y-%m', photos.taken_at / 1000, 'unixepoch'), '')",
+    expr: "COALESCE(strftime('%m', photos.taken_at / 1000, 'unixepoch'), '')",
     direction: "DESC",
   },
   day: {

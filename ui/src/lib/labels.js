@@ -65,6 +65,10 @@ export function shortLeafLabel(dimension, value, prevValue) {
   }
 
   if (dimension === "month") {
+    // month-of-year: the value is now a bare "01".."12" (all years aggregated).
+    const bare = /^(\d{2})$/.exec(value);
+    if (bare) return monthName(bare[1]) ?? value;
+    // Legacy "YYYY-MM" fallback (kept in case any cached value slips through).
     const m = MONTH_RE.exec(value);
     if (!m) return value;
     const [, year, monthNum] = m;

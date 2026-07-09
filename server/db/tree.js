@@ -52,19 +52,37 @@ export function getTreeNode(db, { groupBy, path = [], filter: filterSpec = {}, s
   const hasChildren = path.length + 1 < dims.length;
   const nodes = rows.map((r) => ({
     value: r.value,
-    label: formatTreeLabel(r.value),
+    label: formatTreeLabel(nextDim.name, r.value),
     count: r.count,
     hasChildren,
   }));
   return { total, nodes };
 }
 
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
 /** Mirrors ui/src/lib/feed.js's formatGroupValue: the empty-string date
- * sentinel (see feed.js's DIMENSIONS doc comment) displays as "Unknown".
+ * sentinel (see feed.js's DIMENSIONS doc comment) displays as "Unknown", and
+ * the month-of-year dimension ("01".."12") displays as its month name.
  * Kept in sync manually — there is no shared module between server and
  * client to import this from. */
-function formatTreeLabel(value) {
-  return value === "" ? "Unknown" : value;
+function formatTreeLabel(dimension, value) {
+  if (value === "") return "Unknown";
+  if (dimension === "month") return MONTH_NAMES[Number(value) - 1] ?? value;
+  return value;
 }
 
 /**

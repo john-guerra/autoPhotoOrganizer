@@ -53,11 +53,11 @@ export function sortSeekDim(sort) {
   };
 }
 
-// year/month/day formats MUST reproduce the current DIMENSIONS exprs (only the
-// date source varies). NOTE: the timeline spec later changes `month` to "%m"
-// (month-of-year); when that lands, update the month format here too — this is
-// the single seam both features touch.
-const DATE_DIM_FMT = { year: "%Y", month: "%Y-%m", day: "%Y-%m-%d" };
+// year/month/day formats MUST match the DIMENSIONS exprs (only the date source
+// varies). `month` is month-of-year ("%m" → "01".."12"), so all Decembers
+// aggregate into one group regardless of year; a full chronological month is
+// still reachable via groupBy [year, month].
+const DATE_DIM_FMT = { year: "%Y", month: "%m", day: "%Y-%m-%d" };
 
 function dateDimExpr(unit, colExpr) {
   // Outer COALESCE(..., '') turns a NULL date into the '' Unknown bucket.
