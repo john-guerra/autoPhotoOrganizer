@@ -1919,10 +1919,17 @@
     z-index: 20;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.75rem;
+    row-gap: 0.45rem;
     padding: 0.6rem 1rem;
     background: #1c1c1c;
     border-bottom: 1px solid #2a2a2a;
+  }
+  /* Clusters keep their natural width and wrap as whole units, rather than
+     shrinking (which squeezed the group-by widget and made it overflow). */
+  .cluster {
+    flex-shrink: 0;
   }
   .cluster {
     display: flex;
@@ -1939,14 +1946,11 @@
     background: #2a2a2a;
     margin: 2px 0;
   }
-  /* The View cluster + status form the right-aligned group; the flexible gap
-     lands between Organize and View. Pushing the divider (not status) keeps
-     status flowing normally after the view cell so it can't overlap it. */
+  /* Push the View cluster to the right ONLY when everything still fits on one
+     row; once the toolbar wraps, the auto-margin collapses and View wraps as a
+     normal unit (no odd right-shove on its own row). */
   .divider.push {
     margin-left: auto;
-  }
-  .cluster.view {
-    flex-shrink: 0;
   }
 
   .add-folder {
