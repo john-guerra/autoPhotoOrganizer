@@ -32,6 +32,7 @@
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
+  import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
   import MultiAutoSelect from "multi-auto-select";
 
@@ -106,6 +107,12 @@
     return ["folder"];
   })();
   $: localStorage.setItem(LS_GROUP_BY, JSON.stringify(groupBy));
+
+  // Sidebar view: classic "tree" or focus+context "fisheye" (toggle, persisted).
+  const LS_SIDEBAR_MODE = "autogallery.sidebarMode";
+  let sidebarMode =
+    localStorage.getItem(LS_SIDEBAR_MODE) === "fisheye" ? "fisheye" : "tree";
+  $: localStorage.setItem(LS_SIDEBAR_MODE, sidebarMode);
   let collapsedPaths = []; // Array<Array<{dimension,value}>>, reset on hierarchy change
   let treeSidebarRef; // bound to TreeSidebar, for revealCurrentLocation to call revealPath
   let items = []; // the currently-loaded feed window, ordered
@@ -390,6 +397,24 @@
       .map((d) => ({ dimension: d, value: photo.groupValues[d] }));
     treeSidebarRef?.revealPath(path);
   }
+
+  /** The group path of the first photo currently visible in the feed — drives
+   * the fisheye sidebar's "you are here" marker so it follows the feed as you
+   * scroll. Read-only: derived from the existing render window, it never
+   * scrolls the feed itself (honours issue #40's no-scroll-hijack rule). */
+  function deriveCurrentPath(start, entries, gb) {
+    for (let i = Math.max(0, start); i < entries.length; i++) {
+      const e = entries[i];
+      if (!e || e.kind === "placeholder") continue;
+      const gv = resolvePhoto(e)?.groupValues;
+      if (!gv) continue;
+      return gb
+        .filter((d) => gv[d] !== undefined)
+        .map((d) => ({ dimension: d, value: gv[d] }));
+    }
+    return null;
+  }
+  $: currentPath = deriveCurrentPath(renderStart, displayEntries, groupBy);
 
   /** Finds the displayEntries index whose entry represents photo `id` —
    * either directly (a plain photo entry, or a stack entry whose cover IS
@@ -1425,6 +1450,33 @@
   <header class="topbar">
     <h1>AutoGallery</h1>
     <div class="group-by" use:groupBySelector={groupBy}></div>
+    <div
+      class="sidebar-toggle"
+      role="group"
+      aria-label="Sidebar view"
+      style="display:flex;gap:2px;background:#101010;border:1px solid #333;border-radius:6px;padding:2px;"
+    >
+      <button
+        type="button"
+        on:click={() => (sidebarMode = "tree")}
+        style="border:none;border-radius:4px;padding:3px 9px;font-size:0.8rem;cursor:pointer;{sidebarMode ===
+        'tree'
+          ? 'background:#4c9aff;color:#06121f;font-weight:600;'
+          : 'background:transparent;color:#9a9a9a;'}"
+      >
+        Tree
+      </button>
+      <button
+        type="button"
+        on:click={() => (sidebarMode = "fisheye")}
+        style="border:none;border-radius:4px;padding:3px 9px;font-size:0.8rem;cursor:pointer;{sidebarMode ===
+        'fisheye'
+          ? 'background:#4c9aff;color:#06121f;font-weight:600;'
+          : 'background:transparent;color:#9a9a9a;'}"
+      >
+        Fisheye
+      </button>
+    </div>
     <button
       class="reveal-btn"
       on:click={revealCurrentLocation}
@@ -1523,13 +1575,21 @@
   </header>
 
   <div class="app-body">
-    <TreeSidebar
-      bind:this={treeSidebarRef}
-      {groupBy}
-      {collapsedPaths}
-      on:toggle={(e) => toggleSectionCollapse(e.detail)}
-      on:jump={(e) => jumpToPath(e.detail)}
-    />
+    {#if sidebarMode === "tree"}
+      <TreeSidebar
+        bind:this={treeSidebarRef}
+        {groupBy}
+        {collapsedPaths}
+        on:toggle={(e) => toggleSectionCollapse(e.detail)}
+        on:jump={(e) => jumpToPath(e.detail)}
+      />
+    {:else}
+      <FisheyeSidebar
+        {groupBy}
+        {currentPath}
+        on:jump={(e) => jumpToPath(e.detail)}
+      />
+    {/if}
     <div
       class="main-column"
       bind:this={mainColumnEl}

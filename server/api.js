@@ -25,7 +25,7 @@ import {
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
 import { getFeedPage, findGroupBoundary, DIMENSIONS } from "./db/feed.js";
-import { getTreeNode } from "./db/tree.js";
+import { getTreeNode, getFlatTree } from "./db/tree.js";
 
 const processing = new NodeProcessingService();
 
@@ -441,6 +441,29 @@ export function registerApi(app) {
     try {
       const { total, nodes } = getTreeNode(db, { groupBy, path });
       res.json({ total, nodes });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/tree/flat", (req, res) => {
+    const groupBy = String(req.query.groupBy ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!groupBy.length) {
+      return res.status(400).json({ error: "groupBy is required" });
+    }
+    if (groupBy.some((d) => !DIMENSIONS[d])) {
+      return res.status(400).json({
+        error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
+      });
+    }
+
+    const db = getDb();
+    try {
+      const { total, leaves } = getFlatTree(db, { groupBy });
+      res.json({ total, leaves });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }

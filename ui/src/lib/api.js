@@ -192,3 +192,17 @@ export async function fetchTreeNode({ groupBy, path = [] }) {
   }
   return res.json();
 }
+
+/**
+ * @param {string[]} groupBy
+ * @returns {Promise<{total:number, leaves: Array<{values: Record<string,string>, count:number}>}>}
+ */
+export async function fetchFlatTree(groupBy) {
+  const params = new URLSearchParams({ groupBy: groupBy.join(",") });
+  const res = await fetch(`/api/tree/flat?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `flat tree failed (${res.status})`);
+  }
+  return res.json();
+}

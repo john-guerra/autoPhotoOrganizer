@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher } from "svelte";
   import { treeKey } from "./treeState.js";
+  import { shortLeafLabel } from "./labels.js";
 
   export let groupBy; // string[]
   export let path; // Array<{dimension,value}> — this node's own path
@@ -46,8 +47,12 @@
     >
       {collapsedInFeed ? "▸" : "▾"}
     </button>
-    <button class="tree-label" on:click={() => dispatch("jump", path)}>
-      {node.label}
+    <button
+      class="tree-label"
+      title={node.label}
+      on:click={() => dispatch("jump", path)}
+    >
+      {shortLeafLabel(groupBy[depth], node.value)}
     </button>
     <span class="tree-count">{node.count}</span>
   </div>
