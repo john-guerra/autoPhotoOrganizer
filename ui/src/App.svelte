@@ -878,8 +878,14 @@
         sort,
       });
       if (epoch !== feedEpoch) return;
+      // A jump lands mid-library at `path`; unlike loadInitialFeed (which starts
+      // at the true top) there are almost always earlier groups above the target.
+      // Seed hasMoreBefore=true so an upward scroll back-fills them (the "before"
+      // loader seeks backward from the first loaded item). If we actually landed
+      // on the very first group, that first before-fetch returns empty and
+      // mergeFeedPage self-corrects hasMoreBefore back to false — one cheap probe.
       const merged = mergeFeedPage(
-        { items: [], hasMoreBefore: false, hasMoreAfter: true },
+        { items: [], hasMoreBefore: true, hasMoreAfter: true },
         { items: page },
         "after",
         PAGE_SIZE
