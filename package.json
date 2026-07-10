@@ -21,7 +21,6 @@
     "format": "prettier --write ."
   },
   "dependencies": {
-    "@john-guerra/d3-zoomable-axis": "^0.0.1",
     "better-sqlite3": "^12.11.1",
     "d3": "^7.9.0",
     "electron-updater": "^6.3.0",
@@ -33,6 +32,7 @@
     "sortablejs": "^1.15.7"
   },
   "devDependencies": {
+    "@john-guerra/d3-zoomable-axis": "^0.0.1",
     "@sveltejs/vite-plugin-svelte": "^3.1.2",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
