@@ -906,11 +906,32 @@
     const entry = displayEntries[selected];
     if (!entry || entry.kind === "placeholder") return;
     const photo = resolvePhoto(entry);
+    // Primary action: bring the focused photo back into view (centered). Once the
+    // feed scrolls, renderStart updates, so the fisheye + timeline "you are here"
+    // markers follow on their own — no explicit fisheye reveal needed here.
+    scrollSelectedIntoView();
+    // Secondary: in tree mode, expand + highlight the photo's group path. (Fisheye
+    // reflects the new position via its renderStart-driven marker above.)
     if (!photo?.groupValues) return;
     const path = groupBy
       .filter((d) => photo.groupValues[d] !== undefined)
       .map((d) => ({ dimension: d, value: photo.groupValues[d] }));
     treeSidebarRef?.revealPath(path);
+  }
+
+  /** Scroll the feed so the focused (`selected`) photo is centered. Uses the
+   * layout model (`boxes`) rather than the DOM tile, so it works even when the
+   * focus has been virtualized out of the render window (scrolled far away). */
+  function scrollSelectedIntoView() {
+    if (!gridEl || !mainColumnEl || !boxes) return;
+    const b = boxes[selected];
+    if (!b || b.y == null || b.height == null) return;
+    const gridTop = gridEl.getBoundingClientRect().top + mainColumnEl.scrollTop;
+    const target = Math.max(
+      0,
+      gridTop + b.y - (mainColumnEl.clientHeight - b.height) / 2
+    );
+    mainColumnEl.scrollTo({ top: target, behavior: "smooth" });
   }
 
   /** The group path of the first photo currently visible in the feed — drives
