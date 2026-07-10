@@ -9,6 +9,7 @@
   import { createEventDispatcher } from "svelte";
   import RatingFilter from "./RatingFilter.svelte";
   import OrientationFilter from "./OrientationFilter.svelte";
+  import TimelineFilter from "./TimelineFilter.svelte";
   import { DEFAULT_FILTER, isActive as filterIsActive } from "./filterSpec.js";
   import { ALL_DIMENSIONS, SORT_ATTRS, SORT_LABELS } from "./dimensions.js";
   import MultiAutoSelect from "multi-auto-select";
@@ -17,6 +18,11 @@
   export let sort = { by: "date_taken", dir: "asc" };
   export let filter = { ...DEFAULT_FILTER };
   export let filterMode = "display";
+  // Time-range filter facet (a compact sparkline that sits with stars/orientation).
+  export let timeMin = null; // epoch ms domain start (null = no time data yet)
+  export let timeMax = null; // epoch ms domain end
+  export let timeTimes = []; // sampled timestamps for the density sparkline
+  export let currentTime = null; // "you are here" marker (epoch ms)
 
   const dispatch = createEventDispatcher();
 
@@ -81,8 +87,28 @@
       on:click={() => dispatch("filtermodechange", "select")}>Select</button
     >
   </div>
+  <div class="divider"></div>
   <RatingFilter {filter} on:change={(e) => dispatch("filterchange", e.detail)} />
   <OrientationFilter {filter} on:change={(e) => dispatch("filterchange", e.detail)} />
+  {#if timeMin != null && timeMax != null && timeMax > timeMin}
+    <div class="time-filter" title="Filter by capture time — drag the handles">
+      <TimelineFilter
+        min={timeMin}
+        max={timeMax}
+        times={timeTimes}
+        {currentTime}
+        value={[filter.dateFrom ?? null, filter.dateTo ?? null]}
+        on:range={(e) =>
+          dispatch("filterchange", {
+            ...filter,
+            dateFrom: e.detail[0],
+            dateTo: e.detail[1],
+          })}
+        on:clear={() =>
+          dispatch("filterchange", { ...filter, dateFrom: null, dateTo: null })}
+      />
+    </div>
+  {/if}
   {#if filterIsActive(filter)}
     <button
       class="clear-filter"
@@ -158,6 +184,21 @@
     background: #4c9aff;
     color: #06121f;
     font-weight: 600;
+  }
+  /* Group boundary between the organize controls (group-by/sort/mode) and the
+     filter widgets (stars / orientation / time), matching the toolbar dividers. */
+  .divider {
+    width: 1px;
+    align-self: stretch;
+    background: #2a2a2a;
+    margin: 2px 0;
+  }
+  /* Compact home for the timeline sparkline so it sits inline with the other
+     filter widgets instead of a full-width strip. Fixed width keeps the toolbar
+     stable; the widget measures this box for its axis length + marker. */
+  .time-filter {
+    width: 260px;
+    flex-shrink: 0;
   }
   .clear-filter {
     background: transparent;

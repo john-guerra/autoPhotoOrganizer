@@ -13,7 +13,7 @@
    * so it never loops back through `input`.
    */
   import { createEventDispatcher } from "svelte";
-  import { scaleTime, timeFormat } from "d3";
+  import { scaleTime, timeFormat, curveBasis } from "d3";
   import { zoomableAxisInput } from "@john-guerra/d3-zoomable-axis";
 
   export let min = null; // epoch ms, domain start (null = no data)
@@ -76,12 +76,21 @@
       widget = zoomableAxisInput(scale, {
         orient: "bottom",
         length,
+        thickness: 30, // compact band height so the toolbar row stays short
+        // Continuous: a time-range filter shouldn't snap endpoints to a grid.
+        step: 0,
+        // Sparse ticks so year labels don't crowd in the compact toolbar width.
+        ticks: 4,
+        // Double-click a badge → native datetime picker (down to the second).
+        inputType: "datetime-local",
         value: brushRange(np.value, np.min, np.max),
         format: (d) => fmt(new Date(+d)),
         scent: {
           values: np.times || [],
-          type: "violin",
+          type: "area", // one-sided sparkline fill (spec'd), not a mirrored violin
           style: "kde",
+          size: 30,
+          curve: curveBasis, // smooth sparkline; swap for any d3 curve factory
           color: "#3a3a3a",
           colorSelected: "#4c9aff",
         },
@@ -140,13 +149,13 @@
 <style>
   .timeline {
     width: 100%;
-    padding: 6px 12px 2px;
+    padding: 2px 4px 0;
     box-sizing: border-box;
     overflow: visible;
   }
   .timeline-axis {
     position: relative;
-    min-height: 84px;
+    min-height: 60px;
   }
   /* The widget draws its own SVG axis + handles; give its accent a home so the
      selected KDE band matches the app's blue. */
@@ -157,10 +166,12 @@
   /* "You are here": a thin amber marker at the current view's time — read-only,
      distinct from the blue brush band. Sits above the axis; never intercepts
      clicks so the handles/brush stay usable underneath it. */
+  /* Short amber tick spanning just the density band down to the axis line
+     (thickness 30 → axis at ~37px), so it marks the spot without adding height. */
   .you-are-here {
     position: absolute;
-    top: 0;
-    height: 52px;
+    top: 7px;
+    height: 30px;
     width: 2px;
     background: #ffd24c;
     transform: translateX(-1px);
@@ -170,11 +181,11 @@
   }
   .yah-cap {
     position: absolute;
-    top: 0;
+    top: -4px;
     left: 50%;
     transform: translateX(-50%);
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #ffd24c;
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+    border-top: 4px solid #ffd24c;
   }
 </style>

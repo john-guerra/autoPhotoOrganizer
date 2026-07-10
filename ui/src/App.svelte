@@ -55,7 +55,6 @@
   import OrganizeControls from "./lib/OrganizeControls.svelte";
   import ViewControls from "./lib/ViewControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
-  import TimelineFilter from "./lib/TimelineFilter.svelte";
   import {
     DEFAULT_FILTER,
     isActive as filterIsActive,
@@ -2097,6 +2096,10 @@
       {sort}
       {filter}
       {filterMode}
+      {timeMin}
+      {timeMax}
+      {timeTimes}
+      {currentTime}
       on:groupbychange={(e) => onGroupByChange(e.detail)}
       on:sortchange={(e) => onSortChange(e.detail)}
       on:filtermodechange={(e) => onFilterModeChange(e.detail)}
@@ -2174,21 +2177,6 @@
     {/if}
   </header>
 
-  {#if timeMin != null && timeMax != null && timeMax > timeMin}
-    <div class="timeline-strip">
-      <TimelineFilter
-        min={timeMin}
-        max={timeMax}
-        times={timeTimes}
-        {currentTime}
-        value={[filter.dateFrom ?? null, filter.dateTo ?? null]}
-        on:range={(e) =>
-          onFilterChange({ ...filter, dateFrom: e.detail[0], dateTo: e.detail[1] })}
-        on:clear={() =>
-          onFilterChange({ ...filter, dateFrom: null, dateTo: null })}
-      />
-    </div>
-  {/if}
 
   <div class="app-body">
     {#if sidebarMode === "tree"}
@@ -2477,12 +2465,6 @@
     height: 100vh;
     display: flex;
     flex-direction: column;
-  }
-  .timeline-strip {
-    flex-shrink: 0;
-    width: 100%;
-    background: #161616;
-    border-bottom: 1px solid #2a2a2a;
   }
   .app-body {
     display: flex;
