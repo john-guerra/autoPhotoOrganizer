@@ -108,7 +108,7 @@
           side: "in", // rise toward the plot (up), matching the area sparkline
           color: "#3a3a3a",
           colorSelected: "#4c9aff",
-          controls: true, // built-in density settings gear + popover
+          // controls default ON — the widget's density gear + popover
           persistKey: KDE_PERSIST_KEY,
         },
       });
