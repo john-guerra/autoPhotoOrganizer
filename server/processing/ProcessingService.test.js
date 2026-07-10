@@ -21,12 +21,13 @@ describe("ProcessingService (smoke)", () => {
     expect(svc).toBeInstanceOf(ProcessingService);
   });
 
-  it("NodeProcessingService still throws on the not-yet-implemented video engine", async () => {
+  it("videoThumb rejects (not silently resolves) for a nonexistent/undecodable file", async () => {
     const svc = new NodeProcessingService();
-    // Video poster frames come later; RAW/JPEG embedded-preview extraction
-    // is implemented now (see NodeProcessingService.test.js).
-    await expect(svc.videoThumb("/tmp/x.mov")).rejects.toThrow(
-      /not implemented/i
+    // videoThumb is implemented (ffmpeg); a missing file must reject with the
+    // VideoDecodeError surface, not hang or resolve. Real poster-frame behavior
+    // is exercised in NodeProcessingService.test.js against a generated clip.
+    await expect(svc.videoThumb("/tmp/does-not-exist.mov", 100)).rejects.toMatchObject(
+      { name: "VideoDecodeError" }
     );
   });
 });

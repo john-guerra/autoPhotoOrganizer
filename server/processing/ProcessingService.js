@@ -32,6 +32,7 @@
  * @property {number=} height
  * @property {string=} camera
  * @property {string=} orientation
+ * @property {number=} duration   Video length in seconds (videos only; via ffprobe).
  */
 
 /**
@@ -78,11 +79,13 @@ export class ProcessingService {
   }
 
   /**
-   * Produce a poster-frame thumbnail for a video.
+   * Produce a poster-frame thumbnail for a video, bounded to `_size` px on the
+   * longest edge (symmetric with thumbnail()).
    * @param {string} _file
+   * @param {number} _size
    * @returns {Promise<PreviewResult>}
    */
-  async videoThumb(_file) {
+  async videoThumb(_file, _size) {
     throw new Error("ProcessingService.videoThumb is abstract");
   }
 
