@@ -1,10 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import autoUpdaterPkg from "electron-updater";
 import { createApp, listenOnOpenPort } from "../server/index.js";
-
-const { autoUpdater } = autoUpdaterPkg;
+import { initAutoUpdates } from "./updates.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -56,11 +54,7 @@ ipcMain.handle("pick-folder", async (event) => {
 app.whenReady().then(async () => {
   try {
     await createWindow();
-    if (!isDev) {
-      autoUpdater
-        .checkForUpdatesAndNotify()
-        .catch((err) => console.error("Update check failed:", err));
-    }
+    initAutoUpdates({ isDev });
   } catch (err) {
     dialog.showErrorBox("AutoGallery failed to start", String(err));
     app.quit();

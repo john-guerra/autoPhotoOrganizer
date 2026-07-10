@@ -48,6 +48,7 @@
   import JobsPanel from "./lib/JobsPanel.svelte";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
+  import UpdateBanner from "./lib/UpdateBanner.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
   import AlbumsView from "./lib/AlbumsView.svelte";
   import SnapshotStrip from "./lib/SnapshotStrip.svelte";
@@ -2201,6 +2202,8 @@
 </script>
 
 <svelte:window on:keydown={onKeydown} on:resize={scheduleVisibleRangeUpdate} />
+
+<UpdateBanner />
 
 <div class="app">
   <header class="topbar">

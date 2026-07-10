@@ -1,5 +1,15 @@
 name: Release
 
+# Cut a release by pushing a version tag:
+#   npm version 2.0.0-alpha.1 && git push origin main --follow-tags
+# Each OS runner builds its native installers and electron-builder's
+# `--publish always` uploads them + the update metadata (latest*.yml) to the
+# tag's GitHub Release; installed apps read that metadata via electron-updater.
+#
+# NOTE: macOS auto-update needs a SIGNED + notarized build. Until Developer ID
+# secrets are added below, mac artifacts install fine but won't auto-update;
+# Windows/Linux auto-update works from these unsigned builds.
+
 on:
   push:
     tags:
@@ -31,3 +41,7 @@ jobs:
       - run: npx electron-builder ${{ matrix.flag }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No signing certs in CI yet — keep the mac build from stalling on
+          # signing. Remove once Developer ID secrets are added (enables macOS
+          # auto-update).
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
