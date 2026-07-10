@@ -10,7 +10,7 @@ import { dateAttrExpr } from "./sort.js";
  * Injection-safe: orientation names index a hardcoded fragment table; the
  * rating threshold is a bound param. User-supplied strings never reach SQL.
  *
- * @param {{minRating?: number, orientations?: string[], dateAttr?: string}} [spec]
+ * @param {{minRating?: number, orientations?: string[], scopeIds?: number[], keepScope?: boolean, folderPath?: string, dateAttr?: string}} [spec]
  * @returns {{sql: string, params: any[]}}
  */
 export function buildFilter(spec = {}) {
@@ -57,6 +57,28 @@ export function buildFilter(spec = {}) {
   // cap, unlike scopeIds above). Restrict to whatever is in the keep_scope table.
   if (spec?.keepScope) {
     clauses.push(`photos.id IN (SELECT photo_id FROM keep_scope)`);
+  }
+
+  // Folder-focus scope ("open a folder"): restrict to the chosen folder plus
+  // everything nested under it. abs_path is stored with no trailing separator
+  // (see upsertScan), so the subtree is the exact path OR any path beginning
+  // with `path + sep`. The required separator before the wildcard keeps
+  // /a/trip from matching a sibling /a/trip-2. LIKE metacharacters in a folder
+  // name are escaped (with ESCAPE '\') so a literal % or _ can't widen the
+  // match; the exact-equality arm compares the raw path (a bound param, not a
+  // pattern). Paths on this platform are '/'-delimited absolute paths.
+  //
+  // Phrased as a `photos.folder_id IN (subquery)` (like keepScope above) rather
+  // than a direct `folders.abs_path` comparison, so it works in EVERY query
+  // this filter is spliced into — including the tree and feed-seek queries that
+  // don't JOIN the folders table (those would otherwise throw "no such column:
+  // folders.abs_path"). photos.folder_id is always present.
+  if (typeof spec?.folderPath === "string" && spec.folderPath.length) {
+    const escaped = spec.folderPath.replace(/([\\%_])/g, "\\$1");
+    clauses.push(
+      `photos.folder_id IN (SELECT id FROM folders WHERE abs_path = ? OR abs_path LIKE ? ESCAPE '\\')`
+    );
+    params.push(spec.folderPath, escaped + "/%");
   }
 
   // Time-range facet (timeline filter). Filters on the SAME date attribute the

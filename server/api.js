@@ -262,6 +262,15 @@ function parseFilterParam(req) {
   // "Keep only" working set, referenced by flag; the ids live in the keep_scope
   // table (set via POST /api/scope), so there is no size cap here.
   if (raw.keepScope) spec.keepScope = true;
+  // Folder-focus scope ("open a folder"): the abs_path of the focused subtree
+  // root. Only ever compared against the indexed folders.abs_path column (never
+  // resolved to a file), so no safeResolve is needed here.
+  if (raw.folderPath !== undefined && raw.folderPath !== null) {
+    if (typeof raw.folderPath !== "string" || !raw.folderPath.length) {
+      return { spec: {}, error: "folderPath must be a non-empty string" };
+    }
+    spec.folderPath = raw.folderPath;
+  }
   // Timeline filter time-range (epoch ms). Each bound is optional; a finite
   // number constrains, anything else is rejected so a garbled range can't
   // silently widen the query.
@@ -279,7 +288,10 @@ function parseFilterParam(req) {
   // date-type sort; anything else is rejected rather than silently ignored.
   if (raw.dateAttr !== undefined && raw.dateAttr !== null) {
     if (!DATE_SORTS.includes(raw.dateAttr)) {
-      return { spec: {}, error: `dateAttr must be one of ${DATE_SORTS.join("/")}` };
+      return {
+        spec: {},
+        error: `dateAttr must be one of ${DATE_SORTS.join("/")}`,
+      };
     }
     spec.dateAttr = raw.dateAttr;
   }
@@ -849,7 +861,10 @@ export function registerApi(app) {
     // Flat feed (no grouping) has no hierarchy — an empty tree, not an error —
     // but still report the real matching total so the sidebar header is right.
     if (!groupBy.length) {
-      return res.json({ total: photoCountMatchingFilter(getDb(), filter), nodes: [] });
+      return res.json({
+        total: photoCountMatchingFilter(getDb(), filter),
+        nodes: [],
+      });
     }
 
     let path = [];
@@ -892,7 +907,10 @@ export function registerApi(app) {
     // Flat feed (no grouping) has no leaves — empty, not an error — but still
     // report the real matching total for the sidebar header.
     if (!groupBy.length) {
-      return res.json({ total: photoCountMatchingFilter(getDb(), filter), leaves: [] });
+      return res.json({
+        total: photoCountMatchingFilter(getDb(), filter),
+        leaves: [],
+      });
     }
 
     const db = getDb();

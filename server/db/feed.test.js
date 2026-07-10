@@ -718,7 +718,10 @@ describe("getFeedPage — startPath (jump to an arbitrary hierarchy path)", () =
     });
     // Starts AT Canon/video (skipping the earlier Canon/image), then the next
     // camera — never the parent's first subgroup.
-    expect(items.map((i) => i.name)).toEqual(["canon-vid.mp4", "nikon-img.jpg"]);
+    expect(items.map((i) => i.name)).toEqual([
+      "canon-vid.mp4",
+      "nikon-img.jpg",
+    ]);
   });
 
   it("multi-level DESC (year → month): lands on the exact month, not the year's first month", () => {
@@ -750,7 +753,11 @@ describe("getFeedPage — startPath (jump to an arbitrary hierarchy path)", () =
       ],
       after: 10,
     });
-    expect(items.map((i) => i.name)).toEqual(["jul.jpg", "jun.jpg", "dec24.jpg"]);
+    expect(items.map((i) => i.name)).toEqual([
+      "jul.jpg",
+      "jun.jpg",
+      "dec24.jpg",
+    ]);
   });
 });
 
@@ -1024,7 +1031,10 @@ describe("workingSetTimeline — album gap-clustering source", () => {
       { name: "b.jpg", size: 1, mtimeMs: 2, kind: "image" },
       { name: "c.jpg", size: 1, mtimeMs: 3, kind: "image" },
     ]);
-    db.prepare(`UPDATE photos SET rating = 5 WHERE id IN (?, ?)`).run(a.id, c.id);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id IN (?, ?)`).run(
+      a.id,
+      c.id
+    );
     const { photos } = workingSetTimeline(db, { minRating: 4 });
     expect(photos.map((p) => p.id).sort()).toEqual([a.id, c.id].sort());
   });
@@ -1214,5 +1224,82 @@ describe("workingSetTimes — timeline density", () => {
       max: null,
       sampled: false,
     });
+  });
+});
+
+describe("folderPath focus scope — subtree matching", () => {
+  function seedTree(db) {
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/trip/day1", 1, [
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/trip-2", 1, [
+      { name: "sibling.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/other", 1, [
+      { name: "d.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+  }
+
+  it("counts the folder plus its subfolders, excluding siblings", () => {
+    const db = getDb();
+    seedTree(db);
+    // /photos/trip (2) + /photos/trip/day1 (1) = 3; NOT /photos/trip-2 or /other.
+    expect(photoCountMatchingFilter(db, { folderPath: "/photos/trip" })).toBe(
+      3
+    );
+    // Whole library is unscoped.
+    expect(photoCountMatchingFilter(db, {})).toBe(5);
+  });
+
+  it("the feed grid returns only subtree rows", () => {
+    const db = getDb();
+    seedTree(db);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      filter: { folderPath: "/photos/trip" },
+      after: 100,
+    });
+    expect(items.map((i) => i.name).sort()).toEqual([
+      "a.jpg",
+      "b.jpg",
+      "c.jpg",
+    ]);
+    expect(new Set(items.map((i) => i.groupValues.folder))).toEqual(
+      new Set(["/photos/trip", "/photos/trip/day1"])
+    );
+  });
+
+  it("focuses a bare parent that has no media of its own (only the LIKE arm matches)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    // /albums has no media directly — only nested folders do.
+    upsertScan(db, "/albums/2024/jan", 1, [
+      { name: "x.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/albums/2024/feb", 1, [
+      { name: "y.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    expect(photoCountMatchingFilter(db, { folderPath: "/albums" })).toBe(2);
+    expect(
+      photoCountMatchingFilter(db, { folderPath: "/albums/2024/jan" })
+    ).toBe(1);
+  });
+
+  it("intersects folderPath with other facets (AND semantics)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const rows = upsertScan(db, "/photos/trip", 1, [
+      { name: "keep.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "skip.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(rows[0].id);
+    expect(
+      photoCountMatchingFilter(db, { folderPath: "/photos/trip", minRating: 5 })
+    ).toBe(1);
   });
 });

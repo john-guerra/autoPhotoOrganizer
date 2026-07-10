@@ -97,6 +97,37 @@ describe("buildFilter", () => {
     expect(f.params).toEqual([3]);
   });
 
+  it("folderPath scopes to a subtree via a folder_id subquery (works without a folders JOIN)", () => {
+    const f = buildFilter({ folderPath: "/photos/trip" });
+    expect(f.sql).toBe(
+      "photos.folder_id IN (SELECT id FROM folders WHERE abs_path = ? OR abs_path LIKE ? ESCAPE '\\')"
+    );
+    // Exact arm gets the raw path; LIKE arm gets `path + "/%"`.
+    expect(f.params).toEqual(["/photos/trip", "/photos/trip/%"]);
+  });
+
+  it("folderPath escapes LIKE metacharacters (%, _, \\) in the prefix only", () => {
+    const f = buildFilter({ folderPath: "/a/50%_off\\stuff" });
+    // Exact arm is the raw path; only the LIKE prefix is escaped.
+    expect(f.params).toEqual([
+      "/a/50%_off\\stuff",
+      "/a/50\\%\\_off\\\\stuff/%",
+    ]);
+  });
+
+  it("empty/absent folderPath is a no-op", () => {
+    expect(buildFilter({ folderPath: "" })).toEqual({ sql: "1=1", params: [] });
+    expect(buildFilter({})).toEqual({ sql: "1=1", params: [] });
+  });
+
+  it("combines folderPath with a rating facet and keepScope, params in order", () => {
+    const f = buildFilter({ minRating: 4, keepScope: true, folderPath: "/x" });
+    expect(f.sql).toBe(
+      "photos.rating >= ? AND photos.id IN (SELECT photo_id FROM keep_scope) AND photos.folder_id IN (SELECT id FROM folders WHERE abs_path = ? OR abs_path LIKE ? ESCAPE '\\')"
+    );
+    expect(f.params).toEqual([4, "/x", "/x/%"]);
+  });
+
   it("emits a COALESCE(taken_at,mtime) range for dateFrom/dateTo", () => {
     const both = buildFilter({ dateFrom: 1000, dateTo: 2000 });
     expect(both.sql).toBe(
