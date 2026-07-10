@@ -148,7 +148,8 @@
       class="clear-filter"
       title="Clear filters"
       aria-label="Clear filters"
-      on:click={() => dispatch("filterchange", { ...DEFAULT_FILTER })}
+      on:click={() =>
+        dispatch("filterchange", { ...DEFAULT_FILTER, dateAttr: filter.dateAttr })}
     >
       ✕
     </button>

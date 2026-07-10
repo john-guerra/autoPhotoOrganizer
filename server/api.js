@@ -837,9 +837,7 @@ export function registerApi(app) {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    // Flat feed (no grouping) has no hierarchy — an empty tree, not an error.
-    if (!groupBy.length) return res.json({ total: 0, nodes: [] });
-    if (groupBy.some((d) => !DIMENSIONS[d])) {
+    if (groupBy.length && groupBy.some((d) => !DIMENSIONS[d])) {
       return res.status(400).json({
         error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
       });
@@ -847,6 +845,12 @@ export function registerApi(app) {
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
     const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
+
+    // Flat feed (no grouping) has no hierarchy — an empty tree, not an error —
+    // but still report the real matching total so the sidebar header is right.
+    if (!groupBy.length) {
+      return res.json({ total: photoCountMatchingFilter(getDb(), filter), nodes: [] });
+    }
 
     let path = [];
     if (req.query.path) {
@@ -876,9 +880,7 @@ export function registerApi(app) {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    // Flat feed (no grouping) has no leaves — empty, not an error.
-    if (!groupBy.length) return res.json({ total: 0, leaves: [] });
-    if (groupBy.some((d) => !DIMENSIONS[d])) {
+    if (groupBy.length && groupBy.some((d) => !DIMENSIONS[d])) {
       return res.status(400).json({
         error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
       });
@@ -886,6 +888,12 @@ export function registerApi(app) {
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });
     const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
+
+    // Flat feed (no grouping) has no leaves — empty, not an error — but still
+    // report the real matching total for the sidebar header.
+    if (!groupBy.length) {
+      return res.json({ total: photoCountMatchingFilter(getDb(), filter), leaves: [] });
+    }
 
     const db = getDb();
     try {

@@ -1705,10 +1705,14 @@ describe("GET /api/tree", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns an empty tree when groupBy is missing (flat feed has no hierarchy)", async () => {
+  it("empty groupBy: no nodes, but reports the real matching total (flat feed)", async () => {
+    await scan(srv.base, photosDir);
     const res = await fetch(`${srv.base}/api/tree`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ total: 0, nodes: [] });
+    const body = await res.json();
+    expect(body.nodes).toEqual([]);
+    // Flat feed has no hierarchy, but the sidebar header still needs a real count.
+    expect(body.total).toBeGreaterThan(0);
   });
 
   it("400s on malformed path JSON", async () => {

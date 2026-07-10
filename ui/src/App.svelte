@@ -537,6 +537,26 @@
    * 7th copy" rule). In "select" mode the grid is NOT narrowed (displayFilter
    * stays default), so the feed is untouched — instead the matching photos are
    * unioned into the selection. */
+  /** Reset every filter facet (and exit keep-only) — the empty-state "Clear
+   * filters" action. Preserves dateAttr so the timeline keeps following the sort
+   * date rather than snapping back to date_taken. */
+  function clearAllFilters() {
+    if (keepIds) exitKeepOnly();
+    onFilterChange({ ...DEFAULT_FILTER, dateAttr: filter.dateAttr });
+  }
+
+  // Human names of the currently-active filter facets, for the empty-state hint
+  // (so it says exactly what's hiding the photos, not a generic list).
+  $: activeFacetLabels = (() => {
+    const f = [];
+    if ((filter.minRating ?? 0) > 0) f.push(`${filter.minRating}+ stars`);
+    const o = filter.orientations ?? [];
+    if (o.length > 0 && o.length < 3) f.push("orientation");
+    if (filter.dateFrom != null || filter.dateTo != null) f.push("time range");
+    if (keepIds) f.push("keep-only scope");
+    return f;
+  })();
+
   function onFilterChange(next) {
     filter = next;
     if (filterMode === "select") {
@@ -2464,7 +2484,29 @@
           {/if}
         </div>
       {:else if !scanning && status !== "loading…"}
-        <div class="empty">Nothing indexed yet — scan a folder to get started.</div>
+        {#if libraryTotal === 0}
+          <div class="empty">Nothing indexed yet — scan a folder to get started.</div>
+        {:else if filterIsActive(filter) || keepIds}
+          <div class="empty">
+            <p class="empty-title">No photos match your current filters.</p>
+            <p class="empty-hint">
+              {libraryTotal.toLocaleString()} photos are indexed — none match the active
+              {activeFacetLabels.length ? activeFacetLabels.join(" + ") + " filter" : "filters"}{activeFacetLabels.length >
+              1
+                ? "s"
+                : ""}. Widen or clear them to see photos again.
+            </p>
+            <button class="empty-action" on:click={clearAllFilters}>Clear filters</button>
+          </div>
+        {:else}
+          <div class="empty">
+            <p class="empty-title">No photos to show here.</p>
+            <p class="empty-hint">
+              {libraryTotal.toLocaleString()} photos are indexed. Try a different grouping
+              or sort.
+            </p>
+          </div>
+        {/if}
       {/if}
     </div>
   </div>
@@ -2769,5 +2811,29 @@
     padding: 4rem 1rem;
     text-align: center;
     color: #777;
+  }
+  .empty-title {
+    margin: 0 0 0.4rem;
+    font-size: 1rem;
+    color: #bbb;
+  }
+  .empty-hint {
+    margin: 0 auto 1rem;
+    max-width: 32rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  .empty-action {
+    background: #4c9aff;
+    color: #06121f;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .empty-action:hover {
+    background: #6aabff;
   }
 </style>

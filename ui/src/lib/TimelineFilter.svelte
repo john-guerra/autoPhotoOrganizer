@@ -163,6 +163,14 @@
     --za-accent: #4c9aff;
     color: #9a9a9a;
   }
+  /* Compact the date pills so a narrow selection (both handles clustered) crowds
+     less. Higher specificity than the widget's own `.zoomable-axis-input
+     .za-value` rule (3 classes vs 2) so this wins despite loading first. */
+  .timeline-axis :global(.zoomable-axis-input .za-value) {
+    font-size: 0.62rem;
+    padding: 1px 6px;
+    letter-spacing: -0.2px;
+  }
   /* "You are here": a thin amber marker at the current view's time — read-only,
      distinct from the blue brush band. Sits above the axis; never intercepts
      clicks so the handles/brush stay usable underneath it. */
