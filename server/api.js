@@ -281,7 +281,10 @@ function parseFilterParam(req) {
   // date-type sort; anything else is rejected rather than silently ignored.
   if (raw.dateAttr !== undefined && raw.dateAttr !== null) {
     if (!DATE_SORTS.includes(raw.dateAttr)) {
-      return { spec: {}, error: `dateAttr must be one of ${DATE_SORTS.join("/")}` };
+      return {
+        spec: {},
+        error: `dateAttr must be one of ${DATE_SORTS.join("/")}`,
+      };
     }
     spec.dateAttr = raw.dateAttr;
   }
@@ -578,7 +581,10 @@ export function registerApi(app) {
     if (!command) {
       return res
         .status(501)
-        .json({ ok: false, error: `unsupported platform: ${process.platform}` });
+        .json({
+          ok: false,
+          error: `unsupported platform: ${process.platform}`,
+        });
     }
     try {
       await new Promise((resolveSpawn, reject) => {
@@ -889,7 +895,10 @@ export function registerApi(app) {
     // Flat feed (no grouping) has no hierarchy — an empty tree, not an error —
     // but still report the real matching total so the sidebar header is right.
     if (!groupBy.length) {
-      return res.json({ total: photoCountMatchingFilter(getDb(), filter), nodes: [] });
+      return res.json({
+        total: photoCountMatchingFilter(getDb(), filter),
+        nodes: [],
+      });
     }
 
     let path = [];
@@ -932,7 +941,10 @@ export function registerApi(app) {
     // Flat feed (no grouping) has no leaves — empty, not an error — but still
     // report the real matching total for the sidebar header.
     if (!groupBy.length) {
-      return res.json({ total: photoCountMatchingFilter(getDb(), filter), leaves: [] });
+      return res.json({
+        total: photoCountMatchingFilter(getDb(), filter),
+        leaves: [],
+      });
     }
 
     const db = getDb();

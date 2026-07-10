@@ -5,7 +5,10 @@ describe("revealCommand", () => {
   const p = "/Volumes/Trip/DCIM/IMG_0001.JPG";
 
   it("reveals-and-selects the file in Finder on macOS", () => {
-    expect(revealCommand("darwin", p)).toEqual({ cmd: "open", args: ["-R", p] });
+    expect(revealCommand("darwin", p)).toEqual({
+      cmd: "open",
+      args: ["-R", p],
+    });
   });
 
   it("uses explorer /select, to highlight the file on Windows", () => {

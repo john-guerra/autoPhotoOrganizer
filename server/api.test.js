@@ -431,7 +431,12 @@ describe("POST /api/reveal/:id", () => {
     const dir = await mkdtemp(join(tmpdir(), "ag-reveal-"));
     const f = join(dir, "gone.jpg");
     await sharp({
-      create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } },
+      create: {
+        width: 8,
+        height: 8,
+        channels: 3,
+        background: { r: 1, g: 2, b: 3 },
+      },
     })
       .jpeg()
       .toFile(f);
@@ -1472,9 +1477,7 @@ describe("GET /api/albums/timeline", () => {
 
   it("clamps an over-large limit to the hard ceiling (200000)", async () => {
     await scan(srv.base, photosDir);
-    const res = await fetch(
-      `${srv.base}/api/albums/timeline?limit=999999999`
-    );
+    const res = await fetch(`${srv.base}/api/albums/timeline?limit=999999999`);
     const body = await res.json();
     expect(body.limit).toBe(200000);
   });
