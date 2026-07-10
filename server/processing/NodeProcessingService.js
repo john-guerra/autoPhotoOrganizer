@@ -3,9 +3,18 @@ import { spawn } from "node:child_process";
 import { extname, join } from "node:path";
 import sharp from "sharp";
 import exifr from "exifr";
-import ffmpegPath from "ffmpeg-static";
+import ffmpegPathRaw from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { ProcessingService } from "./ProcessingService.js";
+
+// In a packaged Electron build the static binaries are pulled out of the asar
+// archive (build.asarUnpack) so they can be spawned, but the resolved path still
+// points inside app.asar — rewrite it to the unpacked location. A no-op in dev
+// (the path contains no "app.asar" segment). Without this the packaged app can't
+// spawn ffmpeg/ffprobe even though the binaries are shipped.
+const unpacked = (p) => p && p.replace("app.asar", "app.asar.unpacked");
+const ffmpegPath = unpacked(ffmpegPathRaw);
+const ffprobePath = unpacked(ffprobeStatic.path);
 
 class NotImplementedError extends Error {
   /** @param {string} method */
@@ -325,7 +334,7 @@ export class NodeProcessingService extends ProcessingService {
     /** @type {import("./ProcessingService.js").MediaMetadata} */
     const meta = { path, camera: "" };
     try {
-      const out = await runBinary(ffprobeStatic.path, [
+      const out = await runBinary(ffprobePath, [
         "-v",
         "quiet",
         "-print_format",

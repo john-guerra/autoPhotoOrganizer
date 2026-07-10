@@ -62,7 +62,9 @@
     "asarUnpack": [
       "node_modules/sharp/**",
       "node_modules/@img/**",
-      "node_modules/better-sqlite3/**"
+      "node_modules/better-sqlite3/**",
+      "node_modules/ffmpeg-static/**",
+      "node_modules/ffprobe-static/**"
     ],
     "mac": {
       "icon": "build/icon.icns",
