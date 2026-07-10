@@ -203,6 +203,17 @@
   // report the true library total. null = whole library.
   let keepIds = null;
 
+  // "Open a folder" focus: when non-null, an abs path whose subtree (the folder
+  // + everything under it) the feed/tree/counts/albums scope to via the
+  // folderPath filter key, while the library total keeps showing the whole
+  // index. The folder is a permanent library member (it was scanned in); focus
+  // is just a scoped view. Persisted so it survives a reload. null = unfocused.
+  const LS_FOCUS_PATH = "autogallery.focusPath";
+  let focusPath = localStorage.getItem(LS_FOCUS_PATH) || null;
+  $: focusName = focusPath ? focusPath.split("/").filter(Boolean).pop() || focusPath : "";
+  $: if (focusPath) localStorage.setItem(LS_FOCUS_PATH, focusPath);
+  else localStorage.removeItem(LS_FOCUS_PATH);
+
   // Auto-albums review mode: replaces the grid with a time-gap-clustered view
   // of the working set (see AlbumsView).
   let albumMode = false;
@@ -228,6 +239,10 @@
     // keep-only ids live server-side in the keep_scope table (POSTed by
     // applyKeepOnly); the filter carries only a flag, so the scope is unbounded.
     ...(keepIds ? { keepScope: true } : {}),
+    // Folder-focus ("open a folder"): scope the whole app to the focused
+    // subtree. A live WHERE over folders.abs_path — stays correct across
+    // rescans, no id enumeration, persists as a single path string.
+    ...(focusPath ? { folderPath: focusPath } : {}),
     // dateAttr is which date the timeline PLOTS, not a constraint — so it follows
     // the sort date in both modes (in select mode the rest resets to DEFAULT, but
     // the timeline column must still track the sort).
@@ -370,6 +385,11 @@
   let libraryOpen = false;
   let addFolderOpen = false;
   let manageLibraryOpen = false;
+  // "Open a folder…" text-input popover (non-native fallback when there's no
+  // native folder picker). Kept separate from the ＋ add-folder `dir` state so
+  // the two popovers don't clobber each other's input.
+  let openFolderOpen = false;
+  let openFolderDir = "";
 
   let selected = 0; // index into displayEntries; must never land on a
   // {kind:'placeholder'} entry — see nextSelectable below.
@@ -542,6 +562,7 @@
    * date rather than snapping back to date_taken. */
   function clearAllFilters() {
     if (keepIds) exitKeepOnly();
+    if (focusPath) exitFocus();
     onFilterChange({ ...DEFAULT_FILTER, dateAttr: filter.dateAttr });
   }
 
@@ -554,6 +575,7 @@
     if (o.length > 0 && o.length < 3) f.push("orientation");
     if (filter.dateFrom != null || filter.dateTo != null) f.push("time range");
     if (keepIds) f.push("keep-only scope");
+    if (focusPath) f.push("folder focus");
     return f;
   })();
 
@@ -695,6 +717,37 @@
   /** Leave keep-only focus, back to the whole library. */
   function exitKeepOnly() {
     applyKeepOnly(null);
+  }
+
+  /** Enter/replace folder-focus on a subtree path (null exits). Mirrors
+   * applyKeepOnly's refresh sequence so the feed/tree/counts all rebuild against
+   * the new displayFilter — routes through onGroupByChange (the shared feed-window
+   * guard) rather than hand-rolling a window reset. Folder-focus and keep-only are
+   * both "scope the whole app to a subset"; stacking them is confusing and "keep it
+   * alone" implies a clean scope, so entering focus clears any active keep-only. */
+  async function setFocus(path) {
+    focusPath = path || null;
+    if (keepIds) {
+      keepIds = null;
+      setScope([]).catch(() => {}); // fire-and-forget the server-side clear
+    }
+    countsEpoch++;
+    headerCounts = {};
+    fetchedParents = new Set();
+    inFlightParents = new Set();
+    // displayFilter is a `$:` derived value; it hasn't recomputed with the new
+    // focusPath yet. Flush reactive state before rebuilding so the feed loader
+    // reads the updated filter (otherwise the live rebuild uses the stale,
+    // unfocused filter and the grid keeps showing out-of-scope folders).
+    await tick();
+    await onGroupByChange(groupBy);
+    refreshCounts();
+    libraryVersion++; // force TreeSidebar/Fisheye (refreshToken) to refetch
+  }
+
+  /** Leave folder-focus, back to the whole library. */
+  function exitFocus() {
+    setFocus(null);
   }
 
   /** Toggle one photo's membership in the selection. */
@@ -857,6 +910,7 @@
     selectedIds = new Set();
     lastClearedSelection = null;
     keepIds = null;
+    focusPath = null; // the focused folder is gone with the whole index
     await refreshLibrary();
     await loadInitialFeed();
     refreshCounts();
@@ -1516,29 +1570,57 @@
     }
   }
 
-  function selectFromLibrary(entry) {
-    libraryOpen = false;
-    if (!entry.mounted) {
-      // Offline folders can still be browsed read-only from the SQLite
-      // cache (the app's offline-mirror invariant) — reuse the same
-      // jumpToPath the tree sidebar already uses for any folder, rather
-      // than requiring a live rescan this folder's volume can't provide.
-      // startPath is matched POSITIONALLY against the live groupBy (see
-      // server/db/feed.js's startPathCondition — it never reads the
-      // `dimension` label), so this only lands on the right rows if
-      // "folder" is actually groupBy's first dimension; force that here
-      // rather than assuming it (groupBy is a freely reorderable
-      // multi-select, unlike the tree sidebar which always derives its
-      // path from whatever groupBy[0] currently is).
-      if (groupBy[0] !== "folder") {
-        groupBy = ["folder", ...groupBy.filter((d) => d !== "folder")];
-        collapsedPaths = [];
+  /** "Open a folder" focus. If the subtree is already indexed, focus straight
+   * from the cache (works offline — an unmounted volume can't be rescanned).
+   * Otherwise scan it in recursively (the same background-job flow as the ＋
+   * add-folder path) so it becomes a permanent library member, then focus. */
+  async function openFolderFocus(path) {
+    const p = (path || "").trim();
+    if (!p) return;
+    const alreadyIndexed = library.some(
+      (e) => e.path === p || e.path.startsWith(p + "/")
+    );
+    error = "";
+    try {
+      if (!alreadyIndexed) {
+        scanning = true;
+        status = "scanning…";
+        const { jobId } = await startScan(p, { recursive: true });
+        const job = await waitForJob(jobId);
+        if (job.status === "canceled") {
+          status = "Scan canceled";
+          return;
+        }
+        if (job.status !== "done") {
+          error = job.error || "Scan failed";
+          status = "";
+          return;
+        }
+        localStorage.setItem(LS_KEY, p);
+        await refreshLibrary();
       }
-      jumpToPath([{ dimension: "folder", value: entry.path }]);
-      return;
+      setFocus(p);
+      status = "";
+    } catch (e) {
+      error = e.message;
+      status = "";
+    } finally {
+      scanning = false;
     }
-    dir = entry.path;
-    doScan();
+  }
+
+  /** Toolbar "Open a folder…" entry: get a path (native picker when available,
+   * otherwise a small text-input popover) and hand it to openFolderFocus. */
+  function requestOpenFolder() {
+    libraryOpen = false;
+    if (hasNativePicker) {
+      window.autogallery?.pickFolder().then((path) => {
+        if (path) openFolderFocus(path);
+      });
+    } else {
+      openFolderDir = "";
+      openFolderOpen = true;
+    }
   }
 
   async function chooseFolder() {
@@ -2208,7 +2290,6 @@
 
     <!-- ① SOURCE -->
     <SourceControls
-      {library}
       {scanning}
       {hasNativePicker}
       bind:libraryOpen
@@ -2216,10 +2297,46 @@
       bind:addFolderOpen
       bind:dir
       bind:recursiveScan
-      on:selectlibrary={(e) => selectFromLibrary(e.detail)}
+      on:openfolder={requestOpenFolder}
       on:scan={doScan}
       on:choosefolder={chooseFolder}
     />
+
+    {#if openFolderOpen}
+      <div class="open-folder-popover">
+        <input
+          class="dir"
+          type="text"
+          placeholder="/path/to/folder"
+          bind:value={openFolderDir}
+          on:keydown={(e) => {
+            if (e.key === "Enter") {
+              openFolderOpen = false;
+              openFolderFocus(openFolderDir);
+            } else if (e.key === "Escape") {
+              openFolderOpen = false;
+            }
+          }}
+          spellcheck="false"
+          autofocus
+        />
+        <div class="open-folder-actions">
+          <button
+            class="open-folder-go"
+            on:click={() => {
+              openFolderOpen = false;
+              openFolderFocus(openFolderDir);
+            }}
+            disabled={scanning}
+          >
+            {scanning ? "Opening…" : "Open"}
+          </button>
+          <button class="open-folder-cancel" on:click={() => (openFolderOpen = false)}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    {/if}
 
     <div class="divider"></div>
 
@@ -2275,6 +2392,16 @@
         title="Exit keep-only focus (back to the whole library)"
       >
         ● Keep-only {keepIds.length.toLocaleString()} ✕
+      </button>
+    {/if}
+
+    {#if focusPath}
+      <button
+        class="focus-chip"
+        on:click={exitFocus}
+        title={"Exit folder focus — back to the whole library (" + focusPath + ")"}
+      >
+        ▣ Focused: {focusName} ✕
       </button>
     {/if}
 
@@ -2701,6 +2828,82 @@
   }
   .keep-chip:hover {
     background: #1a4d38;
+  }
+  /* Folder-focus chip — a distinct blue/violet accent so it reads as a
+     different kind of scope than the green keep-only chip. */
+  .focus-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #1e2a4a;
+    border: 1px solid #4c6fcf;
+    color: #9db8ff;
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    white-space: nowrap;
+    max-width: 20rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .focus-chip:hover {
+    background: #263562;
+  }
+  /* "Open a folder…" text-input popover (non-native picker fallback). Mirrors
+     the add-folder popover in SourceControls. */
+  .open-folder-popover {
+    position: absolute;
+    top: 3.2rem;
+    left: 1rem;
+    z-index: 300;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px;
+    min-width: 300px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .open-folder-popover .dir {
+    padding: 0.45rem 0.6rem;
+    background: #101010;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: #eee;
+    font-size: 0.9rem;
+    font-family: ui-monospace, monospace;
+  }
+  .open-folder-popover .dir:focus {
+    outline: none;
+    border-color: #4c9aff;
+  }
+  .open-folder-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .open-folder-go {
+    padding: 0.4rem 1rem;
+    background: #4c9aff;
+    color: #06121f;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .open-folder-go:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .open-folder-cancel {
+    padding: 0.4rem 1rem;
+    background: #101010;
+    border: 1px solid #333;
+    color: #cfcfcf;
+    border-radius: 6px;
+    cursor: pointer;
   }
   h1 {
     font-size: 1rem;
