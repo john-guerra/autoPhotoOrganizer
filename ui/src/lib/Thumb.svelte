@@ -172,6 +172,7 @@
     title={item.name}
     style={stackMarginPx ? `inset: 0 ${stackMarginPx}px;` : ""}
     on:click
+    on:contextmenu
   >
     {#if inSelection}
       <span class="select-check" title="Selected" aria-hidden="true">✓</span>

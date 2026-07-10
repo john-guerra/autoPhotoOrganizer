@@ -1,6 +1,16 @@
 <script>
+  import { createEventDispatcher } from "svelte";
   import { imageUrl } from "./api.js";
   import Stars from "./Stars.svelte";
+
+  const dispatch = createEventDispatcher();
+
+  // Right-click the photo → let App.svelte open the shared context menu at the
+  // cursor, targeting the currently-loupe'd photo.
+  function onContextMenu(e) {
+    e.preventDefault();
+    dispatch("contextmenu", { x: e.clientX, y: e.clientY });
+  }
 
   export let items;
   export let index; // current position in items
@@ -42,7 +52,7 @@
 </script>
 
 <div class="loupe" role="dialog" aria-modal="true">
-  <div class="stage">
+  <div class="stage" on:contextmenu={onContextMenu}>
     {#if item}
       {#key item.id}
         <img src={imageUrl(item.id, item.mtimeMs)} alt={item.name} />

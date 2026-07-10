@@ -41,10 +41,12 @@
     fetchTimes,
     setScope,
     removeFolderByPath,
+    revealInFinder,
   } from "./lib/api.js";
   import { waitForJob } from "./lib/jobs.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
+  import ContextMenu from "./lib/ContextMenu.svelte";
   import JobsPanel from "./lib/JobsPanel.svelte";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
@@ -721,6 +723,40 @@
 
   /** Grid tile click: Cmd/Ctrl toggles selection, Shift selects a range from
    * the focused tile, a plain click keeps the existing open/expand behavior. */
+  // --- Right-click context menu (issue #18; shared surface for #25) ---------
+  // `targetIndex` indexes displayEntries, like `selected`.
+  let contextMenu = { open: false, x: 0, y: 0, targetIndex: -1 };
+
+  function openContextMenu(x, y, targetIndex) {
+    contextMenu = { open: true, x, y, targetIndex };
+  }
+
+  function onTileContextMenu(e, entry, i) {
+    e.preventDefault();
+    openContextMenu(e.clientX, e.clientY, i);
+  }
+
+  /** Reveal the photo at `index` in the OS file browser (Finder/Explorer/…). */
+  async function reveal(index) {
+    const it = resolvedPhotos[index];
+    if (!it || typeof it.id !== "number") return;
+    const res = await revealInFinder(it.id);
+    if (!res.ok) {
+      status = `Couldn't reveal file: ${res.error ?? "unknown error"}`;
+      console.warn("[reveal]", res.error);
+    }
+  }
+
+  // Menu items for the current target. Kept as data so #25 can append more
+  // (multi-select actions, etc.) without reworking the menu component.
+  $: contextMenuItems = [
+    {
+      label: "Reveal in Finder",
+      action: () => reveal(contextMenu.targetIndex),
+      enabled: typeof resolvedPhotos[contextMenu.targetIndex]?.id === "number",
+    },
+  ];
+
   function onTileClick(e, entry, i) {
     if (e.metaKey || e.ctrlKey) {
       toggleSelect(resolvePhoto(entry)?.id);
@@ -2556,6 +2592,7 @@
                     entry.stackId !== null &&
                     stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
                   on:click={(e) => onTileClick(e, entry, i)}
+                  on:contextmenu={(e) => onTileContextMenu(e, entry, i)}
                   on:attempt={handleThumbAttempt}
                   on:settled={handleThumbSettled}
                 />
@@ -2601,6 +2638,16 @@
     inSelection={typeof resolvedPhotos[selected]?.id === "number" &&
       selectedIds.has(resolvedPhotos[selected].id)}
     selectedCount={selectedCount}
+    on:contextmenu={(e) => openContextMenu(e.detail.x, e.detail.y, selected)}
+  />
+{/if}
+
+{#if contextMenu.open}
+  <ContextMenu
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={contextMenuItems}
+    on:close={() => (contextMenu.open = false)}
   />
 {/if}
 

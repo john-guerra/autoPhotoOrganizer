@@ -62,6 +62,30 @@ export async function setCover(id, isCover) {
   return res.json();
 }
 
+/**
+ * Ask the server to reveal a photo's real file in the OS file browser
+ * (Finder/Explorer/file manager) — read-only, no file operations. Resolves to
+ * `{ok:false, error}` on any failure instead of throwing, so callers can show a
+ * non-blocking notice rather than crash the app.
+ * @param {number} id
+ * @returns {Promise<{ok:boolean, error?:string}>}
+ */
+export async function revealInFinder(id) {
+  try {
+    const res = await fetch(`/api/reveal/${id}`, { method: "POST" });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: body.error || `reveal failed (${res.status})`,
+      };
+    }
+    return body;
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+}
+
 // Image URLs carry a `v` version token (the file's mtimeMs). A numeric id is
 // only meaningful within the current scan session — after rescanning a
 // different folder, id 0 points to a different file. Without a version the
