@@ -526,7 +526,7 @@
     // filter.dateAttr re-plots the density (via timesKey) and re-bounds the brush.
     if (DATE_SORT_ATTRS.includes(next.by)) lastDateSort = next.by;
     if (filter.dateAttr !== lastDateSort) filter = { ...filter, dateAttr: lastDateSort };
-    onGroupByChange(groupBy);
+    rebuildFeedForFilterOrSort();
   }
 
   /** Apply a new filter spec. In "display" mode this narrows the grid: the
@@ -569,8 +569,21 @@
     headerCounts = {};
     fetchedParents = new Set();
     inFlightParents = new Set();
-    onGroupByChange(groupBy);
+    rebuildFeedForFilterOrSort();
     refreshCounts();
+  }
+
+  /** Rebuild the feed after a filter or sort change (same hierarchy, different
+   * groups/order). A whole-view mode (snapshot-all / collapse-all) is sticky: the
+   * groups that (re)appear inherit it, rather than snapping back to expanded. In
+   * expanded mode this is the plain reset-and-recenter path. */
+  async function rebuildFeedForFilterOrSort() {
+    if (globalViewMode === "expanded") {
+      await onGroupByChange(groupBy);
+    } else {
+      await applyViewModeToGroups(globalViewMode);
+      await loadInitialFeed();
+    }
   }
 
   /** Toggle the Display/Select filter mode. Switching flips displayFilter, so
@@ -1079,10 +1092,35 @@
     }
   }
 
+  /** Set collapsedPaths / snapshotGroupKeys so EVERY current top-level group
+   * matches `mode`: "expanded" clears both; "snapshot"/"collapsed" collapse all
+   * top-level groups (snapshot also renders each as a strip). Fetches the current
+   * top-level group list under displayFilter. Does NOT rebuild the feed — the
+   * caller reloads after. Reused by the cycle-all control AND by filter/sort
+   * rebuilds so a global view mode survives those changes (new groups inherit it). */
+  async function applyViewModeToGroups(mode) {
+    if (mode === "expanded") {
+      collapsedPaths = [];
+      snapshotGroupKeys = new Set();
+      return;
+    }
+    const { nodes } = await fetchTreeNode({
+      groupBy,
+      path: [],
+      filter: displayFilter,
+      sort,
+    });
+    const allPaths = nodes.map((n) => [
+      { dimension: groupBy[0], value: n.value },
+    ]);
+    collapsedPaths = allPaths;
+    snapshotGroupKeys =
+      mode === "snapshot" ? new Set(allPaths.map(pathKey)) : new Set();
+  }
+
   /** The top-of-toolbar "cycle all" control: flip EVERY top-level group at
-   * once through full view → snapshot all → collapse all → full view. Fetches
-   * the current top-level group list from the tree, then sets collapsedPaths /
-   * snapshotGroupKeys wholesale and rebuilds the feed from the top. */
+   * once through full view → snapshot all → collapse all → full view. Sets
+   * collapsedPaths / snapshotGroupKeys wholesale and rebuilds the feed from the top. */
   async function cycleAllGroups() {
     if (cyclingAll) return;
     const next =
@@ -1093,23 +1131,7 @@
           : "expanded";
     cyclingAll = true;
     try {
-      if (next === "expanded") {
-        collapsedPaths = [];
-        snapshotGroupKeys = new Set();
-      } else {
-        const { nodes } = await fetchTreeNode({
-          groupBy,
-          path: [],
-          filter: displayFilter,
-          sort,
-        });
-        const allPaths = nodes.map((n) => [
-          { dimension: groupBy[0], value: n.value },
-        ]);
-        collapsedPaths = allPaths;
-        snapshotGroupKeys =
-          next === "snapshot" ? new Set(allPaths.map(pathKey)) : new Set();
-      }
+      await applyViewModeToGroups(next);
       globalViewMode = next;
       await loadInitialFeed();
     } catch (e) {
