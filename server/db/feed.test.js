@@ -693,6 +693,65 @@ describe("getFeedPage — startPath (jump to an arbitrary hierarchy path)", () =
     });
     expect(items.map((i) => i.name)).toEqual(["a.jpg"]);
   });
+
+  it("multi-level: seeks to the EXACT subgroup, not its parent's first subgroup", () => {
+    // Regression: a two-level jump (camera → kind) used an inclusive compare at
+    // the camera level, so `camera >= "Canon"` swallowed all of Canon and landed
+    // on Canon/image instead of the requested Canon/video.
+    const db = getDb();
+    seedVolume(db, 1);
+    const [ci, cv, ni] = upsertScan(db, "/photos/trip", 1, [
+      { name: "canon-img.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "canon-vid.mp4", size: 1, mtimeMs: 1, kind: "video" },
+      { name: "nikon-img.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    db.prepare(`UPDATE photos SET camera = ? WHERE id = ?`).run("Canon", ci.id);
+    db.prepare(`UPDATE photos SET camera = ? WHERE id = ?`).run("Canon", cv.id);
+    db.prepare(`UPDATE photos SET camera = ? WHERE id = ?`).run("Nikon", ni.id);
+    const { items } = getFeedPage(db, {
+      groupBy: ["camera", "kind"],
+      startPath: [
+        { dimension: "camera", value: "Canon" },
+        { dimension: "kind", value: "video" },
+      ],
+      after: 10,
+    });
+    // Starts AT Canon/video (skipping the earlier Canon/image), then the next
+    // camera — never the parent's first subgroup.
+    expect(items.map((i) => i.name)).toEqual(["canon-vid.mp4", "nikon-img.jpg"]);
+  });
+
+  it("multi-level DESC (year → month): lands on the exact month, not the year's first month", () => {
+    // The reported repro: group by year/month, click a month in the fisheye.
+    // year & month are both DESC, so the feed reads 2025/08, 2025/07, 2025/06…
+    // A jump to 2025/07 must skip 2025/08 (the year's first month) and start AT
+    // 2025/07.
+    const db = getDb();
+    seedVolume(db, 1);
+    // upsertScan returns rows ORDER BY filename, not input order — so assign
+    // taken_at by looking each photo up by name, not by array position.
+    const rows = upsertScan(db, "/photos/trip", 1, [
+      { name: "aug.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "jul.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "jun.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "dec24.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const byName = Object.fromEntries(rows.map((r) => [r.name, r.id]));
+    const setTaken = db.prepare(`UPDATE photos SET taken_at = ? WHERE id = ?`);
+    setTaken.run(Date.UTC(2025, 7, 15), byName["aug.jpg"]); // 2025-08
+    setTaken.run(Date.UTC(2025, 6, 15), byName["jul.jpg"]); // 2025-07
+    setTaken.run(Date.UTC(2025, 5, 15), byName["jun.jpg"]); // 2025-06
+    setTaken.run(Date.UTC(2024, 11, 15), byName["dec24.jpg"]); // 2024-12
+    const { items } = getFeedPage(db, {
+      groupBy: ["year", "month"],
+      startPath: [
+        { dimension: "year", value: "2025" },
+        { dimension: "month", value: "07" },
+      ],
+      after: 10,
+    });
+    expect(items.map((i) => i.name)).toEqual(["jul.jpg", "jun.jpg", "dec24.jpg"]);
+  });
 });
 
 describe("getFeedPage — keyset pagination", () => {

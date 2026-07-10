@@ -128,9 +128,16 @@ function startPathCondition(dims, path) {
       parts.push(`${dims[j].expr} = ?`);
       params.push(path[j].value);
     }
+    // Row-value ">=" decomposes as: d0>v0 OR (d0=v0 AND d1>v1) OR … OR
+    // (d0=v0 AND … AND dN>=vN). Every level EXCEPT the last compares STRICTLY —
+    // equality at that level is carried by the deeper clause. Using the inclusive
+    // op at a non-final level (the old bug) made e.g. `camera >= X` swallow the
+    // WHOLE camera group, landing a two-level jump on its first subgroup instead
+    // of the requested one.
     const op = cmpOp(dims[i].direction, true);
     const inclusiveOp = op === ">" ? ">=" : "<=";
-    parts.push(`${dims[i].expr} ${inclusiveOp} ?`);
+    const isLast = i === path.length - 1;
+    parts.push(`${dims[i].expr} ${isLast ? inclusiveOp : op} ?`);
     params.push(value);
     clauses.push(`(${parts.join(" AND ")})`);
   });
