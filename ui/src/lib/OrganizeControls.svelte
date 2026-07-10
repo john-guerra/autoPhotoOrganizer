@@ -70,24 +70,58 @@
       {sort.dir === "asc" ? "↑" : "↓"}
     </button>
   </div>
-  <div
-    class="seg-toggle"
-    role="group"
-    aria-label="Filter mode"
-    title="Does the filter narrow the view (Display), or add matches to the selection (Select)?"
-  >
+  <div class="divider"></div>
+  <div class="seg-toggle icons" role="group" aria-label="Filter mode">
     <button
       type="button"
       class:active={filterMode === "display"}
-      on:click={() => dispatch("filtermodechange", "display")}>Display</button
+      title="Display: the filter narrows what's shown"
+      aria-label="Display mode — filter narrows the view"
+      aria-pressed={filterMode === "display"}
+      on:click={() => dispatch("filtermodechange", "display")}
     >
+      <!-- eye: what you see -->
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M8 3.5C4.4 3.5 1.9 6.6 1.2 8c.7 1.4 3.2 4.5 6.8 4.5s6.1-3.1 6.8-4.5C14.1 6.6 11.6 3.5 8 3.5z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.3"
+        />
+        <circle cx="8" cy="8" r="2" fill="currentColor" />
+      </svg>
+    </button>
     <button
       type="button"
       class:active={filterMode === "select"}
-      on:click={() => dispatch("filtermodechange", "select")}>Select</button
+      title="Select: matches join the selection instead of narrowing"
+      aria-label="Select mode — filter adds matches to the selection"
+      aria-pressed={filterMode === "select"}
+      on:click={() => dispatch("filtermodechange", "select")}
     >
+      <!-- check-square: adds to selection -->
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect
+          x="2.2"
+          y="2.2"
+          width="11.6"
+          height="11.6"
+          rx="2.4"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.3"
+        />
+        <path
+          d="M4.8 8.2l2.1 2.2 4.3-4.6"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
+    </button>
   </div>
-  <div class="divider"></div>
   <RatingFilter {filter} on:change={(e) => dispatch("filterchange", e.detail)} />
   <OrientationFilter {filter} on:change={(e) => dispatch("filterchange", e.detail)} />
   {#if timeMin != null && timeMax != null && timeMax > timeMin}
@@ -184,6 +218,18 @@
     background: #4c9aff;
     color: #06121f;
     font-weight: 600;
+  }
+  /* Icon variant: square buttons, the SVG inherits the button color (so it turns
+     dark-on-blue when active, matching the text variant's contrast). */
+  .seg-toggle.icons button {
+    padding: 3px 6px;
+    display: flex;
+    align-items: center;
+  }
+  .seg-toggle.icons svg {
+    width: 15px;
+    height: 15px;
+    display: block;
   }
   /* Group boundary between the organize controls (group-by/sort/mode) and the
      filter widgets (stars / orientation / time), matching the toolbar dividers. */
