@@ -6,7 +6,11 @@ import { initAutoUpdates } from "./updates.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
-const PORT = process.env.PORT ? Number(process.env.PORT) : 4321;
+// The packaged app prefers a port distinct from the dev server's 4321 so a
+// running install never squats the port `npm run dev` needs (issue #65). It
+// points the renderer at whatever port it actually binds, so the exact number
+// is arbitrary; it still falls back to a free port if this one is taken too.
+const PORT = process.env.PORT ? Number(process.env.PORT) : 4331;
 const HOST = "127.0.0.1";
 const DEV_URL = "http://localhost:5173";
 const isDev = process.env.ELECTRON_DEV === "1";

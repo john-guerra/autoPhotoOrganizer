@@ -10,10 +10,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "concurrently -n server,ui -c blue,magenta \"npm:dev:server\" \"npm:dev:ui\"",
+    "dev": "node scripts/dev.mjs",
     "dev:server": "node server/index.js",
     "dev:ui": "vite ui",
-    "electron:dev": "concurrently -n server,ui,electron -c blue,magenta,green \"npm:dev:server\" \"npm:dev:ui\" \"wait-on tcp:4321 tcp:5173 && cross-env ELECTRON_DEV=1 electron .\"",
+    "electron:dev": "node scripts/dev.mjs --electron",
     "electron:build": "npm run build && electron-builder --mac --win --linux",
     "electron:build:mac": "npm run build && electron-builder --mac",
     "build": "vite build ui",
