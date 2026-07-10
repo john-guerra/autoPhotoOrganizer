@@ -741,9 +741,16 @@ describe("GET /api/feed", () => {
     expect(res.status).toBe(400);
   });
 
-  it("400s when groupBy is missing", async () => {
-    const res = await fetch(`${srv.base}/api/feed`);
-    expect(res.status).toBe(400);
+  it("serves a flat feed of every photo when groupBy is empty", async () => {
+    await scan(srv.base, photosDir);
+    const res = await fetch(`${srv.base}/api/feed?after=50`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Flat feed: real photo items, no group dimensions in play.
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items[0]).toHaveProperty("id");
+    expect(body.items.every((i) => i.kind !== "header")).toBe(true);
   });
 
   it("respects an explicit after=0 instead of silently defaulting it to 50", async () => {
@@ -1698,9 +1705,10 @@ describe("GET /api/tree", () => {
     expect(res.status).toBe(400);
   });
 
-  it("400s when groupBy is missing", async () => {
+  it("returns an empty tree when groupBy is missing (flat feed has no hierarchy)", async () => {
     const res = await fetch(`${srv.base}/api/tree`);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ total: 0, nodes: [] });
   });
 
   it("400s on malformed path JSON", async () => {

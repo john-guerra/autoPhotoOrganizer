@@ -656,9 +656,8 @@ export function registerApi(app) {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    if (!groupBy.length) {
-      return res.status(400).json({ error: "groupBy is required" });
-    }
+    // Empty groupBy is valid: a flat feed of every photo (getFeedPage builds no
+    // dim columns). Only reject unknown dimension names.
     if (groupBy.some((d) => !DIMENSIONS[d])) {
       return res.status(400).json({
         error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
@@ -838,9 +837,8 @@ export function registerApi(app) {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    if (!groupBy.length) {
-      return res.status(400).json({ error: "groupBy is required" });
-    }
+    // Flat feed (no grouping) has no hierarchy — an empty tree, not an error.
+    if (!groupBy.length) return res.json({ total: 0, nodes: [] });
     if (groupBy.some((d) => !DIMENSIONS[d])) {
       return res.status(400).json({
         error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
@@ -878,9 +876,8 @@ export function registerApi(app) {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    if (!groupBy.length) {
-      return res.status(400).json({ error: "groupBy is required" });
-    }
+    // Flat feed (no grouping) has no leaves — empty, not an error.
+    if (!groupBy.length) return res.json({ total: 0, leaves: [] });
     if (groupBy.some((d) => !DIMENSIONS[d])) {
       return res.status(400).json({
         error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
