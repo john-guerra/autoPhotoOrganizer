@@ -5,6 +5,14 @@ Notable changes to AutoGallery, newest first. Versions follow the scheme in
 gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
 short and user-facing — what you can now do, not how it's built.
 
+## 2.3.0-alpha
+
+- **AutoAlbums: name your album folders** — edit each album's folder name before
+  materializing, instead of accepting the auto-generated date (#68).
+- **Materialize in place** — when you've opened a folder, the materialize
+  destination now defaults to that folder, so "Move" organizes it into dated
+  subfolders in one click (#68).
+
 ## 2.2.1-alpha
 
 - **Fixed: packaged app failed to launch** with a `NODE_MODULE_VERSION`

@@ -2551,6 +2551,7 @@
           photos={albumPhotos}
           truncated={albumTruncated}
           limit={albumLimit}
+          defaultDest={focusPath || ""}
           {hasNativePicker}
           on:relimit={(e) => onAlbumRelimit(e.detail)}
           on:close={() => (albumMode = false)}
