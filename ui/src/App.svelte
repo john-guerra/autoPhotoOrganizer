@@ -934,6 +934,22 @@
   // Pass dateAttr so the marker recomputes when the sort date changes, not just
   // on scroll (Svelte only tracks deps named in the reactive expression).
   $: currentTime = deriveCurrentTime(renderStart, displayEntries, filter.dateAttr);
+  // The marker follows the loaded feed window (`displayEntries`), which is rebuilt
+  // asynchronously on each filter change, while the selection band follows `filter`
+  // synchronously. During rapid brushing the window lags the band, which would
+  // paint the "you are here" marker OUTSIDE the selection until the feed catches up.
+  // In display mode the feed is narrowed to the range, so a marker outside it is a
+  // stale-window artifact — suppress it until the feed reconciles (state-driven, no
+  // settle timer). In select mode the grid spans the whole library, so a marker
+  // outside the (sub-range) selection is legitimate and stays visible.
+  $: markerTime = (() => {
+    if (currentTime == null) return null;
+    if (filterMode === "select") return currentTime;
+    const { dateFrom, dateTo } = filter;
+    if (dateFrom != null && currentTime < dateFrom) return null;
+    if (dateTo != null && currentTime > dateTo) return null;
+    return currentTime;
+  })();
 
   /** Keeps the first occurrence of each id, dropping later repeats. Guards
    * against a real, observed case: fetching "before" and "after" a focusId
@@ -2155,7 +2171,7 @@
       {timeMin}
       {timeMax}
       {timeTimes}
-      {currentTime}
+      currentTime={markerTime}
       on:groupbychange={(e) => onGroupByChange(e.detail)}
       on:sortchange={(e) => onSortChange(e.detail)}
       on:filtermodechange={(e) => onFilterModeChange(e.detail)}
