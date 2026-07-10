@@ -63,6 +63,7 @@
       "node_modules/better-sqlite3/**"
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "target": [
         "dmg",
         "zip"
@@ -70,11 +71,13 @@
       "category": "public.app-category.photography"
     },
     "win": {
+      "icon": "build/icon.png",
       "target": [
         "nsis"
       ]
     },
     "linux": {
+      "icon": "build/icon.png",
       "target": [
         "AppImage"
       ],

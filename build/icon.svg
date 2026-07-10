@@ -1,0 +1,18 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#26456f"/><stop offset="1" stop-color="#14243d"/></linearGradient>
+    <linearGradient id="box" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b5ea8"/><stop offset="1" stop-color="#14294d"/></linearGradient>
+    <clipPath id="c"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <clipPath id="boxclip"><rect x="362" y="362" width="300" height="300" rx="44"/></clipPath>
+    <filter id="sh" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000" flood-opacity="0.45"/></filter>
+  </defs>
+  <g clip-path="url(#c)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#bg)"/>
+    <rect x="257" y="257" width="150" height="150" rx="26" fill="#8ea6cc" fill-opacity="0.5"/><rect x="437" y="257" width="150" height="150" rx="26" fill="#8ea6cc" fill-opacity="0.5"/><rect x="617" y="257" width="150" height="150" rx="26" fill="#8ea6cc" fill-opacity="0.5"/><rect x="257" y="437" width="150" height="150" rx="26" fill="#8ea6cc" fill-opacity="0.5"/><rect x="617" y="437" width="150" height="150" rx="26" fill="#8ea6cc" fill-opacity="0.5"/><rect x="257" y="617" width="150" height="150" rx="26" fill="#8ea6cc" fill-opacity="0.5"/><rect x="437" y="617" width="150" height="150" rx="26" fill="#8ea6cc" fill-opacity="0.5"/><rect x="617" y="617" width="150" height="150" rx="26" fill="#8ea6cc" fill-opacity="0.5"/>
+    <g filter="url(#sh)">
+      <rect x="362" y="362" width="300" height="300" rx="44" fill="url(#box)" stroke="#eef5ff" stroke-width="12"/>
+      <g clip-path="url(#boxclip)"><circle cx="512" cy="512" r="136" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="13"/><path d="M 512 387 A 125 125 0 0 1 620.2531754730549 449.5 L 517.0557315621681 473.32908614512326 Z" fill="#eaf2ff"/><path d="M 620.2531754730549 449.5 A 125 125 0 0 1 620.2531754730549 574.5 L 548.0178595669669 497.042935040114 Z" fill="#c8ddf7"/><path d="M 620.2531754730549 574.5 A 125 125 0 0 1 512 637 L 542.9621280047988 535.7138488949907 Z" fill="#eaf2ff"/><path d="M 512 637 A 125 125 0 0 1 403.7468245269452 574.5 L 506.9442684378319 550.6709138548767 Z" fill="#c8ddf7"/><path d="M 403.7468245269452 574.5 A 125 125 0 0 1 403.74682452694515 449.5 L 475.9821404330331 526.957064959886 Z" fill="#eaf2ff"/><path d="M 403.74682452694515 449.5 A 125 125 0 0 1 512 387 L 481.03787199520116 488.28615110500925 Z" fill="#c8ddf7"/><circle cx="512" cy="512" r="20" fill="#4c9aff"/></g>
+    </g>
+  </g>
+</svg>
