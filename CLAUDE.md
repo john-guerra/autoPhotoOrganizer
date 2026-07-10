@@ -90,6 +90,11 @@ verification), and decisions already made.
 - Keep the current pre-release suffix (`-alpha`) until a stable release is cut,
   so e.g. a feature at `2.0.0-alpha` bumps to `2.1.0-alpha`. Bump in the **same
   commit/PR that closes the issue**, not as a separate housekeeping commit.
+- **Update `CHANGELOG.md` in that same commit.** Add a new `## <version>` entry
+  (newest first) with a clean, short, user-facing line per feature/fix — what
+  the user can now do, not how it's implemented — most notable first, with the
+  issue number in parens. This is the human-readable companion to the version
+  number.
 
 ## Agent tool usage
 
