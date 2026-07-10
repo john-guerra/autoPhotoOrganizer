@@ -940,10 +940,11 @@
     mainColumnEl.scrollTo({ top: target, behavior: "smooth" });
   }
 
-  /** The group path of the first photo currently visible in the feed — drives
-   * the fisheye sidebar's "you are here" marker so it follows the feed as you
-   * scroll. Read-only: derived from the existing render window, it never
-   * scrolls the feed itself (honours issue #40's no-scroll-hijack rule). */
+  /** The group path at the "you are here" anchor (`hereIndex` — the focused
+   * photo, or the first visible row when the focus is scrolled off) — drives the
+   * fisheye dot + tree highlight so they follow both keyboard focus and scroll.
+   * Read-only: derived from the existing render window, it never scrolls the feed
+   * itself (honours issue #40's no-scroll-hijack rule). */
   function deriveCurrentPath(start, entries, gb) {
     for (let i = Math.max(0, start); i < entries.length; i++) {
       const e = entries[i];
@@ -956,12 +957,23 @@
     }
     return null;
   }
-  $: currentPath = deriveCurrentPath(renderStart, displayEntries, groupBy);
+  // "You are here" anchor index. The markers (fisheye dot, tree highlight,
+  // timeline tick) should point at the photo you're actually working on. During
+  // keyboard culling that's the FOCUSED photo (`selected`) — it moves as you
+  // arrow through the grid, often without scrolling, so a renderStart-only
+  // anchor left the dot frozen (issue #18). When you mouse-scroll AWAY from the
+  // focus (focus leaves the render window) we fall back to the first visible row
+  // so the marker still follows the feed as you browse. Best of both.
+  $: hereIndex =
+    selected >= renderStart && selected <= renderEnd ? selected : renderStart;
+  $: currentPath = deriveCurrentPath(hereIndex, displayEntries, groupBy);
 
-  /** Epoch-ms of the first photo currently in view, for the timeline's "you are
-   * here" marker. Walks from renderStart to the first real (non-placeholder)
+  /** Epoch-ms at the "you are here" anchor (`hereIndex` — the focused photo, or
+   * the first visible row when the focus is scrolled off), for the timeline's
+   * marker. Walks forward from the anchor to the first real (non-placeholder)
    * entry whose metadata has arrived (takenAt is filled by enrichMeta), so the
-   * marker follows the feed as you scroll. null until a timestamp is known. */
+   * marker follows both keyboard focus and scroll. null until a timestamp is
+   * known. */
   function deriveCurrentTime(start, entries, attr) {
     for (let i = Math.max(0, start); i < entries.length; i++) {
       const e = entries[i];
@@ -973,7 +985,7 @@
   }
   // Pass dateAttr so the marker recomputes when the sort date changes, not just
   // on scroll (Svelte only tracks deps named in the reactive expression).
-  $: currentTime = deriveCurrentTime(renderStart, displayEntries, filter.dateAttr);
+  $: currentTime = deriveCurrentTime(hereIndex, displayEntries, filter.dateAttr);
   // The marker follows the loaded feed window (`displayEntries`), which is rebuilt
   // asynchronously on each filter change, while the selection band follows `filter`
   // synchronously. During rapid brushing the window lags the band, which would
