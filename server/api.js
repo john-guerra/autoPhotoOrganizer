@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { writeFile, rename, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { extname, join, basename, resolve, sep } from "node:path";
+import { extname, join, basename, dirname, resolve, sep } from "node:path";
 import { revealCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { thumbsDir, cacheRoot } from "./lib/cachePaths.js";
@@ -40,6 +40,7 @@ import {
   deleteFolder,
   resetLibrary,
   repointPhoto,
+  renameFolderPath,
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
 import {
@@ -703,6 +704,47 @@ export function registerApi(app) {
     if (!row) return res.status(404).json({ error: `not indexed: ${path}` });
     deleteFolder(db, row.id);
     res.json({ removed: true, id: row.id });
+  });
+
+  // Rename a scanned folder on disk and update the index (issue #68 Slice B).
+  // Folders on disk are the source of truth, so this renames the real directory
+  // (renameSync) and repoints the folder rows — the user explicitly asked to
+  // rename it. Photo rows are untouched (paths derive from folder_id).
+  app.post("/api/folders/rename", (req, res) => {
+    const { path, newName } = req.body ?? {};
+    if (typeof path !== "string" || !path.length) {
+      return res.status(400).json({ error: "path is required" });
+    }
+    if (typeof newName !== "string" || !newName.trim()) {
+      return res.status(400).json({ error: "newName is required" });
+    }
+    const name = newName.trim();
+    // A bare folder name only — no separators, no traversal.
+    if (name.includes("/") || name.includes(sep) || name === "." || name === "..") {
+      return res.status(400).json({ error: "invalid folder name" });
+    }
+    const db = getDb();
+    const row = db.prepare(`SELECT id FROM folders WHERE abs_path = ?`).get(path);
+    if (!row) return res.status(404).json({ error: `not indexed: ${path}` });
+    if (!existsSync(path)) {
+      return res.status(409).json({ error: "folder is not on disk (offline?)" });
+    }
+    const newAbsPath = join(dirname(path), name);
+    if (newAbsPath === path) {
+      return res.json({ ok: true, oldPath: path, newPath: newAbsPath }); // no-op
+    }
+    if (existsSync(newAbsPath) || db.prepare(`SELECT id FROM folders WHERE abs_path = ?`).get(newAbsPath)) {
+      return res
+        .status(409)
+        .json({ error: "a folder with that name already exists" });
+    }
+    try {
+      renameSync(path, newAbsPath);
+    } catch (err) {
+      return res.status(500).json({ error: `rename failed: ${err.message}` });
+    }
+    renameFolderPath(db, path, newAbsPath);
+    res.json({ ok: true, oldPath: path, newPath: newAbsPath });
   });
 
   app.get("/api/cache/stats", (_req, res) => {
