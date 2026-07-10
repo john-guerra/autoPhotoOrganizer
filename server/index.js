@@ -55,6 +55,39 @@ export function createApp() {
   return app;
 }
 
+/**
+ * Start `app` on loopback, preferring `preferredPort` but falling back to an
+ * OS-assigned free port if that one is already taken — e.g. a running dev
+ * server, a stale process, or a second AutoGallery instance holds it. Without
+ * this the packaged app's `listen()` fails with EADDRINUSE and the window has
+ * nothing to load (issue #64). Resolves with the port actually bound so the
+ * caller can point the renderer at it.
+ *
+ * The standalone dev server below intentionally does NOT use this — it must
+ * stay on the fixed PORT because Vite's dev proxy targets it by number.
+ *
+ * @param {import("express").Express} app
+ * @param {{preferredPort?: number, host?: string}} [opts]
+ * @returns {Promise<{server: import("node:http").Server, port: number}>}
+ */
+export function listenOnOpenPort(
+  app,
+  { preferredPort = PORT, host = HOST } = {}
+) {
+  const tryPort = (port) =>
+    new Promise((resolve, reject) => {
+      const server = app.listen(port, host, () => {
+        resolve({ server, port: server.address().port });
+      });
+      server.on("error", reject);
+    });
+  // `0` asks the OS for any free port.
+  return tryPort(preferredPort).catch((err) => {
+    if (err && err.code === "EADDRINUSE") return tryPort(0);
+    throw err;
+  });
+}
+
 // Only listen when run directly (not when imported by tests).
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const app = createApp();

@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import autoUpdaterPkg from "electron-updater";
-import { createApp } from "../server/index.js";
+import { createApp, listenOnOpenPort } from "../server/index.js";
 
 const { autoUpdater } = autoUpdaterPkg;
 
@@ -15,10 +15,13 @@ const isDev = process.env.ELECTRON_DEV === "1";
 
 async function startEmbeddedServer() {
   const expressApp = createApp();
-  await new Promise((resolve, reject) => {
-    const server = expressApp.listen(PORT, HOST, resolve);
-    server.on("error", reject);
+  // Prefer PORT, but fall back to any free port if it's taken (a dev server, a
+  // stale process, a second instance) so the app still launches (issue #64).
+  const { port } = await listenOnOpenPort(expressApp, {
+    preferredPort: PORT,
+    host: HOST,
   });
+  return port;
 }
 
 async function createWindow() {
@@ -36,8 +39,8 @@ async function createWindow() {
   if (isDev) {
     await win.loadURL(DEV_URL);
   } else {
-    await startEmbeddedServer();
-    await win.loadURL(`http://${HOST}:${PORT}`);
+    const port = await startEmbeddedServer();
+    await win.loadURL(`http://${HOST}:${port}`);
   }
 }
 
