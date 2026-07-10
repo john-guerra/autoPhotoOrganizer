@@ -5,6 +5,12 @@ Notable changes to AutoGallery, newest first. Versions follow the scheme in
 gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
 short and user-facing — what you can now do, not how it's built.
 
+## 2.2.1-alpha
+
+- **Fixed: packaged app failed to launch** with a `NODE_MODULE_VERSION`
+  mismatch — the native database module was built for the wrong runtime. Builds
+  (and CI releases) now rebuild it for Electron correctly (#67).
+
 ## 2.2.0-alpha
 
 - **Open a folder** — focus the whole app (feed, tree, counts, albums) on a

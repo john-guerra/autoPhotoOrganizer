@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.2.0-alpha",
+  "version": "2.2.1-alpha",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
@@ -14,8 +14,10 @@
     "dev:server": "node server/index.js",
     "dev:ui": "vite ui",
     "electron:dev": "node scripts/dev.mjs --electron",
-    "electron:build": "npm run build && electron-builder --mac --win --linux",
-    "electron:build:mac": "npm run build && electron-builder --mac",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "electron:build": "npm run build && npm run rebuild:electron && electron-builder --mac --win --linux -c.npmRebuild=false && npm run rebuild:node",
+    "electron:build:mac": "npm run build && npm run rebuild:electron && electron-builder --mac -c.npmRebuild=false && npm run rebuild:node",
     "build": "vite build ui",
     "test": "vitest run",
     "format": "prettier --write ."
@@ -32,6 +34,7 @@
     "sortablejs": "^1.15.7"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.6.1",
     "@john-guerra/d3-zoomable-axis": "^0.0.3",
     "@sveltejs/vite-plugin-svelte": "^3.1.2",
     "concurrently": "^8.2.2",
