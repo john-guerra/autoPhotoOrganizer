@@ -1530,6 +1530,7 @@
           it.width = m.width ?? 0;
           it.height = m.height ?? 0;
           it.takenAt = m.takenAt;
+          it.duration = m.duration ?? null; // video length → grid badge
         }
         items = items; // re-layout with real aspect ratios
       } catch {

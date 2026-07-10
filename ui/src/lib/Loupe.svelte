@@ -1,6 +1,6 @@
 <script>
   import { createEventDispatcher } from "svelte";
-  import { imageUrl } from "./api.js";
+  import { imageUrl, videoUrl } from "./api.js";
   import Stars from "./Stars.svelte";
 
   const dispatch = createEventDispatcher();
@@ -37,6 +37,9 @@
     for (let d = -3; d <= 3; d++) {
       const it = items[i + d];
       if (!isRealPhoto(it)) continue;
+      // An Image() can't preload a video, and pulling whole video files into
+      // cache for the ±3 neighbours would be wasteful — skip them.
+      if (it.kind === "video") continue;
       wanted.add(it.id);
       if (!warm.has(it.id)) {
         const img = new Image();
@@ -55,7 +58,23 @@
   <div class="stage" on:contextmenu={onContextMenu}>
     {#if item}
       {#key item.id}
-        <img src={imageUrl(item.id, item.mtimeMs)} alt={item.name} />
+        {#if item.kind === "video"}
+          <!-- muted so the browser doesn't block autoplay; controls give the
+               scrub bar that drives the server's Range requests. The {#key}
+               tears down/rebuilds the element on navigation, stopping playback. -->
+          <video
+            src={videoUrl(item.id, item.mtimeMs)}
+            controls
+            autoplay
+            muted
+            playsinline
+            preload="metadata"
+          >
+            <track kind="captions" />
+          </video>
+        {:else}
+          <img src={imageUrl(item.id, item.mtimeMs)} alt={item.name} />
+        {/if}
       {/key}
     {/if}
   </div>
@@ -93,7 +112,8 @@
     justify-content: center;
     padding: 1rem;
   }
-  .stage img {
+  .stage img,
+  .stage video {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
