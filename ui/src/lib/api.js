@@ -354,6 +354,26 @@ export async function fetchAlbumTimeline(filter = null, limit = 20000) {
 }
 
 /**
+ * Timestamps of the working set for the timeline filter's density curve. Pass
+ * the filter with its time facet already stripped (the caller keys the
+ * crossfilter refetch on the non-time facets); the server also strips it
+ * defensively. Returns exact min/max/total plus a down-sampled `times` array.
+ * @param {object|null} [filter=null] non-time filter facets (or null for the whole library)
+ * @returns {Promise<{times:number[], total:number, min:number|null, max:number|null, sampled:boolean}>}
+ */
+export async function fetchTimes(filter = null) {
+  const params = new URLSearchParams();
+  const fp = filter ? toQueryParam(filter) : null;
+  if (fp) params.set("filter", fp);
+  const res = await fetch(`/api/times?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `times failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
  * Materialize albums to disk: copy each album into its own folder under
  * destParent (copies, never moves).
  * @param {string} destParent

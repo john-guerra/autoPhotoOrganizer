@@ -3,18 +3,26 @@
 
 export const ORIENTATIONS = ["landscape", "portrait", "square"];
 
-export const DEFAULT_FILTER = { minRating: 0, orientations: [...ORIENTATIONS] };
+export const DEFAULT_FILTER = {
+  minRating: 0,
+  orientations: [...ORIENTATIONS],
+  // Time-range facet (epoch ms), driven by the timeline filter. null = open.
+  dateFrom: null,
+  dateTo: null,
+};
 
-/** @param {{minRating?:number, orientations?:string[], scopeIds?:number[], keepScope?:boolean}} spec */
+/** @param {{minRating?:number, orientations?:string[], scopeIds?:number[], keepScope?:boolean, dateFrom?:number|null, dateTo?:number|null}} spec */
 export function isActive(spec) {
   const minRating = spec?.minRating ?? 0;
   const o = spec?.orientations ?? [];
   const scoped = Array.isArray(spec?.scopeIds) && spec.scopeIds.length > 0;
+  const timed = spec?.dateFrom != null || spec?.dateTo != null;
   return (
     minRating > 0 ||
     (o.length > 0 && o.length < ORIENTATIONS.length) ||
     scoped ||
-    Boolean(spec?.keepScope)
+    Boolean(spec?.keepScope) ||
+    timed
   );
 }
 
@@ -30,6 +38,8 @@ export function toQueryParam(spec) {
     out.scopeIds = spec.scopeIds;
   }
   if (spec?.keepScope) out.keepScope = true;
+  if (Number.isFinite(spec?.dateFrom)) out.dateFrom = spec.dateFrom;
+  if (Number.isFinite(spec?.dateTo)) out.dateTo = spec.dateTo;
   return JSON.stringify(out);
 }
 

@@ -57,6 +57,21 @@ export function buildFilter(spec = {}) {
     clauses.push(`photos.id IN (SELECT photo_id FROM keep_scope)`);
   }
 
+  // Time-range facet (timeline filter). Filters on the same timestamp the feed
+  // orders/clusters by — COALESCE(taken_at, mtime) — so the brush, the grid,
+  // and the counts all agree on "when". Bounds are epoch ms; either may be
+  // absent (open-ended). Injection-safe: bound params, never spliced strings.
+  // Guard null/undefined explicitly: Number(null) === 0 is finite, which would
+  // silently add a `>= 0` clause for an open-ended (null) bound.
+  if (spec?.dateFrom != null && Number.isFinite(Number(spec.dateFrom))) {
+    clauses.push("COALESCE(photos.taken_at, photos.mtime) >= ?");
+    params.push(Number(spec.dateFrom));
+  }
+  if (spec?.dateTo != null && Number.isFinite(Number(spec.dateTo))) {
+    clauses.push("COALESCE(photos.taken_at, photos.mtime) <= ?");
+    params.push(Number(spec.dateTo));
+  }
+
   if (!clauses.length) return { sql: "1=1", params: [] };
   return { sql: clauses.join(" AND "), params };
 }

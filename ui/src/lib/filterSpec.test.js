@@ -26,6 +26,14 @@ describe("filterSpec", () => {
       orientations: ["portrait"],
     });
   });
+  it("a time-range bound activates and round-trips through toQueryParam", () => {
+    expect(isActive({ ...DEFAULT_FILTER, dateFrom: 1000 })).toBe(true);
+    expect(isActive({ ...DEFAULT_FILTER, dateTo: 2000 })).toBe(true);
+    expect(isActive(DEFAULT_FILTER)).toBe(false); // both null
+    expect(
+      JSON.parse(toQueryParam({ ...DEFAULT_FILTER, dateFrom: 1000, dateTo: 2000 }))
+    ).toEqual({ dateFrom: 1000, dateTo: 2000 });
+  });
 });
 
 describe("applyRatingClick", () => {

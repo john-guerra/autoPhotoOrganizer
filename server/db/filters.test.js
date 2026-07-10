@@ -96,4 +96,33 @@ describe("buildFilter", () => {
     );
     expect(f.params).toEqual([3]);
   });
+
+  it("emits a COALESCE(taken_at,mtime) range for dateFrom/dateTo", () => {
+    const both = buildFilter({ dateFrom: 1000, dateTo: 2000 });
+    expect(both.sql).toBe(
+      "COALESCE(photos.taken_at, photos.mtime) >= ? AND COALESCE(photos.taken_at, photos.mtime) <= ?"
+    );
+    expect(both.params).toEqual([1000, 2000]);
+
+    const fromOnly = buildFilter({ dateFrom: 1000 });
+    expect(fromOnly.sql).toBe("COALESCE(photos.taken_at, photos.mtime) >= ?");
+    expect(fromOnly.params).toEqual([1000]);
+
+    const toOnly = buildFilter({ dateTo: 2000 });
+    expect(toOnly.sql).toBe("COALESCE(photos.taken_at, photos.mtime) <= ?");
+    expect(toOnly.params).toEqual([2000]);
+
+    expect(buildFilter({ dateFrom: null, dateTo: null })).toEqual({
+      sql: "1=1",
+      params: [],
+    });
+  });
+
+  it("AND-composes the time range with a rating facet, params in order", () => {
+    const f = buildFilter({ minRating: 4, dateFrom: 1000, dateTo: 2000 });
+    expect(f.sql).toBe(
+      "photos.rating >= ? AND COALESCE(photos.taken_at, photos.mtime) >= ? AND COALESCE(photos.taken_at, photos.mtime) <= ?"
+    );
+    expect(f.params).toEqual([4, 1000, 2000]);
+  });
 });

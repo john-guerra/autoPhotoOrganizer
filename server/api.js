@@ -46,6 +46,7 @@ import {
   photoIdsMatchingFilter,
   photoCountMatchingFilter,
   workingSetTimeline,
+  workingSetTimes,
   countGroupPath,
   fetchGroupRowsAtOffsets,
   DIMENSIONS,
@@ -261,6 +262,18 @@ function parseFilterParam(req) {
   // "Keep only" working set, referenced by flag; the ids live in the keep_scope
   // table (set via POST /api/scope), so there is no size cap here.
   if (raw.keepScope) spec.keepScope = true;
+  // Timeline filter time-range (epoch ms). Each bound is optional; a finite
+  // number constrains, anything else is rejected so a garbled range can't
+  // silently widen the query.
+  for (const key of ["dateFrom", "dateTo"]) {
+    if (raw[key] !== undefined && raw[key] !== null) {
+      const v = Number(raw[key]);
+      if (!Number.isFinite(v)) {
+        return { spec: {}, error: `${key} must be a finite epoch-ms number` };
+      }
+      spec[key] = v;
+    }
+  }
   return { spec };
 }
 
@@ -997,6 +1010,17 @@ export function registerApi(app) {
     const db = getDb();
     const { photos, truncated } = workingSetTimeline(db, filter, limit);
     res.json({ photos, truncated, limit });
+  });
+
+  // --- Timeline filter density: timestamps of the working set (crossfilter on
+  // every facet except the time range itself). Drives the brushable timeline's
+  // KDE; down-sampled server-side so the payload stays small on big libraries.
+  app.get("/api/times", (req, res) => {
+    const { spec: filter, error: filterError } = parseFilterParam(req);
+    if (filterError) return res.status(400).json({ error: filterError });
+    const TIMES_SAMPLE_MAX = 12000;
+    const db = getDb();
+    res.json(workingSetTimes(db, filter, TIMES_SAMPLE_MAX));
   });
 
   // --- Materialize albums: move (default) or copy each album into its own

@@ -646,6 +646,46 @@ export function workingSetTimeline(db, filterSpec = {}, limit = 2000) {
 }
 
 /**
+ * Timestamps of the working set, for the timeline filter's density curve.
+ * STRIPS any time-range facet (`dateFrom`/`dateTo`) from `spec` — the histogram
+ * shows the whole temporal span you brush *within* — but keeps every other
+ * facet, so it's a true crossfilter on rating/orientation/scope. Returns exact
+ * `min`/`max`/`total` (so the axis domain is right even when down-sampled) plus
+ * an even-stride sample of `t = COALESCE(taken_at, mtime)` capped at `cap`, so
+ * the KDE stays cheap regardless of library size.
+ * @param {import('better-sqlite3').Database} db
+ * @param {object} filterSpec
+ * @param {number} cap max points returned
+ * @returns {{times:number[], total:number, min:number|null, max:number|null, sampled:boolean}}
+ */
+export function workingSetTimes(db, filterSpec = {}, cap = 12000) {
+  // Drop the time facet; keep the rest (crossfilter).
+  const { dateFrom, dateTo, ...rest } = filterSpec || {};
+  const filter = buildFilter(rest);
+  const rows = db
+    .prepare(
+      `SELECT COALESCE(photos.taken_at, photos.mtime) AS t
+       FROM photos JOIN folders ON folders.id = photos.folder_id
+       WHERE photos.stale = 0 AND (${filter.sql})
+       ORDER BY t ASC`
+    )
+    .all(...filter.params);
+  const total = rows.length;
+  if (!total) return { times: [], total: 0, min: null, max: null, sampled: false };
+  const min = rows[0].t;
+  const max = rows[total - 1].t;
+  if (total <= cap) {
+    return { times: rows.map((r) => r.t), total, min, max, sampled: false };
+  }
+  // Even-stride down-sample; always pin the last row so the right edge is exact.
+  const stride = total / cap;
+  const times = [];
+  for (let i = 0; i < cap; i++) times.push(rows[Math.floor(i * stride)].t);
+  if (times[times.length - 1] !== max) times.push(max);
+  return { times, total, min, max, sampled: true };
+}
+
+/**
  * Find the id of the first real row (in true forward composite order) of
  * the next/previous DIFFERENT group after/before focusId's own group, at
  * any dimension depth — e.g. the next year within the same folder, or the

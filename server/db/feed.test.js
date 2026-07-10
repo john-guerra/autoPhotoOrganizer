@@ -10,6 +10,7 @@ import {
   photoIdsMatchingFilter,
   photoCountMatchingFilter,
   workingSetTimeline,
+  workingSetTimes,
 } from "./feed.js";
 
 let cacheDir;
@@ -1054,5 +1055,105 @@ describe("getFeedPage — photo-level sort", () => {
     // window is contiguous in size-asc,id-asc order around the focus
     const sizes = items.map((i) => i.size);
     expect([...sizes]).toEqual([...sizes].sort((x, y) => x - y));
+  });
+});
+
+describe("workingSetTimes — timeline density", () => {
+  function seedTimes(db, isoList) {
+    seedVolume(db, 1);
+    const rows = upsertScan(
+      db,
+      "/photos/trip",
+      1,
+      isoList.map((_, i) => ({
+        name: `p${i}.jpg`,
+        size: 1,
+        mtimeMs: 1000 + i,
+        kind: "image",
+      }))
+    );
+    isoList.forEach((iso, i) => iso && setTakenAt(db, rows[i].id, iso));
+    return rows;
+  }
+
+  it("returns sorted t = COALESCE(taken_at, mtime) with exact min/max/total", () => {
+    const db = getDb();
+    seedTimes(db, [
+      "2023-03-01T00:00:00.000Z",
+      "2023-01-01T00:00:00.000Z",
+      "2023-02-01T00:00:00.000Z",
+    ]);
+    const r = workingSetTimes(db, {});
+    expect(r.total).toBe(3);
+    expect(r.sampled).toBe(false);
+    expect(r.times).toEqual([...r.times].sort((a, b) => a - b));
+    expect(r.min).toBe(Date.parse("2023-01-01T00:00:00.000Z"));
+    expect(r.max).toBe(Date.parse("2023-03-01T00:00:00.000Z"));
+  });
+
+  it("falls back to mtime when taken_at is null", () => {
+    const db = getDb();
+    seedTimes(db, [null]); // mtimeMs 1000
+    const r = workingSetTimes(db, {});
+    expect(r.total).toBe(1);
+    expect(r.min).toBe(1000);
+    expect(r.max).toBe(1000);
+  });
+
+  it("respects a rating facet (crossfilter on other dims)", () => {
+    const db = getDb();
+    const rows = seedTimes(db, [
+      "2023-01-01T00:00:00.000Z",
+      "2023-02-01T00:00:00.000Z",
+      "2023-03-01T00:00:00.000Z",
+    ]);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(rows[1].id);
+    const r = workingSetTimes(db, { minRating: 4 });
+    expect(r.total).toBe(1);
+    expect(r.min).toBe(Date.parse("2023-02-01T00:00:00.000Z"));
+  });
+
+  it("IGNORES an incoming time facet (density spans the whole range you brush within)", () => {
+    const db = getDb();
+    seedTimes(db, [
+      "2023-01-01T00:00:00.000Z",
+      "2023-02-01T00:00:00.000Z",
+      "2023-03-01T00:00:00.000Z",
+    ]);
+    const withRange = workingSetTimes(db, {
+      dateFrom: Date.parse("2023-02-15T00:00:00.000Z"),
+      dateTo: Date.parse("2023-02-20T00:00:00.000Z"),
+    });
+    expect(withRange.total).toBe(3); // time facet stripped
+    expect(withRange.min).toBe(Date.parse("2023-01-01T00:00:00.000Z"));
+  });
+
+  it("even-stride down-samples above the cap but keeps total exact and pins the max", () => {
+    const db = getDb();
+    seedTimes(db, [
+      "2023-01-01T00:00:00.000Z",
+      "2023-01-02T00:00:00.000Z",
+      "2023-01-03T00:00:00.000Z",
+      "2023-01-04T00:00:00.000Z",
+      "2023-01-05T00:00:00.000Z",
+    ]);
+    const r = workingSetTimes(db, {}, 2);
+    expect(r.total).toBe(5); // exact, not the sample size
+    expect(r.sampled).toBe(true);
+    expect(r.times.length).toBeLessThanOrEqual(3); // 2 strided + pinned max
+    expect(r.times[r.times.length - 1]).toBe(r.max);
+    expect(r.times[0]).toBe(r.min);
+  });
+
+  it("empty working set → nulls", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    expect(workingSetTimes(db, {})).toEqual({
+      times: [],
+      total: 0,
+      min: null,
+      max: null,
+      sampled: false,
+    });
   });
 });
