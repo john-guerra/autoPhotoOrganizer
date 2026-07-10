@@ -50,7 +50,9 @@
   const DEFAULT_KDE = {
     type: "area", // area | violin | histogram
     curve: "basis",
-    bandwidthDays: 0, // 0 → auto
+    bandwidthDays: 0, // 0 → auto (Scott's rule)
+    adjust: 1, // multiplier on the (auto/absolute) bandwidth
+    pad: 0, // fast-kde domain padding (fraction)
     bins: 30,
     size: 30,
   };
@@ -143,10 +145,13 @@
           values: np.times || [],
           type: k.type, // area (sparkline) | violin | histogram — user-tunable
           style: k.type === "histogram" ? "bars" : "kde",
+          side: "in", // rise toward the plot (up), matching the area sparkline
           size: k.size,
           bins: k.bins,
           // bandwidthDays 0 → omit so fast-kde uses its automatic (Scott) rule.
           ...(k.bandwidthDays > 0 ? { bandwidth: k.bandwidthDays * DAY_MS } : {}),
+          adjust: k.adjust,
+          ...(k.pad > 0 ? { pad: k.pad } : {}),
           curve: CURVES[k.curve] || curveBasis,
           color: "#3a3a3a",
           colorSelected: "#4c9aff",
@@ -253,6 +258,34 @@
           on:input={(e) => setKde({ bandwidthDays: +e.target.value })}
         />
         <span class="kde-val">{kde.bandwidthDays === 0 ? "auto" : kde.bandwidthDays + "d"}</span>
+      </div>
+      <div class="kde-row" class:disabled={kde.type === "histogram"}>
+        <label for="kde-adjust">Adjust</label>
+        <input
+          id="kde-adjust"
+          type="range"
+          min="0.2"
+          max="3"
+          step="0.1"
+          value={kde.adjust}
+          disabled={kde.type === "histogram"}
+          on:input={(e) => setKde({ adjust: +e.target.value })}
+        />
+        <span class="kde-val">×{kde.adjust.toFixed(1)}</span>
+      </div>
+      <div class="kde-row" class:disabled={kde.type === "histogram"}>
+        <label for="kde-pad">Pad</label>
+        <input
+          id="kde-pad"
+          type="range"
+          min="0"
+          max="0.5"
+          step="0.02"
+          value={kde.pad}
+          disabled={kde.type === "histogram"}
+          on:input={(e) => setKde({ pad: +e.target.value })}
+        />
+        <span class="kde-val">{kde.pad.toFixed(2)}</span>
       </div>
       <div class="kde-row">
         <label for="kde-bins">Bins</label>
