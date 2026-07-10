@@ -428,10 +428,12 @@
     position: relative;
     min-height: 60px;
   }
-  /* The widget draws its own SVG axis + handles; give its accent a home so the
-     selected KDE band matches the app's blue. */
+  /* The widget draws its own SVG axis + handles; give its accent a home. A muted
+     slate-blue (same ~213° hue as the app's #4c9aff action-azure, but low chroma)
+     keeps the whole range widget — pill, band, handles — calm and recessive
+     rather than a focal point. */
   .timeline-axis :global(.zoomable-axis-input) {
-    --za-accent: #4c9aff;
+    --za-accent: #5f83ad;
     color: #9a9a9a;
   }
   /* Compact the date pills so a narrow selection (both handles clustered) crowds
