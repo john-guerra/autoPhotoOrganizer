@@ -1,9 +1,23 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // Config lives in ui/ and is used via `vite ui` (root = ui).
+const pkg = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL("../package.json", import.meta.url)),
+    "utf8"
+  )
+);
+
 export default defineConfig({
   plugins: [svelte()],
+  // Compile-time constant so the UI can show its version without importing the
+  // whole package.json into the bundle.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   server: {
     port: 5173,
     proxy: {

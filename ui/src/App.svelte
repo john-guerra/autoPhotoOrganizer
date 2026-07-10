@@ -47,6 +47,7 @@
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
   import ContextMenu from "./lib/ContextMenu.svelte";
+  import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import JobsPanel from "./lib/JobsPanel.svelte";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
@@ -63,6 +64,9 @@
     isActive as filterIsActive,
   } from "./lib/filterSpec.js";
   import { ALL_DIMENSIONS, SORT_ATTRS, DATE_SORT_ATTRS } from "./lib/dimensions.js";
+
+  // Injected at build time by Vite (see ui/vite.config.js `define`).
+  const APP_VERSION = __APP_VERSION__;
 
   const LS_KEY = "autogallery.lastDir";
   const LS_ZOOM = "autogallery.zoom";
@@ -377,6 +381,7 @@
   let selected = 0; // index into displayEntries; must never land on a
   // {kind:'placeholder'} entry — see nextSelectable below.
   let loupeOpen = false;
+  let shortcutsHelpOpen = false; // '?' toggles the keyboard-shortcuts overlay
   let gridEl;
   let mainColumnEl;
   let gridWidth = 0;
@@ -423,6 +428,10 @@
         : "";
 
   onMount(() => {
+    // Show the version in the browser tab / Electron window title. Electron's
+    // BrowserWindow title follows document.title by default, so this covers
+    // both surfaces.
+    document.title = `AutoGallery v${APP_VERSION}`;
     refreshLibrary();
     loadInitialFeed();
     refreshCounts();
@@ -1947,6 +1956,17 @@
 
   async function onKeydown(e) {
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
+
+    // The shortcuts-help overlay owns the keyboard while open: Esc or '?'
+    // closes it, everything else is swallowed so keys don't act on the grid
+    // behind it.
+    if (shortcutsHelpOpen) {
+      if (e.key === "Escape" || e.key === "?") {
+        e.preventDefault();
+        shortcutsHelpOpen = false;
+      }
+      return;
+    }
     // The user is driving now — cancel any pending post-jump pin (a jump
     // re-arms it at the end of jumpGroupBoundary, after this returns).
     jumpRevealPending = false;
@@ -1972,6 +1992,14 @@
     const tag = e.target?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)
       return;
+
+    // '?' opens the keyboard-shortcuts overlay (before the empty-library
+    // guard, so it works even with nothing scanned yet).
+    if (e.key === "?") {
+      e.preventDefault();
+      shortcutsHelpOpen = true;
+      return;
+    }
 
     if (!displayEntries.length) return;
     const key = e.key;
@@ -2243,7 +2271,10 @@
 
 <div class="app">
   <header class="topbar">
-    <h1>AutoGallery</h1>
+    <h1>
+      AutoGallery
+      <span class="app-version" title="App version">v{APP_VERSION}</span>
+    </h1>
 
     <!-- ① SOURCE -->
     <SourceControls
@@ -2339,6 +2370,15 @@
         {thumbProgress}
       </span>
     {/if}
+
+    <button
+      class="help-btn"
+      title="Keyboard shortcuts (?)"
+      aria-label="Keyboard shortcuts"
+      on:click={() => (shortcutsHelpOpen = true)}
+    >
+      ?
+    </button>
     {#if manageLibraryOpen}
       <ManageLibrary
         {library}
@@ -2651,6 +2691,10 @@
   />
 {/if}
 
+{#if shortcutsHelpOpen}
+  <ShortcutsOverlay on:close={() => (shortcutsHelpOpen = false)} />
+{/if}
+
 <style>
   :global(body) {
     margin: 0;
@@ -2758,6 +2802,34 @@
     margin: 0;
     color: #fff;
     white-space: nowrap;
+  }
+  .app-version {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: #7a7a7a;
+    margin-left: 2px;
+    vertical-align: 0.15em;
+  }
+  .help-btn {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid #3a3a3a;
+    background: #262626;
+    color: #cfcfcf;
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 0.25rem;
+  }
+  .help-btn:hover {
+    background: #333;
+    color: #fff;
+    border-color: #555;
   }
   .status {
     color: #9a9a9a;

@@ -76,6 +76,21 @@ verification), and decisions already made.
   Prefer many small checkpoint commits over one large one. (Branch/merge flow:
   see `docs/ROADMAP.md`.)
 
+## Versioning
+
+- **Every fixed issue bumps the app version in `package.json`**, sized to the
+  change's gravity (semver). The version shows in the title bar (`App.svelte`
+  reads it via Vite's `__APP_VERSION__` define) and drives electron-updater
+  releases, so it doubles as the human-visible changelog anchor.
+  - **Patch** (`x.y.Z+1`) — bug fixes and small tweaks that don't add
+    user-facing capability (e.g. the dev-port fix, #65).
+  - **Minor** (`x.Y+1.0`) — new user-facing features or enhancements (e.g.
+    Reveal in Finder #18, the shortcuts overlay #26).
+  - **Major** (`X+1.0.0`) — breaking changes or removed capabilities.
+- Keep the current pre-release suffix (`-alpha`) until a stable release is cut,
+  so e.g. a feature at `2.0.0-alpha` bumps to `2.1.0-alpha`. Bump in the **same
+  commit/PR that closes the issue**, not as a separate housekeeping commit.
+
 ## Agent tool usage
 
 - When driving the app with claude-in-chrome for verification, prefer
