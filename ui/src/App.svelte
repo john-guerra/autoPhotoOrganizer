@@ -865,6 +865,21 @@
   }
   $: currentPath = deriveCurrentPath(renderStart, displayEntries, groupBy);
 
+  /** Epoch-ms of the first photo currently in view, for the timeline's "you are
+   * here" marker. Walks from renderStart to the first real (non-placeholder)
+   * entry whose metadata has arrived (takenAt is filled by enrichMeta), so the
+   * marker follows the feed as you scroll. null until a timestamp is known. */
+  function deriveCurrentTime(start, entries) {
+    for (let i = Math.max(0, start); i < entries.length; i++) {
+      const e = entries[i];
+      if (!e || e.kind === "placeholder") continue;
+      const t = resolvePhoto(e)?.takenAt;
+      if (t != null) return typeof t === "number" ? t : Date.parse(t);
+    }
+    return null;
+  }
+  $: currentTime = deriveCurrentTime(renderStart, displayEntries);
+
   /** Keeps the first occurrence of each id, dropping later repeats. Guards
    * against a real, observed case: fetching "before" and "after" a focusId
    * as two independent seeks (used when re-centering on a known photo —
@@ -2165,6 +2180,7 @@
         min={timeMin}
         max={timeMax}
         times={timeTimes}
+        {currentTime}
         value={[filter.dateFrom ?? null, filter.dateTo ?? null]}
         on:range={(e) =>
           onFilterChange({ ...filter, dateFrom: e.detail[0], dateTo: e.detail[1] })}

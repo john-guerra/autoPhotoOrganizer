@@ -20,12 +20,24 @@
   export let max = null; // epoch ms, domain end
   export let times = []; // sampled timestamps (ms) for the KDE
   export let value = null; // [fromMs|null, toMs|null] current brush, or null
+  export let currentTime = null; // epoch ms of the first photo in view ("you are here")
 
   const dispatch = createEventDispatcher();
   const AXIS_MARGIN = 22; // zoomableAxisInput's default side margin (px each side)
   const fmt = timeFormat("%b %e, %Y");
 
   let width = 0; // measured via bind:clientWidth (SnapshotStrip lesson)
+
+  // "You are here": pixel x of the current photo's time along the axis. Uses the
+  // same geometry the widget mounts with (AXIS_MARGIN + length), so the marker
+  // lines up with the axis by construction. The axis is always full-domain (the
+  // brush is an overlay band, not a re-zoom), so this mapping is stable.
+  $: markerPx =
+    currentTime == null || min == null || max == null || max <= min || !(width > 0)
+      ? null
+      : AXIS_MARGIN +
+        Math.max(0, Math.min(1, (currentTime - min) / (max - min))) *
+          Math.max(60, width - AXIS_MARGIN * 2);
 
   // Resolve the brush endpoints from `value`, filling open bounds with the
   // domain edges. A null/empty value means "no time filter" → full span.
@@ -111,7 +123,18 @@
 </script>
 
 <div class="timeline" bind:clientWidth={width}>
-  <div class="timeline-axis" use:timeline={{ min, max, times, value, width }}></div>
+  <div class="timeline-axis" use:timeline={{ min, max, times, value, width }}>
+    {#if markerPx != null}
+      <div
+        class="you-are-here"
+        style="left:{markerPx}px"
+        title="Current view"
+        aria-hidden="true"
+      >
+        <span class="yah-cap"></span>
+      </div>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -130,5 +153,28 @@
   .timeline-axis :global(.zoomable-axis-input) {
     --za-accent: #4c9aff;
     color: #9a9a9a;
+  }
+  /* "You are here": a thin amber marker at the current view's time — read-only,
+     distinct from the blue brush band. Sits above the axis; never intercepts
+     clicks so the handles/brush stay usable underneath it. */
+  .you-are-here {
+    position: absolute;
+    top: 0;
+    height: 52px;
+    width: 2px;
+    background: #ffd24c;
+    transform: translateX(-1px);
+    pointer-events: none;
+    z-index: 5;
+    transition: left 90ms linear;
+  }
+  .yah-cap {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #ffd24c;
   }
 </style>
