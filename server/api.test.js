@@ -1682,6 +1682,33 @@ describe("POST /api/albums/materialize", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("materializes IN PLACE: destParent may be a scanned source folder (move)", async () => {
+    // The in-place default (Slice A): materialize into a subfolder of the
+    // folder the photos already live in. /api/export still forbids this
+    // (guard relaxed for materialize only, via allowInsideSource).
+    const scanBody = await scan(srv.base, srcDir);
+    const ids = scanBody.items.map((i) => i.id);
+    const res = await fetch(`${srv.base}/api/albums/materialize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        destParent: srcDir, // same folder the photos already live in
+        albums: [{ name: "2026-01-01", photoIds: ids.slice(0, 2) }],
+        // move defaults to true
+      }),
+    });
+    expect(res.status).toBe(202);
+    const job = await waitJob((await res.json()).jobId);
+    expect(job.status).toBe("done");
+    expect(job.result.move).toBe(true);
+    // The two photos now live inside srcDir/2026-01-01 …
+    expect(await readdir(join(srcDir, "2026-01-01"))).toHaveLength(2);
+    // … and were moved out of the source root (only the third .jpg remains).
+    const rootNow = await readdir(srcDir);
+    expect(rootNow).toContain("2026-01-01");
+    expect(rootNow.filter((n) => n.endsWith(".jpg"))).toHaveLength(1);
+  });
 });
 
 describe("POST /api/albums/undo-move", () => {

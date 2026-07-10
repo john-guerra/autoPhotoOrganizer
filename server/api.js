@@ -83,10 +83,24 @@ function isPathContainedIn(root, target) {
 /**
  * Validate + resolve an export destination folder, shared by /api/export and
  * /api/albums/materialize. Guards traversal (safeResolve) and refuses to write
- * inside the app cache or any scanned source folder (the read-only invariant).
+ * inside the app cache. It also refuses to write inside any scanned source
+ * folder (the read-only invariant) UNLESS `allowInsideSource` is set — which
+ * materialize passes so it can organize a folder *in place* (move rated photos
+ * into dated subfolders of the folder they already live in). Copies into a new
+ * subfolder never modify existing source files, and the user explicitly asked
+ * for it; the cache and traversal guards always apply.
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} destParent
+ * @param {string} folderName
+ * @param {{allowInsideSource?: boolean}} [opts]
  * @returns {{target:string}|{error:string}}
  */
-function resolveExportTarget(db, destParent, folderName) {
+function resolveExportTarget(
+  db,
+  destParent,
+  folderName,
+  { allowInsideSource = false } = {}
+) {
   let destSt;
   try {
     destSt = statSync(destParent);
@@ -105,11 +119,13 @@ function resolveExportTarget(db, destParent, folderName) {
       error: "export destination cannot be inside the AutoGallery cache",
     };
   }
-  const sourceFolders = db.prepare(`SELECT abs_path FROM folders`).all();
-  if (sourceFolders.some((f) => isPathContainedIn(f.abs_path, target))) {
-    return {
-      error: "export destination cannot be inside a scanned source folder",
-    };
+  if (!allowInsideSource) {
+    const sourceFolders = db.prepare(`SELECT abs_path FROM folders`).all();
+    if (sourceFolders.some((f) => isPathContainedIn(f.abs_path, target))) {
+      return {
+        error: "export destination cannot be inside a scanned source folder",
+      };
+    }
   }
   return { target };
 }
@@ -1129,7 +1145,11 @@ export function registerApi(app) {
     // name mid-job, which would just surface as an async job failure.
     const resolvedAlbums = [];
     for (const album of albums) {
-      const resolved = resolveExportTarget(db, destParent, album.name);
+      // Materialize allows an in-place destination (a subfolder of the source
+      // folder) — that's the default "organize this folder in place" flow.
+      const resolved = resolveExportTarget(db, destParent, album.name, {
+        allowInsideSource: true,
+      });
       if (resolved.error)
         return res.status(400).json({ error: resolved.error });
       resolvedAlbums.push({ album, target: resolved.target });
