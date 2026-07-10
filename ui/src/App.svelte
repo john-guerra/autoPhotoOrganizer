@@ -50,13 +50,15 @@
   import ManageLibrary from "./lib/ManageLibrary.svelte";
   import AlbumsView from "./lib/AlbumsView.svelte";
   import SnapshotStrip from "./lib/SnapshotStrip.svelte";
-  import RatingFilter from "./lib/RatingFilter.svelte";
-  import OrientationFilter from "./lib/OrientationFilter.svelte";
+  import SourceControls from "./lib/SourceControls.svelte";
+  import OrganizeControls from "./lib/OrganizeControls.svelte";
+  import ViewControls from "./lib/ViewControls.svelte";
+  import SelectionBar from "./lib/SelectionBar.svelte";
   import {
     DEFAULT_FILTER,
     isActive as filterIsActive,
   } from "./lib/filterSpec.js";
-  import MultiAutoSelect from "multi-auto-select";
+  import { ALL_DIMENSIONS, SORT_ATTRS } from "./lib/dimensions.js";
 
   const LS_KEY = "autogallery.lastDir";
   const LS_ZOOM = "autogallery.zoom";
@@ -100,24 +102,6 @@
       (b) => b >= Math.ceil(rowHeight * (window.devicePixelRatio || 1))
     ) ?? 1024;
 
-  /** Svelte action: mounts the real MultiAutoSelect DOM widget into the
-   * node, keeps it in sync with `groupBy` via the `value` param, and
-   * calls `onGroupByChange` when the user reorders/adds/removes a pill. */
-  function groupBySelector(node, initialValue) {
-    const widget = MultiAutoSelect(ALL_DIMENSIONS, {
-      value: initialValue,
-      placeholder: "Add a grouping level…",
-      sortable: true,
-    });
-    widget.addEventListener("input", () => onGroupByChange(widget.value));
-    node.appendChild(widget);
-    return {
-      destroy() {
-        widget.remove();
-      },
-    };
-  }
-
   let dir = localStorage.getItem(LS_KEY) || "";
   // Recursive "soup folder" scan: pull in every subfolder. Default on — the
   // common case is pointing at a parent of dated album folders.
@@ -125,7 +109,6 @@
   let recursiveScan = localStorage.getItem(LS_RECURSIVE) !== "false";
   $: localStorage.setItem(LS_RECURSIVE, String(recursiveScan));
   const LS_GROUP_BY = "autogallery.groupBy";
-  const ALL_DIMENSIONS = ["folder", "year", "month", "day", "camera", "kind"];
   let groupBy = (() => {
     try {
       const stored = JSON.parse(localStorage.getItem(LS_GROUP_BY) ?? "null");
@@ -143,22 +126,6 @@
   // boundary call; date sorts re-derive the year/month/day grouping (server-side
   // applySortToDims), so grouping and sorting agree on one date notion.
   const LS_SORT = "autogallery.sort";
-  const SORT_ATTRS = [
-    "date_taken",
-    "date_created",
-    "date_modified",
-    "rating",
-    "size",
-    "name",
-  ];
-  const SORT_LABELS = {
-    date_taken: "Taken",
-    date_created: "Created",
-    date_modified: "Modified",
-    rating: "Rating",
-    size: "Size",
-    name: "Name",
-  };
   let sort = (() => {
     try {
       const s = JSON.parse(localStorage.getItem(LS_SORT) ?? "null");
@@ -2052,239 +2019,51 @@
     <h1>AutoGallery</h1>
 
     <!-- ① SOURCE -->
-    <div class="cluster source">
-      <div class="library">
-        <button
-          class="library-toggle"
-          on:click={() => (libraryOpen = !libraryOpen)}
-          title="Recently scanned folders"
-        >
-          Library ▾
-        </button>
-        {#if libraryOpen}
-          <ul class="library-panel">
-            <li>
-              <button
-                class="library-entry"
-                on:click={() => {
-                  libraryOpen = false;
-                  manageLibraryOpen = true;
-                }}
-              >
-                Manage library…
-              </button>
-            </li>
-            <li class="library-sep" role="separator"></li>
-            {#if library.length === 0}
-              <li class="library-empty">No folders scanned yet.</li>
-            {/if}
-            {#each library as entry (entry.path)}
-              <li>
-                <button
-                  class="library-entry"
-                  class:offline={!entry.mounted}
-                  on:click={() => selectFromLibrary(entry)}
-                  title={entry.path}
-                >
-                  {entry.name}
-                  {#if !entry.mounted}<span class="offline-badge">offline</span>{/if}
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </div>
-      <div class="add-folder">
-        <button
-          class="add-toggle"
-          on:click={() => (addFolderOpen = !addFolderOpen)}
-          title="Add / scan a folder"
-          aria-label="Add folder"
-        >
-          ＋
-        </button>
-        {#if addFolderOpen}
-          <div class="add-panel">
-            <input
-              class="dir"
-              type="text"
-              placeholder="/path/to/photos"
-              bind:value={dir}
-              on:keydown={(e) => e.key === "Enter" && doScan()}
-              spellcheck="false"
-            />
-            <label class="recursive-opt" title="Scan this folder and all folders inside it">
-              <input type="checkbox" bind:checked={recursiveScan} />
-              <span>Include subfolders</span>
-            </label>
-            <div class="add-actions">
-              <button class="scan" on:click={doScan} disabled={scanning}>
-                {scanning ? "Scanning…" : "Scan"}
-              </button>
-              {#if hasNativePicker}
-                <button
-                  class="choose-folder"
-                  on:click={chooseFolder}
-                  disabled={scanning}
-                >
-                  Choose Folder…
-                </button>
-              {/if}
-            </div>
-          </div>
-        {/if}
-      </div>
-    </div>
+    <SourceControls
+      {library}
+      {scanning}
+      {hasNativePicker}
+      bind:libraryOpen
+      bind:manageLibraryOpen
+      bind:addFolderOpen
+      bind:dir
+      bind:recursiveScan
+      on:selectlibrary={(e) => selectFromLibrary(e.detail)}
+      on:scan={doScan}
+      on:choosefolder={chooseFolder}
+    />
 
     <div class="divider"></div>
 
     <!-- ② ORGANIZE & FILTER -->
-    <div class="cluster organize">
-      <div class="group-by" use:groupBySelector={groupBy}></div>
-      <div class="sort-control" title="Sort photos">
-        <select
-          class="sort-by"
-          value={sort.by}
-          on:change={(e) => onSortChange({ ...sort, by: e.target.value })}
-        >
-          {#each SORT_ATTRS as key}
-            <option value={key}>{SORT_LABELS[key]}</option>
-          {/each}
-        </select>
-        <button
-          class="sort-dir"
-          title="Toggle ascending / descending"
-          aria-label="Toggle sort direction"
-          on:click={() =>
-            onSortChange({ ...sort, dir: sort.dir === "asc" ? "desc" : "asc" })}
-        >
-          {sort.dir === "asc" ? "↑" : "↓"}
-        </button>
-      </div>
-      <div
-        class="seg-toggle"
-        role="group"
-        aria-label="Filter mode"
-        title="Does the filter narrow the view (Display), or add matches to the selection (Select)?"
-      >
-        <button
-          type="button"
-          class:active={filterMode === "display"}
-          on:click={() => onFilterModeChange("display")}>Display</button
-        >
-        <button
-          type="button"
-          class:active={filterMode === "select"}
-          on:click={() => onFilterModeChange("select")}>Select</button
-        >
-      </div>
-      <RatingFilter {filter} on:change={(e) => onFilterChange(e.detail)} />
-      <OrientationFilter {filter} on:change={(e) => onFilterChange(e.detail)} />
-      {#if filterIsActive(filter)}
-        <button
-          class="clear-filter"
-          title="Clear filters"
-          aria-label="Clear filters"
-          on:click={() => onFilterChange({ ...DEFAULT_FILTER })}
-        >
-          ✕
-        </button>
-      {/if}
-    </div>
+    <OrganizeControls
+      {groupBy}
+      {sort}
+      {filter}
+      {filterMode}
+      on:groupbychange={(e) => onGroupByChange(e.detail)}
+      on:sortchange={(e) => onSortChange(e.detail)}
+      on:filtermodechange={(e) => onFilterModeChange(e.detail)}
+      on:filterchange={(e) => onFilterChange(e.detail)}
+    />
 
     <div class="divider push"></div>
 
     <!-- ③ VIEW -->
-    <div class="cluster view">
-      <div
-        class="sidebar-toggle"
-        role="group"
-        aria-label="Sidebar view"
-        style="display:flex;gap:2px;background:#101010;border:1px solid #333;border-radius:6px;padding:2px;"
-      >
-        <button
-          type="button"
-          on:click={() => (sidebarMode = "tree")}
-          style="border:none;border-radius:4px;padding:3px 9px;font-size:0.8rem;cursor:pointer;{sidebarMode ===
-          'tree'
-            ? 'background:#4c9aff;color:#06121f;font-weight:600;'
-            : 'background:transparent;color:#9a9a9a;'}"
-        >
-          Tree
-        </button>
-        <button
-          type="button"
-          on:click={() => (sidebarMode = "fisheye")}
-          style="border:none;border-radius:4px;padding:3px 9px;font-size:0.8rem;cursor:pointer;{sidebarMode ===
-          'fisheye'
-            ? 'background:#4c9aff;color:#06121f;font-weight:600;'
-            : 'background:transparent;color:#9a9a9a;'}"
-        >
-          Fisheye
-        </button>
-      </div>
-      <button
-        class="reveal-btn"
-        on:click={revealCurrentLocation}
-        title="Reveal the current photo's location in the tree"
-      >
-        ⌖ Locate
-      </button>
-      <button
-        class="reveal-btn"
-        on:click={cycleAllGroups}
-        disabled={cyclingAll}
-        title="Cycle every group: full view → snapshot all → collapse all"
-      >
-        {cyclingAll
-          ? "…"
-          : globalViewMode === "snapshot"
-            ? "◐ Snapshot all"
-            : globalViewMode === "collapsed"
-              ? "▸ Collapsed all"
-              : "▦ Full view"}
-      </button>
-      <button
-        class="reveal-btn"
-        class:active={albumMode}
-        on:click={() => (albumMode ? (albumMode = false) : detectAlbums())}
-        disabled={detectingAlbums}
-        title="Split the current working set into albums by time gaps"
-      >
-        {detectingAlbums ? "Detecting…" : albumMode ? "✕ Albums" : "▤ Albums"}
-      </button>
-      <div class="view-cell">
-        <label class="zoom" title="Grid zoom (also + / - keys)">
-          <span class="zoom-icon small">▦</span>
-          <input
-            type="range"
-            min="0"
-            max={ZOOM_LEVELS.length - 1}
-            step="1"
-            bind:value={zoom}
-          />
-          <span class="zoom-icon">▦</span>
-        </label>
-        <label
-          class="burst"
-          title="Group photos taken close in time as a burst"
-        >
-          <input type="checkbox" bind:checked={burstEnabled} />
-          <span class="burst-label">Burst</span>
-          <input
-            type="range"
-            min="0"
-            max="10000"
-            step="500"
-            bind:value={burstGapMs}
-            disabled={!burstEnabled}
-          />
-          <span class="burst-value" class:off={!burstEnabled}
-            >{(burstGapMs / 1000).toFixed(1)}s</span
-          >
-        </label>
-      </div>
-    </div>
+    <ViewControls
+      bind:sidebarMode
+      {cyclingAll}
+      {globalViewMode}
+      bind:albumMode
+      {detectingAlbums}
+      bind:zoom
+      zoomMax={ZOOM_LEVELS.length - 1}
+      bind:burstEnabled
+      bind:burstGapMs
+      on:revealcurrent={revealCurrentLocation}
+      on:cycleall={cycleAllGroups}
+      on:detectalbums={detectAlbums}
+    />
 
     <div
       class="counts"
@@ -2307,84 +2086,21 @@
       </button>
     {/if}
 
-    {#if selectedCount > 0}
-      <div class="cluster selection">
-        <button class="sel-btn" on:click={clearSelection} title="Clear selection"
-          >Clear</button
-        >
-        <button
-          class="sel-btn"
-          on:click={keepOnlySelection}
-          title="Focus the whole app on just these photos (keep only)"
-          >Keep only</button
-        >
-        {#if lastClearedSelection}
-          <button
-            class="sel-btn undo"
-            on:click={undoClearSelection}
-            title="Restore the selection you just cleared">Undo</button
-          >
-        {/if}
-        <div class="export-wrap">
-          <button
-            class="sel-btn export"
-            on:click={() => (exportOpen = !exportOpen)}
-            title="Copy the selected photos into a new folder">Export…</button
-          >
-          {#if exportOpen}
-            <div class="export-panel">
-              <label class="export-field">
-                <span>Destination folder</span>
-                <div class="export-row">
-                  <input
-                    class="dir"
-                    type="text"
-                    placeholder="/path/to/destination"
-                    bind:value={exportDest}
-                    spellcheck="false"
-                  />
-                  {#if hasNativePicker}
-                    <button class="choose-folder" on:click={chooseExportDest}>
-                      Choose…
-                    </button>
-                  {/if}
-                </div>
-              </label>
-              <label class="export-field">
-                <span>New folder name</span>
-                <input
-                  class="dir"
-                  type="text"
-                  placeholder="album-name"
-                  bind:value={exportName}
-                  spellcheck="false"
-                />
-              </label>
-              <div class="export-actions">
-                <button
-                  class="scan"
-                  on:click={doExport}
-                  disabled={exporting ||
-                    !exportDest.trim() ||
-                    !exportName.trim()}
-                >
-                  {exporting
-                    ? "Copying…"
-                    : `Copy ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
-                </button>
-              </div>
-              {#if exportResult}
-                <p class="export-result">
-                  Copied {exportResult.copied}{exportResult.skipped
-                    ? `, skipped ${exportResult.skipped}`
-                    : ""} → {exportResult.target}
-                </p>
-              {/if}
-            </div>
-          {/if}
-        </div>
-      </div>
-    {/if}
+    <SelectionBar
+      {selectedCount}
+      {lastClearedSelection}
+      {hasNativePicker}
+      {exporting}
+      {exportResult}
+      bind:exportOpen
+      bind:exportDest
+      bind:exportName
+      on:clear={clearSelection}
+      on:keeponly={keepOnlySelection}
+      on:undoclear={undoClearSelection}
+      on:choosedest={chooseExportDest}
+      on:export={doExport}
+    />
 
     <span class="status" class:err={!!error}>{error || status}</span>
     {#if thumbProgress}
@@ -2700,28 +2416,6 @@
     min-width: 0;
     overflow-y: auto;
   }
-  .reveal-btn {
-    background: #1a1a1a;
-    border: 1px solid #2a2a2a;
-    color: inherit;
-    font: inherit;
-    padding: 4px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .reveal-btn:hover {
-    background: #2a2a2a;
-  }
-  .reveal-btn.active {
-    background: #2e8b57;
-    border-color: #2e8b57;
-    color: #06121f;
-    font-weight: 600;
-  }
-  .reveal-btn:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
   .topbar {
     position: sticky;
     top: 0;
@@ -2743,20 +2437,6 @@
     padding: 0.6rem 1rem;
     background: #1c1c1c;
     border-bottom: 1px solid #2a2a2a;
-  }
-  /* Clusters keep their natural width and wrap as whole units, rather than
-     shrinking (which squeezed the group-by widget and made it overflow). */
-  .cluster {
-    flex-shrink: 0;
-  }
-  .cluster {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    min-width: 0;
-  }
-  .cluster.organize {
-    flex-wrap: wrap;
   } /* pills wrap WITHIN the cluster, not pushing siblings */
   .divider {
     width: 1px;
@@ -2769,142 +2449,6 @@
      normal unit (no odd right-shove on its own row). */
   .divider.push {
     margin-left: auto;
-  }
-
-  .add-folder {
-    position: relative;
-  }
-  .add-toggle {
-    background: #101010;
-    border: 1px solid #333;
-    color: #cfcfcf;
-    border-radius: 6px;
-    padding: 3px 9px;
-    font-size: 0.95rem;
-    line-height: 1;
-    cursor: pointer;
-  }
-  .add-panel {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    z-index: 50;
-    background: #0d0d0d;
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 260px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  }
-  .add-actions {
-    display: flex;
-    gap: 8px;
-  }
-  .recursive-opt {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.8rem;
-    color: #b8b8b8;
-    cursor: pointer;
-  }
-
-  .view-cell {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #141414;
-    border: 1px solid #2f2f2f;
-    border-radius: 6px;
-    padding: 3px 8px;
-  }
-  .burst {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.78rem;
-    color: #9a9a9a;
-  }
-  .burst input[type="range"] {
-    width: 90px;
-    accent-color: #4c9aff;
-  }
-  .burst input[type="range"]:disabled {
-    opacity: 0.4;
-  }
-  .burst-value.off {
-    opacity: 0.4;
-  }
-  .clear-filter {
-    background: transparent;
-    border: 1px solid #444;
-    color: #cfcfcf;
-    border-radius: 50%;
-    width: 20px;
-    height: 20px;
-    line-height: 1;
-    font-size: 0.7rem;
-    cursor: pointer;
-  }
-
-  /* Feed sort control: attribute dropdown + direction toggle. */
-  .sort-control {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    background: #101010;
-    border: 1px solid #333;
-    border-radius: 6px;
-    padding: 2px;
-  }
-  .sort-by {
-    background: transparent;
-    border: none;
-    color: #cfcfcf;
-    font-size: 0.8rem;
-    padding: 3px 4px;
-    cursor: pointer;
-  }
-  .sort-dir {
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: #9a9a9a;
-    font-size: 0.9rem;
-    line-height: 1;
-    padding: 3px 7px;
-    cursor: pointer;
-  }
-  .sort-dir:hover {
-    background: #222;
-    color: #e8e8e8;
-  }
-
-  /* Display/Select segmented toggle (matches the sidebar-view toggle). */
-  .seg-toggle {
-    display: flex;
-    gap: 2px;
-    background: #101010;
-    border: 1px solid #333;
-    border-radius: 6px;
-    padding: 2px;
-  }
-  .seg-toggle button {
-    border: none;
-    border-radius: 4px;
-    padding: 3px 9px;
-    font-size: 0.8rem;
-    cursor: pointer;
-    background: transparent;
-    color: #9a9a9a;
-  }
-  .seg-toggle button.active {
-    background: #4c9aff;
-    color: #06121f;
-    font-weight: 600;
   }
 
   /* Three-level counts: library / showing / selected. */
@@ -2943,194 +2487,12 @@
   .keep-chip:hover {
     background: #1a4d38;
   }
-
-  .cluster.selection {
-    gap: 6px;
-  }
-  .sel-btn {
-    background: #222;
-    border: 1px solid #3a3a3a;
-    color: #e8e8e8;
-    border-radius: 6px;
-    padding: 4px 10px;
-    font-size: 0.8rem;
-    cursor: pointer;
-  }
-  .sel-btn:hover {
-    background: #2c2c2c;
-  }
-  .sel-btn.export {
-    background: #4c9aff;
-    border-color: #4c9aff;
-    color: #06121f;
-    font-weight: 600;
-  }
-  .sel-btn.undo {
-    color: #ffd24c;
-  }
-  .export-wrap {
-    position: relative;
-  }
-  .export-panel {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 50;
-    background: #0d0d0d;
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    min-width: 300px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  }
-  .export-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 0.75rem;
-    color: #9a9a9a;
-  }
-  .export-row {
-    display: flex;
-    gap: 8px;
-  }
-  .export-actions {
-    display: flex;
-  }
-  .export-result {
-    margin: 0;
-    font-size: 0.75rem;
-    color: #8fd18f;
-    word-break: break-all;
-  }
   h1 {
     font-size: 1rem;
     font-weight: 600;
     margin: 0;
     color: #fff;
     white-space: nowrap;
-  }
-  .dir {
-    flex: 1;
-    max-width: 40rem;
-    padding: 0.45rem 0.6rem;
-    background: #101010;
-    border: 1px solid #333;
-    border-radius: 6px;
-    color: #eee;
-    font-size: 0.9rem;
-    font-family: ui-monospace, monospace;
-  }
-  .dir:focus {
-    outline: none;
-    border-color: #4c9aff;
-  }
-  .scan {
-    padding: 0.45rem 1rem;
-    background: #4c9aff;
-    color: #06121f;
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .scan:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-  .choose-folder {
-    padding: 0.45rem 1rem;
-    background: #4c9aff;
-    color: #06121f;
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .choose-folder:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-  .library {
-    position: relative;
-  }
-  .library-toggle {
-    padding: 0.45rem 1rem;
-    background: #4c9aff;
-    color: #06121f;
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .library-toggle:hover {
-    background: #5ba8ff;
-  }
-  .library-panel {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    z-index: 200;
-    margin: 4px 0 0;
-    padding: 4px 0;
-    min-width: 220px;
-    max-height: 300px;
-    overflow-y: auto;
-    list-style: none;
-    background: #1e1e1e;
-    border: 1px solid #333;
-    border-radius: 4px;
-  }
-  .library-entry {
-    display: block;
-    width: 100%;
-    padding: 6px 10px;
-    text-align: left;
-    background: none;
-    border: none;
-    color: inherit;
-    cursor: pointer;
-  }
-  .library-entry:hover:not(:disabled) {
-    background: #2a2a2a;
-  }
-  .library-entry.offline {
-    color: #888;
-    cursor: default;
-  }
-  .offline-badge {
-    margin-left: 6px;
-    font-size: 0.7rem;
-    color: #888;
-  }
-  .library-empty {
-    padding: 6px 10px;
-    color: #888;
-  }
-  .library-sep {
-    height: 1px;
-    margin: 4px 0;
-    background: #333;
-  }
-  .zoom {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: #777;
-  }
-  .zoom input[type="range"] {
-    width: 90px;
-    accent-color: #4c9aff;
-  }
-  .zoom-icon {
-    font-size: 1rem;
-    line-height: 1;
-  }
-  .zoom-icon.small {
-    font-size: 0.7rem;
   }
   .status {
     color: #9a9a9a;
@@ -3311,13 +2673,5 @@
     padding: 4rem 1rem;
     text-align: center;
     color: #777;
-  }
-  .group-by :global(.multi-auto-select) {
-    color: inherit;
-  }
-  .group-by :global(.pill) {
-    background: #2a2a2a !important;
-    color: #eee !important;
-    border-color: #444 !important;
   }
 </style>
