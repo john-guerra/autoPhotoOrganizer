@@ -165,6 +165,8 @@ function rowToItem(r, dims) {
     // when sorting by date_created; kept numeric (the marker reads it directly).
     createdAt: r.btime ?? null,
     kind: r.kind,
+    // Video length in seconds; null for images and not-yet-probed videos.
+    duration: r.duration ?? null,
     groupValues,
   };
 }
@@ -361,7 +363,7 @@ export function getFeedPage(
         `SELECT photos.id, photos.filename AS name, photos.size,
                 photos.mtime AS mtimeMs, photos.rating,
                 photos.preferred_cover AS preferredCover,
-                photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
+                photos.width, photos.height, photos.taken_at, photos.btime, photos.kind, photos.duration,
                 ${selectDimAndSortCols}
          FROM photos JOIN folders ON folders.id = photos.folder_id
          WHERE photos.id = ?`
@@ -423,7 +425,7 @@ export function getFeedPage(
         `SELECT photos.id, photos.filename AS name, photos.size,
                 photos.mtime AS mtimeMs, photos.rating,
                 photos.preferred_cover AS preferredCover,
-                photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
+                photos.width, photos.height, photos.taken_at, photos.btime, photos.kind, photos.duration,
                 ${selectDimAndSortCols}
          FROM photos
          JOIN folders ON folders.id = photos.folder_id

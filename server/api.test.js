@@ -10,7 +10,7 @@ import {
 } from "vitest";
 import { mkdtemp, rm, mkdir, readdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, basename, dirname } from "node:path";
 
@@ -2060,5 +2060,77 @@ describe("jobs endpoints", () => {
       method: "POST",
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("video support (ffmpeg) — scan, thumb, meta, Range", () => {
+  let videoDir;
+  let hasFfmpeg;
+
+  beforeAll(async () => {
+    const { default: ffmpegPath } = await import("ffmpeg-static");
+    hasFfmpeg = await new Promise((resolve) => {
+      if (!ffmpegPath) return resolve(false);
+      const c = spawn(ffmpegPath, ["-version"], { stdio: "ignore" });
+      c.on("error", () => resolve(false));
+      c.on("close", (code) => resolve(code === 0));
+    });
+    if (!hasFfmpeg) return;
+    videoDir = await mkdtemp(join(tmpdir(), "ag-video-"));
+    await new Promise((resolve, reject) => {
+      const c = spawn(
+        ffmpegPath,
+        ["-y", "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=10", join(videoDir, "clip.mp4")],
+        { stdio: "ignore" }
+      );
+      c.on("error", reject);
+      c.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`gen ${code}`))));
+    });
+  });
+
+  afterAll(async () => {
+    if (videoDir) await rm(videoDir, { recursive: true, force: true });
+  });
+
+  it("scans an mp4 as kind:'video', posters it, probes duration, and streams Range", async () => {
+    if (!hasFfmpeg) return; // ffmpeg-static binary unavailable → skip
+    const body = await scan(srv.base, videoDir);
+    const id = body.items[0].id;
+    expect(body.items[0].kind).toBe("video");
+
+    // Poster-frame thumbnail is a real JPEG.
+    const thumb = await fetch(`${srv.base}/api/thumb/${id}?size=120`);
+    expect(thumb.status).toBe(200);
+    expect(thumb.headers.get("content-type")).toContain("image/jpeg");
+    const bytes = new Uint8Array(await thumb.arrayBuffer());
+    expect(bytes[0]).toBe(0xff);
+    expect(bytes[1]).toBe(0xd8);
+
+    // ffprobe metadata: duration + dimensions populated.
+    const meta = await (await fetch(`${srv.base}/api/meta?ids=${id}`)).json();
+    expect(meta[0].duration).toBeGreaterThan(1.5);
+    expect(meta[0].width).toBe(320);
+    expect(meta[0].height).toBe(240);
+
+    // Full-file request advertises Range support.
+    const full = await fetch(`${srv.base}/api/image/${id}`);
+    expect(full.status).toBe(200);
+    expect(full.headers.get("accept-ranges")).toBe("bytes");
+    expect(full.headers.get("content-type")).toBe("video/mp4");
+    const totalSize = Number(full.headers.get("content-length"));
+
+    // A byte-range request gets 206 with the right slice headers.
+    const ranged = await fetch(`${srv.base}/api/image/${id}`, {
+      headers: { Range: "bytes=0-99" },
+    });
+    expect(ranged.status).toBe(206);
+    expect(ranged.headers.get("content-range")).toBe(`bytes 0-99/${totalSize}`);
+    expect(ranged.headers.get("content-length")).toBe("100");
+
+    // An unsatisfiable range → 416.
+    const bad = await fetch(`${srv.base}/api/image/${id}`, {
+      headers: { Range: `bytes=${totalSize + 10}-${totalSize + 20}` },
+    });
+    expect(bad.status).toBe(416);
   });
 });

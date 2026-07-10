@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS keep_scope (
 export function applySchema(db) {
   db.exec(SCHEMA_SQL);
   ensureColumn(db, "photos", "btime", "INTEGER");
+  // Video length in seconds (fractional; NULL for images and un-probed videos).
+  ensureColumn(db, "photos", "duration", "REAL");
 }
 
 /** Idempotent ADD COLUMN — the app ships no migration runner, and

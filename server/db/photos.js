@@ -59,7 +59,7 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
   return db
     .prepare(
       `SELECT id, filename AS name, size, mtime AS mtimeMs, rating,
-              preferred_cover AS preferredCover
+              preferred_cover AS preferredCover, kind, duration
        FROM photos WHERE folder_id = ? AND stale = 0 ORDER BY filename`
     )
     .all(folderId);
