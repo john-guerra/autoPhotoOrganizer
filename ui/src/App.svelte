@@ -41,6 +41,7 @@
     fetchTimes,
     setScope,
     removeFolderByPath,
+    renameFolder,
     revealInFinder,
   } from "./lib/api.js";
   import { waitForJob } from "./lib/jobs.js";
@@ -681,6 +682,44 @@
       snapshotGroupKeys.delete(key);
       snapshotGroupKeys = snapshotGroupKeys;
       await loadInitialFeed();
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  // --- Rename a folder group in place (issue #68 Slice B) ------------------
+  // Inline-edit the folder's section header; commit renames the real folder on
+  // disk and reloads the feed. `renamingKey` is the pathKey being edited.
+  let renamingKey = null;
+  let renameDraft = "";
+
+  function startRename(path) {
+    const folderPath = path?.find((p) => p.dimension === "folder")?.value;
+    if (!folderPath) return;
+    renamingKey = pathKey(path);
+    renameDraft = folderPath.split("/").filter(Boolean).pop() || folderPath;
+  }
+
+  function cancelRename() {
+    renamingKey = null;
+    renameDraft = "";
+  }
+
+  async function commitRename(path) {
+    const key = pathKey(path);
+    if (renamingKey !== key) return; // already committed/canceled (blur re-entry)
+    const folderPath = path?.find((p) => p.dimension === "folder")?.value;
+    const name = renameDraft.trim();
+    renamingKey = null; // close the editor immediately so blur can't re-fire this
+    const current = folderPath
+      ? folderPath.split("/").filter(Boolean).pop()
+      : "";
+    if (!folderPath || !name || name === current) return;
+    try {
+      const { newPath } = await renameFolder(folderPath, name);
+      if (focusPath === folderPath) focusPath = newPath; // keep focus on it
+      await loadInitialFeed();
+      refreshCounts();
     } catch (e) {
       error = e.message;
     }
@@ -1361,21 +1400,6 @@
    * to a bounded timeout in case scrollend never fires (e.g. the target
    * already matches the current position, or some interruption) so this
    * can never leave the guard stuck permanently. */
-  function scrollToSection(pos) {
-    if (!gridEl || !mainColumnEl) return Promise.resolve();
-    const gridTop = gridEl.getBoundingClientRect().top + mainColumnEl.scrollTop;
-    const target = Math.max(0, gridTop + pos.y - pos.depth * HEADER_HEIGHT + PAD);
-    if (Math.abs(mainColumnEl.scrollTop - target) < 1) return Promise.resolve();
-    mainColumnEl.scrollTo({ top: target, behavior: "smooth" });
-    return new Promise((resolve) => {
-      const done = () => {
-        mainColumnEl.removeEventListener("scrollend", done);
-        resolve();
-      };
-      mainColumnEl.addEventListener("scrollend", done, { once: true });
-      setTimeout(done, 1000);
-    });
-  }
 
   async function loadMore(direction) {
     if (direction === "after") {
@@ -2595,12 +2619,30 @@
                   >
                     ▾
                   </button>
-                  <button
-                    class="section-label"
-                    on:click={() => scrollToSection(header)}
-                  >
-                    {header.label}
-                  </button>
+                  {#if header.path && renamingKey === pathKey(header.path)}
+                    <!-- svelte-ignore a11y-autofocus -->
+                    <input
+                      class="section-rename"
+                      bind:value={renameDraft}
+                      on:click|stopPropagation
+                      on:keydown={(e) => {
+                        if (e.key === "Enter") commitRename(header.path);
+                        else if (e.key === "Escape") cancelRename();
+                      }}
+                      on:blur={() => commitRename(header.path)}
+                      autofocus
+                    />
+                  {:else}
+                    <button
+                      class="section-label"
+                      title={header.path?.at(-1)?.dimension === "folder"
+                        ? "Double-click to rename this folder on disk"
+                        : ""}
+                      on:dblclick={() => startRename(header.path)}
+                    >
+                      {header.label}
+                    </button>
+                  {/if}
                   {#if header.path && headerCounts[pathKey(header.path)] !== undefined}
                     <span class="section-count">
                       {headerCounts[pathKey(header.path)].toLocaleString()} items
@@ -3103,6 +3145,19 @@
   }
   .section-label:hover {
     background: #2a2a2a;
+  }
+  .section-rename {
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: #0d0d0d;
+    border: 1px solid #4c9aff;
+    border-radius: 4px;
+    padding: 2px 6px;
+    min-width: 12ch;
+  }
+  .section-rename:focus {
+    outline: none;
   }
   .section-count {
     color: #888;

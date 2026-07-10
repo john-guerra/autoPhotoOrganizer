@@ -138,6 +138,23 @@ export async function removeFolderByPath(path) {
   return res.json();
 }
 
+/** Rename a scanned folder on disk (and update the index). `path` is the
+ * folder's absolute path, `newName` a bare folder name (no separators).
+ * @param {string} path @param {string} newName
+ * @returns {Promise<{ok:boolean, oldPath:string, newPath:string}>} */
+export async function renameFolder(path, newName) {
+  const res = await fetch(`/api/folders/rename`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path, newName }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `rename failed (${res.status})`);
+  }
+  return res.json();
+}
+
 /** @returns {Promise<{totalBytes:number, totalFiles:number}>} */
 export async function fetchCacheStats() {
   const res = await fetch("/api/cache/stats");

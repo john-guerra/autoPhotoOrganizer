@@ -5,6 +5,11 @@ Notable changes to AutoGallery, newest first. Versions follow the scheme in
 gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
 short and user-facing — what you can now do, not how it's built.
 
+## 2.4.0-alpha
+
+- **Rename a folder from the feed** — double-click a folder's section header to
+  rename it; the real folder on disk is renamed and the index follows (#68).
+
 ## 2.3.0-alpha
 
 - **AutoAlbums: name your album folders** — edit each album's folder name before
