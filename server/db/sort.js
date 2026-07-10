@@ -32,6 +32,22 @@ const GROUP_DATE_COL = {
   date_modified: "photos.mtime",
 };
 
+/** The date-type sort attributes (the ones the timeline can plot against). */
+export const DATE_SORTS = ["date_taken", "date_created", "date_modified"];
+
+/** @param {string} attr @returns {boolean} is it a date-type sort? */
+export function isDateSort(attr) {
+  return DATE_SORTS.includes(attr);
+}
+
+/** NULL-safe instant expr for a date attribute, shared by the time FILTER
+ *  (buildFilter) and the timeline density (workingSetTimes) so both agree on
+ *  which date the timeline reflects. Falls back to date_taken (EXIF-created) for
+ *  a missing/non-date attr, so the timeline always has a sensible date to plot. */
+export function dateAttrExpr(attr) {
+  return SORT_ATTRS[isDateSort(attr) ? attr : "date_taken"].expr;
+}
+
 const DEFAULT_SORT = { by: "date_taken", dir: "desc" };
 
 /** @param {string|undefined} raw "by:dir" @returns {{by:string,dir:"asc"|"desc"}} */

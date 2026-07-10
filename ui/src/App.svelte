@@ -59,7 +59,7 @@
     DEFAULT_FILTER,
     isActive as filterIsActive,
   } from "./lib/filterSpec.js";
-  import { ALL_DIMENSIONS, SORT_ATTRS } from "./lib/dimensions.js";
+  import { ALL_DIMENSIONS, SORT_ATTRS, DATE_SORT_ATTRS } from "./lib/dimensions.js";
 
   const LS_KEY = "autogallery.lastDir";
   const LS_ZOOM = "autogallery.zoom";
@@ -151,6 +151,29 @@
   })();
   $: localStorage.setItem(LS_FILTER, JSON.stringify(filter));
 
+  // The timeline reflects the feed's SORT date. A date sort becomes the
+  // timeline's attribute (and is remembered); a non-date sort (rating/size/name)
+  // keeps the last date attr. Seed from the persisted sort/filter so the timeline
+  // matches the sort on first paint. `lastDateSort` is the remembered date attr.
+  let lastDateSort = DATE_SORT_ATTRS.includes(sort.by)
+    ? sort.by
+    : DATE_SORT_ATTRS.includes(filter.dateAttr)
+      ? filter.dateAttr
+      : "date_taken";
+  if (filter.dateAttr !== lastDateSort) filter = { ...filter, dateAttr: lastDateSort };
+
+  /** The per-photo epoch-ms for a given date attribute, mirroring the server's
+   * NULL-safe exprs (COALESCE to mtime), so the "you are here" marker sits on the
+   * same date the timeline plots. */
+  function photoDateFor(p, attr) {
+    if (!p) return null;
+    if (attr === "date_modified") return p.mtimeMs ?? null;
+    if (attr === "date_created") return p.createdAt ?? p.mtimeMs ?? null;
+    const t = p.takenAt; // date_taken (EXIF)
+    const taken = t == null ? null : typeof t === "number" ? t : Date.parse(t);
+    return taken ?? p.mtimeMs ?? null;
+  }
+
   // --- Selection (multi-select for batch export) --------------------------
   // A persistent Set of photo ids the user has picked. Culling a trip is a
   // long, expensive process, so the selection survives reloads/quits via
@@ -205,6 +228,10 @@
     // keep-only ids live server-side in the keep_scope table (POSTed by
     // applyKeepOnly); the filter carries only a flag, so the scope is unbounded.
     ...(keepIds ? { keepScope: true } : {}),
+    // dateAttr is which date the timeline PLOTS, not a constraint — so it follows
+    // the sort date in both modes (in select mode the rest resets to DEFAULT, but
+    // the timeline column must still track the sort).
+    dateAttr: filter.dateAttr,
   };
 
   // --- Timeline filter (brushable density under the toolbar) ----------------
@@ -231,7 +258,9 @@
   async function refreshTimes(spec) {
     const epoch = ++timesEpoch;
     try {
-      const r = await fetchTimes(filterIsActive(spec) ? spec : null);
+      // Pass the spec directly: toQueryParam sends `dateAttr` even when no other
+      // facet is active, so a plain sort-date switch still re-plots the density.
+      const r = await fetchTimes(spec);
       if (epoch !== timesEpoch) return; // superseded by a newer refetch
       timeMin = r.min;
       timeMax = r.max;
@@ -492,6 +521,11 @@
   function onSortChange(next) {
     if (next.by === sort.by && next.dir === sort.dir) return;
     sort = next;
+    // Timeline follows the sort date: a date sort becomes (and is remembered as)
+    // the timeline's attribute; a non-date sort keeps the last date attr. Updating
+    // filter.dateAttr re-plots the density (via timesKey) and re-bounds the brush.
+    if (DATE_SORT_ATTRS.includes(next.by)) lastDateSort = next.by;
+    if (filter.dateAttr !== lastDateSort) filter = { ...filter, dateAttr: lastDateSort };
     onGroupByChange(groupBy);
   }
 
@@ -868,16 +902,18 @@
    * here" marker. Walks from renderStart to the first real (non-placeholder)
    * entry whose metadata has arrived (takenAt is filled by enrichMeta), so the
    * marker follows the feed as you scroll. null until a timestamp is known. */
-  function deriveCurrentTime(start, entries) {
+  function deriveCurrentTime(start, entries, attr) {
     for (let i = Math.max(0, start); i < entries.length; i++) {
       const e = entries[i];
       if (!e || e.kind === "placeholder") continue;
-      const t = resolvePhoto(e)?.takenAt;
-      if (t != null) return typeof t === "number" ? t : Date.parse(t);
+      const t = photoDateFor(resolvePhoto(e), attr);
+      if (t != null) return t;
     }
     return null;
   }
-  $: currentTime = deriveCurrentTime(renderStart, displayEntries);
+  // Pass dateAttr so the marker recomputes when the sort date changes, not just
+  // on scroll (Svelte only tracks deps named in the reactive expression).
+  $: currentTime = deriveCurrentTime(renderStart, displayEntries, filter.dateAttr);
 
   /** Keeps the first occurrence of each id, dropping later repeats. Guards
    * against a real, observed case: fetching "before" and "after" a focusId

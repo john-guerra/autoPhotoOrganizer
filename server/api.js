@@ -53,7 +53,7 @@ import {
 } from "./db/feed.js";
 import { getTreeNode, getFlatTree } from "./db/tree.js";
 import { ALLOWED_ORIENTATIONS } from "./db/filters.js";
-import { parseSort } from "./db/sort.js";
+import { parseSort, DATE_SORTS } from "./db/sort.js";
 import { sampleOffsets } from "./db/sampleGroup.js";
 import { setKeepScope } from "./db/keepScope.js";
 import { registry } from "./jobs/registry.js";
@@ -273,6 +273,15 @@ function parseFilterParam(req) {
       }
       spec[key] = v;
     }
+  }
+  // Which date attribute the timeline (and thus the dateFrom/dateTo bounds)
+  // reflects — follows the feed's sort date on the client. Must be a known
+  // date-type sort; anything else is rejected rather than silently ignored.
+  if (raw.dateAttr !== undefined && raw.dateAttr !== null) {
+    if (!DATE_SORTS.includes(raw.dateAttr)) {
+      return { spec: {}, error: `dateAttr must be one of ${DATE_SORTS.join("/")}` };
+    }
+    spec.dateAttr = raw.dateAttr;
   }
   return { spec };
 }

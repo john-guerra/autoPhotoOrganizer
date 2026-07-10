@@ -9,6 +9,9 @@ export const DEFAULT_FILTER = {
   // Time-range facet (epoch ms), driven by the timeline filter. null = open.
   dateFrom: null,
   dateTo: null,
+  // Which date attribute the timeline reflects — follows the feed's sort date;
+  // defaults to date_taken (EXIF-created). Not a constraint on its own.
+  dateAttr: "date_taken",
 };
 
 /** @param {{minRating?:number, orientations?:string[], scopeIds?:number[], keepScope?:boolean, dateFrom?:number|null, dateTo?:number|null}} spec */
@@ -26,12 +29,13 @@ export function isActive(spec) {
   );
 }
 
-/** The `filter` query-param JSON string, or null when nothing is constrained.
- * @param {{minRating?:number, orientations?:string[], scopeIds?:number[]}} spec */
+/** The `filter` query-param JSON string, or null when nothing is sent.
+ * `dateAttr` rides along whenever it differs from the default, even if no other
+ * facet is active, so the timeline density and date bounds use the right column.
+ * @param {{minRating?:number, orientations?:string[], scopeIds?:number[], dateAttr?:string}} spec */
 export function toQueryParam(spec) {
-  if (!isActive(spec)) return null;
   const out = {};
-  if ((spec.minRating ?? 0) > 0) out.minRating = spec.minRating;
+  if ((spec?.minRating ?? 0) > 0) out.minRating = spec.minRating;
   const o = spec?.orientations ?? [];
   if (o.length > 0 && o.length < ORIENTATIONS.length) out.orientations = o;
   if (Array.isArray(spec?.scopeIds) && spec.scopeIds.length) {
@@ -40,7 +44,8 @@ export function toQueryParam(spec) {
   if (spec?.keepScope) out.keepScope = true;
   if (Number.isFinite(spec?.dateFrom)) out.dateFrom = spec.dateFrom;
   if (Number.isFinite(spec?.dateTo)) out.dateTo = spec.dateTo;
-  return JSON.stringify(out);
+  if (spec?.dateAttr && spec.dateAttr !== "date_taken") out.dateAttr = spec.dateAttr;
+  return Object.keys(out).length ? JSON.stringify(out) : null;
 }
 
 /** Click star k (1..5): set the threshold to k, or clear to 0 if k is already

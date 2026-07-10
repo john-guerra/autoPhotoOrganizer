@@ -125,4 +125,22 @@ describe("buildFilter", () => {
     );
     expect(f.params).toEqual([4, 1000, 2000]);
   });
+
+  it("dateAttr picks which date column the time bounds filter on", () => {
+    expect(buildFilter({ dateFrom: 1000, dateAttr: "date_modified" }).sql).toBe(
+      "photos.mtime >= ?"
+    );
+    expect(buildFilter({ dateTo: 2000, dateAttr: "date_created" }).sql).toBe(
+      "COALESCE(photos.btime, photos.mtime) <= ?"
+    );
+    // Default / unknown attr falls back to date_taken (EXIF-created).
+    expect(buildFilter({ dateFrom: 1000, dateAttr: "name" }).sql).toBe(
+      "COALESCE(photos.taken_at, photos.mtime) >= ?"
+    );
+    // dateAttr alone (no bounds) constrains nothing.
+    expect(buildFilter({ dateAttr: "date_modified" })).toEqual({
+      sql: "1=1",
+      params: [],
+    });
+  });
 });

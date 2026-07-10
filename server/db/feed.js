@@ -1,5 +1,5 @@
 import { buildFilter } from "./filters.js";
-import { parseSort, sortSeekDim, applySortToDims } from "./sort.js";
+import { parseSort, sortSeekDim, applySortToDims, dateAttrExpr } from "./sort.js";
 
 /**
  * Grouping dimensions available to the feed. Each maps to a plain SQL
@@ -138,7 +138,7 @@ function startPathCondition(dims, path) {
 }
 
 /**
- * @param {{id:number, name:string, size:number, mtimeMs:number, rating:number, preferredCover:number, width:number|null, height:number|null, taken_at:number|null}} r
+ * @param {{id:number, name:string, size:number, mtimeMs:number, rating:number, preferredCover:number, width:number|null, height:number|null, taken_at:number|null, btime:number|null}} r
  * @param {Array<{name:string}>} dims
  */
 function rowToItem(r, dims) {
@@ -154,6 +154,9 @@ function rowToItem(r, dims) {
     width: r.width,
     height: r.height,
     takenAt: r.taken_at ? new Date(r.taken_at).toISOString() : null,
+    // Filesystem birth time (epoch ms) — the "created" date the timeline uses
+    // when sorting by date_created; kept numeric (the marker reads it directly).
+    createdAt: r.btime ?? null,
     kind: r.kind,
     groupValues,
   };
@@ -351,7 +354,7 @@ export function getFeedPage(
         `SELECT photos.id, photos.filename AS name, photos.size,
                 photos.mtime AS mtimeMs, photos.rating,
                 photos.preferred_cover AS preferredCover,
-                photos.width, photos.height, photos.taken_at, photos.kind,
+                photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
                 ${selectDimAndSortCols}
          FROM photos JOIN folders ON folders.id = photos.folder_id
          WHERE photos.id = ?`
@@ -413,7 +416,7 @@ export function getFeedPage(
         `SELECT photos.id, photos.filename AS name, photos.size,
                 photos.mtime AS mtimeMs, photos.rating,
                 photos.preferred_cover AS preferredCover,
-                photos.width, photos.height, photos.taken_at, photos.kind,
+                photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
                 ${selectDimAndSortCols}
          FROM photos
          JOIN folders ON folders.id = photos.folder_id
@@ -531,7 +534,7 @@ export function fetchGroupRowsAtOffsets(
     `SELECT photos.id, photos.filename AS name, photos.size,
             photos.mtime AS mtimeMs, photos.rating,
             photos.preferred_cover AS preferredCover,
-            photos.width, photos.height, photos.taken_at, photos.kind,
+            photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
             ${selectDimAndSortCols}
      FROM photos
      JOIN folders ON folders.id = photos.folder_id
@@ -659,12 +662,14 @@ export function workingSetTimeline(db, filterSpec = {}, limit = 2000) {
  * @returns {{times:number[], total:number, min:number|null, max:number|null, sampled:boolean}}
  */
 export function workingSetTimes(db, filterSpec = {}, cap = 12000) {
-  // Drop the time facet; keep the rest (crossfilter).
+  // Drop the time facet; keep the rest (crossfilter). `dateAttr` stays in `rest`
+  // so the density plots the SAME date the feed sorts by (buildFilter agrees).
   const { dateFrom, dateTo, ...rest } = filterSpec || {};
   const filter = buildFilter(rest);
+  const timeExpr = dateAttrExpr(rest.dateAttr);
   const rows = db
     .prepare(
-      `SELECT COALESCE(photos.taken_at, photos.mtime) AS t
+      `SELECT ${timeExpr} AS t
        FROM photos JOIN folders ON folders.id = photos.folder_id
        WHERE photos.stale = 0 AND (${filter.sql})
        ORDER BY t ASC`

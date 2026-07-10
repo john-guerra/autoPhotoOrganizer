@@ -19,6 +19,11 @@ export const SORT_ATTRS = [
   "name",
 ];
 
+/** The date-typed sort attributes (the ones the timeline can plot against).
+ *  Sorting by one of these makes it the timeline's date; a non-date sort keeps
+ *  the last date attr. Mirrors DATE_SORTS in server/db/sort.js. */
+export const DATE_SORT_ATTRS = ["date_taken", "date_created", "date_modified"];
+
 /** Human labels for each sort attribute. */
 export const SORT_LABELS = {
   date_taken: "Taken",

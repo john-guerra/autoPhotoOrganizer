@@ -1,3 +1,5 @@
+import { dateAttrExpr } from "./sort.js";
+
 /**
  * Compiles a filter spec into a SQL fragment + bound params, ANDed into the
  * WHERE of every set-reasoning feed/tree query. The single definition of
@@ -8,7 +10,7 @@
  * Injection-safe: orientation names index a hardcoded fragment table; the
  * rating threshold is a bound param. User-supplied strings never reach SQL.
  *
- * @param {{minRating?: number, orientations?: string[]}} [spec]
+ * @param {{minRating?: number, orientations?: string[], dateAttr?: string}} [spec]
  * @returns {{sql: string, params: any[]}}
  */
 export function buildFilter(spec = {}) {
@@ -57,18 +59,21 @@ export function buildFilter(spec = {}) {
     clauses.push(`photos.id IN (SELECT photo_id FROM keep_scope)`);
   }
 
-  // Time-range facet (timeline filter). Filters on the same timestamp the feed
-  // orders/clusters by — COALESCE(taken_at, mtime) — so the brush, the grid,
-  // and the counts all agree on "when". Bounds are epoch ms; either may be
-  // absent (open-ended). Injection-safe: bound params, never spliced strings.
-  // Guard null/undefined explicitly: Number(null) === 0 is finite, which would
+  // Time-range facet (timeline filter). Filters on the SAME date attribute the
+  // timeline plots — driven by `dateAttr` (which follows the feed's sort date;
+  // defaults to date_taken = EXIF-created) — so the brush, the density, the
+  // grid, and the counts all agree on "when". Bounds are epoch ms; either may be
+  // absent (open-ended). Injection-safe: the expr comes from a hardcoded table
+  // keyed by dateAttr, bounds are bound params, never spliced strings. Guard
+  // null/undefined explicitly: Number(null) === 0 is finite, which would
   // silently add a `>= 0` clause for an open-ended (null) bound.
+  const timeExpr = dateAttrExpr(spec?.dateAttr);
   if (spec?.dateFrom != null && Number.isFinite(Number(spec.dateFrom))) {
-    clauses.push("COALESCE(photos.taken_at, photos.mtime) >= ?");
+    clauses.push(`${timeExpr} >= ?`);
     params.push(Number(spec.dateFrom));
   }
   if (spec?.dateTo != null && Number.isFinite(Number(spec.dateTo))) {
-    clauses.push("COALESCE(photos.taken_at, photos.mtime) <= ?");
+    clauses.push(`${timeExpr} <= ?`);
     params.push(Number(spec.dateTo));
   }
 
