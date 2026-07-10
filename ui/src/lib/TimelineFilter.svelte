@@ -13,63 +13,22 @@
    * so it never loops back through `input`.
    */
   import { createEventDispatcher } from "svelte";
-  import {
-    scaleTime,
-    timeFormat,
-    curveBasis,
-    curveNatural,
-    curveMonotoneX,
-    curveCatmullRom,
-    curveLinear,
-    curveStep,
-  } from "d3";
+  import { scaleTime, timeFormat } from "d3";
   import { zoomableAxisInput } from "@john-guerra/d3-zoomable-axis";
 
-  // d3 curve factories the density panel offers, by key.
-  const CURVES = {
-    basis: curveBasis,
-    natural: curveNatural,
-    monotone: curveMonotoneX,
-    catmullRom: curveCatmullRom,
-    linear: curveLinear,
-    step: curveStep,
-  };
-  const CURVE_LABELS = {
-    basis: "Basis",
-    natural: "Natural",
-    monotone: "Monotone",
-    catmullRom: "Catmull-Rom",
-    linear: "Linear",
-    step: "Step",
-  };
-  const DAY_MS = 86400000;
-
-  // Tunable density (KDE/scent) params, persisted so the user's chosen look
-  // sticks. bandwidthDays 0 = automatic (fast-kde's Scott rule).
-  const LS_KDE = "autogallery.timelineKde";
+  // Density (KDE/scent) look. The widget owns the live settings popover + its
+  // persistence now (scent.controls + scent.persistKey), so these are just the
+  // initial defaults; the user's tuned values are restored from localStorage by
+  // the widget itself.
+  const KDE_PERSIST_KEY = "autogallery.timelineKde";
   const DEFAULT_KDE = {
     type: "area", // area | violin | histogram
-    curve: "basis",
-    bandwidthDays: 0, // 0 → auto (Scott's rule)
-    adjust: 1, // multiplier on the (auto/absolute) bandwidth
+    curve: "basis", // curve name (widget resolves to a d3-shape factory)
+    adjust: 1, // smoothing: multiplier on the auto Scott bandwidth
     pad: 0, // fast-kde domain padding (fraction)
     bins: 30,
-    size: 30,
+    size: 30, // scent height (px)
   };
-  let kde = (() => {
-    try {
-      const s = JSON.parse(localStorage.getItem(LS_KDE) ?? "null");
-      if (s && typeof s === "object") return { ...DEFAULT_KDE, ...s };
-    } catch {
-      /* fall through */
-    }
-    return { ...DEFAULT_KDE };
-  })();
-  $: localStorage.setItem(LS_KDE, JSON.stringify(kde));
-  let settingsOpen = false;
-  // Reassign to a NEW object on every change so the mount action sees a fresh
-  // reference and rebuilds the widget (mutating in place wouldn't trigger it).
-  const setKde = (patch) => (kde = { ...kde, ...patch });
 
   export let min = null; // epoch ms, domain start (null = no data)
   export let max = null; // epoch ms, domain end
@@ -128,7 +87,6 @@
       if (!(np.width > 0) || np.min == null || np.max == null || np.min >= np.max) return;
       const length = Math.max(60, np.width - AXIS_MARGIN * 2);
       const scale = scaleTime().domain([new Date(np.min), new Date(np.max)]);
-      const k = np.kde || DEFAULT_KDE;
       widget = zoomableAxisInput(scale, {
         orient: "bottom",
         length,
@@ -143,18 +101,15 @@
         format: (d) => fmt(new Date(+d)),
         scent: {
           values: np.times || [],
-          type: k.type, // area (sparkline) | violin | histogram — user-tunable
-          style: k.type === "histogram" ? "bars" : "kde",
+          // Initial look; the widget's ⚙ panel live-tunes these and remembers
+          // them in localStorage (persistKey), restoring across rebuilds/sessions.
+          ...DEFAULT_KDE,
+          style: DEFAULT_KDE.type === "histogram" ? "bars" : "kde",
           side: "in", // rise toward the plot (up), matching the area sparkline
-          size: k.size,
-          bins: k.bins,
-          // bandwidthDays 0 → omit so fast-kde uses its automatic (Scott) rule.
-          ...(k.bandwidthDays > 0 ? { bandwidth: k.bandwidthDays * DAY_MS } : {}),
-          adjust: k.adjust,
-          ...(k.pad > 0 ? { pad: k.pad } : {}),
-          curve: CURVES[k.curve] || curveBasis,
           color: "#3a3a3a",
           colorSelected: "#4c9aff",
+          controls: true, // built-in density settings gear + popover
+          persistKey: KDE_PERSIST_KEY,
         },
       });
       widget.addEventListener("input", emit);
@@ -168,8 +123,7 @@
           np.min !== last.min ||
           np.max !== last.max ||
           np.width !== last.width ||
-          np.times !== last.times ||
-          np.kde !== last.kde; // density params changed → rebuild the scent
+          np.times !== last.times;
         if (rebuilt) {
           build(np);
           return;
@@ -195,17 +149,9 @@
 </script>
 
 <div class="timeline" bind:clientWidth={width}>
-  <button
-    class="kde-gear"
-    class:on={settingsOpen}
-    title="Density (KDE) settings"
-    aria-label="Density settings"
-    aria-expanded={settingsOpen}
-    on:click={() => (settingsOpen = !settingsOpen)}
-  >
-    ⚙
-  </button>
-  <div class="timeline-axis" use:timeline={{ min, max, times, value, width, kde }}>
+  <!-- The density settings ⚙ gear + popover now live inside the widget itself
+       (scent.controls), which also persists the tuned params (scent.persistKey). -->
+  <div class="timeline-axis" use:timeline={{ min, max, times, value, width }}>
     {#if markerPx != null}
       <div
         class="you-are-here"
@@ -217,108 +163,6 @@
       </div>
     {/if}
   </div>
-
-  {#if settingsOpen}
-    <div class="kde-panel" role="dialog" aria-label="Timeline density settings">
-      <div class="kde-row">
-        <label for="kde-type">Shape</label>
-        <select
-          id="kde-type"
-          value={kde.type}
-          on:change={(e) => setKde({ type: e.target.value })}
-        >
-          <option value="area">Area (sparkline)</option>
-          <option value="violin">Violin</option>
-          <option value="histogram">Histogram</option>
-        </select>
-      </div>
-      <div class="kde-row" class:disabled={kde.type === "histogram"}>
-        <label for="kde-curve">Curve</label>
-        <select
-          id="kde-curve"
-          value={kde.curve}
-          disabled={kde.type === "histogram"}
-          on:change={(e) => setKde({ curve: e.target.value })}
-        >
-          {#each Object.keys(CURVES) as c}
-            <option value={c}>{CURVE_LABELS[c]}</option>
-          {/each}
-        </select>
-      </div>
-      <div class="kde-row" class:disabled={kde.type === "histogram"}>
-        <label for="kde-bw">Smoothing</label>
-        <input
-          id="kde-bw"
-          type="range"
-          min="0"
-          max="180"
-          step="1"
-          value={kde.bandwidthDays}
-          disabled={kde.type === "histogram"}
-          on:input={(e) => setKde({ bandwidthDays: +e.target.value })}
-        />
-        <span class="kde-val">{kde.bandwidthDays === 0 ? "auto" : kde.bandwidthDays + "d"}</span>
-      </div>
-      <div class="kde-row" class:disabled={kde.type === "histogram"}>
-        <label for="kde-adjust">Adjust</label>
-        <input
-          id="kde-adjust"
-          type="range"
-          min="0.2"
-          max="3"
-          step="0.1"
-          value={kde.adjust}
-          disabled={kde.type === "histogram"}
-          on:input={(e) => setKde({ adjust: +e.target.value })}
-        />
-        <span class="kde-val">×{kde.adjust.toFixed(1)}</span>
-      </div>
-      <div class="kde-row" class:disabled={kde.type === "histogram"}>
-        <label for="kde-pad">Pad</label>
-        <input
-          id="kde-pad"
-          type="range"
-          min="0"
-          max="0.5"
-          step="0.02"
-          value={kde.pad}
-          disabled={kde.type === "histogram"}
-          on:input={(e) => setKde({ pad: +e.target.value })}
-        />
-        <span class="kde-val">{kde.pad.toFixed(2)}</span>
-      </div>
-      <div class="kde-row">
-        <label for="kde-bins">Bins</label>
-        <input
-          id="kde-bins"
-          type="range"
-          min="10"
-          max="120"
-          step="1"
-          value={kde.bins}
-          on:input={(e) => setKde({ bins: +e.target.value })}
-        />
-        <span class="kde-val">{kde.bins}</span>
-      </div>
-      <div class="kde-row">
-        <label for="kde-size">Height</label>
-        <input
-          id="kde-size"
-          type="range"
-          min="12"
-          max="48"
-          step="1"
-          value={kde.size}
-          on:input={(e) => setKde({ size: +e.target.value })}
-        />
-        <span class="kde-val">{kde.size}px</span>
-      </div>
-      <div class="kde-actions">
-        <button class="kde-reset" on:click={() => (kde = { ...DEFAULT_KDE })}>Reset</button>
-        <button class="kde-done" on:click={() => (settingsOpen = false)}>Done</button>
-      </div>
-    </div>
-  {/if}
 </div>
 
 <style>
@@ -328,101 +172,6 @@
     box-sizing: border-box;
     overflow: visible;
     position: relative;
-  }
-  /* Density settings gear + popover. */
-  .kde-gear {
-    position: absolute;
-    top: -2px;
-    right: 2px;
-    z-index: 6;
-    width: 18px;
-    height: 18px;
-    padding: 0;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: #6f6f6f;
-    font-size: 12px;
-    line-height: 18px;
-    cursor: pointer;
-  }
-  .kde-gear:hover,
-  .kde-gear.on {
-    color: #d8d8d8;
-    background: #2c2c2c;
-  }
-  .kde-panel {
-    position: absolute;
-    top: 18px;
-    right: 0;
-    z-index: 30;
-    width: 224px;
-    box-sizing: border-box;
-    background: #1e1e1e;
-    border: 1px solid #383838;
-    border-radius: 8px;
-    padding: 10px;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-  }
-  .kde-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.72rem;
-  }
-  .kde-row.disabled {
-    opacity: 0.4;
-  }
-  .kde-row label {
-    width: 58px;
-    flex-shrink: 0;
-    color: #9a9a9a;
-  }
-  .kde-row select {
-    flex: 1;
-    min-width: 0;
-    background: #101010;
-    border: 1px solid #333;
-    color: #cfcfcf;
-    border-radius: 4px;
-    padding: 2px 4px;
-    font-size: 0.72rem;
-  }
-  .kde-row input[type="range"] {
-    flex: 1;
-    min-width: 0;
-    accent-color: #4c9aff;
-  }
-  .kde-val {
-    width: 36px;
-    flex-shrink: 0;
-    text-align: right;
-    color: #9a9a9a;
-    font-variant-numeric: tabular-nums;
-  }
-  .kde-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-    margin-top: 2px;
-  }
-  .kde-actions button {
-    border: 1px solid #444;
-    background: transparent;
-    color: #cfcfcf;
-    border-radius: 5px;
-    padding: 3px 12px;
-    font-size: 0.72rem;
-    cursor: pointer;
-  }
-  .kde-done {
-    background: #4c9aff;
-    color: #06121f;
-    border-color: #4c9aff;
-    font-weight: 600;
   }
   .timeline-axis {
     position: relative;
