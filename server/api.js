@@ -264,6 +264,15 @@ function parseFilterParam(req) {
   // "Keep only" working set, referenced by flag; the ids live in the keep_scope
   // table (set via POST /api/scope), so there is no size cap here.
   if (raw.keepScope) spec.keepScope = true;
+  // Folder-focus scope ("open a folder"): the abs_path of the focused subtree
+  // root. Only ever compared against the indexed folders.abs_path column (never
+  // resolved to a file), so no safeResolve is needed here.
+  if (raw.folderPath !== undefined && raw.folderPath !== null) {
+    if (typeof raw.folderPath !== "string" || !raw.folderPath.length) {
+      return { spec: {}, error: "folderPath must be a non-empty string" };
+    }
+    spec.folderPath = raw.folderPath;
+  }
   // Timeline filter time-range (epoch ms). Each bound is optional; a finite
   // number constrains, anything else is rejected so a garbled range can't
   // silently widen the query.

@@ -1440,6 +1440,38 @@ describe("POST /api/scope + keepScope filter", () => {
   });
 });
 
+describe("folderPath focus filter (end-to-end)", () => {
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+  });
+
+  it("scopes the count to the focused folder; a bogus path matches nothing", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const total = scanBody.items.length;
+    expect(total).toBeGreaterThan(0);
+
+    const focus = encodeURIComponent(JSON.stringify({ folderPath: photosDir }));
+    const scoped = await fetch(`${srv.base}/api/photos/count?filter=${focus}`);
+    expect((await scoped.json()).count).toBe(total);
+
+    const bogus = encodeURIComponent(
+      JSON.stringify({ folderPath: photosDir + "-nope" })
+    );
+    const none = await fetch(`${srv.base}/api/photos/count?filter=${bogus}`);
+    expect((await none.json()).count).toBe(0);
+  });
+
+  it("rejects a non-string/empty folderPath with 400", async () => {
+    for (const bad of [123, ""]) {
+      const filter = encodeURIComponent(JSON.stringify({ folderPath: bad }));
+      const res = await fetch(`${srv.base}/api/photos/count?filter=${filter}`);
+      expect(res.status).toBe(400);
+    }
+  });
+});
+
 describe("GET /api/albums/timeline", () => {
   beforeEach(async () => {
     const db = getDb();

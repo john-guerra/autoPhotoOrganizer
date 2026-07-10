@@ -1,14 +1,14 @@
 <script>
   /**
-   * Toolbar cluster ①: the library dropdown (recently-scanned folders +
-   * "Manage library…") and the add/scan-a-folder popover. Purely
-   * presentational — it owns no scan/library logic, only the open/close popover
-   * state and form fields (two-way bound), and emits an event when the user
-   * asks to scan, pick a folder, or open a library entry.
+   * Toolbar cluster ①: the library dropdown ("Manage library…" + "Open a
+   * folder…") and the add/scan-a-folder popover. Purely presentational — it
+   * owns no scan/library logic, only the open/close popover state and form
+   * fields (two-way bound), and emits an event when the user asks to scan, pick
+   * a folder, manage the library, or open a folder to focus on it. The folder
+   * LIST that used to live in this dropdown moved to the tree/fisheye sidebar.
    */
   import { createEventDispatcher } from "svelte";
 
-  export let library = [];
   export let scanning = false;
   export let hasNativePicker = false;
 
@@ -45,23 +45,18 @@
             Manage library…
           </button>
         </li>
-        <li class="library-sep" role="separator"></li>
-        {#if library.length === 0}
-          <li class="library-empty">No folders scanned yet.</li>
-        {/if}
-        {#each library as entry (entry.path)}
-          <li>
-            <button
-              class="library-entry"
-              class:offline={!entry.mounted}
-              on:click={() => dispatch("selectlibrary", entry)}
-              title={entry.path}
-            >
-              {entry.name}
-              {#if !entry.mounted}<span class="offline-badge">offline</span>{/if}
-            </button>
-          </li>
-        {/each}
+        <li>
+          <button
+            class="library-entry"
+            on:click={() => {
+              libraryOpen = false;
+              dispatch("openfolder");
+            }}
+            title="Open a single folder and focus the whole app on it"
+          >
+            Open a folder…
+          </button>
+        </li>
       </ul>
     {/if}
   </div>
@@ -157,24 +152,6 @@
   }
   .library-entry:hover:not(:disabled) {
     background: #2a2a2a;
-  }
-  .library-entry.offline {
-    color: #888;
-    cursor: default;
-  }
-  .offline-badge {
-    margin-left: 6px;
-    font-size: 0.7rem;
-    color: #888;
-  }
-  .library-empty {
-    padding: 6px 10px;
-    color: #888;
-  }
-  .library-sep {
-    height: 1px;
-    margin: 4px 0;
-    background: #333;
   }
   .add-folder {
     position: relative;
