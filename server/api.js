@@ -12,7 +12,9 @@ import {
   unlinkSync,
 } from "node:fs";
 import { writeFile, rename, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { extname, join, basename, resolve, sep } from "node:path";
+import { revealCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { thumbsDir, cacheRoot } from "./lib/cachePaths.js";
 import {
@@ -555,6 +557,44 @@ export function registerApi(app) {
     }
     setPhotoRating(db, it.id, rating);
     res.json({ id: it.id, rating });
+  });
+
+  // Reveal a photo's real location in the OS file browser (Finder/Explorer/
+  // file manager) — a read-only escape hatch to the file on disk (issue #18).
+  // No file operations: it only asks the OS to show where the file already
+  // lives. Runs server-side so it works identically in the browser dev server
+  // and the packaged Electron app (both host this Express server locally).
+  app.post("/api/reveal/:id", async (req, res) => {
+    const db = getDb();
+    const it = getPhotoById(db, Number(req.params.id));
+    if (!it) return res.status(404).json({ ok: false, error: "unknown id" });
+    try {
+      await stat(it.path);
+    } catch {
+      // File gone (offline drive, or moved in Finder since the last scan).
+      return res.status(404).json({ ok: false, error: "file not found" });
+    }
+    const command = revealCommand(process.platform, it.path);
+    if (!command) {
+      return res
+        .status(501)
+        .json({ ok: false, error: `unsupported platform: ${process.platform}` });
+    }
+    try {
+      await new Promise((resolveSpawn, reject) => {
+        // execFile with an args array (never a shell string) — the path is
+        // trusted-from-index, but this keeps the launch injection-proof anyway.
+        execFile(command.cmd, command.args, (err) => {
+          // Windows Explorer routinely exits non-zero even on a successful
+          // reveal, so a non-zero exit there is not a failure.
+          if (err && process.platform !== "win32") reject(err);
+          else resolveSpawn();
+        });
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: String(err?.message ?? err) });
+    }
   });
 
   app.post("/api/cover", (req, res) => {

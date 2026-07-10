@@ -10,8 +10,23 @@ import {
 } from "vitest";
 import { mkdtemp, rm, mkdir, readdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
+
+// Reveal-in-Finder shells out to a file manager; stub the async launcher so
+// tests never actually pop Finder/Explorer, while preserving execFileSync
+// (used by db/volumes.js for `diskutil` during scans).
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    execFile: vi.fn((cmd, args, cb) => {
+      if (typeof cb === "function") cb(null, "", "");
+      return {};
+    }),
+  };
+});
 import sharp from "sharp";
 import { createApp } from "./index.js";
 import { getDb, _resetDbForTest } from "./db/connection.js";
@@ -390,6 +405,90 @@ describe("manual cover choice round-trip", () => {
       body: JSON.stringify({ id, isCover: "yes" }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/reveal/:id", () => {
+  const realPlatform = process.platform;
+
+  beforeEach(() => {
+    vi.mocked(execFile).mockClear();
+  });
+  afterEach(() => {
+    // Restore the real platform after any test that faked it.
+    Object.defineProperty(process, "platform", { value: realPlatform });
+  });
+
+  it("404s for an unknown id", async () => {
+    const res = await fetch(`${srv.base}/api/reveal/99999999`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("404s when the file no longer exists on disk", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ag-reveal-"));
+    const f = join(dir, "gone.jpg");
+    await sharp({
+      create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } },
+    })
+      .jpeg()
+      .toFile(f);
+    const body = await scan(srv.base, dir);
+    const id = body.items[0].id;
+    await rm(f);
+    const res = await fetch(`${srv.base}/api/reveal/${id}`, { method: "POST" });
+    expect(res.status).toBe(404);
+    expect(execFile).not.toHaveBeenCalled();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("spawns `open -R <path>` and returns ok on macOS", async () => {
+    const body = await scan(srv.base, photosDir);
+    const id = body.items[0].id;
+    const raw = getPhotoById(getDb(), id);
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const res = await fetch(`${srv.base}/api/reveal/${id}`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(execFile).toHaveBeenCalledTimes(1);
+    const [cmd, args] = vi.mocked(execFile).mock.calls[0];
+    expect(cmd).toBe("open");
+    expect(args).toEqual(["-R", raw.path]);
+  });
+
+  it("uses `explorer /select,` on Windows", async () => {
+    const body = await scan(srv.base, photosDir);
+    const id = body.items[0].id;
+    const raw = getPhotoById(getDb(), id);
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const res = await fetch(`${srv.base}/api/reveal/${id}`, { method: "POST" });
+    expect(res.status).toBe(200);
+    const [cmd, args] = vi.mocked(execFile).mock.calls[0];
+    expect(cmd).toBe("explorer");
+    expect(args).toEqual(["/select,", raw.path]);
+  });
+
+  it("opens the containing folder via `xdg-open` on Linux", async () => {
+    const body = await scan(srv.base, photosDir);
+    const id = body.items[0].id;
+    const raw = getPhotoById(getDb(), id);
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const res = await fetch(`${srv.base}/api/reveal/${id}`, { method: "POST" });
+    expect(res.status).toBe(200);
+    const [cmd, args] = vi.mocked(execFile).mock.calls[0];
+    expect(cmd).toBe("xdg-open");
+    expect(args).toEqual([dirname(raw.path)]);
+  });
+
+  it("501s on an unsupported platform", async () => {
+    const body = await scan(srv.base, photosDir);
+    const id = body.items[0].id;
+    Object.defineProperty(process, "platform", { value: "sunos" });
+    const res = await fetch(`${srv.base}/api/reveal/${id}`, { method: "POST" });
+    expect(res.status).toBe(501);
+    expect(execFile).not.toHaveBeenCalled();
   });
 });
 
