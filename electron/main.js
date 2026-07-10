@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp, listenOnOpenPort } from "../server/index.js";
 import { initAutoUpdates } from "./updates.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const ICON_PATH = path.join(__dirname, "..", "build", "icon.png");
 
 // The packaged app prefers a port distinct from the dev server's 4321 so a
 // running install never squats the port `npm run dev` needs (issue #65). It
@@ -30,6 +31,10 @@ async function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
+    // Taskbar/window icon for Windows & Linux dev runs. On macOS this is
+    // ignored (the dock icon comes from the app bundle) — see the
+    // app.dock.setIcon call below for the macOS dev icon.
+    icon: ICON_PATH,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -57,6 +62,13 @@ ipcMain.handle("pick-folder", async (event) => {
 
 app.whenReady().then(async () => {
   try {
+    // In dev the app runs from the generic Electron.app bundle, so macOS shows
+    // the default Electron dock icon. Set our icon explicitly. (The packaged
+    // app gets its icon from electron-builder, so this dev-only path is enough.)
+    if (process.platform === "darwin" && app.dock) {
+      const img = nativeImage.createFromPath(ICON_PATH);
+      if (!img.isEmpty()) app.dock.setIcon(img);
+    }
     await createWindow();
     initAutoUpdates({ isDev });
   } catch (err) {
