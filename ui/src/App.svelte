@@ -38,6 +38,7 @@
     fetchPhotoIds,
     fetchPhotoCount,
     fetchAlbumTimeline,
+    fetchTimes,
     setScope,
     removeFolderByPath,
   } from "./lib/api.js";
@@ -54,6 +55,7 @@
   import OrganizeControls from "./lib/OrganizeControls.svelte";
   import ViewControls from "./lib/ViewControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
+  import TimelineFilter from "./lib/TimelineFilter.svelte";
   import {
     DEFAULT_FILTER,
     isActive as filterIsActive,
@@ -205,6 +207,45 @@
     // applyKeepOnly); the filter carries only a flag, so the scope is unbounded.
     ...(keepIds ? { keepScope: true } : {}),
   };
+
+  // --- Timeline filter (brushable density under the toolbar) ----------------
+  // The timeline's KDE is a crossfilter: it reflects the OTHER active facets
+  // (rating/orientation/keep-scope) but NOT the time range itself, so brushing
+  // never collapses the histogram you're brushing within. timesFilter is
+  // displayFilter with the time facet stripped; timesKey is its stable
+  // signature so we refetch only when the non-time facets or the library
+  // change — never on a brush.
+  let timeMin = null;
+  let timeMax = null;
+  let timeTimes = [];
+  let timesEpoch = 0;
+  $: timesFilter = (() => {
+    const { dateFrom, dateTo, ...rest } = displayFilter;
+    return rest;
+  })();
+  $: timesKey = JSON.stringify(timesFilter) + "|" + libraryVersion;
+  let lastTimesKey = null;
+  $: if (timesKey !== lastTimesKey) {
+    lastTimesKey = timesKey;
+    refreshTimes(timesFilter);
+  }
+  async function refreshTimes(spec) {
+    const epoch = ++timesEpoch;
+    try {
+      const r = await fetchTimes(filterIsActive(spec) ? spec : null);
+      if (epoch !== timesEpoch) return; // superseded by a newer refetch
+      timeMin = r.min;
+      timeMax = r.max;
+      timeTimes = r.times;
+    } catch (e) {
+      // Non-fatal: the strip just hides (timeMin stays null); feed unaffected.
+      if (epoch === timesEpoch) {
+        timeMin = null;
+        timeMax = null;
+        timeTimes = [];
+      }
+    }
+  }
 
   // Three live counts the user asked for: whole library, currently shown
   // (under displayFilter), and selected. selectedCount is reactive off the Set.
@@ -2118,6 +2159,21 @@
     {/if}
   </header>
 
+  {#if timeMin != null && timeMax != null && timeMax > timeMin}
+    <div class="timeline-strip">
+      <TimelineFilter
+        min={timeMin}
+        max={timeMax}
+        times={timeTimes}
+        value={[filter.dateFrom ?? null, filter.dateTo ?? null]}
+        on:range={(e) =>
+          onFilterChange({ ...filter, dateFrom: e.detail[0], dateTo: e.detail[1] })}
+        on:clear={() =>
+          onFilterChange({ ...filter, dateFrom: null, dateTo: null })}
+      />
+    </div>
+  {/if}
+
   <div class="app-body">
     {#if sidebarMode === "tree"}
       <TreeSidebar
@@ -2405,6 +2461,12 @@
     height: 100vh;
     display: flex;
     flex-direction: column;
+  }
+  .timeline-strip {
+    flex-shrink: 0;
+    width: 100%;
+    background: #161616;
+    border-bottom: 1px solid #2a2a2a;
   }
   .app-body {
     display: flex;
