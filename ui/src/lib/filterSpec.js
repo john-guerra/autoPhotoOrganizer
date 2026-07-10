@@ -14,17 +14,20 @@ export const DEFAULT_FILTER = {
   dateAttr: "date_taken",
 };
 
-/** @param {{minRating?:number, orientations?:string[], scopeIds?:number[], keepScope?:boolean, dateFrom?:number|null, dateTo?:number|null}} spec */
+/** @param {{minRating?:number, orientations?:string[], scopeIds?:number[], keepScope?:boolean, folderPath?:string, dateFrom?:number|null, dateTo?:number|null}} spec */
 export function isActive(spec) {
   const minRating = spec?.minRating ?? 0;
   const o = spec?.orientations ?? [];
   const scoped = Array.isArray(spec?.scopeIds) && spec.scopeIds.length > 0;
+  const focused =
+    typeof spec?.folderPath === "string" && spec.folderPath.length > 0;
   const timed = spec?.dateFrom != null || spec?.dateTo != null;
   return (
     minRating > 0 ||
     (o.length > 0 && o.length < ORIENTATIONS.length) ||
     scoped ||
     Boolean(spec?.keepScope) ||
+    focused ||
     timed
   );
 }
@@ -32,7 +35,7 @@ export function isActive(spec) {
 /** The `filter` query-param JSON string, or null when nothing is sent.
  * `dateAttr` rides along whenever it differs from the default, even if no other
  * facet is active, so the timeline density and date bounds use the right column.
- * @param {{minRating?:number, orientations?:string[], scopeIds?:number[], dateAttr?:string}} spec */
+ * @param {{minRating?:number, orientations?:string[], scopeIds?:number[], keepScope?:boolean, folderPath?:string, dateAttr?:string}} spec */
 export function toQueryParam(spec) {
   const out = {};
   if ((spec?.minRating ?? 0) > 0) out.minRating = spec.minRating;
@@ -42,9 +45,13 @@ export function toQueryParam(spec) {
     out.scopeIds = spec.scopeIds;
   }
   if (spec?.keepScope) out.keepScope = true;
+  if (typeof spec?.folderPath === "string" && spec.folderPath) {
+    out.folderPath = spec.folderPath;
+  }
   if (Number.isFinite(spec?.dateFrom)) out.dateFrom = spec.dateFrom;
   if (Number.isFinite(spec?.dateTo)) out.dateTo = spec.dateTo;
-  if (spec?.dateAttr && spec.dateAttr !== "date_taken") out.dateAttr = spec.dateAttr;
+  if (spec?.dateAttr && spec.dateAttr !== "date_taken")
+    out.dateAttr = spec.dateAttr;
   return Object.keys(out).length ? JSON.stringify(out) : null;
 }
 

@@ -22,48 +22,77 @@ describe("filterSpec", () => {
     expect(isActive({ minRating: 0, orientations: ["portrait"] })).toBe(true);
     expect(isActive({ minRating: 0, orientations: ORIENTATIONS })).toBe(false);
     expect(isActive({ minRating: 0, orientations: [] })).toBe(false);
-    expect(JSON.parse(toQueryParam({ minRating: 0, orientations: ["portrait"] }))).toEqual({
+    expect(
+      JSON.parse(toQueryParam({ minRating: 0, orientations: ["portrait"] }))
+    ).toEqual({
       orientations: ["portrait"],
     });
+  });
+  it("a folderPath focus activates and round-trips through toQueryParam", () => {
+    expect(isActive({ ...DEFAULT_FILTER, folderPath: "/photos/trip" })).toBe(
+      true
+    );
+    expect(isActive({ ...DEFAULT_FILTER, folderPath: "" })).toBe(false);
+    expect(
+      JSON.parse(
+        toQueryParam({ ...DEFAULT_FILTER, folderPath: "/photos/trip" })
+      )
+    ).toEqual({ folderPath: "/photos/trip" });
   });
   it("a time-range bound activates and round-trips through toQueryParam", () => {
     expect(isActive({ ...DEFAULT_FILTER, dateFrom: 1000 })).toBe(true);
     expect(isActive({ ...DEFAULT_FILTER, dateTo: 2000 })).toBe(true);
     expect(isActive(DEFAULT_FILTER)).toBe(false); // both null
     expect(
-      JSON.parse(toQueryParam({ ...DEFAULT_FILTER, dateFrom: 1000, dateTo: 2000 }))
+      JSON.parse(
+        toQueryParam({ ...DEFAULT_FILTER, dateFrom: 1000, dateTo: 2000 })
+      )
     ).toEqual({ dateFrom: 1000, dateTo: 2000 });
   });
 });
 
 describe("applyRatingClick", () => {
   it("sets the threshold to the clicked star", () => {
-    expect(applyRatingClick({ minRating: 0, orientations: ORIENTATIONS }, 4).minRating).toBe(4);
+    expect(
+      applyRatingClick({ minRating: 0, orientations: ORIENTATIONS }, 4)
+        .minRating
+    ).toBe(4);
   });
   it("clicking the current threshold star clears to Any (0)", () => {
-    expect(applyRatingClick({ minRating: 4, orientations: ORIENTATIONS }, 4).minRating).toBe(0);
+    expect(
+      applyRatingClick({ minRating: 4, orientations: ORIENTATIONS }, 4)
+        .minRating
+    ).toBe(0);
   });
   it("preserves orientations untouched", () => {
-    expect(applyRatingClick({ minRating: 0, orientations: ["portrait"] }, 2).orientations).toEqual([
-      "portrait",
-    ]);
+    expect(
+      applyRatingClick({ minRating: 0, orientations: ["portrait"] }, 2)
+        .orientations
+    ).toEqual(["portrait"]);
   });
 });
 
 describe("toggleOrientation", () => {
   it("removes an included orientation", () => {
-    expect(toggleOrientation({ minRating: 0, orientations: ORIENTATIONS }, "landscape").orientations).toEqual([
-      "portrait",
-      "square",
-    ]);
+    expect(
+      toggleOrientation(
+        { minRating: 0, orientations: ORIENTATIONS },
+        "landscape"
+      ).orientations
+    ).toEqual(["portrait", "square"]);
   });
   it("adds an excluded orientation back in canonical order", () => {
-    expect(toggleOrientation({ minRating: 0, orientations: ["square"] }, "landscape").orientations).toEqual([
-      "landscape",
-      "square",
-    ]);
+    expect(
+      toggleOrientation({ minRating: 0, orientations: ["square"] }, "landscape")
+        .orientations
+    ).toEqual(["landscape", "square"]);
   });
   it("preserves minRating untouched", () => {
-    expect(toggleOrientation({ minRating: 3, orientations: ORIENTATIONS }, "portrait").minRating).toBe(3);
+    expect(
+      toggleOrientation(
+        { minRating: 3, orientations: ORIENTATIONS },
+        "portrait"
+      ).minRating
+    ).toBe(3);
   });
 });
