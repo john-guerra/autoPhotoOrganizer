@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.7.5-alpha
+
+- **Fixed: expanding a group showed only part of it** — a group now opens from
+  its first photo and fills in as you scroll down, instead of loading only the
+  tail end of the group (follow-up to #74).
+
 ## 2.7.4-alpha
 
 - **Fixed: jumping to the next/previous group (Alt+←/→) landed mid-group** — the

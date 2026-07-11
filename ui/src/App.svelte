@@ -1310,6 +1310,27 @@
   /** Toggle a section's collapsed state and re-center the feed on whatever
    * photo is currently selected, so the user doesn't lose their place —
    * mirrors onGroupByChange's re-centering. */
+  /** The id of a group's first photo in the current sort (null if the group
+   * has no photos under the active filter). Seeks to the group's own top via
+   * startPath so an expand loads the group from its BEGINNING and paginates
+   * downward. safeFocusId(selected) can't do this: the collapsed group is a
+   * single placeholder with no real photo id, so it resolves to the NEXT
+   * group's first photo, and recentering there loads only this group's tail
+   * (the reported "doesn't expand all the photos" — #74). Must run AFTER the
+   * group is removed from collapsedPaths, so the server returns its real photos
+   * rather than the placeholder. */
+  async function firstPhotoIdOfGroup(path) {
+    const { items: head } = await fetchFeed({
+      groupBy,
+      collapsed: collapsedPaths,
+      startPath: path,
+      after: 1,
+      filter: displayFilter,
+      sort,
+    });
+    return head[0]?.id ?? null;
+  }
+
   async function toggleSectionCollapse(path) {
     const key = pathKey(path);
     const collapsing = !collapsedPaths.some((p) => pathKey(p) === key);
@@ -1324,7 +1345,13 @@
     collapsedPaths = collapsing
       ? [...collapsedPaths, path]
       : collapsedPaths.filter((p) => pathKey(p) !== key);
-    await recenterFeedOnId(safeFocusId(selected, collapsing ? path : null));
+    // Expand seeks to the group's own first photo (loads from the top, extends
+    // downward via loadMore("after")); collapse re-centers on the current
+    // selection, excluding the group about to be hidden.
+    const focusId = collapsing
+      ? safeFocusId(selected, path)
+      : ((await firstPhotoIdOfGroup(path)) ?? safeFocusId(selected));
+    await recenterFeedOnId(focusId);
     if (expandPin) {
       await tick();
       pinExpandNow();
