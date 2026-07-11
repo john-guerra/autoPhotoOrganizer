@@ -111,3 +111,21 @@ export function renderAlbumName(template, date, n) {
     .join("/");
   return safe.length ? safe : `Album ${n}`;
 }
+
+/**
+ * Display name for each album, keeping a user-typed name alive across
+ * re-clustering as long as the album still starts with the same first photo.
+ * @param {Array<{startAt:number, ids:number[]}>} albums
+ * @param {Map<number,string>} editedNames keyed by first-photo id
+ * @param {string} template strftime template for un-edited albums
+ * @returns {string[]}
+ */
+export function computeAlbumNames(albums, editedNames, template) {
+  return albums.map((a, i) => {
+    const firstId = a.ids[0];
+    const typed = editedNames.get(firstId);
+    return typed != null && typed !== ""
+      ? typed
+      : renderAlbumName(template, new Date(a.startAt), i + 1);
+  });
+}

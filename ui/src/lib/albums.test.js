@@ -5,6 +5,7 @@ import {
   clusterByGap,
   defaultAlbumName,
   renderAlbumName,
+  computeAlbumNames,
 } from "./albums.js";
 
 const H = 3600_000; // one hour in ms
@@ -106,5 +107,35 @@ describe("renderAlbumName", () => {
     expect(renderAlbumName("", d, 4)).toBe("Album 4");
     expect(renderAlbumName("   ", d, 4)).toBe("Album 4");
     expect(renderAlbumName("/", d, 4)).toBe("Album 4");
+  });
+});
+
+describe("computeAlbumNames", () => {
+  const A = { startAt: new Date(2017, 0, 9).getTime(), ids: [10, 11, 12] };
+  const B = { startAt: new Date(2017, 0, 11).getTime(), ids: [20, 21] };
+
+  it("uses the template when no name was typed", () => {
+    expect(computeAlbumNames([A, B], new Map(), "%Y-%m-%d")).toEqual([
+      "2017-01-09",
+      "2017-01-11",
+    ]);
+  });
+
+  it("keeps a typed name keyed to the album's first photo", () => {
+    const edited = new Map([[10, "Diana_VR"]]);
+    expect(computeAlbumNames([A, B], edited, "%Y-%m-%d")).toEqual([
+      "Diana_VR",
+      "2017-01-11",
+    ]);
+  });
+
+  it("drops a typed name once its album no longer starts with that photo", () => {
+    const edited = new Map([[10, "Diana_VR"]]);
+    // Re-clustered so the first album now starts at id 11, not 10.
+    const A2 = { startAt: A.startAt, ids: [11, 12] };
+    expect(computeAlbumNames([A2, B], edited, "%Y-%m-%d")).toEqual([
+      "2017-01-09",
+      "2017-01-11",
+    ]);
   });
 });
