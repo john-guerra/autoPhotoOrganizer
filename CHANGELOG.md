@@ -88,7 +88,7 @@ user-facing — what you can now do, not how it's built.
   defaults to the Desktop, and switching Move/Copy updates the default until
   you hand-type a path; a warning appears if a Move destination is on a
   different volume, since that copies every file instead of an instant move
- .
+  .
 
 ## 2.8.5-alpha
 
@@ -101,7 +101,7 @@ user-facing — what you can now do, not how it's built.
 - **Backend groundwork for smart move/copy destination defaults** —
   `/api/system/paths` (home + Desktop) and `/api/system/same-volume` (cheap
   same-device check) are in place ahead of the setup-modal dest-picker wiring
- .
+  .
 
 ## 2.8.3-alpha
 

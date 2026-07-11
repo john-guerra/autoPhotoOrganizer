@@ -23,24 +23,24 @@
 
 ## File map
 
-| File | Responsibility | Action |
-|---|---|---|
-| `ui/src/lib/albums.js` | pure clustering + naming helpers | modify: add `renderAlbumName`, `computeAlbumNames` |
-| `ui/src/lib/albums.test.js` | tests for the above | modify |
-| `ui/src/lib/albumPrefs.js` | global prefs (pure merge + localStorage wrapper) | create |
-| `ui/src/lib/albumPrefs.test.js` | tests for the pure merge | create |
-| `ui/src/lib/Modal.svelte` | reusable native-`<dialog>` wrapper | create |
-| `ui/src/lib/AlbumsSetupModal.svelte` | explainer + gap + naming + dest config | create |
-| `ui/src/lib/AlbumsView.svelte` | review view: default gap, Auto btn, name persistence, Options btns | modify |
-| `ui/src/lib/ViewControls.svelte` | entry button label + tooltip | modify |
-| `ui/src/App.svelte` | modal open policy + prefs pass-through | modify |
-| `ui/src/lib/actions.js` | `clickOutside` + `onEscape` Svelte actions | create |
-| `ui/src/lib/actions.test.js` | test for the pure parts (if any) | create (optional) |
-| `ui/src/lib/ManageLibrary.svelte` | retrofit onto `Modal` | modify |
-| `ui/src/lib/ShortcutsOverlay.svelte` | retrofit onto `Modal` | modify |
-| `ui/src/lib/SourceControls.svelte` | dropdown dismissal | modify |
-| `server/db/feed.test.js` | assert a video clusters into albums | modify |
-| `package.json`, `CHANGELOG.md` | version + changelog | modify |
+| File                                 | Responsibility                                                     | Action                                             |
+| ------------------------------------ | ------------------------------------------------------------------ | -------------------------------------------------- |
+| `ui/src/lib/albums.js`               | pure clustering + naming helpers                                   | modify: add `renderAlbumName`, `computeAlbumNames` |
+| `ui/src/lib/albums.test.js`          | tests for the above                                                | modify                                             |
+| `ui/src/lib/albumPrefs.js`           | global prefs (pure merge + localStorage wrapper)                   | create                                             |
+| `ui/src/lib/albumPrefs.test.js`      | tests for the pure merge                                           | create                                             |
+| `ui/src/lib/Modal.svelte`            | reusable native-`<dialog>` wrapper                                 | create                                             |
+| `ui/src/lib/AlbumsSetupModal.svelte` | explainer + gap + naming + dest config                             | create                                             |
+| `ui/src/lib/AlbumsView.svelte`       | review view: default gap, Auto btn, name persistence, Options btns | modify                                             |
+| `ui/src/lib/ViewControls.svelte`     | entry button label + tooltip                                       | modify                                             |
+| `ui/src/App.svelte`                  | modal open policy + prefs pass-through                             | modify                                             |
+| `ui/src/lib/actions.js`              | `clickOutside` + `onEscape` Svelte actions                         | create                                             |
+| `ui/src/lib/actions.test.js`         | test for the pure parts (if any)                                   | create (optional)                                  |
+| `ui/src/lib/ManageLibrary.svelte`    | retrofit onto `Modal`                                              | modify                                             |
+| `ui/src/lib/ShortcutsOverlay.svelte` | retrofit onto `Modal`                                              | modify                                             |
+| `ui/src/lib/SourceControls.svelte`   | dropdown dismissal                                                 | modify                                             |
+| `server/db/feed.test.js`             | assert a video clusters into albums                                | modify                                             |
+| `package.json`, `CHANGELOG.md`       | version + changelog                                                | modify                                             |
 
 Run tests with `npm test` (vitest run). Run the app with `npm run dev`.
 
@@ -51,10 +51,12 @@ Run tests with `npm test` (vitest run). Run the app with `npm run dev`.
 ### Task 1: `renderAlbumName` — strftime folder names with `%n` + nesting
 
 **Files:**
+
 - Modify: `ui/src/lib/albums.js`
 - Test: `ui/src/lib/albums.test.js`
 
 **Interfaces:**
+
 - Consumes: `d3.timeFormat` (from `d3`).
 - Produces: `renderAlbumName(template: string, date: Date, n: number): string` — a folder name that MAY contain `/` for nested folders; `%n` → 1-based index; leading `/` and `..` segments stripped; empty result falls back to `Album {n}`.
 
@@ -161,10 +163,12 @@ git commit -m "feat(albums): strftime album-name template with %n and nested fol
 ### Task 2: `computeAlbumNames` — names that survive re-clustering
 
 **Files:**
+
 - Modify: `ui/src/lib/albums.js`
 - Test: `ui/src/lib/albums.test.js`
 
 **Interfaces:**
+
 - Consumes: `renderAlbumName` (Task 1).
 - Produces: `computeAlbumNames(albums, editedNames, template): string[]` where `albums: Array<{startAt:number, ids:number[]}>`, `editedNames: Map<number,string>` keyed by first-photo id. For each album: return `editedNames.get(album.ids[0])` if present, else `renderAlbumName(template, new Date(album.startAt), i+1)`.
 
@@ -252,10 +256,12 @@ git commit -m "feat(albums): first-photo-keyed album names survive re-clustering
 ### Task 3: `albumPrefs` — global preferences (pure merge + localStorage)
 
 **Files:**
+
 - Create: `ui/src/lib/albumPrefs.js`
 - Test: `ui/src/lib/albumPrefs.test.js`
 
 **Interfaces:**
+
 - Produces:
   - `DEFAULT_ALBUM_PREFS = { template: "%Y-%m-%d", gapMode: "fixed", fixedGapMs: 60000, k: 2, move: true }`
   - `mergeAlbumPrefs(stored: object|null): object` — defaults shallow-merged with a (possibly partial/garbage) stored object, coercing types and clamping `fixedGapMs >= 1000`, `gapMode ∈ {"fixed","auto"}`.
@@ -388,12 +394,14 @@ git commit -m "feat(albums): global album prefs store (1-min default, strftime t
 ### Task 4: `Modal.svelte` — reusable native-`<dialog>` wrapper
 
 **Files:**
+
 - Create: `ui/src/lib/Modal.svelte`
 
 **Interfaces:**
+
 - Produces a component with props `open` (two-way `bind:open`), `title` (string), `size` (`"sm"|"md"|"lg"`, default `"md"`), `dismissible` (default `true`); slots: default (body), `footer`; events: `close`. When `open` → calls `showModal()`; when false → `close()`. Emits `close` on Esc (`cancel`), backdrop click, and the ✕ button.
 
-*(No vitest — component behavior is verified live in Task 14. Correctness here is by inspection + browser check.)*
+_(No vitest — component behavior is verified live in Task 14. Correctness here is by inspection + browser check.)_
 
 - [ ] **Step 1: Create `ui/src/lib/Modal.svelte`**
 
@@ -551,9 +559,11 @@ git commit -m "feat(ui): reusable Modal built on the native <dialog> element"
 ### Task 5: `AlbumsSetupModal.svelte` — explainer + gap + naming + destination
 
 **Files:**
+
 - Create: `ui/src/lib/AlbumsSetupModal.svelte`
 
 **Interfaces:**
+
 - Consumes: `Modal.svelte`; `renderAlbumName` (Task 1); album prefs shape (Task 3); `parseDuration`/`fmtDur` (copy the two helpers from `AlbumsView.svelte` — they're small and self-contained — or, preferred, export them from `albums.js` and import in both; see note).
 - Props: `open` (bind), `prefs` (the album prefs object), `sampleDate` (a `Date` for the live preview — the first album's start, or now), `dest` (string), `hasNativePicker` (bool).
 - Events: `apply` with `detail = { template, gapMode, fixedGapMs, move, dest }`; `close`.
@@ -722,8 +732,10 @@ git commit -m "refactor(albums): share duration helpers from albums.js"
         placeholder="e.g. 1m, 30m, 2h, 1d"
         disabled={gapMode !== "fixed"}
       />
-      <button class:active={gapMode === "auto"} on:click={useAuto} title="mean + k·stddev of gaps"
-        >Auto</button
+      <button
+        class:active={gapMode === "auto"}
+        on:click={useAuto}
+        title="mean + k·stddev of gaps">Auto</button
       >
     </div>
     <p class="hint">
@@ -735,10 +747,17 @@ git commit -m "refactor(albums): share duration helpers from albums.js"
 
   <section class="field">
     <label class="lbl">Folder naming</label>
-    <input class="tpl" bind:value={template} spellcheck="false" placeholder="%Y/%Y_%m%b_%d" />
+    <input
+      class="tpl"
+      bind:value={template}
+      spellcheck="false"
+      placeholder="%Y/%Y_%m%b_%d"
+    />
     <div class="tokens">
       {#each TOKENS as [tok, ex]}
-        <button class="token" title={ex} on:click={() => insertToken(tok)}>{tok}</button>
+        <button class="token" title={ex} on:click={() => insertToken(tok)}
+          >{tok}</button
+        >
       {/each}
     </div>
     <p class="preview">
@@ -753,7 +772,12 @@ git commit -m "refactor(albums): share duration helpers from albums.js"
       <label><input type="radio" value={false} bind:group={move} /> Copy</label>
     </div>
     <div class="dest-row">
-      <input class="dest" bind:value={localDest} placeholder="/materialize/destination" spellcheck="false" />
+      <input
+        class="dest"
+        bind:value={localDest}
+        placeholder="/materialize/destination"
+        spellcheck="false"
+      />
       {#if hasNativePicker}<button on:click={pickDest}>Choose…</button>{/if}
     </div>
   </section>
@@ -883,9 +907,11 @@ git commit -m "feat(albums): setup modal — how-it-works, split gap, strftime n
 ### Task 6: `AlbumsView.svelte` — default gap, Auto button, name persistence, Options
 
 **Files:**
+
 - Modify: `ui/src/lib/AlbumsView.svelte`
 
 **Interfaces:**
+
 - Consumes: prefs shape (Task 3); `computeAlbumNames`, `autoThresholdMs`, `computeGapStats`, `clusterByGap` (Tasks 1–2 + existing); `AlbumsSetupModal` (Task 5).
 - New props: `prefs` (album prefs object), passed from App.
 - Emits: `openoptions` (ask App to open the setup modal), plus existing `relimit`/`close`/`openphoto`.
@@ -907,8 +933,12 @@ $: thresholdMs = gapMode === "auto" ? autoThresholdMs(stats, k) : fixedGapMs;
 Keep the existing type-exact editor, but have it set `fixedGapMs` + `gapMode="fixed"`. Add an **Auto** button in the bar:
 
 ```svelte
-<button class="mat-btn" class:active={gapMode === "auto"} on:click={() => (gapMode = "auto")}
-  title="Pick the split gap automatically (mean + k·stddev)">Auto</button>
+<button
+  class="mat-btn"
+  class:active={gapMode === "auto"}
+  on:click={() => (gapMode = "auto")}
+  title="Pick the split gap automatically (mean + k·stddev)">Auto</button
+>
 ```
 
 And the slider, when moved, sets `gapMode="fixed"` and maps its value to `fixedGapMs` (reuse the existing slider but bind it to a fixed-ms scale; simplest: keep `k` slider for auto and add a separate fixed-gap slider shown when `gapMode==="fixed"`). Minimal approach: keep one slider that edits `fixedGapMs` on a log scale from 30s→2d and a separate `Auto` toggle button; `onSlider` sets `gapMode="fixed"`.
@@ -938,7 +968,11 @@ Update `namedAlbums()` to read from `names[i]` (the derived array) rather than t
 Add to the bar:
 
 ```svelte
-<button class="mat-btn" on:click={() => (setupOpen = true)} title="Naming & gap options">⚙ Options</button>
+<button
+  class="mat-btn"
+  on:click={() => (setupOpen = true)}
+  title="Naming & gap options">⚙ Options</button
+>
 ```
 
 Add near the top of the component:
@@ -979,6 +1013,7 @@ git commit -m "feat(albums): 1-min default + Auto button, first-photo-keyed name
 ### Task 7: `ViewControls.svelte` — Auto Albums button + tooltip
 
 **Files:**
+
 - Modify: `ui/src/lib/ViewControls.svelte:73-82`
 
 - [ ] **Step 1: Rename label + tooltip**
@@ -987,12 +1022,15 @@ git commit -m "feat(albums): 1-min default + Auto button, first-photo-keyed name
 <button
   class="reveal-btn"
   class:active={albumMode}
-  on:click={() =>
-    albumMode ? (albumMode = false) : dispatch("detectalbums")}
+  on:click={() => (albumMode ? (albumMode = false) : dispatch("detectalbums"))}
   disabled={detectingAlbums}
   title="Group the photos you're viewing into albums by the pauses between shots — a long gap starts a new album. Preview, rename, then save them into folders (photos and videos)."
 >
-  {detectingAlbums ? "Detecting…" : albumMode ? "✕ Auto Albums" : "▤ Auto Albums"}
+  {detectingAlbums
+    ? "Detecting…"
+    : albumMode
+      ? "✕ Auto Albums"
+      : "▤ Auto Albums"}
 </button>
 ```
 
@@ -1012,9 +1050,11 @@ git commit -m "feat(albums): rename entry to Auto Albums with a clearer tooltip"
 ### Task 8: `App.svelte` — modal open policy + prefs pass-through
 
 **Files:**
+
 - Modify: `ui/src/App.svelte` (around `detectAlbums` ~line 1054, the `<AlbumsView>` usage ~line 2829, and state decls ~line 261-266)
 
 **Interfaces:**
+
 - Consumes: `loadAlbumPrefs`, `saveAlbumPrefs` (Task 3); `AlbumsView` new `prefs` prop + `prefschange`/`openoptions` events.
 
 - [ ] **Step 1: Load prefs + first-entry-per-session flag**
@@ -1074,6 +1114,7 @@ git commit -m "feat(albums): load/persist album prefs, open setup on first entry
 ### Task 9: Backend — assert videos cluster into albums
 
 **Files:**
+
 - Modify: `server/db/feed.test.js` (the `workingSetTimeline` describe block ~line 1098)
 
 - [ ] **Step 1: Write the failing test**
@@ -1110,6 +1151,7 @@ git commit -m "test(albums): guarantee videos are included in the album timeline
 ### Task 10: Retrofit `ManageLibrary.svelte` onto `Modal`
 
 **Files:**
+
 - Modify: `ui/src/lib/ManageLibrary.svelte`
 
 - [ ] **Step 1: Replace the hand-rolled backdrop with `<Modal>`**
@@ -1122,7 +1164,12 @@ Import and wrap. Replace the outer `.manage-library-backdrop` / `.manage-library
   // ...existing imports & logic unchanged...
 </script>
 
-<Modal open={true} title="Manage library" size="md" on:close={() => dispatch("close")}>
+<Modal
+  open={true}
+  title="Manage library"
+  size="md"
+  on:close={() => dispatch("close")}
+>
   <!-- existing {#if message}…, and all <section> blocks, unchanged -->
 </Modal>
 ```
@@ -1145,6 +1192,7 @@ git commit -m "refactor(ui): ManageLibrary on the native-dialog Modal (Esc/focus
 ### Task 11: Retrofit `ShortcutsOverlay.svelte` onto `Modal` (reconcile Esc)
 
 **Files:**
+
 - Modify: `ui/src/lib/ShortcutsOverlay.svelte`
 - Modify: `ui/src/App.svelte` (the `onKeydown` Esc/`?` handling for `shortcutsHelpOpen`)
 
@@ -1158,7 +1206,7 @@ git commit -m "refactor(ui): ManageLibrary on the native-dialog Modal (Esc/focus
   import { createEventDispatcher } from "svelte";
   const dispatch = createEventDispatcher();
   const close = () => dispatch("close");
-  const groups = [ /* unchanged */ ];
+  const groups = [/* unchanged */];
 </script>
 
 <Modal open={true} title="Keyboard shortcuts" size="lg" on:close={close}>
@@ -1191,10 +1239,12 @@ git commit -m "refactor(ui): ShortcutsOverlay on Modal; dialog owns Esc (no doub
 ### Task 12: Dropdown dismissal — `clickOutside` / `onEscape` actions
 
 **Files:**
+
 - Create: `ui/src/lib/actions.js`
 - Modify: `ui/src/lib/SourceControls.svelte`
 
 **Interfaces:**
+
 - Produces: `clickOutside(node, callback)` and `onEscape(node, callback)` Svelte actions (standard `{ destroy }` shape).
 
 - [ ] **Step 1: Create `ui/src/lib/actions.js`**
@@ -1271,6 +1321,7 @@ git commit -m "feat(ui): dismiss Library/Add-folder dropdowns on outside-click +
 ### Task 13: Version bump, CHANGELOG, file deferred issues
 
 **Files:**
+
 - Modify: `package.json`, `CHANGELOG.md`
 
 - [ ] **Step 1: Bump patch + changelog**
@@ -1334,6 +1385,7 @@ git commit -m "chore(release): 2.8.3-alpha — Auto Albums polish + native-dialo
 - **Type consistency:** `renderAlbumName(template,date,n)`, `computeAlbumNames(albums,editedNames,template)`, prefs shape `{template,gapMode,fixedGapMs,k,move}`, and the setup modal `apply` detail `{template,gapMode,fixedGapMs,move,dest}` are used consistently across T1–T8.
 - **Known soft spots to resolve during execution (flag in review, don't guess):**
   (a) T6 Step 1 — exact slider mapping for a fixed-ms gap (log scale) vs. keeping the k-slider only for auto; pick the simplest that keeps one control authoritative. (b) T8 Step 2 — the cleanest way to pass "auto-open setup on first entry" (an `autoOpenSetup` prop captured pre-flip). (c) T9 — match the file's existing row-seeding helper and the schema's video marker exactly. These are implementation details, not open design questions.
+
 ```
 ---
 
@@ -1496,3 +1548,4 @@ All original checks PLUS: verify the **freeze fix on a packaged/Electron build**
 (not `npm run dev`); after Copy-materialize the **new nested tree appears** in the
 sidebar; **cross-volume Move shows the warning**; **group-by-folder-name** shows
 concise labels and disambiguates two same-named folders.
+```

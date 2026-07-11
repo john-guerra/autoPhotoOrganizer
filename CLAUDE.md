@@ -74,8 +74,8 @@ is **not** user feedback.
 
 - **Surface every failure the user can trigger** as a visible, specific,
   actionable message in the UI — never a silent no-op or console-only error.
-  A `413`, a rejected job, an unmounted drive: the user sees *what happened*
-  and *what to do next*, not a dead button. If an operation can fail, its
+  A `413`, a rejected job, an unmounted drive: the user sees _what happened_
+  and _what to do next_, not a dead button. If an operation can fail, its
   caller renders the error (the existing pattern: `result.error` inline, the
   status line for transient state).
 - **Prefer specific over generic.** "Undo failed: the move record was too large
@@ -86,8 +86,8 @@ is **not** user feedback.
 - **Confirm or make-undoable anything destructive.** Prefer soft-delete + a
   visible undo affordance over a hard, unrecoverable action (and over a hard
   failure).
-- When you add or touch an action, ask: *if this fails, does the user find out,
-  and do they know what to do?* If not, it isn't done.
+- When you add or touch an action, ask: _if this fails, does the user find out,
+  and do they know what to do?_ If not, it isn't done.
 
 ## Committing
 

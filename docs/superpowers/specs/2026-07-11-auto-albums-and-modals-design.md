@@ -14,14 +14,14 @@ original body) — Phase 1 in build.
 
 ## Problem
 
-The auto-albums feature is the product's headline user story — *"I come back from
+The auto-albums feature is the product's headline user story — _"I come back from
 a trip with thousands of photos+videos; split them into per-day / per-event
-groups and drop them into dated folders"* — but it is under-explained and
+groups and drop them into dated folders"_ — but it is under-explained and
 under-configurable:
 
 - The entry button just says **Albums** with a terse tooltip; a first-time user
   doesn't know what will happen.
-- There is no up-front explanation of *how* clustering works before it reorganizes
+- There is no up-front explanation of _how_ clustering works before it reorganizes
   the view.
 - The only naming scheme is a fixed `YYYY-MM-DD`; the legacy tool had a
   configurable date-format + prefix + index, and the user's real-world convention
@@ -29,8 +29,8 @@ under-configurable:
 - Typed album names are **lost** whenever the split slider re-clusters (they are
   re-seeded on any structural change).
 - The default split threshold is the statistical `mean + k·stddev`, which is a
-  good *auto* mode but a poor *default* to reason about; the user wants a concrete
-  **1-minute** starting point with *Auto* as an explicit button.
+  good _auto_ mode but a poor _default_ to reason about; the user wants a concrete
+  **1-minute** starting point with _Auto_ as an explicit button.
 
 Separately, the app's modals are hand-rolled backdrop `<div>`s (`ManageLibrary`,
 `ShortcutsOverlay`) with manual `z-index`, **no `Esc`, no focus trap, no focus
@@ -77,9 +77,9 @@ Phase A then applies that same component to the existing hand-rolled modals.
 ### B1. Entry button — `ui/src/lib/ViewControls.svelte`
 
 - Label `▤ Albums` → `▤ Auto Albums`; active state `✕ Auto Albums`.
-- Tooltip: *"Group the photos you're viewing into albums by the pauses between
+- Tooltip: _"Group the photos you're viewing into albums by the pauses between
   shots — a long gap starts a new album. Preview, rename, then save them into
-  folders (photos and videos)."*
+  folders (photos and videos)."_
 
 ### B2. Naming engine — `ui/src/lib/albums.js`
 
@@ -130,9 +130,9 @@ Built on `Modal.svelte` (Phase B0). Sections:
 
 1. **How it works** — 2–3 friendly sentences plus a tiny inline SVG showing dots
    clustering, with a big gap starting a new group. Copy example:
-   *"AutoGallery looks at when each photo and video was taken. When there's a long
+   _"AutoGallery looks at when each photo and video was taken. When there's a long
    pause between shots, it starts a new album. Drag the split gap to make albums
-   bigger or smaller, or let AutoGallery pick a gap automatically."*
+   bigger or smaller, or let AutoGallery pick a gap automatically."_
 2. **Split gap** — a slider + type-exact field (reusing the existing
    `parseDuration`/`fmtDur` helpers), showing the current gap; default **1 min**.
    An **`Auto`** button switches to the statistical `mean + k·stddev` threshold
@@ -201,7 +201,7 @@ Nested names already work: `resolveExportTarget` → `safeResolve` uses
 ### B0/A0. `ui/src/lib/Modal.svelte` (new; created in Phase B, used across both)
 
 A thin reusable wrapper over the native `<dialog>` element, borrowing Bootstrap's
-*structure/semantics*, not its CSS:
+_structure/semantics_, not its CSS:
 
 - Props: `open` (two-way `bind:open`), `title`, optional `size`
   (`sm|md|lg`), optional `dismissible` (default true).
@@ -224,8 +224,8 @@ Replace the hand-rolled `.manage-library-backdrop/.panel` with `<Modal>`; keep
 all existing sections/logic. Gains Esc/focus-trap/restore and removes the manual
 z-index + `stopPropagation`.
 
-*(Note: the inner native `confirm()` calls are a separate concern — leave them for
-now, or track as a follow-up; not in scope.)*
+_(Note: the inner native `confirm()` calls are a separate concern — leave them for
+now, or track as a follow-up; not in scope.)_
 
 ### A2. Retrofit `ShortcutsOverlay.svelte`
 
@@ -286,6 +286,7 @@ Five new user requests and a critical architect review reshaped the epic into
 two phases. **This revision governs where it conflicts with the original body.**
 
 ### Corrections to the original design
+
 - **"No backend changes" (original Goals/§B7) was wrong.** Materialize needs
   real backend work (below). The nested-name / `mkdirSync recursive` /
   `safeResolve` observations remain true; the "no change" conclusion does not.
@@ -297,6 +298,7 @@ two phases. **This revision governs where it conflicts with the original body.**
   half), and backend fixes are permanent.
 
 ### Phase 1 — build now (this plan)
+
 1. **Modal foundation** — `Modal.svelte` (native `<dialog>`), retrofit
    `ManageLibrary` + `ShortcutsOverlay`, dropdown dismissal. (Unchanged.)
 2. **Auto Albums naming** — button/tooltip; strftime template + live preview;
@@ -338,7 +340,9 @@ two phases. **This revision governs where it conflicts with the original body.**
    `2017_2`).
 
 ### Phase 2 — design carefully, then build (separate spec: the "in-feed" epic)
+
 Filed as a GitHub epic; needs its own brainstorm/spec. Key items and the crux:
+
 - **In-feed "Split into albums"** replacing `AlbumsView` — per-group action
   (button / right-click), parent group's name as album-name prefix,
   loupe-safe, state-preserving. Reuse the burst **algorithm** (`detectBursts`
@@ -363,5 +367,6 @@ Filed as a GitHub epic; needs its own brainstorm/spec. Key items and the crux:
   main-process loop, a different layer.
 
 ### Deferred → standalone GitHub issues
+
 - AI-generated meaningful album names (keep the app free/offline).
 - Shift the capture date of a whole album (fix a wrong camera clock).
