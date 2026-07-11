@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import ffmpegPath from "ffmpeg-static";
-import { NodeProcessingService, formatCamera } from "./NodeProcessingService.js";
+import {
+  NodeProcessingService,
+  formatCamera,
+  exifToMeta,
+} from "./NodeProcessingService.js";
 
 let dir;
 let svc;
@@ -187,5 +191,35 @@ describe("formatCamera", () => {
     expect(formatCamera(undefined, "iPhone 15")).toBe("iPhone 15");
     expect(formatCamera("Sony", undefined)).toBe("Sony");
     expect(formatCamera(undefined, undefined)).toBe("");
+  });
+});
+
+describe("exifToMeta", () => {
+  it("maps exifr fields to raw persisted values", () => {
+    expect(
+      exifToMeta({
+        FNumber: 2.8,
+        ExposureTime: 0.004,
+        ISO: 400,
+        FocalLength: 50,
+        LensModel: "RF24-70mm F2.8 L IS USM",
+      })
+    ).toEqual({
+      aperture: 2.8,
+      shutter: 0.004,
+      iso: 400,
+      focalLength: 50,
+      lens: "RF24-70mm F2.8 L IS USM",
+    });
+  });
+
+  it("returns nulls and an empty-string lens sentinel when EXIF is absent", () => {
+    expect(exifToMeta(undefined)).toEqual({
+      aperture: null,
+      shutter: null,
+      iso: null,
+      focalLength: null,
+      lens: "",
+    });
   });
 });

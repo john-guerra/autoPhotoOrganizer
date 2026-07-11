@@ -31,7 +31,9 @@ class NotImplementedError extends Error {
 class VideoDecodeError extends Error {
   /** @param {string} file @param {string} [detail] */
   constructor(file, detail) {
-    super(`video poster-frame decode failed for ${file}${detail ? `: ${detail}` : ""}`);
+    super(
+      `video poster-frame decode failed for ${file}${detail ? `: ${detail}` : ""}`
+    );
     this.name = "VideoDecodeError";
   }
 }
@@ -68,7 +70,9 @@ function runBinary(bin, args) {
     child.on("error", (e) => done(reject, e));
     child.on("close", (code) => {
       if (code === 0) return done(resolve, Buffer.concat(out));
-      const msg = Buffer.concat(err).toString().trim().split("\n").pop() || `exit ${code}`;
+      const msg =
+        Buffer.concat(err).toString().trim().split("\n").pop() ||
+        `exit ${code}`;
       done(reject, new Error(msg));
     });
   });
@@ -134,8 +138,25 @@ export const VIDEO_EXTS = new Set([
 export function formatCamera(make, model) {
   const mk = (make ?? "").trim();
   const md = (model ?? "").trim();
-  if (md && mk && !md.toLowerCase().startsWith(mk.toLowerCase())) return `${mk} ${md}`;
+  if (md && mk && !md.toLowerCase().startsWith(mk.toLowerCase()))
+    return `${mk} ${md}`;
   return md || mk || "";
+}
+
+/** Map a parsed exifr result to the raw EXIF fields we persist and later
+ * format in the UI. Numeric fields are null when absent; `lens` is "" (not
+ * null) so a stored value marks "EXIF was attempted" — mirroring how `width`
+ * marks dimensions attempted — which keeps /api/meta from re-extracting forever
+ * for files that genuinely have no lens tag. */
+export function exifToMeta(exif) {
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return {
+    aperture: num(exif?.FNumber),
+    shutter: num(exif?.ExposureTime),
+    iso: num(exif?.ISO),
+    focalLength: num(exif?.FocalLength),
+    lens: typeof exif?.LensModel === "string" ? exif.LensModel : "",
+  };
 }
 
 /**
@@ -306,11 +327,22 @@ export class NodeProcessingService extends ProcessingService {
         }
         try {
           const exif = await exifr.parse(path, {
-            pick: ["DateTimeOriginal", "CreateDate", "Make", "Model"],
+            pick: [
+              "DateTimeOriginal",
+              "CreateDate",
+              "Make",
+              "Model",
+              "FNumber",
+              "ExposureTime",
+              "ISO",
+              "FocalLength",
+              "LensModel",
+            ],
           });
           const createDate = exif?.DateTimeOriginal || exif?.CreateDate;
           if (createDate) meta.createDate = createDate;
           meta.camera = formatCamera(exif?.Make, exif?.Model);
+          Object.assign(meta, exifToMeta(exif));
         } catch {
           /* no EXIF */
         }
@@ -344,7 +376,9 @@ export class NodeProcessingService extends ProcessingService {
         path,
       ]);
       const probe = JSON.parse(out.toString());
-      const stream = (probe.streams || []).find((s) => s.codec_type === "video");
+      const stream = (probe.streams || []).find(
+        (s) => s.codec_type === "video"
+      );
 
       const durationStr = probe.format?.duration ?? stream?.duration;
       const duration = Number(durationStr);
