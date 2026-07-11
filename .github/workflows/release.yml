@@ -41,9 +41,12 @@ jobs:
       # Rebuild native modules (better-sqlite3) for Electron's ABI — each runner
       # does this for its own OS. electron-builder's built-in rebuild is a no-op
       # here, which shipped a Node-ABI binary and crashed the app on launch
-      # (#67), so force it and skip electron-builder's own rebuild.
+      # (#67), so force it and skip electron-builder's own rebuild via the
+      # `npmRebuild: false` build config (an inline `-c.npmRebuild=false` CLI
+      # arg mis-parsed on the Windows runner as a bogus config-file path and
+      # failed every Windows build).
       - run: npx electron-rebuild -f -w better-sqlite3
-      - run: npx electron-builder ${{ matrix.flag }} --publish always -c.npmRebuild=false
+      - run: npx electron-builder ${{ matrix.flag }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No signing certs in CI yet — keep the mac build from stalling on

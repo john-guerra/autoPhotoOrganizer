@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { basename } from "node:path";
 
 /** @param {string} absPath @returns {string} */
@@ -83,12 +84,12 @@ export function upsertVolume(db, mountRoot, exec = defaultExec) {
  */
 export function isVolumeMounted(volumeRow, exec = defaultExec) {
   if (!volumeRow.uuid) {
-    try {
-      exec(volumeRow.last_mount_path);
-      return true;
-    } catch {
-      return false;
-    }
+    // No stable UUID (internal disk, or a non-macOS host where `diskutil`
+    // doesn't exist): "mounted" degrades to "the mount path is present". Using
+    // existsSync here instead of a `diskutil` probe keeps this correct on
+    // Linux/Windows — the old probe threw on every non-macOS host and reported
+    // every folder as unmounted (which turned the CI `mounted` assertion red).
+    return existsSync(volumeRow.last_mount_path);
   }
   const current = getVolumeInfo(volumeRow.last_mount_path, exec);
   return current.uuid === volumeRow.uuid;

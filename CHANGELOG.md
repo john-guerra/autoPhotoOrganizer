@@ -6,6 +6,19 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.12-alpha
+
+- **Windows installers build again** — the release workflow's electron-builder
+  invocation mis-parsed a config flag on the Windows runner, so every Windows
+  build failed; the setting moved into the build config and Windows `.exe`
+  installers now ship alongside the macOS/Linux ones.
+- **Accurate Move warning** — the Auto Albums "Move" note now reads "relocates
+  the originals into the album folders (not a copy)", since Move defaults to
+  organizing in place rather than moving files out of the folder.
+- **Fixed: folders showed as offline on Linux** — the "mounted" check shelled
+  out to a macOS-only tool and reported every folder as unavailable on
+  Linux/Windows; it now uses a cross-platform presence check.
+
 ## 2.8.11-alpha
 
 - **Album naming defaults to the folder you're in** — leave the naming

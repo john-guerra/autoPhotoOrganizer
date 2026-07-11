@@ -3608,11 +3608,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .snapshot-count {
-    flex: 0 0 auto;
-    color: #888;
-    font-size: 0.78rem;
-  }
   .snap-wrap {
     flex: 1 1 auto;
     min-width: 0;

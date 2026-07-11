@@ -143,4 +143,23 @@ describe("isVolumeMounted", () => {
       )
     ).toBe(false);
   });
+
+  // The no-UUID branch (internal disk, or any non-macOS host where `diskutil`
+  // doesn't exist) must NOT depend on the exec probe — it used to shell out and
+  // reported every folder as unmounted on Linux/Windows. It now keys purely on
+  // whether the mount path is present, so a throwing exec is irrelevant.
+  it("uses path presence (not exec) when there is no uuid", () => {
+    const throwingExec = () => {
+      throw new Error("diskutil: command not found");
+    };
+    expect(
+      isVolumeMounted({ uuid: null, last_mount_path: "/" }, throwingExec)
+    ).toBe(true);
+    expect(
+      isVolumeMounted(
+        { uuid: null, last_mount_path: "/no/such/mount/xyz" },
+        throwingExec
+      )
+    ).toBe(false);
+  });
 });

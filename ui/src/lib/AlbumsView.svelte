@@ -74,9 +74,10 @@
   let destEdited = false;
   let materializing = false;
   let result = null;
-  // Materialize defaults to MOVE (relocates originals out of the source
-  // folders) — Copy is the safer opt-in. A completed/partially-canceled move
-  // job can be undone from the JobsPanel via its result manifest.
+  // Materialize defaults to MOVE (relocates the originals into the album
+  // folders — by default subfolders of the folder you're viewing) — Copy is
+  // the safer opt-in. A completed/partially-canceled move job can be undone
+  // from the JobsPanel via its result manifest.
   let move = prefs.move;
 
   // Desktop path for Copy's default destination (fetched once; harmless if it
@@ -410,8 +411,8 @@
 
   {#if move}
     <p class="albums-msg warn">
-      Move relocates originals out of the source folders — undoable from the
-      jobs panel.
+      Move relocates the originals into the album folders (not a copy) —
+      undoable from the jobs panel.
     </p>
   {/if}
   {#if move && sameVolume === false}
