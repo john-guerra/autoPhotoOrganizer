@@ -40,7 +40,8 @@ import {
   setPhotoCover,
   deleteFolder,
   resetLibrary,
-  repointPhoto,
+  resolveDestFolderId,
+  repointPhotoToFolder,
   renameFolderPath,
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
@@ -198,6 +199,12 @@ export async function copyIdsIntoFolder(
   const manifest = [];
   const total = ids.length;
 
+  // Resolve the destination folder's id ONCE (it shells out to `diskutil` via
+  // upsertVolume). Every photo lands in the same targetDir, so doing this per
+  // file — as repointPhoto did — spawned a subprocess per file and made a
+  // fast same-volume move crawl for minutes. Move only; copy doesn't reindex.
+  const destFolderId = move ? resolveDestFolderId(db, targetDir) : null;
+
   let i = 0;
   for (const id of ids) {
     if (signal?.aborted) {
@@ -213,7 +220,7 @@ export async function copyIdsIntoFolder(
       const dst = nextAvailablePath(targetDir, basename(photo.path));
       if (move) {
         await moveFile(photo.path, dst);
-        repointPhoto(db, Number(id), dst);
+        repointPhotoToFolder(db, Number(id), destFolderId, basename(dst));
         moved++;
       } else {
         await fsp.copyFile(photo.path, dst);
@@ -1488,6 +1495,19 @@ export function registerApi(app) {
       try {
         let restored = 0;
         let skipped = 0;
+        // Cache the folder-id resolution per source directory — resolving it
+        // per file spawns `diskutil` per file (see copyIdsIntoFolder). Undo
+        // restores to the ORIGINAL folders, which vary, so key the cache by dir.
+        const folderIdByDir = new Map();
+        const destFolderIdFor = (absPath) => {
+          const dir = dirname(absPath);
+          let fid = folderIdByDir.get(dir);
+          if (fid == null) {
+            fid = resolveDestFolderId(db, dir);
+            folderIdByDir.set(dir, fid);
+          }
+          return fid;
+        };
         for (let i = 0; i < manifest.length; i++) {
           // Same rationale as the materialize loop above: moveFile is async
           // (it may fall back to copy+unlink across volumes), so we still
@@ -1504,7 +1524,12 @@ export function registerApi(app) {
             skipped++;
           } else {
             await moveFile(entry.to, entry.from);
-            repointPhoto(db, Number(entry.id), entry.from);
+            repointPhotoToFolder(
+              db,
+              Number(entry.id),
+              destFolderIdFor(entry.from),
+              basename(entry.from)
+            );
             restored++;
           }
           registry.update(job.id, { done: i + 1, phase: "restoring" });

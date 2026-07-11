@@ -133,9 +133,36 @@ function ensureFolderRow(db, absPath, volumeId) {
  */
 export function repointPhoto(db, id, newAbsPath) {
   const dir = dirname(newAbsPath);
-  const filename = basename(newAbsPath);
-  const volumeId = upsertVolume(db, volumeRootForPath(dir));
-  const folderId = ensureFolderRow(db, dir, volumeId);
+  const folderId = resolveDestFolderId(db, dir);
+  repointPhotoToFolder(db, id, folderId, basename(newAbsPath));
+}
+
+/**
+ * Resolve (creating if needed) the `folders` row id for a destination
+ * directory. This is the EXPENSIVE part of a repoint: `upsertVolume` shells out
+ * to `diskutil` to identify the volume. When repointing many photos into the
+ * SAME directory (e.g. every photo of an album move), resolve it ONCE with this
+ * and repoint each row with the cheap `repointPhotoToFolder` — calling
+ * `repointPhoto` per file instead spawns `diskutil` per file and turns a fast
+ * same-volume move into a multi-minute crawl.
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} dirAbsPath
+ * @returns {number} folder id
+ */
+export function resolveDestFolderId(db, dirAbsPath) {
+  const volumeId = upsertVolume(db, volumeRootForPath(dirAbsPath));
+  return ensureFolderRow(db, dirAbsPath, volumeId);
+}
+
+/**
+ * Cheap per-photo repoint: just re-parent the row to an already-resolved folder
+ * id (see `resolveDestFolderId`). No volume/folder resolution, no subprocess.
+ * @param {import("better-sqlite3").Database} db
+ * @param {number} id
+ * @param {number} folderId
+ * @param {string} filename
+ */
+export function repointPhotoToFolder(db, id, folderId, filename) {
   db.prepare(`UPDATE photos SET folder_id = ?, filename = ? WHERE id = ?`).run(
     folderId,
     filename,
