@@ -6,6 +6,19 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.10-alpha
+
+- **Opening a photo from Auto Albums no longer loses your work** — clicking a
+  photo in the album snapshots opens the loupe as an overlay; pressing `Esc`
+  returns you to the album review with your split, names, and materialize setup
+  intact (previously it dropped all of it).
+- **Live materialize progress** — the jobs panel now shows a running
+  "moved N / total" count that updates on every file, instead of a bar that
+  only jumped every 50 files.
+- **Move defaults to the folder you're viewing** — album subfolders are created
+  directly inside the open folder; when no folder is focused the destination
+  starts empty instead of a stale remembered path.
+
 ## 2.8.9-alpha
 
 - **`{prefix}` naming token for albums** — the folder-naming template now

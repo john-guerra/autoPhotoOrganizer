@@ -62,9 +62,12 @@
   // folder's name. Source-specific — not part of the persisted prefs.
   let prefix = defaultPrefix;
   let setupOpen = autoOpenSetup;
-  // Destination: prefer the opened folder (in-place), else the remembered dest.
-  let dest =
-    defaultDest || localStorage.getItem("autogallery.exportDest") || "";
+  // Destination: default to the opened folder (in-place) so Move creates album
+  // subfolders directly inside the folder you're viewing. When you're not
+  // focused on a folder it starts empty (rather than a stale remembered path
+  // that could be a parent) — the mode-dependent block below then fills Copy's
+  // default with the Desktop.
+  let dest = defaultDest || "";
   // Track whether the user has hand-edited the destination; until they do, keep
   // it mode-dependent (see reactive block below) instead of a fixed value.
   let destEdited = false;
