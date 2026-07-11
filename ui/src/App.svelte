@@ -72,6 +72,7 @@
   import OrganizeControls from "./lib/OrganizeControls.svelte";
   import ViewControls from "./lib/ViewControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
+  import StatusBar from "./lib/StatusBar.svelte";
   import {
     DEFAULT_FILTER,
     isActive as filterIsActive,
@@ -2798,17 +2799,6 @@
       on:detectalbums={detectAlbums}
     />
 
-    <div
-      class="counts"
-      title="Photos in the whole library · shown under the current filter/focus · currently selected"
-    >
-      <span>{libraryTotal.toLocaleString()} <em>library</em></span>
-      <span>{showingCount.toLocaleString()} <em>showing</em></span>
-      <span class:has-sel={selectedCount > 0}
-        >{selectedCount.toLocaleString()} <em>selected</em></span
-      >
-    </div>
-
     {#if keepIds}
       <button
         class="keep-chip"
@@ -2846,13 +2836,6 @@
       on:choosedest={chooseExportDest}
       on:export={doExport}
     />
-
-    <span class="status" class:err={!!error}>{error || status}</span>
-    {#if thumbProgress}
-      <span class="thumb-progress" class:err={thumbCounts.error > 0}>
-        {thumbProgress}
-      </span>
-    {/if}
 
     <button
       class="help-btn"
@@ -3195,6 +3178,16 @@
       {/if}
     </div>
   </div>
+
+  <StatusBar
+    {libraryTotal}
+    {showingCount}
+    {selectedCount}
+    {status}
+    {error}
+    {thumbProgress}
+    {thumbCounts}
+  />
 </div>
 
 <JobsPanel />
@@ -3291,26 +3284,6 @@
     margin-left: auto;
   }
 
-  /* Three-level counts: library / showing / selected. */
-  .counts {
-    display: flex;
-    gap: 10px;
-    font-size: 0.8rem;
-    color: #cfcfcf;
-    white-space: nowrap;
-  }
-  .counts em {
-    font-style: normal;
-    color: #808080;
-  }
-  .counts .has-sel {
-    color: #ffd24c;
-    font-weight: 600;
-  }
-  .counts .has-sel em {
-    color: #b9932f;
-  }
-
   .keep-chip {
     display: inline-flex;
     align-items: center;
@@ -3382,24 +3355,6 @@
     background: #333;
     color: #fff;
     border-color: #555;
-  }
-  .status {
-    color: #9a9a9a;
-    font-size: 0.85rem;
-    white-space: nowrap;
-    flex-shrink: 0;
-    margin-left: 0.25rem;
-  }
-  .status.err {
-    color: #ff6b6b;
-  }
-  .thumb-progress {
-    color: #9a9a9a;
-    font-size: 0.8rem;
-    white-space: nowrap;
-  }
-  .thumb-progress.err {
-    color: #ff8a80;
   }
   .grid {
     /* Justified layout: children are absolutely positioned by computed boxes;
