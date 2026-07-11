@@ -19,6 +19,22 @@ describe("formatGroupValue", () => {
     expect(formatGroupValue("year", "2024")).toBe("2024");
     expect(formatGroupValue("folder", "/photos/trip")).toBe("/photos/trip");
   });
+
+  it("labels folderName as the POSIX path's basename", () => {
+    expect(formatGroupValue("folderName", "/photos/2017/DCIM")).toBe("DCIM");
+  });
+
+  it("labels folderName as the Windows path's basename", () => {
+    expect(formatGroupValue("folderName", "C:\\a\\b\\Trip")).toBe("Trip");
+  });
+
+  it("strips a trailing slash before taking folderName's basename", () => {
+    expect(formatGroupValue("folderName", "/a/b/")).toBe("b");
+  });
+
+  it("maps the empty-string sentinel to 'Unknown' for folderName too", () => {
+    expect(formatGroupValue("folderName", "")).toBe("Unknown");
+  });
 });
 
 describe("mergeFeedPage", () => {

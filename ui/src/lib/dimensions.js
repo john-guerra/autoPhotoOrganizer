@@ -9,6 +9,7 @@
 /** Every grouping level the multi-select offers, in menu order. */
 export const ALL_DIMENSIONS = [
   "folder",
+  "folderName",
   "year",
   "month",
   "day",

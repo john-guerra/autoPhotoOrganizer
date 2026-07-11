@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.5-alpha
+
+- **New "Folder name" group-by option** — group the feed by each folder's
+  leaf name (e.g. `DCIM`) instead of its full path; smart disambiguation for
+  same-named folders (e.g. `2017_DCIM`) is tracked separately (#81).
+
 ## 2.8.4-alpha
 
 - **Backend groundwork for smart move/copy destination defaults** —

@@ -18,6 +18,7 @@ import {
  */
 export const DIMENSIONS = {
   folder: { expr: "folders.abs_path", direction: "ASC" },
+  folderName: { expr: "folders.abs_path", direction: "ASC" },
   year: {
     expr: "COALESCE(strftime('%Y', photos.taken_at / 1000, 'unixepoch'), '')",
     direction: "DESC",

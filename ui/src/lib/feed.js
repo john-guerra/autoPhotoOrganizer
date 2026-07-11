@@ -25,6 +25,11 @@ const MONTH_NAMES = [
 export function formatGroupValue(dimension, value) {
   if (value === "") return "Unknown";
   if (dimension === "month") return MONTH_NAMES[Number(value) - 1] ?? value;
+  if (dimension === "folderName") {
+    const trimmed = value.replace(/[/\\]+$/, "");
+    const parts = trimmed.split(/[/\\]/);
+    return parts[parts.length - 1] || "Unknown";
+  }
   return value;
 }
 
