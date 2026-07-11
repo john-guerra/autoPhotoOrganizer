@@ -67,6 +67,28 @@ verification), and decisions already made.
 - Every file-serving endpoint MUST route user paths through
   `server/lib/safeResolve.js` (path-traversal guard — the legacy app was flagged).
 
+## Usability (never fail silently)
+
+Every user-facing action must tell the user what is happening. A console error
+is **not** user feedback.
+
+- **Surface every failure the user can trigger** as a visible, specific,
+  actionable message in the UI — never a silent no-op or console-only error.
+  A `413`, a rejected job, an unmounted drive: the user sees *what happened*
+  and *what to do next*, not a dead button. If an operation can fail, its
+  caller renders the error (the existing pattern: `result.error` inline, the
+  status line for transient state).
+- **Prefer specific over generic.** "Undo failed: the move record was too large
+  to send (N files) — retry from the jobs panel" beats "Error".
+- **Long or async operations show progress and completion**, not a frozen
+  control — route them through the JobsPanel; never block the UI thread (heavy
+  fs/IO belongs off the main event loop — see the materialize async work).
+- **Confirm or make-undoable anything destructive.** Prefer soft-delete + a
+  visible undo affordance over a hard, unrecoverable action (and over a hard
+  failure).
+- When you add or touch an action, ask: *if this fails, does the user find out,
+  and do they know what to do?* If not, it isn't done.
+
 ## Committing
 
 - **Commit often — every stable state is a checkpoint.** The moment the app
