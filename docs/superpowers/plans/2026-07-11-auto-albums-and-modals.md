@@ -1335,3 +1335,164 @@ git commit -m "chore(release): 2.8.3-alpha — Auto Albums polish + native-dialo
 - **Known soft spots to resolve during execution (flag in review, don't guess):**
   (a) T6 Step 1 — exact slider mapping for a fixed-ms gap (log scale) vs. keeping the k-slider only for auto; pick the simplest that keeps one control authoritative. (b) T8 Step 2 — the cleanest way to pass "auto-open setup on first entry" (an `autoOpenSetup` prop captured pre-flip). (c) T9 — match the file's existing row-seeding helper and the schema's video marker exactly. These are implementation details, not open design questions.
 ```
+---
+
+# PLAN REVISION 1 (2026-07-11) — post architect review
+
+This revision GOVERNS. Spec Revision 1 is the source of truth. Phase 2 (in-feed
+albums, nested-path grouping, worker/SSE subsystem) is NOT in this plan — it gets
+its own brainstorm/spec. Global Constraints above still apply, plus:
+
+- **Materialize fs must be async (`fs/promises`), not sync-plus-`setImmediate`.**
+  A single large file must not block. Keep same-volume `renameSync`.
+- **The freeze only reproduces in a packaged/Electron build** (dev runs the
+  server as a separate process). Verify #3 accordingly.
+
+### Revised Phase-1 task order
+Foundation done: **T1** `renderAlbumName` ✅, **T2** `computeAlbumNames` ✅.
+Unchanged-from-original and still valid: **T3** albumPrefs, **T4** Modal, **T7**
+button/tooltip, **T10** ManageLibrary retrofit, **T11** ShortcutsOverlay retrofit,
+**T12** dropdown dismissal. **T5/T6/T8** (AlbumsView + setup modal wiring) proceed
+but are TIME-BOXED interim; do the minimum, do NOT deep-polish the slider. **T9**
+videos test = honest regression guard (they're already unfiltered — do not claim
+it's likely to catch a bug). **T13** release/issues amended (below). **T14** live
+verify amended (Electron build for the freeze).
+
+New tasks **T15–T19** below. Suggested execution order: T3, T4, then T15–T17
+(backend materialize) can run before or alongside the AlbumsView UI (T5/T6/T8),
+T18 (grouping) is independent, T10–T12 (modal retrofits) independent, T19 test
+last.
+
+---
+
+### Task 15: Materialize async fs — kill the beachball
+
+**Files:** Modify `server/api.js` (`copyIdsIntoFolder` ~181-219, `moveFile`
+~145-160); Test: `server/copy.test.js` (or `server/api.test.js` where copy is
+tested).
+
+**Interfaces:** `copyIdsIntoFolder` stays same signature but becomes `async`
+(returns a Promise). Its caller in `/api/albums/materialize` (~1376) already runs
+in an async IIFE and must `await` it. Any other caller (export path ~1249) must
+`await` too — grep `copyIdsIntoFolder(` and update all call sites.
+
+- [ ] **Step 1 (test):** Add a test that materializing/copying N files yields to
+  the event loop — e.g. spy that a `setImmediate`/`await` boundary occurs between
+  files, or (simpler) assert the function is async and resolves with the same
+  `{copied,moved,skipped,manifest}` shape on a temp dir of small files. Use the
+  existing temp-dir + AUTOGALLERY_HOME isolation pattern already in the copy test.
+- [ ] **Step 2:** Run → RED (function is sync / not awaited).
+- [ ] **Step 3 (impl):** Convert the per-file loop to `for...of` with
+  `await fsp.copyFile(src, dst)` (import `import * as fsp from "node:fs/promises"`)
+  for the copy path; in move mode keep `renameSync` for same-volume and use
+  `await fsp.copyFile` in the EXDEV fallback inside `moveFile` (make `moveFile`
+  async too, or extract an async `copyAcrossVolumes`). Preserve: per-file
+  `signal?.aborted` check + `AbortError` with `e.manifest`, `repointPhoto` on
+  move, `nextAvailablePath` collision suffix, `onProgress`. `mkdirSync(...,
+  {recursive:true})` can stay sync (one call). Update all call sites to `await`.
+- [ ] **Step 4:** Run → GREEN; run full `npm test`.
+- [ ] **Step 5:** Commit `perf(materialize): async fs copy so large jobs don't freeze the UI`.
+
+### Task 16: `/api/system/paths` + mode-dependent dest defaults + cross-volume warn
+
+**Files:** Modify `server/api.js` (new route), `server/index.js` if routes are
+registered there; `ui/src/lib/api.js` (client fns); the setup modal / AlbumsView
+dest logic (T5/T6). Test: `server/api.test.js`.
+
+**Interfaces:**
+- `GET /api/system/paths` → `{ home, desktop }` (`os.homedir()`,
+  `join(home,"Desktop")`).
+- `GET /api/system/same-volume?a=<path>&b=<path>` → `{ sameVolume: boolean }`
+  via `statSync(a).dev === statSync(b).dev` (guard: if either stat throws,
+  return `{ sameVolume: null }`).
+- Client: `fetchSystemPaths()`, `checkSameVolume(a,b)` in `ui/src/lib/api.js`.
+
+- [ ] **Step 1 (test):** In `server/api.test.js`, assert `GET /api/system/paths`
+  returns a `desktop` ending in `/Desktop` and a non-empty `home`; assert
+  `same-volume` returns `true` for two paths under the same temp root.
+- [ ] **Step 2:** RED.
+- [ ] **Step 3 (impl):** Add the two routes (route style matches existing
+  `app.get(...)` handlers). Add client fns. Wire dest defaults: Move default =
+  in-place (the opened `defaultDest`/source); Copy default = `desktop` from the
+  endpoint. Toggling Move↔Copy swaps the default **only while `destEdited` is
+  false**. When mode is Move and `checkSameVolume(source, dest)` is false, show a
+  warning line ("Different volume — this Move is a full copy, not instant").
+- [ ] **Step 4:** GREEN + `npm test`.
+- [ ] **Step 5:** Commit `feat(materialize): smart dest defaults (move in-place, copy→Desktop) + cross-volume warning`.
+
+### Task 17: Post-materialize auto-rescan of the destination
+
+**Files:** Modify the materialize completion path — client side
+`AlbumsView.doMaterialize` (`ui/src/lib/AlbumsView.svelte:162-189`) and/or
+`App.svelte`. Reuse existing `POST /api/scan` (client `startScan`/scan fn in
+`ui/src/lib/api.js`).
+
+**Interfaces:** After a successful materialize job, trigger a scan of the
+destination parent so the created nested folders index and appear in the tree,
+then refresh the library/tree (bump `libraryVersion` / the tree refresh token the
+app already uses after a scan).
+
+- [ ] **Step 1:** After `job.status === "done"`, call the scan of `dest` (the
+  destParent), await it, then dispatch an event App handles to refresh the
+  library/tree (follow how a normal scan refreshes today — find `startScan`
+  usage in App and reuse that refresh path).
+- [ ] **Step 2:** Verify live (Task 14): after Copy-materialize, the new tree
+  shows in the sidebar without a manual reload. (No pure unit test — this is
+  wiring; the scan endpoint itself is already tested.)
+- [ ] **Step 3:** Commit `feat(materialize): auto-rescan destination so the new tree appears immediately`.
+
+### Task 18: Group by folder name (smart-labeled, no cross-library merge)
+
+**Files:** `server/db/feed.js` (`DIMENSIONS`), `ui/src/lib/dimensions.js`
+(`ALL_DIMENSIONS`), the group-label formatter (`formatGroupValue` — find it,
+frontend), plus a pure smart-label helper + test.
+
+**Design:** The grouping KEY stays per-folder (so no library-wide merge). Add a
+dimension `folderName` whose SQL `expr` is still `folders.abs_path` (unique key),
+but tag it so the **label** renders as the concise leaf. Then a pure client
+helper computes shortest-unique-suffix labels over the currently-loaded group
+values.
+
+**Interfaces (pure, tested):**
+`smartFolderLabels(absPaths: string[], sep = "_"): Map<string,string>` — for each
+path, the shortest trailing path-segment suffix that is unique among the input,
+joined by `sep` (e.g. `["/a/2017/DCIM","/b/2019/DCIM"]` → `DCIM`→ambiguous →
+`2017_DCIM` / `2019_DCIM`). Handles both `/` and `\` separators.
+
+- [ ] **Step 1 (test):** `ui/src/lib/folderLabels.test.js` — leaf when unique;
+  extend to parent segment on collision; three-way collisions extend further;
+  Windows `\` paths; single path → its leaf.
+- [ ] **Step 2:** RED.
+- [ ] **Step 3 (impl):** Create `ui/src/lib/folderLabels.js` with
+  `smartFolderLabels`. Add `folderName` to `DIMENSIONS` (expr `folders.abs_path`,
+  ASC) and to `ALL_DIMENSIONS`. In the label formatter, when the dimension is
+  `folderName`, render via `smartFolderLabels` over the visible group values
+  (configurable `sep`, default `_`).
+- [ ] **Step 4:** GREEN + `npm test`.
+- [ ] **Step 5:** Commit `feat(feed): group by folder name with smart namesake-disambiguating labels`.
+
+### Task 19: Nested-name collision test (materialize)
+
+**Files:** Test only — `server/api.test.js` (or `copy.test.js`).
+
+- [ ] **Step 1:** Test that two albums whose rendered names collide as nested
+  paths are materialized into distinct, sensible folders (not silently merged).
+  Assert the second gets a disambiguated target and both sets of files land
+  intact. Use the existing temp-dir isolation.
+- [ ] **Step 2:** If it exposes a real bug in `namedAlbums()`/`nextAvailablePath`
+  for nested names, fix minimally; else it stands as a regression guard.
+- [ ] **Step 3:** Commit `test(materialize): nested-name collisions stay distinct`.
+
+### Task 13 (amended): release + issues
+Bump to `2.8.3-alpha`; CHANGELOG entries for: Auto Albums rename+setup, 1-min
+default+Auto, strftime naming+nesting, kept names, native-dialog modals,
+**no-freeze materialize, smart dest defaults + auto-rescan, group-by-folder-name**.
+File issues: AI album names; shift-album-date; **and a Phase-2 EPIC**: "In-feed
+Split-into-albums + nested-path grouping + backend worker/SSE processing
+subsystem" (link this spec's Revision 1).
+
+### Task 14 (amended): live verify
+All original checks PLUS: verify the **freeze fix on a packaged/Electron build**
+(not `npm run dev`); after Copy-materialize the **new nested tree appears** in the
+sidebar; **cross-volume Move shows the warning**; **group-by-folder-name** shows
+concise labels and disambiguates two same-named folders.

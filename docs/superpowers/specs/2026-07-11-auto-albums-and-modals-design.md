@@ -1,9 +1,16 @@
 # Auto Albums polish + native-`<dialog>` modal foundation
 
 **Date:** 2026-07-11
-**Status:** Approved design, ready for plan
+**Status:** Revised (Revision 1 below supersedes conflicting parts of the
+original body) — Phase 1 in build.
 **Related:** builds on `2026-07-10-albums-editable-names-inplace-design.md` and
 `2026-07-09-fisheye-snapshot-view-design.md`.
+
+> **Revision 1 (2026-07-11, after mid-build user feedback + an architect
+> review) is at the bottom of this file and GOVERNS where it conflicts with the
+> original body** (notably: the original "no backend changes" claim is wrong;
+> materialize gets async-fs + dest defaults + auto-rescan; the standalone
+> AlbumsView is now interim, superseded by a Phase-2 in-feed redesign).
 
 ## Problem
 
@@ -270,3 +277,91 @@ Popover API is an alternative but the action keeps the existing markup/logic.)
 - Name-persistence keyed to first-photo id: if two albums could ever share a first
   photo they can't (clusters partition the set), so the map key is unique per
   cluster — safe.
+
+---
+
+## Revision 1 — mid-build feedback + architect review (2026-07-11)
+
+Five new user requests and a critical architect review reshaped the epic into
+two phases. **This revision governs where it conflicts with the original body.**
+
+### Corrections to the original design
+- **"No backend changes" (original Goals/§B7) was wrong.** Materialize needs
+  real backend work (below). The nested-name / `mkdirSync recursive` /
+  `safeResolve` observations remain true; the "no change" conclusion does not.
+- **The standalone `AlbumsView` mode is now interim.** A loupe round-trip drops
+  its materialize/setup state and it re-implements feed features. Phase 2
+  replaces it with an in-feed "Split into albums" flow. Phase 1 still polishes
+  AlbumsView (users have it meanwhile) but the AlbumsView-specific wiring is
+  explicitly time-boxed; the naming helpers, prefs, setup modal (gap+naming
+  half), and backend fixes are permanent.
+
+### Phase 1 — build now (this plan)
+1. **Modal foundation** — `Modal.svelte` (native `<dialog>`), retrofit
+   `ManageLibrary` + `ShortcutsOverlay`, dropdown dismissal. (Unchanged.)
+2. **Auto Albums naming** — button/tooltip; strftime template + live preview;
+   **setup modal built as a reusable config dialog** (gap+naming half kept
+   structurally separate from the move+dest half); global prefs;
+   first-photo-keyed names. (Tasks 1–2 done.)
+3. **Materialize freeze fix — async fs, not `setImmediate`+sync.** Convert
+   `copyIdsIntoFolder` and `moveFile`'s EXDEV branch to `fs/promises`
+   (`copyFile`) so copies run on the libuv threadpool and never block the
+   Electron **main-process** event loop (the server is embedded in the main
+   process via `electron/main.js`). Keep same-volume `renameSync` (instant,
+   atomic). Per-file `AbortSignal` checks and the partial-manifest-on-abort
+   contract are preserved.
+4. **Materialize destination defaults — mode-dependent.** Move → in-place
+   (current/source folder); Copy → `~/Desktop`. Add `GET /api/system/paths`
+   (`{home, desktop}` via `os.homedir()`, works in dev + packaged). Default dest
+   swaps on Move↔Copy toggle, honoring the `destEdited` latch. `albumPrefs` does
+   NOT store dest (it's mode-derived).
+5. **Cross-volume move warning.** Compare `statSync(src).dev` vs
+   `statSync(dest).dev`; when a Move destination is on a different volume, warn
+   "this is a full copy, not an instant move." (SD-card→Desktop move is
+   inherently a byte copy; the Copy→Desktop default is the right card-import
+   path.)
+6. **Post-materialize auto-rescan.** After a successful materialize, call the
+   existing `POST /api/scan` on the destination so the created nested tree
+   appears in the sidebar immediately. This also fixes the **Copy path indexing
+   gap** (the copy branch inserts no DB rows today), making "see the recursive
+   tree right after materialize" work for both Move and Copy.
+7. **Group by folder name (smart-labeled).** New grouping that keeps each folder
+   its own group (group key stays per-folder `abs_path` — no cross-library
+   merge) but renders a **concise leaf label**, disambiguating namesakes by
+   extending with parent segments (`2017_DCIM`) using a configurable separator
+   (default `_`) — shortest-unique-suffix labeling computed over the loaded
+   groups. (Not the naive `basename` SQL expr, which would merge all namesakes
+   library-wide and mishandle Windows separators.)
+8. **Tests** — videos-in-timeline as an honest **regression guard** (they're
+   already unfiltered); a **nested-name collision** test (two albums rendering
+   the same nested path must not become confusing siblings like `2017` →
+   `2017_2`).
+
+### Phase 2 — design carefully, then build (separate spec: the "in-feed" epic)
+Filed as a GitHub epic; needs its own brainstorm/spec. Key items and the crux:
+- **In-feed "Split into albums"** replacing `AlbumsView` — per-group action
+  (button / right-click), parent group's name as album-name prefix,
+  loupe-safe, state-preserving. Reuse the burst **algorithm** (`detectBursts`
+  gap-walk) but the **section-header** render path, NOT burst stacks (albums
+  keep every photo visible; bursts collapse to a cover).
+- **CRUX (resolve before estimating):** album boundaries are **global to a
+  group**, but the feed loads a **60-row window** and can't place a whole-group
+  boundary from a window. Needs a server endpoint returning **album-boundary
+  photo-ids per group** so the feed renders sub-dividers while paging (or load
+  the group's whole timeline on split). "Expand/collapse is free from feed
+  sections" is FALSE — this is the hard part.
+- **Group by full nested path** (variable-depth hierarchy). The feed's
+  fixed-depth keyset model (N dims = N levels, one SQL expr = one level) can't
+  express it. First scope against the existing `server/db/tree.js` to see how
+  much variable-depth hierarchy the sidebar already models.
+- **Backend processing subsystem** — move heavy fs into an Electron
+  `utilityProcess`/`worker_thread` (main loop never at risk for huge jobs) +
+  **SSE/WebSocket progress streaming** (replaces polling). Design the worker
+  contract to return **partial manifests on abort** so undo survives the process
+  boundary (the manifest is already serializable `{id,from,to}`). Web
+  Workers/WebSockets alone do NOT fix the freeze — the freeze is a blocked Node
+  main-process loop, a different layer.
+
+### Deferred → standalone GitHub issues
+- AI-generated meaningful album names (keep the app free/offline).
+- Shift the capture date of a whole album (fix a wrong camera clock).
