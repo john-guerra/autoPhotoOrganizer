@@ -87,6 +87,14 @@ export function applySchema(db) {
   ensureColumn(db, "photos", "no_auto_stack", "INTEGER NOT NULL DEFAULT 0");
   // Video length in seconds (fractional; NULL for images and un-probed videos).
   ensureColumn(db, "photos", "duration", "REAL");
+  // Loupe details panel EXIF (issue #27). Nullable — populated lazily by
+  // /api/meta on first detailed view; `lens` doubles as the "EXIF attempted"
+  // sentinel (see NodeProcessingService.exifToMeta / api.js /api/meta trigger).
+  ensureColumn(db, "photos", "aperture", "REAL");
+  ensureColumn(db, "photos", "shutter", "REAL");
+  ensureColumn(db, "photos", "iso", "INTEGER");
+  ensureColumn(db, "photos", "focal_length", "REAL");
+  ensureColumn(db, "photos", "lens", "TEXT");
 }
 
 /** Idempotent ADD COLUMN — the app ships no migration runner, and
