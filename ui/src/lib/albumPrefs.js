@@ -4,7 +4,7 @@
 const KEY = "autogallery.albumPrefs";
 
 export const DEFAULT_ALBUM_PREFS = {
-  template: "%Y-%m-%d", // generic default; user saves e.g. "%Y/%Y_%m%b_%d"
+  template: "%Y/%Y_%m%b_%d", // e.g. 2017/2017_01Jan_09 (nested year folder)
   gapMode: "fixed", // "fixed" (a concrete gap) | "auto" (mean + k·stddev)
   fixedGapMs: 86400000, // 1 day
   k: 2, // stddev multiplier for auto mode
