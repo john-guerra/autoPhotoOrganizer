@@ -82,6 +82,14 @@ export function detectBursts(items, { gapMs }) {
  * `items` is assumed already sorted so each group's rows are contiguous
  * (matches the server's composite ORDER BY — groupBy dimensions first,
  * then time/id).
+ *
+ * Interaction with the feed SORT (issue #15): bursts are ALWAYS clustered
+ * chronologically — detectBursts re-sorts each group's members by time before
+ * walking gaps, independent of the active sort attribute. So under a non-date
+ * sort (Name / Rating / Size), a burst still groups the same time-adjacent
+ * photos, and its collapsed stack is positioned by its cover's place in that
+ * sort order. Stacking is therefore never "recomputed against the sorted
+ * order"; it is deliberately capture-time based in every sort mode.
  * @param {Array<{id, name, rating?, mtimeMs, takenAt?, groupValues: Record<string,string>}>} items
  * @param {string[]} groupBy
  * @param {{ gapMs: number }} opts
