@@ -710,6 +710,88 @@ describe("POST /api/folders/remove", () => {
   });
 });
 
+describe("POST /api/folders/rename", () => {
+  let base;
+  let folderDir;
+
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM photos").run();
+    db.prepare("DELETE FROM folders").run();
+    base = await mkdtemp(join(tmpdir(), "ag-ren-"));
+    folderDir = join(base, "OldName");
+    await mkdir(folderDir);
+    await sharp({
+      create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } },
+    })
+      .jpeg()
+      .toFile(join(folderDir, "p.jpg"));
+  });
+  afterEach(async () => {
+    await rm(base, { recursive: true, force: true });
+  });
+
+  const rename = (path, newName) =>
+    fetch(`${srv.base}/api/folders/rename`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path, newName }),
+    });
+
+  it("renames the real folder on disk and updates the index", async () => {
+    const scanBody = await scan(srv.base, folderDir);
+    const id = scanBody.items[0].id;
+
+    const res = await rename(folderDir, "NewName");
+    expect(res.status).toBe(200);
+
+    const newDir = join(base, "NewName");
+    expect(existsSync(folderDir)).toBe(false); // disk: old gone
+    expect(existsSync(join(newDir, "p.jpg"))).toBe(true); // disk: file moved with it
+    // index: the photo's path now reflects the new folder (paths derive from folder_id)
+    expect(getPhotoById(getDb(), id).path).toBe(join(newDir, "p.jpg"));
+    // and the photo is still found under a rescan of the new location
+    const rescan = await scan(srv.base, newDir);
+    expect(rescan.items.some((i) => i.id === id)).toBe(true);
+  });
+
+  it("updates scanned SUBfolders' index rows too (prefix)", async () => {
+    const sub = join(folderDir, "sub");
+    await mkdir(sub);
+    await sharp({
+      create: { width: 8, height: 8, channels: 3, background: { r: 9, g: 9, b: 9 } },
+    })
+      .jpeg()
+      .toFile(join(sub, "q.jpg"));
+    await scan(srv.base, folderDir); // folderDir row + p.jpg
+    const subScan = await scan(srv.base, sub); // sub gets its own folder row + q.jpg
+    const subId = subScan.items[0].id;
+
+    expect((await rename(folderDir, "Renamed")).status).toBe(200);
+    // the subfolder photo repoints under the renamed parent (prefix update)
+    expect(getPhotoById(getDb(), subId).path).toBe(
+      join(base, "Renamed", "sub", "q.jpg")
+    );
+  });
+
+  it("refuses a name containing a path separator", async () => {
+    await scan(srv.base, folderDir);
+    expect((await rename(folderDir, "a/b")).status).toBe(400);
+    expect((await rename(folderDir, "..")).status).toBe(400);
+  });
+
+  it("409s when a folder with the new name already exists on disk", async () => {
+    await mkdir(join(base, "Taken"));
+    await scan(srv.base, folderDir);
+    expect((await rename(folderDir, "Taken")).status).toBe(409);
+    expect(existsSync(folderDir)).toBe(true); // not renamed
+  });
+
+  it("404s for a path not in the index", async () => {
+    expect((await rename(join(base, "ghost"), "x")).status).toBe(404);
+  });
+});
+
 describe("cache management routes", () => {
   it("GET /api/cache/stats reflects real cache dir contents", async () => {
     await fetch(`${srv.base}/api/cache/clear`, { method: "POST" });
@@ -1681,6 +1763,33 @@ describe("POST /api/albums/materialize", () => {
       }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("materializes IN PLACE: destParent may be a scanned source folder (move)", async () => {
+    // The in-place default (Slice A): materialize into a subfolder of the
+    // folder the photos already live in. /api/export still forbids this
+    // (guard relaxed for materialize only, via allowInsideSource).
+    const scanBody = await scan(srv.base, srcDir);
+    const ids = scanBody.items.map((i) => i.id);
+    const res = await fetch(`${srv.base}/api/albums/materialize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        destParent: srcDir, // same folder the photos already live in
+        albums: [{ name: "2026-01-01", photoIds: ids.slice(0, 2) }],
+        // move defaults to true
+      }),
+    });
+    expect(res.status).toBe(202);
+    const job = await waitJob((await res.json()).jobId);
+    expect(job.status).toBe("done");
+    expect(job.result.move).toBe(true);
+    // The two photos now live inside srcDir/2026-01-01 …
+    expect(await readdir(join(srcDir, "2026-01-01"))).toHaveLength(2);
+    // … and were moved out of the source root (only the third .jpg remains).
+    const rootNow = await readdir(srcDir);
+    expect(rootNow).toContain("2026-01-01");
+    expect(rootNow.filter((n) => n.endsWith(".jpg"))).toHaveLength(1);
   });
 });
 

@@ -5,6 +5,37 @@ Notable changes to AutoGallery, newest first. Versions follow the scheme in
 gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
 short and user-facing — what you can now do, not how it's built.
 
+## 2.4.2-alpha
+
+- **Fixed: couldn't type an exact split gap** in Auto-albums — clicking the gap
+  value now opens an editable field that keeps focus, so you can type e.g. `6h`,
+  `2d`, `90m` and press Enter (#70).
+
+## 2.4.1-alpha
+
+- **Fixed: "Keep only" / "Select" on a group left earlier photos showing** when
+  the feed was sorted by Created or Modified — the group scope now follows the
+  same date the feed grouped by, so it narrows to exactly that section (#71).
+
+## 2.4.0-alpha
+
+- **Rename a folder from the feed** — double-click a folder's section header to
+  rename it; the real folder on disk is renamed and the index follows (#68).
+
+## 2.3.0-alpha
+
+- **AutoAlbums: name your album folders** — edit each album's folder name before
+  materializing, instead of accepting the auto-generated date (#68).
+- **Materialize in place** — when you've opened a folder, the materialize
+  destination now defaults to that folder, so "Move" organizes it into dated
+  subfolders in one click (#68).
+
+## 2.2.1-alpha
+
+- **Fixed: packaged app failed to launch** with a `NODE_MODULE_VERSION`
+  mismatch — the native database module was built for the wrong runtime. Builds
+  (and CI releases) now rebuild it for Electron correctly (#67).
+
 ## 2.2.0-alpha
 
 - **Open a folder** — focus the whole app (feed, tree, counts, albums) on a

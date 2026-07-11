@@ -159,6 +159,23 @@ export async function removeFolderByPath(path) {
   return res.json();
 }
 
+/** Rename a scanned folder on disk (and update the index). `path` is the
+ * folder's absolute path, `newName` a bare folder name (no separators).
+ * @param {string} path @param {string} newName
+ * @returns {Promise<{ok:boolean, oldPath:string, newPath:string}>} */
+export async function renameFolder(path, newName) {
+  const res = await fetch(`/api/folders/rename`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path, newName }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `rename failed (${res.status})`);
+  }
+  return res.json();
+}
+
 /** @returns {Promise<{totalBytes:number, totalFiles:number}>} */
 export async function fetchCacheStats() {
   const res = await fetch("/api/cache/stats");
@@ -306,15 +323,20 @@ export async function fetchTreeNode({
 /**
  * Ids of all non-stale photos matching a filter (for "filter → selection").
  * An optional group `path` scopes to one section ("select all in this group").
+ * `sort` must be the feed's active sort so a date group scopes by the same date
+ * column the feed grouped by — otherwise the id set disagrees with the section
+ * (issue #71).
  * @param {{minRating?:number, orientations?:string[]}|null} [filter=null]
  * @param {Array<{dimension:string,value:string}>|null} [path=null]
+ * @param {{by:string,dir:string}|null} [sort=null]
  * @returns {Promise<number[]>}
  */
-export async function fetchPhotoIds(filter = null, path = null) {
+export async function fetchPhotoIds(filter = null, path = null, sort = null) {
   const params = new URLSearchParams();
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
   if (path && path.length) params.set("path", JSON.stringify(path));
+  if (sort) params.set("sort", `${sort.by}:${sort.dir}`);
   const res = await fetch(`/api/photos/ids?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

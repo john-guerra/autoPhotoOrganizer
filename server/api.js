@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { writeFile, rename, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { extname, join, basename, resolve, sep } from "node:path";
+import { extname, join, basename, dirname, resolve, sep } from "node:path";
 import { revealCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { thumbsDir, cacheRoot } from "./lib/cachePaths.js";
@@ -40,6 +40,7 @@ import {
   deleteFolder,
   resetLibrary,
   repointPhoto,
+  renameFolderPath,
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
 import {
@@ -83,10 +84,24 @@ function isPathContainedIn(root, target) {
 /**
  * Validate + resolve an export destination folder, shared by /api/export and
  * /api/albums/materialize. Guards traversal (safeResolve) and refuses to write
- * inside the app cache or any scanned source folder (the read-only invariant).
+ * inside the app cache. It also refuses to write inside any scanned source
+ * folder (the read-only invariant) UNLESS `allowInsideSource` is set — which
+ * materialize passes so it can organize a folder *in place* (move rated photos
+ * into dated subfolders of the folder they already live in). Copies into a new
+ * subfolder never modify existing source files, and the user explicitly asked
+ * for it; the cache and traversal guards always apply.
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} destParent
+ * @param {string} folderName
+ * @param {{allowInsideSource?: boolean}} [opts]
  * @returns {{target:string}|{error:string}}
  */
-function resolveExportTarget(db, destParent, folderName) {
+function resolveExportTarget(
+  db,
+  destParent,
+  folderName,
+  { allowInsideSource = false } = {}
+) {
   let destSt;
   try {
     destSt = statSync(destParent);
@@ -105,11 +120,13 @@ function resolveExportTarget(db, destParent, folderName) {
       error: "export destination cannot be inside the AutoGallery cache",
     };
   }
-  const sourceFolders = db.prepare(`SELECT abs_path FROM folders`).all();
-  if (sourceFolders.some((f) => isPathContainedIn(f.abs_path, target))) {
-    return {
-      error: "export destination cannot be inside a scanned source folder",
-    };
+  if (!allowInsideSource) {
+    const sourceFolders = db.prepare(`SELECT abs_path FROM folders`).all();
+    if (sourceFolders.some((f) => isPathContainedIn(f.abs_path, target))) {
+      return {
+        error: "export destination cannot be inside a scanned source folder",
+      };
+    }
   }
   return { target };
 }
@@ -670,12 +687,10 @@ export function registerApi(app) {
     }
     const command = revealCommand(process.platform, it.path);
     if (!command) {
-      return res
-        .status(501)
-        .json({
-          ok: false,
-          error: `unsupported platform: ${process.platform}`,
-        });
+      return res.status(501).json({
+        ok: false,
+        error: `unsupported platform: ${process.platform}`,
+      });
     }
     try {
       await new Promise((resolveSpawn, reject) => {
@@ -769,6 +784,59 @@ export function registerApi(app) {
     if (!row) return res.status(404).json({ error: `not indexed: ${path}` });
     deleteFolder(db, row.id);
     res.json({ removed: true, id: row.id });
+  });
+
+  // Rename a scanned folder on disk and update the index (issue #68 Slice B).
+  // Folders on disk are the source of truth, so this renames the real directory
+  // (renameSync) and repoints the folder rows — the user explicitly asked to
+  // rename it. Photo rows are untouched (paths derive from folder_id).
+  app.post("/api/folders/rename", (req, res) => {
+    const { path, newName } = req.body ?? {};
+    if (typeof path !== "string" || !path.length) {
+      return res.status(400).json({ error: "path is required" });
+    }
+    if (typeof newName !== "string" || !newName.trim()) {
+      return res.status(400).json({ error: "newName is required" });
+    }
+    const name = newName.trim();
+    // A bare folder name only — no separators, no traversal.
+    if (
+      name.includes("/") ||
+      name.includes(sep) ||
+      name === "." ||
+      name === ".."
+    ) {
+      return res.status(400).json({ error: "invalid folder name" });
+    }
+    const db = getDb();
+    const row = db
+      .prepare(`SELECT id FROM folders WHERE abs_path = ?`)
+      .get(path);
+    if (!row) return res.status(404).json({ error: `not indexed: ${path}` });
+    if (!existsSync(path)) {
+      return res
+        .status(409)
+        .json({ error: "folder is not on disk (offline?)" });
+    }
+    const newAbsPath = join(dirname(path), name);
+    if (newAbsPath === path) {
+      return res.json({ ok: true, oldPath: path, newPath: newAbsPath }); // no-op
+    }
+    if (
+      existsSync(newAbsPath) ||
+      db.prepare(`SELECT id FROM folders WHERE abs_path = ?`).get(newAbsPath)
+    ) {
+      return res
+        .status(409)
+        .json({ error: "a folder with that name already exists" });
+    }
+    try {
+      renameSync(path, newAbsPath);
+    } catch (err) {
+      return res.status(500).json({ error: `rename failed: ${err.message}` });
+    }
+    renameFolderPath(db, path, newAbsPath);
+    res.json({ ok: true, oldPath: path, newPath: newAbsPath });
   });
 
   app.get("/api/cache/stats", (_req, res) => {
@@ -1061,9 +1129,12 @@ export function registerApi(app) {
         return res.status(400).json({ error: "path must be JSON" });
       }
     }
+    // The feed's sort drives date-dimension grouping, so the group scope must
+    // see it too (else keep-only/select disagree with the section — issue #71).
+    const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
     const db = getDb();
     try {
-      res.json({ ids: photoIdsMatchingFilter(db, filter, path) });
+      res.json({ ids: photoIdsMatchingFilter(db, filter, path, sort) });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
@@ -1211,7 +1282,11 @@ export function registerApi(app) {
     // name mid-job, which would just surface as an async job failure.
     const resolvedAlbums = [];
     for (const album of albums) {
-      const resolved = resolveExportTarget(db, destParent, album.name);
+      // Materialize allows an in-place destination (a subfolder of the source
+      // folder) — that's the default "organize this folder in place" flow.
+      const resolved = resolveExportTarget(db, destParent, album.name, {
+        allowInsideSource: true,
+      });
       if (resolved.error)
         return res.status(400).json({ error: resolved.error });
       resolvedAlbums.push({ album, target: resolved.target });

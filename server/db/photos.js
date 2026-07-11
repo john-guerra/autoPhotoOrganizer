@@ -1,4 +1,4 @@
-import { join, dirname, basename } from "node:path";
+import { join, dirname, basename, sep } from "node:path";
 import { volumeRootForPath, upsertVolume } from "./volumes.js";
 
 /**
@@ -139,6 +139,35 @@ export function repointPhoto(db, id, newAbsPath) {
     filename,
     id
   );
+}
+
+/**
+ * Repoint the index after a folder has been RENAMED on disk (issue #68 Slice B).
+ * Updates the folder's own `abs_path` row AND every scanned descendant folder
+ * (its `abs_path` starts with `oldAbsPath/`), replacing the path prefix. Photo
+ * rows need no change — a photo's path derives from its `folder_id` + filename,
+ * so once the folder rows point at the new location, `getPhotoById().path` is
+ * correct. The caller is responsible for the on-disk `renameSync` first.
+ *
+ * Folder counts are small (tens), so this scans all rows in JS rather than a
+ * LIKE query — no metacharacter escaping to get wrong.
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} oldAbsPath
+ * @param {string} newAbsPath
+ */
+export function renameFolderPath(db, oldAbsPath, newAbsPath) {
+  const oldPrefix = oldAbsPath.endsWith(sep) ? oldAbsPath : oldAbsPath + sep;
+  const newPrefix = newAbsPath.endsWith(sep) ? newAbsPath : newAbsPath + sep;
+  const update = db.prepare(`UPDATE folders SET abs_path = ? WHERE id = ?`);
+  const tx = db.transaction(() => {
+    for (const row of db.prepare(`SELECT id, abs_path FROM folders`).all()) {
+      if (row.abs_path === oldAbsPath) update.run(newAbsPath, row.id);
+      else if (row.abs_path.startsWith(oldPrefix)) {
+        update.run(newPrefix + row.abs_path.slice(oldPrefix.length), row.id);
+      }
+    }
+  });
+  tx();
 }
 
 /**

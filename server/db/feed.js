@@ -1,5 +1,10 @@
 import { buildFilter } from "./filters.js";
-import { parseSort, sortSeekDim, applySortToDims, dateAttrExpr } from "./sort.js";
+import {
+  parseSort,
+  sortSeekDim,
+  applySortToDims,
+  dateAttrExpr,
+} from "./sort.js";
 
 /**
  * Grouping dimensions available to the feed. Each maps to a plain SQL
@@ -579,23 +584,37 @@ export function fetchGroupRowsAtOffsets(
  * grid shows.
  * @param {import("better-sqlite3").Database} db
  * @param {{minRating?: number, orientations?: string[]}} [filterSpec]
+ * @param {Array<{dimension:string, value:string}>|null} [path]
+ * @param {{by:string, dir:string}|null} [sort] the feed's active sort — a date
+ *   sort regroups year/month/day onto its own date column, so the group scope
+ *   must follow suit (see below).
  * @returns {number[]}
  */
-export function photoIdsMatchingFilter(db, filterSpec = {}, path = null) {
+export function photoIdsMatchingFilter(
+  db,
+  filterSpec = {},
+  path = null,
+  sort = null
+) {
   const filter = buildFilter(filterSpec);
   const clauses = [`photos.stale = 0`, `(${filter.sql})`];
   const params = [...filter.params];
   // Optional group scope: restrict to a hierarchy path (e.g. one folder/year),
   // matching each dimension's own SQL expression — the "select all in this
-  // group" case. Same expr map the feed groups by, so the ids agree with what
-  // that section shows.
+  // group" / "keep only" case. The date dims (year/month/day) must use the SAME
+  // sort-date column the feed grouped by (applySortToDims), or a Created/
+  // Modified sort buckets the feed by one date while this scopes by taken_at:
+  // the id set then disagrees with the section — empty for undated files, which
+  // fall in the '' bucket — so keep-only/select silently no-op (issue #71).
   if (path && path.length) {
-    for (const { dimension, value } of path) {
-      const dim = DIMENSIONS[dimension];
-      if (!dim) throw new Error(`unknown dimension: ${dimension}`);
-      clauses.push(`${dim.expr} = ?`);
+    const dims = applySortToDims(
+      resolveDimensions(path.map((p) => p.dimension)),
+      sort
+    );
+    path.forEach(({ value }, i) => {
+      clauses.push(`${dims[i].expr} = ?`);
       params.push(value);
-    }
+    });
   }
   const rows = db
     .prepare(
@@ -685,7 +704,8 @@ export function workingSetTimes(db, filterSpec = {}, cap = 12000) {
     )
     .all(...filter.params);
   const total = rows.length;
-  if (!total) return { times: [], total: 0, min: null, max: null, sampled: false };
+  if (!total)
+    return { times: [], total: 0, min: null, max: null, sampled: false };
   const min = rows[0].t;
   const max = rows[total - 1].t;
   if (total <= cap) {

@@ -18,6 +18,9 @@
   export let truncated = false;
   export let hasNativePicker = false;
   export let limit = 20000; // current working-set cap (server hard-caps at 200000)
+  // The folder you've opened (focusPath, #66). When set, materialize defaults
+  // to organizing in place — album subfolders created inside this folder.
+  export let defaultDest = "";
 
   const dispatch = createEventDispatcher();
 
@@ -27,7 +30,12 @@
   let manualThresholdMs = null;
   let editingThresh = false;
   let threshInput = "";
-  let dest = localStorage.getItem("autogallery.exportDest") || "";
+  // Destination: prefer the opened folder (in-place), else the remembered dest.
+  let dest = defaultDest || localStorage.getItem("autogallery.exportDest") || "";
+  // Track whether the user has hand-edited the destination; until they do, keep
+  // it in sync with a changing defaultDest (e.g. focusing a different folder).
+  let destEdited = false;
+  $: if (!destEdited && defaultDest) dest = defaultDest;
   let materializing = false;
   let result = null;
   // Materialize defaults to MOVE (relocates originals out of the source
@@ -48,6 +56,20 @@
     thresholdMs
   );
   $: mtimeById = new Map(photos.map((p) => [p.id, p.mtimeMs]));
+
+  // Editable album folder names, one per cluster. Seeded from the default date
+  // name and re-seeded ONLY when the cluster set structurally changes (e.g. the
+  // slider re-clusters), so a name you typed survives within one clustering but
+  // isn't stale after the boundaries move.
+  let names = [];
+  let lastAlbumSig = "";
+  $: {
+    const sig = albums.map((a) => `${a.index}:${a.ids.length}:${a.startAt}`).join("|");
+    if (sig !== lastAlbumSig) {
+      lastAlbumSig = sig;
+      names = albums.map((a) => defaultAlbumName(a.startAt));
+    }
+  }
 
   function fmtDur(ms) {
     const h = ms / 3600_000;
@@ -109,12 +131,15 @@
     return s === e ? s : `${s} – ${e}`;
   }
 
-  // Disambiguate album folder names (two albums that start on the same day
-  // would otherwise collide): append _2, _3… to later duplicates.
+  // Build the {name, photoIds} list to materialize from the (user-editable)
+  // names. Disambiguate collisions — two albums given the same name (a same-day
+  // default, or the user typing a duplicate) would otherwise merge into one
+  // folder — by appending _2, _3… to later duplicates.
   function namedAlbums() {
     const seen = new Map();
-    return albums.map((a) => {
-      const base = defaultAlbumName(a.startAt);
+    return albums.map((a, i) => {
+      const typed = (names[i] ?? "").trim();
+      const base = typed || defaultAlbumName(a.startAt);
       const n = (seen.get(base) ?? 0) + 1;
       seen.set(base, n);
       return { name: n === 1 ? base : `${base}_${n}`, photoIds: a.ids };
@@ -162,16 +187,22 @@
 <div class="albums-view">
   <div class="albums-bar">
     <strong>Auto-albums</strong>
-    <label class="thresh">
-      Split gap
-      <input
-        type="range"
-        min="0.5"
-        max="6"
-        step="0.25"
-        bind:value={k}
-        on:input={onSlider}
-      />
+    <div class="thresh">
+      <!-- Only the slider is wrapped by a <label>. The editable value MUST stay
+           outside it: a <label> forwards clicks to its first control (the
+           range), which stole focus from the just-opened text field and blurred
+           it shut before you could type — issue #70. -->
+      <label class="thresh-slider">
+        Split gap
+        <input
+          type="range"
+          min="0.5"
+          max="6"
+          step="0.25"
+          bind:value={k}
+          on:input={onSlider}
+        />
+      </label>
       {#if editingThresh}
         <!-- svelte-ignore a11y-autofocus -->
         <input
@@ -186,15 +217,22 @@
           autofocus
         />
       {:else}
+        <!-- mousedown+preventDefault (not a plain click): opening the editor
+             autofocuses the input, but a click's default focus handling would
+             immediately blur it back out (on:blur commits + closes), so the
+             field flashed and vanished. Preventing the mousedown default keeps
+             focus on the input the instant it mounts. on:click stays for
+             keyboard activation, where no mousedown precedes it. -->
         <button
           class="thresh-val"
           title="Click to type an exact split gap (e.g. 6h, 2d, 90m)"
+          on:mousedown|preventDefault={startEditThresh}
           on:click={startEditThresh}
         >
           {manualThresholdMs != null ? "manual" : `${k}×`} · {fmtDur(thresholdMs)}
         </button>
       {/if}
-    </label>
+    </div>
     <span class="albums-count">{albums.length} albums · {photos.length} photos</span>
     <label class="maxphotos" title="Max photos to analyze. Albums render as fisheye snapshot strips, so this stays cheap regardless of size (server caps at 200,000).">
       Max
@@ -223,6 +261,7 @@
       type="text"
       placeholder="/materialize/destination"
       bind:value={dest}
+      on:input={() => (destEdited = true)}
       spellcheck="false"
     />
     {#if hasNativePicker}
@@ -261,9 +300,15 @@
   {/if}
 
   <div class="albums-scroll">
-    {#each albums as album (album.index)}
+    {#each albums as album, i (album.index)}
       <div class="album-divider">
-        <span class="album-name">{defaultAlbumName(album.startAt)}</span>
+        <input
+          class="album-name-edit"
+          bind:value={names[i]}
+          spellcheck="false"
+          title="Album folder name (edit before materializing)"
+          aria-label="Album folder name"
+        />
         <span class="album-meta"
           >{album.ids.length} photo{album.ids.length === 1 ? "" : "s"} · {albumRange(
             album
@@ -299,6 +344,11 @@
     gap: 8px;
     font-size: 0.8rem;
     color: #bbb;
+  }
+  .thresh-slider {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
   }
   .thresh input[type="range"] {
     width: 160px;
@@ -428,9 +478,24 @@
     border-bottom: 2px solid #2e8b57;
     margin-bottom: 8px;
   }
-  .album-name {
+  .album-name-edit {
+    font: inherit;
     font-weight: 600;
     color: #fff;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 2px 6px;
+    min-width: 8ch;
+    width: auto;
+  }
+  .album-name-edit:hover {
+    border-color: #3a5a48;
+  }
+  .album-name-edit:focus {
+    outline: none;
+    background: #0d0d0d;
+    border-color: #2e8b57;
   }
   .album-meta {
     font-size: 0.8rem;
