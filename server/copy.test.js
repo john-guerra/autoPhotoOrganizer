@@ -36,6 +36,25 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
+// The async fs conversion routes both the copy path and the EXDEV cross-volume
+// fallback through node:fs/promises `copyFile`, so the corrupt-copy simulation
+// has to be mocked here too (the sync `copyFileSync` above is no longer on the
+// hot path).
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    copyFile: async (src, dst, ...rest) => {
+      if (forceCorruptCopy) {
+        // Simulate a truncated/corrupted copy so the size-verify step fails.
+        await actual.writeFile(dst, "x");
+        return;
+      }
+      return actual.copyFile(src, dst, ...rest);
+    },
+  };
+});
+
 let cacheDir;
 let srcDir;
 let destDir;
@@ -78,12 +97,32 @@ async function seedPhoto(name, content) {
   return row.id;
 }
 
+describe("copyIdsIntoFolder — async fs (no beachball)", () => {
+  it("is async: returns a Promise that resolves to the result shape", async () => {
+    const id = await seedPhoto("a.jpg", "AAA");
+    const db = getDb();
+
+    const pending = copyIdsIntoFolder(db, destDir, [id]);
+    expect(pending).toBeInstanceOf(Promise);
+
+    const result = await pending;
+    expect(result).toEqual({
+      copied: 1,
+      moved: 0,
+      skipped: 0,
+      manifest: [
+        { id, from: join(srcDir, "a.jpg"), to: join(destDir, "a.jpg") },
+      ],
+    });
+  });
+});
+
 describe("copyIdsIntoFolder — copy mode", () => {
   it("copies files, leaves sources in place, and returns a manifest", async () => {
     const id = await seedPhoto("a.jpg", "AAA");
     const db = getDb();
 
-    const result = copyIdsIntoFolder(db, destDir, [id]);
+    const result = await copyIdsIntoFolder(db, destDir, [id]);
 
     expect(result.copied).toBe(1);
     expect(result.moved).toBe(0);
@@ -101,7 +140,7 @@ describe("copyIdsIntoFolder — copy mode", () => {
     const id = await seedPhoto("a.jpg", "NEW-CONTENT");
     const db = getDb();
 
-    const result = copyIdsIntoFolder(db, destDir, [id]);
+    const result = await copyIdsIntoFolder(db, destDir, [id]);
 
     expect(result.manifest[0].to).toBe(join(destDir, "a (2).jpg"));
     expect(readFileSync(join(destDir, "a.jpg"), "utf8")).toBe("EXISTING");
@@ -115,7 +154,7 @@ describe("copyIdsIntoFolder — copy mode", () => {
     await rm(join(srcDir, "gone.jpg"));
     const db = getDb();
 
-    const result = copyIdsIntoFolder(db, destDir, [id]);
+    const result = await copyIdsIntoFolder(db, destDir, [id]);
 
     expect(result.skipped).toBe(1);
     expect(result.copied).toBe(0);
@@ -128,7 +167,7 @@ describe("copyIdsIntoFolder — move mode (same volume)", () => {
     const id = await seedPhoto("a.jpg", "AAA");
     const db = getDb();
 
-    const result = copyIdsIntoFolder(db, destDir, [id], { move: true });
+    const result = await copyIdsIntoFolder(db, destDir, [id], { move: true });
 
     expect(result.moved).toBe(1);
     expect(result.copied).toBe(0);
@@ -148,7 +187,7 @@ describe("copyIdsIntoFolder — move mode (same volume)", () => {
     const id = await seedPhoto("a.jpg", "NEW-CONTENT");
     const db = getDb();
 
-    const result = copyIdsIntoFolder(db, destDir, [id], { move: true });
+    const result = await copyIdsIntoFolder(db, destDir, [id], { move: true });
 
     expect(result.manifest[0].to).toBe(join(destDir, "a (2).jpg"));
     expect(readFileSync(join(destDir, "a.jpg"), "utf8")).toBe("EXISTING");
@@ -166,7 +205,7 @@ describe("copyIdsIntoFolder — move mode, cross-volume (EXDEV) fallback", () =>
     const srcSize = statSync(join(srcDir, "a.jpg")).size;
 
     forceExdev = true;
-    const result = copyIdsIntoFolder(db, destDir, [id], { move: true });
+    const result = await copyIdsIntoFolder(db, destDir, [id], { move: true });
 
     expect(result.moved).toBe(1);
     expect(existsSync(join(srcDir, "a.jpg"))).toBe(false);
@@ -180,9 +219,9 @@ describe("copyIdsIntoFolder — move mode, cross-volume (EXDEV) fallback", () =>
 
     forceExdev = true;
     forceCorruptCopy = true;
-    expect(() => copyIdsIntoFolder(db, destDir, [id], { move: true })).toThrow(
-      /verify failed/i
-    );
+    await expect(
+      copyIdsIntoFolder(db, destDir, [id], { move: true })
+    ).rejects.toThrow(/verify failed/i);
 
     // Source must survive a failed verification — never lost.
     expect(existsSync(join(srcDir, "a.jpg"))).toBe(true);
@@ -199,7 +238,7 @@ describe("copyIdsIntoFolder — cancel via AbortSignal", () => {
 
     let thrown;
     try {
-      copyIdsIntoFolder(db, destDir, [idA, idB], {
+      await copyIdsIntoFolder(db, destDir, [idA, idB], {
         signal: controller.signal,
       });
     } catch (e) {
@@ -219,7 +258,7 @@ describe("copyIdsIntoFolder — cancel via AbortSignal", () => {
 
     let thrown;
     try {
-      copyIdsIntoFolder(db, destDir, [idA, idB, idC], {
+      await copyIdsIntoFolder(db, destDir, [idA, idB, idC], {
         signal: controller.signal,
         onProgress: (done) => {
           if (done === 1) controller.abort();

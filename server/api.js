@@ -4,13 +4,13 @@ import {
   statSync,
   createReadStream,
   mkdirSync,
-  copyFileSync,
   renameSync,
   fsyncSync,
   openSync,
   closeSync,
   unlinkSync,
 } from "node:fs";
+import * as fsp from "node:fs/promises";
 import { writeFile, rename, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { extname, join, basename, dirname, resolve, sep } from "node:path";
@@ -139,17 +139,20 @@ function resolveExportTarget(
  * the destination is confirmed written, so a crash between copy and unlink
  * leaves a harmless duplicate, never a lost file. This is the only code path
  * allowed to remove a source file.
+ * The cross-volume copy uses async `fsp.copyFile` (libuv threadpool) so a large
+ * file never blocks the event loop — critical in the packaged app where the
+ * Express server runs inside the Electron main process.
  * @param {string} src
  * @param {string} dst
  */
-function moveFile(src, dst) {
+async function moveFile(src, dst) {
   try {
     renameSync(src, dst);
     return;
   } catch (e) {
     if (e.code !== "EXDEV") throw e;
   }
-  copyFileSync(src, dst); // cross-volume
+  await fsp.copyFile(src, dst); // cross-volume
   const fd = openSync(dst, "r");
   fsyncSync(fd);
   closeSync(fd);
@@ -175,10 +178,13 @@ function moveFile(src, dst) {
  * @param {import("better-sqlite3").Database} db
  * @param {string} targetDir
  * @param {Array<number|string>} ids
+ * File I/O is async (`fsp.copyFile` on the libuv threadpool) so a single large
+ * file never blocks the event loop; in the packaged app the Express server runs
+ * inside the Electron main process, so a synchronous copy would beachball the UI.
  * @param {{signal?: AbortSignal, onProgress?: (done:number, total:number, phase:string) => void, move?: boolean}} [opts]
- * @returns {{copied:number, moved:number, skipped:number, manifest:Array<{id:number, from:string, to:string}>}}
+ * @returns {Promise<{copied:number, moved:number, skipped:number, manifest:Array<{id:number, from:string, to:string}>}>}
  */
-export function copyIdsIntoFolder(
+export async function copyIdsIntoFolder(
   db,
   targetDir,
   ids,
@@ -191,7 +197,8 @@ export function copyIdsIntoFolder(
   const manifest = [];
   const total = ids.length;
 
-  ids.forEach((id, i) => {
+  let i = 0;
+  for (const id of ids) {
     if (signal?.aborted) {
       const e = new Error("canceled");
       e.name = "AbortError";
@@ -204,11 +211,11 @@ export function copyIdsIntoFolder(
     } else {
       const dst = nextAvailablePath(targetDir, basename(photo.path));
       if (move) {
-        moveFile(photo.path, dst);
+        await moveFile(photo.path, dst);
         repointPhoto(db, Number(id), dst);
         moved++;
       } else {
-        copyFileSync(photo.path, dst);
+        await fsp.copyFile(photo.path, dst);
         copied++;
       }
       manifest.push({ id: Number(id), from: photo.path, to: dst });
@@ -216,7 +223,8 @@ export function copyIdsIntoFolder(
     if (i % 50 === 0 || i === total - 1) {
       onProgress?.(i + 1, total, move ? "moving" : "copying");
     }
-  });
+    i++;
+  }
 
   return { copied, moved, skipped, manifest };
 }
@@ -1257,7 +1265,7 @@ export function registerApi(app) {
 
     (async () => {
       try {
-        const { copied, skipped, moved } = copyIdsIntoFolder(
+        const { copied, skipped, moved } = await copyIdsIntoFolder(
           db,
           resolved.target,
           photoIds,
@@ -1361,19 +1369,17 @@ export function registerApi(app) {
       let done = 0;
       try {
         for (const { album, target } of resolvedAlbums) {
-          // copyIdsIntoFolder is synchronous fs work end-to-end, so without a
-          // yield here the whole multi-album job would run in one blocking
-          // tick — starving the event loop (no other request, including a
-          // cancel, could be served) and making the per-album abort check
-          // below unreachable in practice. Yielding once per album keeps
-          // cancel (and everything else) actually responsive.
+          // copyIdsIntoFolder now awaits async fs per file, so it yields the
+          // event loop on its own. Keep an explicit yield at the album boundary
+          // so an album that ends up skipping every file (no awaited copy)
+          // still can't starve a pending cancel between albums.
           await new Promise((resolve) => setImmediate(resolve));
           if (job.controller.signal.aborted) {
             const e = new Error("canceled");
             e.name = "AbortError";
             throw e;
           }
-          const r = copyIdsIntoFolder(db, target, album.photoIds, {
+          const r = await copyIdsIntoFolder(db, target, album.photoIds, {
             signal: job.controller.signal,
             move,
             onProgress: (d, _t, phase) =>

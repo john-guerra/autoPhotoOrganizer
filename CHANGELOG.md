@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.3-alpha
+
+- **Big album exports no longer freeze the app** — organizing or exporting a
+  large album now copies files in the background instead of locking up the
+  window, so the UI stays responsive (and cancel keeps working) even on huge
+  jobs.
+
 ## 2.8.2-alpha
 
 - **Clear bursts across a whole selection** — with photos selected, `Shift`+`G`
