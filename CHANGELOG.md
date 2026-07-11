@@ -6,6 +6,10 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.17-alpha
+
+- Compact single-row group-by control keeps the top toolbar to one row (#82).
+
 ## 2.8.16-alpha
 
 - New bottom status bar shows library/showing/selected counts, scan status,

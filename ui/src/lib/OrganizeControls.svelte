@@ -34,6 +34,7 @@
       value: initialValue,
       placeholder: "Add a grouping level…",
       sortable: true,
+      layout: "inline",
     });
     widget.addEventListener("input", () =>
       dispatch("groupbychange", widget.value)
