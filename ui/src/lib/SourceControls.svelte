@@ -8,6 +8,7 @@
    * LIST that used to live in this dropdown moved to the tree/fisheye sidebar.
    */
   import { createEventDispatcher } from "svelte";
+  import { clickOutside, onEscape } from "./actions.js";
 
   export let scanning = false;
   export let hasNativePicker = false;
@@ -33,7 +34,11 @@
       Library ▾
     </button>
     {#if libraryOpen}
-      <ul class="library-panel">
+      <ul
+        class="library-panel"
+        use:clickOutside={() => (libraryOpen = false)}
+        use:onEscape={() => (libraryOpen = false)}
+      >
         <li>
           <button
             class="library-entry"
@@ -70,7 +75,11 @@
       ＋
     </button>
     {#if addFolderOpen}
-      <div class="add-panel">
+      <div
+        class="add-panel"
+        use:clickOutside={() => (addFolderOpen = false)}
+        use:onEscape={() => (addFolderOpen = false)}
+      >
         <input
           class="dir"
           type="text"
