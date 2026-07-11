@@ -8,6 +8,9 @@
   export let sampleDate = new Date();
   export let dest = "";
   export let hasNativePicker = false;
+  // Seed for the Prefix field — normally the source folder's name (App passes
+  // `focusName`). Source-specific, so it is NOT part of the persisted `prefs`.
+  export let defaultPrefix = "";
 
   const dispatch = createEventDispatcher();
 
@@ -18,6 +21,7 @@
   let move = prefs.move;
   let localDest = dest;
   let gapInput = "";
+  let prefix = defaultPrefix;
   $: if (open) {
     // one-shot reseed guard
   }
@@ -29,22 +33,24 @@
     move = prefs.move;
     localDest = dest;
     gapInput = fmtDur(fixedGapMs);
+    prefix = defaultPrefix;
     lastOpen = true;
   }
   $: if (!open) lastOpen = false;
 
-  $: preview = renderAlbumName(template, sampleDate, 1);
+  $: preview = renderAlbumName(template, sampleDate, 1, prefix);
 
   const TOKENS = [
-    ["%Y", "2017"],
-    ["%m", "01"],
-    ["%b", "Jan"],
-    ["%B", "January"],
-    ["%d", "09"],
-    ["%H", "14"],
-    ["%M", "30"],
-    ["%n", "album #"],
-    ["/", "subfolder"],
+    ["%Y", "4-digit year", "2017"],
+    ["%m", "month number", "01"],
+    ["%b", "short month name", "Jan"],
+    ["%B", "full month name", "January"],
+    ["%d", "day of month", "09"],
+    ["%H", "hour (24h)", "14"],
+    ["%M", "minute", "30"],
+    ["%n", "album number", "1, 2, 3…"],
+    ["{prefix}", "folder-name prefix", "Diana"],
+    ["/", "make a subfolder", "subfolder"],
   ];
   function insertToken(tok) {
     template = template + tok;
@@ -77,6 +83,7 @@
       fixedGapMs,
       move,
       dest: localDest.trim(),
+      prefix,
     });
     open = false;
   }
@@ -117,8 +124,10 @@
         placeholder="e.g. 1m, 30m, 2h, 1d"
         disabled={gapMode !== "fixed"}
       />
-      <button class:active={gapMode === "auto"} on:click={useAuto} title="mean + k·stddev of gaps"
-        >Auto</button
+      <button
+        class:active={gapMode === "auto"}
+        on:click={useAuto}
+        title="mean + k·stddev of gaps">Auto</button
       >
     </div>
     <p class="hint">
@@ -130,12 +139,32 @@
 
   <section class="field">
     <label class="lbl">Folder naming</label>
-    <input class="tpl" bind:value={template} spellcheck="false" placeholder="%Y/%Y_%m%b_%d" />
+    <input
+      class="tpl"
+      bind:value={template}
+      spellcheck="false"
+      placeholder="%Y/%Y_%m%b_%d"
+    />
+    <p class="hint">e.g. <code>Album %n</code> → Album 1, Album 2</p>
     <div class="tokens">
-      {#each TOKENS as [tok, ex]}
-        <button class="token" title={ex} on:click={() => insertToken(tok)}>{tok}</button>
+      {#each TOKENS as [tok, desc, ex]}
+        <button
+          class="token"
+          title={`${desc} — e.g. ${ex}`}
+          on:click={() => insertToken(tok)}>{tok}</button
+        >
       {/each}
     </div>
+    <label class="lbl prefix-lbl">Prefix</label>
+    <input
+      class="tpl"
+      bind:value={prefix}
+      spellcheck="false"
+      placeholder="Diana"
+    />
+    <p class="hint">
+      Prefix starts from the current folder's name — used by the {"{prefix}"} token.
+    </p>
     <p class="preview">
       Preview: <code>{localDest || "<destination>"}/{preview}</code>
     </p>
@@ -148,7 +177,12 @@
       <label><input type="radio" value={false} bind:group={move} /> Copy</label>
     </div>
     <div class="dest-row">
-      <input class="dest" bind:value={localDest} placeholder="/materialize/destination" spellcheck="false" />
+      <input
+        class="dest"
+        bind:value={localDest}
+        placeholder="/materialize/destination"
+        spellcheck="false"
+      />
       {#if hasNativePicker}<button on:click={pickDest}>Choose…</button>{/if}
     </div>
   </section>
@@ -185,6 +219,9 @@
     font-size: 0.8rem;
     color: #9a9a9a;
     margin-bottom: 0.35rem;
+  }
+  .prefix-lbl {
+    margin-top: 0.6rem;
   }
   .gap-row,
   .move-row,

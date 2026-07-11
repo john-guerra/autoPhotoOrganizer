@@ -2879,6 +2879,7 @@
           truncated={albumTruncated}
           limit={albumLimit}
           defaultDest={focusPath || ""}
+          defaultPrefix={focusName || ""}
           {hasNativePicker}
           prefs={albumPrefs}
           autoOpenSetup={albumAutoOpenSetup}

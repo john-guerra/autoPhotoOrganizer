@@ -6,6 +6,20 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.9-alpha
+
+- **`{prefix}` naming token for albums** — the folder-naming template now
+  supports a `{prefix}` token that starts out as the current folder's name
+  (editable in the new **Prefix** field), so e.g. `%Y_{prefix}` gives you
+  `2017_Diana` out of the box.
+- **Token legend explains every naming token** — hovering (or reading) each
+  token button in Auto Albums now shows what it means and an example
+  (`%Y` → 4-digit year, `%n` → album number, etc.), plus a quick example under
+  the template field.
+- **Tab jumps between album names** — while renaming albums before
+  materializing, Tab/Shift+Tab now moves straight to the next/previous
+  album's name field instead of tabbing through every snapshot thumbnail.
+
 ## 2.8.8-alpha
 
 - **Auto Albums, explained and configurable** — the old "Albums" button is now

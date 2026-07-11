@@ -30,6 +30,10 @@
   // The folder you've opened (focusPath, #66). When set, materialize defaults
   // to organizing in place — album subfolders created inside this folder.
   export let defaultDest = "";
+  // Seed for the {prefix} naming token — normally the source folder's name
+  // (App passes `focusName`). Source-specific, so it is NOT persisted to the
+  // global album prefs (unlike `template`, which is).
+  export let defaultPrefix = "";
   // Global album prefs (template/gapMode/fixedGapMs/k/move) — see albumPrefs.js.
   // AlbumsView owns the LIVE working copy (seeded here, tweaked by the slider,
   // the Auto button, the type-exact editor, and the Options modal); App
@@ -54,6 +58,9 @@
   // Local mirror of the naming template, kept in sync via the Options modal's
   // `apply` (prefs.template itself only updates once App persists+re-passes).
   let template = prefs.template;
+  // Local mirror of the {prefix} token's value, seeded from the source
+  // folder's name. Source-specific — not part of the persisted prefs.
+  let prefix = defaultPrefix;
   let setupOpen = autoOpenSetup;
   // Destination: prefer the opened folder (in-place), else the remembered dest.
   let dest =
@@ -129,13 +136,27 @@
   // as that photo still starts the album. Un-edited albums render from
   // `template`.
   let editedNames = new Map(); // firstPhotoId -> typed name
-  $: names = computeAlbumNames(albums, editedNames, template);
+  $: names = computeAlbumNames(albums, editedNames, template, prefix);
 
   function onNameInput(i, value) {
     const firstId = albums[i].ids[0];
     if (value == null || value === "") editedNames.delete(firstId);
     else editedNames.set(firstId, value);
     editedNames = editedNames; // trigger Svelte reactivity
+  }
+
+  // Bound album-name <input> elements, indexed like `albums`/`names` — lets
+  // plain Tab/Shift+Tab jump straight between name fields (issue #2) instead
+  // of tabbing through every snapshot thumbnail in between.
+  let nameInputs = [];
+  function onNameKeydown(e, i) {
+    if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) return;
+    const next = e.shiftKey ? i - 1 : i + 1;
+    const target = nameInputs[next];
+    if (!target) return; // stop at the ends
+    e.preventDefault();
+    target.focus();
+    target.select();
   }
 
   function startEditThresh() {
@@ -166,7 +187,9 @@
     move = p.move;
     dest = p.dest || dest;
     template = p.template;
-    // Persist globally (App writes to albumPrefs.js / localStorage).
+    prefix = p.prefix ?? prefix;
+    // Persist globally (App writes to albumPrefs.js / localStorage). Prefix
+    // is source-specific and intentionally excluded from the persisted prefs.
     dispatch("prefschange", p);
     setupOpen = false;
   }
@@ -412,8 +435,10 @@
       <div class="album-divider">
         <input
           class="album-name-edit"
+          bind:this={nameInputs[i]}
           value={names[i]}
           on:input={(e) => onNameInput(i, e.target.value)}
+          on:keydown={(e) => onNameKeydown(e, i)}
           spellcheck="false"
           title="Album folder name (edit before materializing)"
           aria-label="Album folder name"
@@ -441,6 +466,7 @@
   sampleDate={new Date(albums[0]?.startAt ?? Date.now())}
   {dest}
   {hasNativePicker}
+  defaultPrefix={prefix}
   on:apply={onSetupApply}
 />
 
