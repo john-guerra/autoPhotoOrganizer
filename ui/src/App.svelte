@@ -2768,7 +2768,6 @@
     <!-- ② ORGANIZE & FILTER -->
     <OrganizeControls
       {groupBy}
-      {sort}
       {filter}
       {filterMode}
       {timeMin}
@@ -2776,7 +2775,6 @@
       {timeTimes}
       currentTime={markerTime}
       on:groupbychange={(e) => onGroupByChange(e.detail)}
-      on:sortchange={(e) => onSortChange(e.detail)}
       on:filtermodechange={(e) => onFilterModeChange(e.detail)}
       on:filterchange={(e) => onFilterChange(e.detail)}
     />
@@ -2790,10 +2788,6 @@
       {globalViewMode}
       bind:albumMode
       {detectingAlbums}
-      bind:zoom
-      zoomMax={ZOOM_LEVELS.length - 1}
-      bind:burstEnabled
-      bind:burstGapMs
       on:revealcurrent={revealCurrentLocation}
       on:cycleall={cycleAllGroups}
       on:detectalbums={detectAlbums}
@@ -3187,6 +3181,12 @@
     {error}
     {thumbProgress}
     {thumbCounts}
+    bind:zoom
+    zoomMax={ZOOM_LEVELS.length - 1}
+    bind:burstEnabled
+    bind:burstGapMs
+    {sort}
+    on:sortchange={(e) => onSortChange(e.detail)}
   />
 </div>
 

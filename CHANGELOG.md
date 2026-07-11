@@ -6,6 +6,11 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.16-alpha
+
+- New bottom status bar shows library/showing/selected counts, scan status,
+  zoom, burst, and sort — freeing the top toolbar for actions (#82).
+
 ## 2.8.15-alpha
 
 - **Expanding a collapsed group no longer flickers** — re-expanding a section
