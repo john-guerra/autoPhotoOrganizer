@@ -719,22 +719,6 @@
     }
   }
 
-  /** Select every photo in one section/group (respecting the display filter),
-   * unioning them into the selection. Powers the per-group "Select" action. */
-  async function selectGroup(path) {
-    if (!path || !path.length) return;
-    try {
-      const ids = await fetchPhotoIds(
-        filterIsActive(displayFilter) ? displayFilter : null,
-        path,
-        sort
-      );
-      selectedIds = new Set([...selectedIds, ...ids]);
-    } catch (e) {
-      error = e.message;
-    }
-  }
-
   // --- Group tri-state selection indicator (issue #88) -------------------
   // A group label shows none/some/all of its photos selected. The client only
   // holds a flat `selectedIds` set, so we cache each group's id list (fetched
@@ -3087,7 +3071,6 @@
                       isFolder={header.path.at(-1)?.dimension === "folder"}
                       removeArmed={removeArmedKey === pathKey(header.path)}
                       on:toggleselect={() => toggleGroupSelectAll(header.path)}
-                      on:select={() => selectGroup(header.path)}
                       on:keeponly={() => keepOnlyGroup(header.path)}
                       on:remove={() => removeAlbum(header.path)}
                     />
@@ -3138,7 +3121,6 @@
                           pathKey(entry.item.path)}
                         on:toggleselect={() =>
                           toggleGroupSelectAll(entry.item.path)}
-                        on:select={() => selectGroup(entry.item.path)}
                         on:keeponly={() => keepOnlyGroup(entry.item.path)}
                         on:remove={() => removeAlbum(entry.item.path)}
                       />
@@ -3188,7 +3170,6 @@
                       removeArmed={removeArmedKey === pathKey(entry.item.path)}
                       on:toggleselect={() =>
                         toggleGroupSelectAll(entry.item.path)}
-                      on:select={() => selectGroup(entry.item.path)}
                       on:keeponly={() => keepOnlyGroup(entry.item.path)}
                       on:remove={() => removeAlbum(entry.item.path)}
                     />

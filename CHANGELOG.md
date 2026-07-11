@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.17-alpha
+
+- **Dropped the redundant per-group "Select" button** — the new select-all
+  checkbox on each group label already selects (and deselects) the whole group,
+  so the label now shows just the checkbox, Keep only, and Remove (issue #88).
+
 ## 2.8.16-alpha
 
 - **Every group label now offers the same actions and a select-all checkbox,

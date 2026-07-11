@@ -5,9 +5,11 @@
   // regardless of its display state — instead of three drifting inline copies.
   //
   // Purely presentational: it dispatches intent and lets App.svelte run the
-  // canonical handlers (selectGroup / keepOnlyGroup / removeAlbum /
-  // toggleGroupSelectAll). Every button stops click propagation so it never
-  // triggers the surrounding row's own click (e.g. the collapsed pill's cycle).
+  // canonical handlers (toggleGroupSelectAll / keepOnlyGroup / removeAlbum).
+  // Every button stops click propagation so it never triggers the surrounding
+  // row's own click (e.g. the collapsed pill's cycle). The tri-state checkbox
+  // is the select-all affordance — there is no separate "Select" button (it
+  // would only duplicate the checkbox's select half).
   import { createEventDispatcher } from "svelte";
 
   /** @type {"none"|"some"|"all"|"loading"} tri-state select indicator */
@@ -39,13 +41,6 @@
 
   <!-- Revealed on header hover (App.svelte controls opacity across the boundary). -->
   <span class="gla-buttons">
-    <button
-      class="section-act"
-      title="Select every photo in this group"
-      on:click|stopPropagation={() => dispatch("select")}
-    >
-      Select
-    </button>
     <button
       class="section-act"
       title="Keep only this group as the working set"
