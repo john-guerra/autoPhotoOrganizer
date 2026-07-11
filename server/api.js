@@ -14,6 +14,7 @@ import * as fsp from "node:fs/promises";
 import { writeFile, rename, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { extname, join, basename, dirname, resolve, sep } from "node:path";
+import { homedir } from "node:os";
 import { revealCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { thumbsDir, cacheRoot } from "./lib/cachePaths.js";
@@ -1484,5 +1485,30 @@ export function registerApi(app) {
         registry.fail(job.id, e);
       }
     })();
+  });
+
+  // --- System paths: smart defaults for the materialize dest picker
+  // (Move defaults to in-place/source, Copy defaults to Desktop) --------------
+  app.get("/api/system/paths", (_req, res) => {
+    const home = homedir();
+    res.json({ home, desktop: join(home, "Desktop") });
+  });
+
+  // Cheap same-device probe so the UI can warn "this Move is a full copy, not
+  // instant" when source and dest straddle two volumes. Missing paths are a
+  // normal case (dest not created yet, drive unmounted) — never 500, just
+  // report "unknown" via null.
+  app.get("/api/system/same-volume", (req, res) => {
+    const { a, b } = req.query;
+    if (typeof a !== "string" || typeof b !== "string") {
+      return res.status(400).json({ error: "a and b are required" });
+    }
+    let sameVolume = null;
+    try {
+      sameVolume = statSync(a).dev === statSync(b).dev;
+    } catch {
+      sameVolume = null;
+    }
+    res.json({ sameVolume });
   });
 }

@@ -625,3 +625,36 @@ export async function fetchFlatTree(groupBy, filter = null, sort = null) {
   }
   return res.json();
 }
+
+/**
+ * Well-known system paths for the materialize dest picker's smart defaults
+ * (Copy defaults to Desktop; Move defaults to in-place/source).
+ * @returns {Promise<{home:string, desktop:string}>}
+ */
+export async function fetchSystemPaths() {
+  const res = await fetch("/api/system/paths");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `system paths failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Whether two paths live on the same device (statSync(...).dev), so the UI
+ * can warn that a same-volume-only "Move" would actually be a full copy.
+ * `sameVolume` is `null` when either path can't be stat'd (e.g. dest not
+ * created yet, or a drive is unmounted) rather than throwing.
+ * @param {string} a
+ * @param {string} b
+ * @returns {Promise<{sameVolume: boolean|null}>}
+ */
+export async function checkSameVolume(a, b) {
+  const params = new URLSearchParams({ a, b });
+  const res = await fetch(`/api/system/same-volume?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `same-volume check failed (${res.status})`);
+  }
+  return res.json();
+}

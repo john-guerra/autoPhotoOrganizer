@@ -2357,3 +2357,43 @@ describe("video support (ffmpeg) — scan, thumb, meta, Range", () => {
     expect(bad.status).toBe(416);
   });
 });
+
+describe("GET /api/system/paths", () => {
+  it("returns a non-empty home and a desktop under it", async () => {
+    const res = await fetch(`${srv.base}/api/system/paths`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(typeof body.home).toBe("string");
+    expect(body.home.length).toBeGreaterThan(0);
+    expect(body.desktop).toMatch(/Desktop$/);
+  });
+});
+
+describe("GET /api/system/same-volume", () => {
+  it("returns true for two paths under the same temp root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ag-samevol-"));
+    const a = join(root, "a");
+    const b = join(root, "b");
+    await mkdir(a);
+    await mkdir(b);
+    const res = await fetch(
+      `${srv.base}/api/system/same-volume?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.sameVolume).toBe(true);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("returns null when a path doesn't exist, instead of 500ing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ag-samevol-"));
+    const missing = join(root, "does-not-exist");
+    const res = await fetch(
+      `${srv.base}/api/system/same-volume?a=${encodeURIComponent(root)}&b=${encodeURIComponent(missing)}`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.sameVolume).toBeNull();
+    await rm(root, { recursive: true, force: true });
+  });
+});
