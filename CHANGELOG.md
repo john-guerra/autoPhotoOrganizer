@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.7.3-alpha
+
+- **Fixed: "Keep only" on a group left the previous group's photos showing** —
+  the feed now rebuilds against the scoped filter, so keeping a group narrows to
+  exactly that group with no leftover tiles bleeding in from the section above
+  it (#75).
+
 ## 2.7.2-alpha
 
 - **Expanding a group no longer jumps the view** — opening a collapsed section

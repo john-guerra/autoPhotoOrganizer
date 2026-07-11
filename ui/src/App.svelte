@@ -763,7 +763,15 @@
     headerCounts = {};
     fetchedParents = new Set();
     inFlightParents = new Set();
-    onGroupByChange(groupBy);
+    // displayFilter is a `$:` derived value keyed on keepIds; it hasn't
+    // recomputed yet. Flush reactive state before rebuilding so the feed loader
+    // reads the keepScope filter (mirrors setFocus) — otherwise the live rebuild
+    // fetches with the stale, unscoped filter and the focus window's "before"
+    // half bleeds in the previous group's photos (#75). Symmetric on exit:
+    // without the flush, leaving keep-only would rebuild while keepScope is
+    // still true against an already-cleared scope.
+    await tick();
+    await onGroupByChange(groupBy);
     refreshCounts();
   }
 
@@ -779,7 +787,7 @@
     try {
       const ids = await fetchPhotoIds(null, path, sort);
       if (!ids.length) return;
-      applyKeepOnly(ids);
+      await applyKeepOnly(ids);
     } catch (e) {
       error = e.message;
     }
