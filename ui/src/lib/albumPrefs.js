@@ -4,7 +4,10 @@
 const KEY = "autogallery.albumPrefs";
 
 export const DEFAULT_ALBUM_PREFS = {
-  template: "%Y/%Y_%m%b_%d", // e.g. 2017/2017_01Jan_09 (nested year folder)
+  // e.g. 2017/2017_01Jan_09_Diana_VR — nested year folder + a {prefix} that
+  // seeds from the source folder's name (editable). Empty prefix collapses the
+  // trailing "_" cleanly to 2017/2017_01Jan_09.
+  template: "%Y/%Y_%m%b_%d_{prefix}",
   gapMode: "fixed", // "fixed" (a concrete gap) | "auto" (mean + k·stddev)
   fixedGapMs: 86400000, // 1 day
   k: 2, // stddev multiplier for auto mode

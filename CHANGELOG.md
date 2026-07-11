@@ -23,8 +23,9 @@ user-facing — what you can now do, not how it's built.
 
 - **`{prefix}` naming token for albums** — the folder-naming template now
   supports a `{prefix}` token that starts out as the current folder's name
-  (editable in the new **Prefix** field), so e.g. `%Y_{prefix}` gives you
-  `2017_Diana` out of the box.
+  (editable in the new **Prefix** field). It's in the default template
+  (`%Y/%Y_%m%b_%d_{prefix}` → `2017/2017_01Jan_09_Diana_VR`); an empty prefix
+  cleanly collapses the trailing separator to `2017/2017_01Jan_09`.
 - **Token legend explains every naming token** — hovering (or reading) each
   token button in Auto Albums now shows what it means and an example
   (`%Y` → 4-digit year, `%n` → album number, etc.), plus a quick example under
