@@ -66,12 +66,25 @@ CREATE TABLE IF NOT EXISTS photo_tags (
 CREATE TABLE IF NOT EXISTS keep_scope (
   photo_id INTEGER PRIMARY KEY
 );
+-- Manual burst-stack grouping (issue #24): photos sharing a group_id are forced
+-- into one stack regardless of the time-gap heuristic. A photo can belong to at
+-- most one manual stack (PK on photo_id). The complementary "keep separate"
+-- override (dissolve) is the photos.no_auto_stack column. See
+-- docs/superpowers/specs/2026-07-11-manual-burst-override-design.md.
+CREATE TABLE IF NOT EXISTS manual_stacks (
+  photo_id INTEGER PRIMARY KEY REFERENCES photos(id),
+  group_id INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manual_stacks_group ON manual_stacks(group_id);
 `;
 
 /** @param {import("better-sqlite3").Database} db */
 export function applySchema(db) {
   db.exec(SCHEMA_SQL);
   ensureColumn(db, "photos", "btime", "INTEGER");
+  // "Keep separate" (dissolve) marker — a per-photo boolean like preferred_cover,
+  // so it rides upsertScan's ON CONFLICT and survives rescans of unchanged files.
+  ensureColumn(db, "photos", "no_auto_stack", "INTEGER NOT NULL DEFAULT 0");
 }
 
 /** Idempotent ADD COLUMN — the app ships no migration runner, and
