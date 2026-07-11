@@ -78,18 +78,21 @@ verification), and decisions already made.
 
 ## Versioning
 
-- **Every fixed issue bumps the app version in `package.json`**, sized to the
-  change's gravity (semver). The version shows in the title bar (`App.svelte`
-  reads it via Vite's `__APP_VERSION__` define) and drives electron-updater
-  releases, so it doubles as the human-visible changelog anchor.
-  - **Patch** (`x.y.Z+1`) — bug fixes and small tweaks that don't add
-    user-facing capability (e.g. the dev-port fix, #65).
-  - **Minor** (`x.Y+1.0`) — new user-facing features or enhancements (e.g.
-    Reveal in Finder #18, the shortcuts overlay #26).
+- **Every change bumps the app version in `package.json`.** The version shows
+  in the title bar (`App.svelte` reads it via Vite's `__APP_VERSION__` define)
+  and drives electron-updater releases, so it doubles as the human-visible
+  changelog anchor.
+  - **Patch** (`x.y.Z+1`) — the default for **all** ongoing work: every fix,
+    feature, or enhancement bumps the third number (e.g. Reveal in Finder,
+    manual burst stacks, a bug fix — all patch bumps).
+  - **Minor** (`x.Y+1.0`) — bumped **only when we generate a new package**
+    (cut a packaged/distributable build — e.g. an `electron:build:mac` /
+    release artifact). Rolls the patch number back to `0`.
   - **Major** (`X+1.0.0`) — breaking changes or removed capabilities.
 - Keep the current pre-release suffix (`-alpha`) until a stable release is cut,
-  so e.g. a feature at `2.0.0-alpha` bumps to `2.1.0-alpha`. Bump in the **same
-  commit/PR that closes the issue**, not as a separate housekeeping commit.
+  so e.g. a change at `2.7.0-alpha` bumps to `2.7.1-alpha`, and the next
+  packaged build cuts `2.8.0-alpha`. Bump in the **same commit/PR that closes
+  the issue**, not as a separate housekeeping commit.
 - **Update `CHANGELOG.md` in that same commit.** Add a new `## <version>` entry
   (newest first) with a clean, short, user-facing line per feature/fix — what
   the user can now do, not how it's implemented — most notable first, with the

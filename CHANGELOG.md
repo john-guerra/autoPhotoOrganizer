@@ -1,9 +1,10 @@
 # Changelog
 
 Notable changes to AutoGallery, newest first. Versions follow the scheme in
-`CLAUDE.md` (§ Versioning): each fixed issue bumps `package.json` by the change's
-gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
-short and user-facing — what you can now do, not how it's built.
+`CLAUDE.md` (§ Versioning): every change bumps the patch (third) number, the
+minor (second) number is bumped only when a new package is generated, and the
+`-alpha` suffix stays until a stable release is cut. Entries are short and
+user-facing — what you can now do, not how it's built.
 
 ## 2.7.0-alpha
 
