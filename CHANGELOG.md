@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.0-alpha
+
+- **Packaged build** bundling this round of feed fixes: "Keep only" now scopes
+  cleanly to the chosen group (#75), expanding a collapsed group keeps its header
+  in place and opens the whole group from the top (#74), and the Alt+←/→ group
+  jump lands on the group's first photo in the current sort (#77).
+
 ## 2.7.5-alpha
 
 - **Fixed: expanding a group showed only part of it** — a group now opens from
