@@ -85,6 +85,8 @@ export function applySchema(db) {
   // "Keep separate" (dissolve) marker — a per-photo boolean like preferred_cover,
   // so it rides upsertScan's ON CONFLICT and survives rescans of unchanged files.
   ensureColumn(db, "photos", "no_auto_stack", "INTEGER NOT NULL DEFAULT 0");
+  // Video length in seconds (fractional; NULL for images and un-probed videos).
+  ensureColumn(db, "photos", "duration", "REAL");
 }
 
 /** Idempotent ADD COLUMN — the app ships no migration runner, and

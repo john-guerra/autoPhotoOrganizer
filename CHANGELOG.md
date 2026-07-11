@@ -5,7 +5,7 @@ Notable changes to AutoGallery, newest first. Versions follow the scheme in
 gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
 short and user-facing — what you can now do, not how it's built.
 
-## 2.5.0-alpha
+## 2.7.0-alpha
 
 - **Manual burst stacks**: select photos in one folder/day and right-click →
   "Create stack" to force them into a single stack even when their timestamps
@@ -13,6 +13,19 @@ short and user-facing — what you can now do, not how it's built.
   "Dissolve stack" to break it apart, and those photos stay separate on future
   scans. Both choices persist. Keyboard: <kbd>G</kbd> groups the selection,
   <kbd>Shift</kbd>+<kbd>G</kbd> dissolves the stack at the cursor (#24).
+
+## 2.6.0-alpha
+
+- **Click to select, double-click to open** — a single click in the grid now
+  selects a photo instead of jumping into the loupe; the loupe opens on a
+  double-click or a second click on the already-selected photo, so you can click
+  through the grid to pick shots without it taking over (#72).
+
+## 2.5.0-alpha
+
+- **Video support** — videos are scanned alongside photos, shown in the grid
+  with a poster frame, a ▶ badge, and their duration, and play with scrubbing in
+  the loupe (streamed on demand, so large clips open instantly) (#69).
 
 ## 2.4.2-alpha
 

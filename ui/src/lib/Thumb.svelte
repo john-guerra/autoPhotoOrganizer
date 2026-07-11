@@ -8,7 +8,7 @@
 
 <script>
   import { onMount, onDestroy, createEventDispatcher } from "svelte";
-  import { thumbUrl, previewUrl } from "./api.js";
+  import { thumbUrl, previewUrl, formatDuration } from "./api.js";
   import Stars from "./Stars.svelte";
 
   const dispatch = createEventDispatcher();
@@ -209,6 +209,14 @@
         on:click|stopPropagation={retry}>⟳ Retry</button
       >
     {/if}
+    {#if item.kind === "video"}
+      {#if loaded}
+        <span class="play-badge" aria-hidden="true">▶</span>
+      {/if}
+      {#if item.duration != null}
+        <span class="duration-badge">{formatDuration(item.duration)}</span>
+      {/if}
+    {/if}
     {#if item.rating > 0}
       <span class="badge"><Stars rating={item.rating} /></span>
     {/if}
@@ -346,6 +354,41 @@
     font-size: 0.7rem;
     border-radius: 3px;
     pointer-events: none;
+  }
+  /* Centered play glyph marking a video tile (the still is its poster frame). */
+  .play-badge {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    padding-left: 3px; /* optically center the triangle */
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.5);
+    color: #fff;
+    font-size: 1rem;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 100;
+  }
+  /* Duration pill, bottom-LEFT so it never collides with the bottom-right
+     stack "×N" badge on a video that is also a burst cover. */
+  .duration-badge {
+    position: absolute;
+    left: 5px;
+    bottom: 5px;
+    padding: 1px 5px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+    border-radius: 3px;
+    pointer-events: none;
+    z-index: 100;
   }
   .stack-marker {
     position: absolute;

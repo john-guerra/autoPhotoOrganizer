@@ -59,7 +59,8 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
   return db
     .prepare(
       `SELECT id, filename AS name, size, mtime AS mtimeMs, rating,
-              preferred_cover AS preferredCover, no_auto_stack AS keepSeparate,
+              preferred_cover AS preferredCover, kind, duration,
+              no_auto_stack AS keepSeparate,
               (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId
        FROM photos WHERE folder_id = ? AND stale = 0 ORDER BY filename`
     )

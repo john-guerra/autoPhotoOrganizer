@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
+import ffmpegPath from "ffmpeg-static";
 import { NodeProcessingService, formatCamera } from "./NodeProcessingService.js";
 
 let dir;
@@ -17,7 +19,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-describe("scan — RAW file discovery", () => {
+describe("scan — media file discovery", () => {
   it("discovers RAW extensions with kind:'raw', existing formats with kind:'image'", async () => {
     await writeFile(join(dir, "a.jpg"), Buffer.from([0xff, 0xd8, 0xff]));
     await writeFile(join(dir, "b.cr2"), Buffer.from([0]));
@@ -32,6 +34,22 @@ describe("scan — RAW file discovery", () => {
       "c.NEF": "raw",
     });
     expect(files.some((f) => f.name === "d.txt")).toBe(false);
+  });
+
+  it("discovers video extensions with kind:'video' (case-insensitive)", async () => {
+    await writeFile(join(dir, "clip.mp4"), Buffer.from([0]));
+    await writeFile(join(dir, "trip.MOV"), Buffer.from([0])); // case-insensitive
+    await writeFile(join(dir, "cam.mkv"), Buffer.from([0]));
+    await writeFile(join(dir, "notes.txt"), Buffer.from([0])); // skipped
+
+    const files = await svc.scan(dir);
+    const byName = Object.fromEntries(files.map((f) => [f.name, f.kind]));
+    expect(byName).toEqual({
+      "clip.mp4": "video",
+      "trip.MOV": "video",
+      "cam.mkv": "video",
+    });
+    expect(files.some((f) => f.name === "notes.txt")).toBe(false);
   });
 });
 
@@ -81,6 +99,84 @@ describe("extractPreview", () => {
     await expect(
       svc.extractPreview(join(dir, "does-not-exist.jpg"))
     ).rejects.toThrow();
+  });
+});
+
+// ffmpeg-static downloads its binary at install time; if that was skipped (e.g.
+// an offline/locked-down CI), degrade gracefully rather than fail — matching the
+// project's "defer to manual validation" convention for fixtures it can't build.
+async function ffmpegAvailable() {
+  if (!ffmpegPath) return false;
+  return new Promise((resolve) => {
+    const c = spawn(ffmpegPath, ["-version"], { stdio: "ignore" });
+    c.on("error", () => resolve(false));
+    c.on("close", (code) => resolve(code === 0));
+  });
+}
+
+/** Generate a real N-second test clip with the bundled ffmpeg. */
+function makeClip(path, seconds = 2) {
+  return new Promise((resolve, reject) => {
+    const c = spawn(
+      ffmpegPath,
+      [
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        `testsrc=duration=${seconds}:size=320x240:rate=10`,
+        path,
+      ],
+      { stdio: "ignore" }
+    );
+    c.on("error", reject);
+    c.on("close", (code) =>
+      code === 0 ? resolve() : reject(new Error(`ffmpeg gen exit ${code}`))
+    );
+  });
+}
+
+describe("videoThumb + video metadata (ffmpeg/ffprobe)", () => {
+  let hasFfmpeg;
+  beforeAll(async () => {
+    hasFfmpeg = await ffmpegAvailable();
+  });
+
+  it("videoThumb extracts a size-bounded JPEG poster frame", async () => {
+    if (!hasFfmpeg) return; // skip when the static binary is unavailable
+    const mp4 = join(dir, "clip.mp4");
+    await makeClip(mp4, 2);
+    const result = await svc.videoThumb(mp4, 100);
+    expect(result.source).toBe("decoded");
+    expect(result.width).toBeLessThanOrEqual(100);
+    expect(result.height).toBeLessThanOrEqual(100);
+    // JPEG SOI magic bytes.
+    expect(result.data[0]).toBe(0xff);
+    expect(result.data[1]).toBe(0xd8);
+  });
+
+  it("metadata reads duration + displayed dimensions for a video", async () => {
+    if (!hasFfmpeg) return;
+    const mp4 = join(dir, "clip.mp4");
+    await makeClip(mp4, 2);
+    const [meta] = await svc.metadata([mp4]);
+    expect(meta.duration).toBeGreaterThan(1.5);
+    expect(meta.duration).toBeLessThan(2.6);
+    expect(meta.width).toBe(320);
+    expect(meta.height).toBe(240);
+    // lavfi sets no creation_time → undated, camera is "" (satisfies the
+    // meta re-try sentinel so it isn't re-probed forever).
+    expect(meta.createDate).toBeUndefined();
+    expect(meta.camera).toBe("");
+  });
+
+  it("videoThumb rejects with VideoDecodeError for a non-video file", async () => {
+    if (!hasFfmpeg) return;
+    const fake = join(dir, "bogus.mp4");
+    await writeFile(fake, Buffer.from("not actually a video"));
+    await expect(svc.videoThumb(fake, 100)).rejects.toMatchObject({
+      name: "VideoDecodeError",
+    });
   });
 });
 

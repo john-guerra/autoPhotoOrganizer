@@ -229,7 +229,52 @@ const MIME_BY_EXT = {
   ".png": "image/png",
   ".webp": "image/webp",
   ".gif": "image/gif",
+  // Video containers. Correct types are served regardless of whether a given
+  // container plays natively in the loupe's <video> (mkv/avi/mts and HEVC may
+  // not) — playability is a browser concern, separate from serving.
+  ".mp4": "video/mp4",
+  ".m4v": "video/x-m4v",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".avi": "video/x-msvideo",
+  ".mkv": "video/x-matroska",
+  ".3gp": "video/3gpp",
+  ".mts": "video/mp2t",
+  ".m2ts": "video/mp2t",
 };
+
+/**
+ * Parse a single-range `Range: bytes=start-end` header against a known total
+ * size. Returns `null` when there is no Range header (caller serves the whole
+ * file), `"invalid"` when the range is unsatisfiable (caller responds 416), or
+ * `{start, end}` (inclusive, clamped) for a valid range. Only the common
+ * single-range form is supported; multi-range requests fall back to null (full
+ * file), which is a valid response.
+ * @param {string|undefined} header
+ * @param {number} size
+ * @returns {null | "invalid" | {start:number, end:number}}
+ */
+function parseByteRange(header, size) {
+  if (!header) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m) return null; // multi-range or malformed → serve the whole file
+  const [, startStr, endStr] = m;
+  if (startStr === "" && endStr === "") return null;
+  let start;
+  let end;
+  if (startStr === "") {
+    // suffix range: last N bytes
+    const suffix = Number(endStr);
+    if (suffix <= 0) return "invalid";
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(startStr);
+    end = endStr === "" ? size - 1 : Math.min(Number(endStr), size - 1);
+  }
+  if (start > end || start >= size) return "invalid";
+  return { start, end };
+}
 
 /**
  * Parses + validates the optional `filter` query param into a filter spec.
@@ -439,6 +484,8 @@ export function registerApi(app) {
       mtimeMs: r.mtimeMs,
       rating: r.rating,
       preferredCover: r.preferredCover === 1,
+      kind: r.kind,
+      duration: r.duration ?? null,
       manualStackId: r.manualStackId ?? null,
       keepSeparate: r.keepSeparate === 1,
     }));
@@ -473,18 +520,22 @@ export function registerApi(app) {
     if (need.length) {
       const metas = await processing.metadata(need.map((p) => p.path));
       const update = db.prepare(
-        `UPDATE photos SET taken_at = ?, width = ?, height = ?, camera = ? WHERE id = ?`
+        `UPDATE photos SET taken_at = ?, width = ?, height = ?, camera = ?, duration = ? WHERE id = ?`
       );
       metas.forEach((m, i) => {
         const photo = need[i];
         const takenAtMs = m.createDate
           ? new Date(m.createDate).getTime()
           : null;
+        // duration has no tried-sentinel duty (width remains the sole "attempted"
+        // marker); NULL for images/undetermined is fine.
+        const duration = m.duration ?? null;
         update.run(
           takenAtMs,
           m.width ?? 0,
           m.height ?? 0,
           m.camera ?? "",
+          duration,
           photo.id
         );
         photosById.set(photo.id, {
@@ -493,6 +544,7 @@ export function registerApi(app) {
           width: m.width ?? 0,
           height: m.height ?? 0,
           camera: m.camera ?? "",
+          duration,
         });
       });
     }
@@ -505,6 +557,7 @@ export function registerApi(app) {
         takenAt: p.taken_at ? new Date(p.taken_at).toISOString() : null,
         width: p.width ?? null,
         height: p.height ?? null,
+        duration: p.duration ?? null,
       }));
     res.json(out);
   });
@@ -530,7 +583,10 @@ export function registerApi(app) {
     }
 
     try {
-      const { data } = await processing.thumbnail(it.path, size);
+      const { data } =
+        it.kind === "video"
+          ? await processing.videoThumb(it.path, size)
+          : await processing.thumbnail(it.path, size);
       const tmp = `${cachePath}.${process.pid}.tmp`;
       await writeFile(tmp, data);
       await rename(tmp, cachePath);
@@ -559,7 +615,12 @@ export function registerApi(app) {
     }
   });
 
-  // --- Full image (loupe) -------------------------------------------------
+  // --- Full image / video (loupe) -----------------------------------------
+  // Serves the original bytes. Videos need HTTP Range so the loupe's <video>
+  // element can start playback and seek (a browser won't scrub, and often won't
+  // even begin, without 206 support); images take the same path and simply
+  // request without a Range header, getting the whole-file 200. No transcoding —
+  // the browser plays whatever codec the container holds.
   app.get("/api/image/:id", async (req, res) => {
     const db = getDb();
     const it = getPhotoById(db, Number(req.params.id));
@@ -571,11 +632,32 @@ export function registerApi(app) {
       return res.status(404).end();
     }
     res.set("Cache-Control", "public, max-age=3600");
+    res.set("Accept-Ranges", "bytes");
     res.type(
       MIME_BY_EXT[extname(it.path).toLowerCase()] || "application/octet-stream"
     );
+
+    const range = parseByteRange(req.headers.range, st.size);
+    if (range === "invalid") {
+      // Unsatisfiable range → 416 with the resource size, per RFC 7233.
+      res.set("Content-Range", `bytes */${st.size}`);
+      return res.status(416).end();
+    }
+    // Browsers routinely abort/reopen ranges while scrubbing; swallow the
+    // resulting stream EPIPE/ECONNRESET rather than crashing the process.
+    const onStreamError = () => res.destroyed || res.end();
+
+    if (range) {
+      const { start, end } = range;
+      res.status(206);
+      res.set("Content-Range", `bytes ${start}-${end}/${st.size}`);
+      res.set("Content-Length", String(end - start + 1));
+      createReadStream(it.path, { start, end }).on("error", onStreamError).pipe(res);
+      return;
+    }
+
     res.set("Content-Length", String(st.size));
-    createReadStream(it.path).pipe(res);
+    createReadStream(it.path).on("error", onStreamError).pipe(res);
   });
 
   // --- Ratings / cover choices ----------------------------------------------

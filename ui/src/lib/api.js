@@ -26,7 +26,7 @@ export async function scan(dir, recursive = false) {
 /**
  * Fetch dimensions/takenAt for a batch of ids (feeds the justified layout).
  * @param {number[]} ids
- * @returns {Promise<Array<{id:number, takenAt:string|null, width:number|null, height:number|null}>>}
+ * @returns {Promise<Array<{id:number, takenAt:string|null, width:number|null, height:number|null, duration:number|null}>>}
  */
 export async function fetchMeta(ids) {
   const res = await fetch(`/api/meta?ids=${ids.join(",")}`);
@@ -135,6 +135,27 @@ export function previewUrl(id, v = 0) {
 /** @param {number} id @param {number} [v] mtime version */
 export function imageUrl(id, v = 0) {
   return `/api/image/${id}?v=${v}`;
+}
+
+/** Video playback source — same Range-capable endpoint as imageUrl; the server
+ * resolves the id kind-agnostically and streams the original bytes.
+ * @param {number} id @param {number} [v] mtime version */
+export function videoUrl(id, v = 0) {
+  return `/api/image/${id}?v=${v}`;
+}
+
+/** Format a duration in seconds as m:ss (or h:mm:ss past an hour). Returns "" for
+ * null/NaN so the caller can omit the badge for un-probed videos.
+ * @param {number|null|undefined} seconds */
+export function formatDuration(seconds) {
+  if (seconds == null || !Number.isFinite(seconds)) return "";
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const ss = String(s).padStart(2, "0");
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${ss}`;
+  return `${m}:${ss}`;
 }
 
 /**

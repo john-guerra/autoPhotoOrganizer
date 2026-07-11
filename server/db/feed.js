@@ -170,6 +170,8 @@ function rowToItem(r, dims) {
     // when sorting by date_created; kept numeric (the marker reads it directly).
     createdAt: r.btime ?? null,
     kind: r.kind,
+    // Video length in seconds; null for images and not-yet-probed videos.
+    duration: r.duration ?? null,
     // Manual burst-stack overrides (issue #24): the stack this photo is forced
     // into (null = none), and whether it's been dissolved out of auto-stacking.
     manualStackId: r.manualStackId ?? null,
@@ -372,7 +374,7 @@ export function getFeedPage(
                 photos.preferred_cover AS preferredCover,
                 photos.no_auto_stack AS keepSeparate,
                 (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
-                photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
+                photos.width, photos.height, photos.taken_at, photos.btime, photos.kind, photos.duration,
                 ${selectDimAndSortCols}
          FROM photos JOIN folders ON folders.id = photos.folder_id
          WHERE photos.id = ?`
@@ -436,7 +438,7 @@ export function getFeedPage(
                 photos.preferred_cover AS preferredCover,
                 photos.no_auto_stack AS keepSeparate,
                 (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
-                photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
+                photos.width, photos.height, photos.taken_at, photos.btime, photos.kind, photos.duration,
                 ${selectDimAndSortCols}
          FROM photos
          JOIN folders ON folders.id = photos.folder_id

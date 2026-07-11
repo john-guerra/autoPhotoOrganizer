@@ -908,8 +908,17 @@
       selectRange(selected, i);
       return;
     }
-    if (entry.kind === "stack") toggleExpand(entry.stack);
-    else openLoupe(i);
+    if (entry.kind === "stack") {
+      toggleExpand(entry.stack);
+      return;
+    }
+    // Plain click on a photo: the first click just focuses (single-selects) it;
+    // the loupe opens only when the tile is ALREADY the focused one — so a
+    // second click, or a double-click (whose second click lands here with the
+    // tile already focused), opens it. Lets you click through the grid to pick
+    // a photo without the loupe taking over every time (issue #72).
+    if (selected === i) openLoupe(i);
+    else selected = i;
   }
 
   /** Clear the whole selection — guarded (it can represent a lot of work) and
@@ -1595,6 +1604,7 @@
           it.width = m.width ?? 0;
           it.height = m.height ?? 0;
           it.takenAt = m.takenAt;
+          it.duration = m.duration ?? null; // video length → grid badge
         }
         items = items; // re-layout with real aspect ratios
       } catch {
