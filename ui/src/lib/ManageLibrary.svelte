@@ -8,6 +8,7 @@
     pruneCache,
     resetLibrary,
   } from "./api.js";
+  import Modal from "./Modal.svelte";
 
   export let library = [];
 
@@ -111,142 +112,103 @@
   }
 </script>
 
-<div class="manage-library-backdrop" on:click={() => dispatch("close")}>
-  <div class="manage-library-panel" on:click|stopPropagation>
-    <header>
-      <h2>Manage library</h2>
-      <button class="close-btn" on:click={() => dispatch("close")}>✕</button>
-    </header>
+<Modal
+  open={true}
+  title="Manage library"
+  size="md"
+  on:close={() => dispatch("close")}
+>
+  {#if message}<p class="message">{message}</p>{/if}
 
-    {#if message}<p class="message">{message}</p>{/if}
+  <section>
+    <h3>Indexed folders</h3>
+    {#if library.length === 0}
+      <p class="empty">No folders scanned yet.</p>
+    {/if}
+    <ul class="folder-list">
+      {#each library as entry (entry.id)}
+        <li>
+          <span class="folder-path" title={entry.path}>{entry.name}</span>
+          {#if !entry.mounted}<span class="offline-badge">offline</span>{/if}
+          <button
+            class="remove-btn"
+            disabled={busy}
+            on:click={() => removeFolder(entry)}
+          >
+            Remove
+          </button>
+        </li>
+      {/each}
+    </ul>
+  </section>
 
-    <section>
-      <h3>Indexed folders</h3>
-      {#if library.length === 0}
-        <p class="empty">No folders scanned yet.</p>
-      {/if}
-      <ul class="folder-list">
-        {#each library as entry (entry.id)}
-          <li>
-            <span class="folder-path" title={entry.path}>{entry.name}</span>
-            {#if !entry.mounted}<span class="offline-badge">offline</span>{/if}
-            <button
-              class="remove-btn"
-              disabled={busy}
-              on:click={() => removeFolder(entry)}
-            >
-              Remove
-            </button>
-          </li>
-        {/each}
-      </ul>
-    </section>
+  <section>
+    <h3>Thumbnail cache</h3>
+    {#if stats}
+      <p>{formatBytes(stats.totalBytes)} in {stats.totalFiles} file(s)</p>
+    {:else}
+      <p class="empty">Loading…</p>
+    {/if}
 
-    <section>
-      <h3>Thumbnail cache</h3>
-      {#if stats}
-        <p>{formatBytes(stats.totalBytes)} in {stats.totalFiles} file(s)</p>
+    <div class="cache-actions">
+      <button disabled={busy} on:click={showBreakdown}>
+        {breakdownLoading ? "Computing…" : "Show breakdown"}
+      </button>
+      <button disabled={busy} on:click={doClearCache}>Clear cache</button>
+      <button disabled={busy} on:click={doPruneCache}>Prune orphaned</button>
+    </div>
+
+    {#if breakdown}
+      {#if breakdown.folders.length === 0}
+        <p class="empty">No cached thumbnails attributed to any folder.</p>
       {:else}
-        <p class="empty">Loading…</p>
+        <ul class="breakdown-list">
+          {#each breakdown.folders as f (f.id)}
+            <li>
+              <span class="folder-path" title={f.path}>{f.path}</span>
+              <span>{formatBytes(f.cachedBytes)} ({f.cachedFiles} files)</span>
+            </li>
+          {/each}
+        </ul>
       {/if}
+    {/if}
+  </section>
 
-      <div class="cache-actions">
-        <button disabled={busy} on:click={showBreakdown}>
-          {breakdownLoading ? "Computing…" : "Show breakdown"}
-        </button>
-        <button disabled={busy} on:click={doClearCache}>Clear cache</button>
-        <button disabled={busy} on:click={doPruneCache}>Prune orphaned</button>
-      </div>
-
-      {#if breakdown}
-        {#if breakdown.folders.length === 0}
-          <p class="empty">No cached thumbnails attributed to any folder.</p>
-        {:else}
-          <ul class="breakdown-list">
-            {#each breakdown.folders as f (f.id)}
-              <li>
-                <span class="folder-path" title={f.path}>{f.path}</span>
-                <span>{formatBytes(f.cachedBytes)} ({f.cachedFiles} files)</span
-                >
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      {/if}
-    </section>
-
-    <section class="danger">
-      <h3>Danger zone</h3>
-      <p class="danger-warn">
-        Resetting wipes the entire index — <strong
-          >every rating and cover choice</strong
-        >
-        and the thumbnail cache. Your photos on disk are never touched, but the ratings
-        live only here and cannot be recovered. Type
-        <code>{RESET_WORD}</code> to confirm.
-      </p>
-      <div class="danger-actions">
-        <input
-          class="reset-confirm"
-          type="text"
-          placeholder={RESET_WORD}
-          bind:value={resetConfirm}
-          spellcheck="false"
-          autocomplete="off"
-        />
-        <button
-          class="reset-btn"
-          disabled={busy || resetConfirm !== RESET_WORD}
-          on:click={doResetLibrary}
-        >
-          Reset library
-        </button>
-      </div>
-    </section>
-  </div>
-</div>
+  <section class="danger">
+    <h3>Danger zone</h3>
+    <p class="danger-warn">
+      Resetting wipes the entire index — <strong
+        >every rating and cover choice</strong
+      >
+      and the thumbnail cache. Your photos on disk are never touched, but the ratings
+      live only here and cannot be recovered. Type
+      <code>{RESET_WORD}</code> to confirm.
+    </p>
+    <div class="danger-actions">
+      <input
+        class="reset-confirm"
+        type="text"
+        placeholder={RESET_WORD}
+        bind:value={resetConfirm}
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <button
+        class="reset-btn"
+        disabled={busy || resetConfirm !== RESET_WORD}
+        on:click={doResetLibrary}
+      >
+        Reset library
+      </button>
+    </div>
+  </section>
+</Modal>
 
 <style>
-  .manage-library-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 500;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .manage-library-panel {
-    background: #1e1e1e;
-    border: 1px solid #333;
-    border-radius: 8px;
-    width: min(560px, 90vw);
-    max-height: 80vh;
-    overflow-y: auto;
-    padding: 1rem 1.25rem;
-    color: inherit;
-  }
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-  }
-  h2 {
-    margin: 0;
-    font-size: 1.1rem;
-  }
   h3 {
     margin: 0.75rem 0 0.4rem;
     font-size: 0.95rem;
     color: #ccc;
-  }
-  .close-btn {
-    background: none;
-    border: none;
-    color: inherit;
-    cursor: pointer;
-    font-size: 1rem;
   }
   .message {
     background: #2a2a2a;
