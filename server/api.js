@@ -1344,16 +1344,38 @@ export function registerApi(app) {
     // Resolve + validate every album's destination up front (fail fast, 400,
     // before any job/file work starts) rather than discovering a bad album
     // name mid-job, which would just surface as an async job failure.
+    //
+    // Two albums can render the SAME name (a same-day default, a template
+    // that collapses distinct gap-clusters to one nested path like
+    // "2017/DCIM", or a client that skips AlbumsView's own dedup) — without
+    // disambiguation here they'd resolve to the identical target directory
+    // and copyIdsIntoFolder's per-FILENAME collision handling would merge
+    // both albums' photos into one physical folder (not overwritten, since
+    // nextAvailablePath still suffixes same-named files, but silently
+    // merged, which is its own kind of data loss for "keep these as
+    // separate albums"). `usedTargets` mirrors AlbumsView's namedAlbums()
+    // client-side dedup as a server-side backstop.
+    const usedTargets = new Set();
     const resolvedAlbums = [];
     for (const album of albums) {
-      // Materialize allows an in-place destination (a subfolder of the source
-      // folder) — that's the default "organize this folder in place" flow.
-      const resolved = resolveExportTarget(db, destParent, album.name, {
-        allowInsideSource: true,
-      });
-      if (resolved.error)
-        return res.status(400).json({ error: resolved.error });
-      resolvedAlbums.push({ album, target: resolved.target });
+      let name = album.name;
+      let resolved;
+      let n = 1;
+      for (;;) {
+        // Materialize allows an in-place destination (a subfolder of the
+        // source folder) — that's the default "organize this folder in
+        // place" flow.
+        resolved = resolveExportTarget(db, destParent, name, {
+          allowInsideSource: true,
+        });
+        if (resolved.error)
+          return res.status(400).json({ error: resolved.error });
+        if (!usedTargets.has(resolved.target)) break;
+        n += 1;
+        name = `${album.name}_${n}`;
+      }
+      usedTargets.add(resolved.target);
+      resolvedAlbums.push({ album, target: resolved.target, name });
     }
 
     const move = req.body?.move !== false; // default MOVE
@@ -1369,7 +1391,7 @@ export function registerApi(app) {
       const manifest = [];
       let done = 0;
       try {
-        for (const { album, target } of resolvedAlbums) {
+        for (const { album, target, name } of resolvedAlbums) {
           // copyIdsIntoFolder now awaits async fs per file, so it yields the
           // event loop on its own. Keep an explicit yield at the album boundary
           // so an album that ends up skipping every file (no awaited copy)
@@ -1386,12 +1408,12 @@ export function registerApi(app) {
             onProgress: (d, _t, phase) =>
               registry.update(job.id, {
                 done: done + d,
-                phase: `${album.name}: ${phase}`,
+                phase: `${name}: ${phase}`,
               }),
           });
           done += album.photoIds.length;
           results.push({
-            name: album.name,
+            name,
             target,
             copied: r.copied,
             moved: r.moved,

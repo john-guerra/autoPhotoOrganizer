@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.7-alpha
+
+- **Fixed: two same-named albums no longer merge into one folder on
+  materialize** — if two albums resolved to the identical destination name
+  (e.g. a template collapsing two clusters to the same nested "2017/DCIM"),
+  the server used to silently combine their photos into a single physical
+  folder; it now disambiguates server-side (mirroring the Auto-albums
+  panel's own collision handling) so each album always lands in its own
+  folder (Task 19).
+
 ## 2.8.6-alpha
 
 - **Materialized albums index automatically** — after Auto-albums moves or

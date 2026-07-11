@@ -1839,6 +1839,75 @@ describe("POST /api/albums/materialize", () => {
     expect(rootNow).toContain("2026-01-01");
     expect(rootNow.filter((n) => n.endsWith(".jpg"))).toHaveLength(1);
   });
+
+  it("keeps two albums with an identical (nested) target name in distinct folders — no merge, no loss", async () => {
+    // Two DIFFERENT source folders, each with a same-named file, both
+    // clustered by the client into an album that renders the SAME nested
+    // name (e.g. a "%Y" template collapsing two gap-separated albums from
+    // the same year into "2017/DCIM" twice). The client (AlbumsView's
+    // namedAlbums()) normally disambiguates before submitting — this
+    // guards the server itself, which must not silently merge two
+    // logically-distinct albums into one physical folder just because
+    // their names collide.
+    const srcDirA = await mkdtemp(join(tmpdir(), "ag-mat-srcA-"));
+    const srcDirB = await mkdtemp(join(tmpdir(), "ag-mat-srcB-"));
+    try {
+      for (const [dir, shade] of [
+        [srcDirA, 10],
+        [srcDirB, 20],
+      ]) {
+        await sharp({
+          create: {
+            width: 20,
+            height: 20,
+            channels: 3,
+            background: { r: shade, g: shade, b: shade },
+          },
+        })
+          .jpeg()
+          .toFile(join(dir, "a.jpg"));
+      }
+      const idsA = (await scan(srv.base, srcDirA)).items.map((i) => i.id);
+      const idsB = (await scan(srv.base, srcDirB)).items.map((i) => i.id);
+
+      const res = await fetch(`${srv.base}/api/albums/materialize`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          destParent: destDir,
+          move: false,
+          albums: [
+            { name: "2017/DCIM", photoIds: idsA },
+            { name: "2017/DCIM", photoIds: idsB },
+          ],
+        }),
+      });
+      expect(res.status).toBe(202);
+      const job = await waitJob((await res.json()).jobId);
+      expect(job.status).toBe("done");
+
+      // The two albums' resolved targets must differ …
+      const targets = job.result.albums.map((a) => a.target);
+      expect(new Set(targets).size).toBe(2);
+      // … and every file from both source folders must be present
+      // somewhere under destDir, none lost and none clobbered.
+      expect(job.result.albums[0].copied + job.result.albums[1].copied).toBe(2);
+      const walk = async (dir) => {
+        const out = [];
+        for (const entry of await readdir(dir, { withFileTypes: true })) {
+          const p = join(dir, entry.name);
+          if (entry.isDirectory()) out.push(...(await walk(p)));
+          else out.push(p);
+        }
+        return out;
+      };
+      const filesOnDisk = await walk(destDir);
+      expect(filesOnDisk).toHaveLength(2);
+    } finally {
+      await rm(srcDirA, { recursive: true, force: true });
+      await rm(srcDirB, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("POST /api/albums/undo-move", () => {

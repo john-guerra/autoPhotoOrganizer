@@ -1148,6 +1148,23 @@ describe("workingSetTimeline — album gap-clustering source", () => {
     expect(photos).toHaveLength(3);
     expect(truncated).toBe(true);
   });
+
+  // Regression guard, not a bug hunt: workingSetTimeline has no media-kind
+  // filter today, so videos already join the album timeline alongside
+  // images. This test just pins that "videos join albums" user story so a
+  // future filter addition can't silently drop them.
+  it("includes videos alongside images in the timeline", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const [img, vid] = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 100, kind: "image" },
+      { name: "b.mp4", size: 1, mtimeMs: 200, kind: "video" },
+    ]);
+    const { photos } = workingSetTimeline(db);
+    expect(photos.map((p) => p.id)).toEqual(
+      expect.arrayContaining([img.id, vid.id])
+    );
+  });
 });
 
 describe("getFeedPage — photo-level sort", () => {
