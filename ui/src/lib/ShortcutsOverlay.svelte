@@ -45,6 +45,8 @@
       rows: [
         { keys: ["←", "→", "↑", "↓"], label: "Previous / next photo" },
         { keys: ["Shift", "+", "arrow"], label: "Extend selection" },
+        { keys: ["I"], label: "Toggle the details panel" },
+        { keys: ["F"], label: "Toggle the filmstrip" },
         { keys: ["Esc"], label: "Close the loupe" },
       ],
     },

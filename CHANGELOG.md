@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.1-alpha
+
+- **Loupe details panel & filmstrip** — the detail view now shows a right-hand
+  panel with filename, dimensions, dates, camera and full EXIF (lens, aperture,
+  shutter, ISO, focal length) and rating, plus a filmstrip of neighbouring
+  photos along the bottom to jump between shots without leaving the view. Toggle
+  each with `I` (details) and `F` (filmstrip); your choices are remembered
+  (#27, #28).
+
 ## 2.8.0-alpha
 
 - **Packaged build** bundling this round of feed fixes: "Keep only" now scopes

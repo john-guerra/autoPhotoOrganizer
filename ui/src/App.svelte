@@ -127,6 +127,15 @@
   const LS_RECURSIVE = "autogallery.recursiveScan";
   let recursiveScan = localStorage.getItem(LS_RECURSIVE) !== "false";
   $: localStorage.setItem(LS_RECURSIVE, String(recursiveScan));
+
+  // Loupe view toggles (issues #27/#28): details panel + filmstrip, default on,
+  // remembered. Toggled with I / F while the loupe is open (see onKeydown).
+  const LS_LOUPE_DETAILS = "autogallery.loupeDetails";
+  const LS_LOUPE_FILMSTRIP = "autogallery.loupeFilmstrip";
+  let showLoupeDetails = localStorage.getItem(LS_LOUPE_DETAILS) !== "false";
+  let showLoupeFilmstrip = localStorage.getItem(LS_LOUPE_FILMSTRIP) !== "false";
+  $: localStorage.setItem(LS_LOUPE_DETAILS, String(showLoupeDetails));
+  $: localStorage.setItem(LS_LOUPE_FILMSTRIP, String(showLoupeFilmstrip));
   const LS_GROUP_BY = "autogallery.groupBy";
   let groupBy = (() => {
     try {
@@ -2284,6 +2293,16 @@
       return;
     }
 
+    // Loupe-only view toggles: I = details panel, F = filmstrip. Guarded on
+    // loupeOpen so they never clash with grid usage; localStorage persists via
+    // the reactive setters above.
+    if (loupeOpen && (key === "i" || key === "f")) {
+      e.preventDefault();
+      if (key === "i") showLoupeDetails = !showLoupeDetails;
+      else showLoupeFilmstrip = !showLoupeFilmstrip;
+      return;
+    }
+
     // Star rating: 1-5 set stars, 0 clears. Works in both grid and loupe.
     if (/^[0-5]$/.test(key)) {
       e.preventDefault();
@@ -3029,6 +3048,9 @@
     inSelection={typeof resolvedPhotos[selected]?.id === "number" &&
       selectedIds.has(resolvedPhotos[selected].id)}
     selectedCount={selectedCount}
+    {selectedIds}
+    showDetails={showLoupeDetails}
+    showFilmstrip={showLoupeFilmstrip}
     on:contextmenu={(e) => openContextMenu(e.detail.x, e.detail.y, selected)}
   />
 {/if}

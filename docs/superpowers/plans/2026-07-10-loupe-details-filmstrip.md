@@ -232,31 +232,32 @@ git commit -m "feat(db): add EXIF columns to photos (#27)"
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `server/api.test.js` (uses the file's existing `startServer`, `getDb`, and `_resetDbForTest`; insert rows directly so no EXIF fixture is needed):
+Add to `server/api.test.js` (uses the file's existing `startServer` and `getDb`; insert rows directly so no EXIF fixture is needed). Do **not** hardcode ids or call `_resetDbForTest()` — that helper reopens the shared on-disk DB without truncating, so a hardcoded `folders.id = 1` collides with a folder an earlier test already created. Insert with a unique path and let SQLite assign ids:
 
 ```js
 describe("GET /api/meta — EXIF fields", () => {
   it("returns persisted EXIF for an already-extracted photo", async () => {
-    _resetDbForTest();
     const db = getDb();
-    db.prepare(
-      `INSERT INTO folders (id, abs_path, last_scanned_at) VALUES (1, '/p', 0)`
-    ).run();
+    const folderId = db
+      .prepare(`INSERT INTO folders (abs_path, last_scanned_at) VALUES (?, 0)`)
+      .run("/p-exif-test").lastInsertRowid;
     // width + camera + lens all non-null → the handler must NOT re-extract.
-    db.prepare(
-      `INSERT INTO photos
-         (id, folder_id, filename, size, mtime, kind, width, height, camera,
-          aperture, shutter, iso, focal_length, lens)
-       VALUES (7, 1, 'a.jpg', 2400000, 1, 'image', 3024, 4032, 'Canon EOS R6',
-          2.8, 0.004, 400, 50, 'RF24-70mm F2.8')`
-    ).run();
+    const photoId = db
+      .prepare(
+        `INSERT INTO photos
+           (folder_id, filename, size, mtime, kind, width, height, camera,
+            aperture, shutter, iso, focal_length, lens)
+         VALUES (?, 'a.jpg', 2400000, 1, 'image', 3024, 4032, 'Canon EOS R6',
+            2.8, 0.004, 400, 50, 'RF24-70mm F2.8')`
+      )
+      .run(folderId).lastInsertRowid;
 
     const { base, close } = await startServer();
     try {
-      const res = await fetch(`${base}/api/meta?ids=7`);
+      const res = await fetch(`${base}/api/meta?ids=${photoId}`);
       const [m] = await res.json();
       expect(m).toMatchObject({
-        id: 7,
+        id: Number(photoId),
         camera: "Canon EOS R6",
         aperture: 2.8,
         shutter: 0.004,
@@ -264,7 +265,7 @@ describe("GET /api/meta — EXIF fields", () => {
         focalLength: 50,
         lens: "RF24-70mm F2.8",
         size: 2400000,
-        folder: "/p",
+        folder: "/p-exif-test",
       });
     } finally {
       await close();
