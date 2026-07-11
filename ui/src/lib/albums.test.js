@@ -6,6 +6,8 @@ import {
   defaultAlbumName,
   renderAlbumName,
   computeAlbumNames,
+  parseDuration,
+  fmtDur,
 } from "./albums.js";
 
 const H = 3600_000; // one hour in ms
@@ -137,5 +139,16 @@ describe("computeAlbumNames", () => {
       "2017-01-09",
       "2017-01-11",
     ]);
+  });
+});
+
+describe("parseDuration/fmtDur (moved from AlbumsView)", () => {
+  it("parses compact durations", () => {
+    expect(parseDuration("90m")).toBe(90 * 60000);
+    expect(parseDuration("2d")).toBe(2 * 86400000);
+    expect(parseDuration("garbage")).toBeNull();
+  });
+  it("formats a 1-minute gap", () => {
+    expect(fmtDur(60000)).toBe("1 min");
   });
 });

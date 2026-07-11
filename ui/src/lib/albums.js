@@ -129,3 +129,34 @@ export function computeAlbumNames(albums, editedNames, template) {
       : renderAlbumName(template, new Date(a.startAt), i + 1);
   });
 }
+
+/** Format a duration in ms as a short human string (e.g. "90 min", "2.0 h",
+ * "3.5 days"). Used for the split-gap readout. */
+export function fmtDur(ms) {
+  const h = ms / 3600_000;
+  if (h < 1) return `${Math.round(ms / 60_000)} min`;
+  if (h < 48) return `${h.toFixed(1)} h`;
+  return `${(h / 24).toFixed(1)} days`;
+}
+
+/** Parse a compact duration like "6h", "90m", "2.5d", "1w", or a bare number
+ * (interpreted as days) into ms. Returns null on anything unparseable. */
+export function parseDuration(s) {
+  const m = String(s)
+    .trim()
+    .match(/^([\d.]+)\s*([smhdw]?)$/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const mult = { s: 1e3, m: 6e4, h: 36e5, d: 864e5, w: 6048e5 };
+  return n * mult[(m[2] || "d").toLowerCase()];
+}
+
+/** Seed an editable duration field with the current value in its most
+ * natural compact unit (inverse-ish of parseDuration/fmtDur). */
+export function threshAsInput(ms) {
+  const h = ms / 3600_000;
+  if (h < 1) return `${Math.round(ms / 60_000)}m`;
+  if (h < 48) return `${+h.toFixed(1)}h`;
+  return `${+(h / 24).toFixed(1)}d`;
+}
