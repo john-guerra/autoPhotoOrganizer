@@ -3,8 +3,12 @@
   // shows them as break points (dividers) down the feed. The slider re-clusters
   // instantly (all client-side — see albums.js) so you can preview boundaries
   // before materializing them to dated folders on disk.
-  import { createEventDispatcher } from "svelte";
-  import { startMaterialize } from "./api.js";
+  import { createEventDispatcher, onMount } from "svelte";
+  import {
+    startMaterialize,
+    fetchSystemPaths,
+    checkSameVolume,
+  } from "./api.js";
   import { waitForJob } from "./jobs.js";
   import {
     computeGapStats,
@@ -50,15 +54,57 @@
   let dest =
     defaultDest || localStorage.getItem("autogallery.exportDest") || "";
   // Track whether the user has hand-edited the destination; until they do, keep
-  // it in sync with a changing defaultDest (e.g. focusing a different folder).
+  // it mode-dependent (see reactive block below) instead of a fixed value.
   let destEdited = false;
-  $: if (!destEdited && defaultDest) dest = defaultDest;
   let materializing = false;
   let result = null;
   // Materialize defaults to MOVE (relocates originals out of the source
   // folders) — Copy is the safer opt-in. A completed/partially-canceled move
   // job can be undone from the JobsPanel via its result manifest.
   let move = prefs.move;
+
+  // Desktop path for Copy's default destination (fetched once; harmless if it
+  // never resolves — the field just keeps whatever it was seeded with).
+  let desktopPath = "";
+  onMount(async () => {
+    try {
+      const { desktop } = await fetchSystemPaths();
+      desktopPath = desktop || "";
+    } catch {
+      // non-fatal: Copy's smart default just won't kick in
+    }
+  });
+
+  // Mode-dependent dest default: Move organizes in place (the opened
+  // folder/source), Copy defaults to the Desktop — switching the toggle
+  // updates the field only while the user hasn't hand-typed a dest.
+  $: if (!destEdited) {
+    if (move) {
+      if (defaultDest) dest = defaultDest;
+    } else if (desktopPath) {
+      dest = desktopPath;
+    }
+  }
+
+  // Cross-volume Move warning: a Move across volumes can't be a cheap
+  // rename — materialize falls back to copy+delete, which is slow and not
+  // an instant move. `sameVolume` is null while unknown/unchecked.
+  let sameVolume = null;
+  let volumeCheckToken = 0;
+  $: if (move && dest.trim() && defaultDest) {
+    checkVolume(defaultDest, dest.trim());
+  } else {
+    sameVolume = null;
+  }
+  async function checkVolume(source, destPath) {
+    const token = ++volumeCheckToken;
+    try {
+      const { sameVolume: sv } = await checkSameVolume(source, destPath);
+      if (token === volumeCheckToken) sameVolume = sv;
+    } catch {
+      if (token === volumeCheckToken) sameVolume = null;
+    }
+  }
   // Local mirror of the max-photos prop. Re-syncs whenever the prop changes
   // (i.e. after a re-fetch clamps it) but survives typing in between.
   let limitInput = limit;
@@ -180,6 +226,9 @@
       const job = await waitForJob(jobId);
       if (job.status === "done") {
         result = job.result;
+        // Tell App to rescan the destination so the newly-created album
+        // folders index and show up in the sidebar tree right away.
+        dispatch("materialized", { destParent: dest.trim() });
       } else if (job.status === "canceled") {
         result = { error: "Materialize canceled." };
       } else {
@@ -328,6 +377,11 @@
     <p class="albums-msg warn">
       Move relocates originals out of the source folders — undoable from the
       jobs panel.
+    </p>
+  {/if}
+  {#if move && sameVolume === false}
+    <p class="albums-msg warn">
+      Different volume — this Move copies every file, it's not an instant move.
     </p>
   {/if}
 

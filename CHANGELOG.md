@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.6-alpha
+
+- **Materialized albums index automatically** — after Auto-albums moves or
+  copies photos to disk, the destination is rescanned right away so the new
+  dated folders appear in the sidebar tree without a manual rescan (Task 17).
+- **Smart materialize destination + cross-volume warning** — Move now
+  defaults the destination to the opened folder (in-place) while Copy
+  defaults to the Desktop, and switching Move/Copy updates the default until
+  you hand-type a path; a warning appears if a Move destination is on a
+  different volume, since that copies every file instead of an instant move
+  (Task 17).
+
 ## 2.8.5-alpha
 
 - **New "Folder name" group-by option** — group the feed by each folder's

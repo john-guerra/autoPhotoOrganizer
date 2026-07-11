@@ -1796,6 +1796,34 @@
     libraryVersion++;
   }
 
+  /** After AlbumsView materializes (move/copy) album folders to disk, scan
+   * the destination so the newly-created nested folders index and show up
+   * in the sidebar tree right away, instead of waiting for the user to
+   * manually rescan. */
+  async function onAlbumsMaterialized({ destParent }) {
+    if (!destParent) return;
+    try {
+      status = "indexing new albums…";
+      const { jobId } = await startScan(destParent, { recursive: true });
+      const job = await waitForJob(jobId);
+      if (job.status === "canceled") {
+        status = "Scan canceled";
+        return;
+      }
+      if (job.status !== "done") {
+        error = job.error || "Rescan of materialized albums failed";
+        status = "";
+        return;
+      }
+      await refreshLibrary();
+      libraryVersion++;
+      status = "";
+    } catch (e) {
+      error = e.message;
+      status = "";
+    }
+  }
+
   async function doScan() {
     if (!dir.trim()) return;
     error = "";
@@ -2845,6 +2873,7 @@
           on:close={() => (albumMode = false)}
           on:openphoto={(e) => openPhotoById(e.detail.id)}
           on:prefschange={(e) => (albumPrefs = saveAlbumPrefs(e.detail))}
+          on:materialized={(e) => onAlbumsMaterialized(e.detail)}
         />
       {:else if items.length}
         <div
