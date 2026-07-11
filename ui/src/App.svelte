@@ -2177,7 +2177,12 @@
    * collapse state (album jump has no group context). Then re-center via the
    * canonical helper and open the loupe if it landed in the window. */
   async function openPhotoById(id, groupPath = null) {
-    albumMode = false;
+    // NOTE: we intentionally do NOT exit album mode here. When you click a photo
+    // in the Auto-albums snapshot strips, the loupe opens as an overlay on top
+    // of the still-mounted AlbumsView; pressing Esc closes the loupe and returns
+    // you to the album review with all your split/naming/materialize state
+    // intact (previously this set albumMode=false, unmounting AlbumsView and
+    // discarding that work — the in-feed redesign in #81 supersedes this).
     if (groupPath) {
       const key = pathKey(groupPath);
       collapsedPaths = collapsedPaths.filter((p) => pathKey(p) !== key);

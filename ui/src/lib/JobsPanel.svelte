@@ -74,7 +74,12 @@
             value={job.total ? job.done : undefined}
             max={job.total || undefined}
           ></progress>
-          <span class="job-phase">{job.phase}</span>
+          <span class="job-phase">
+            {#if job.total}<strong class="job-count"
+                >{(job.done ?? 0).toLocaleString()} / {job.total.toLocaleString()}</strong
+              >{/if}
+            {job.phase}
+          </span>
           <button class="job-btn" on:click={() => cancelJob(job.id)}
             >Cancel</button
           >
@@ -147,6 +152,11 @@
     flex: 1 1 160px;
     max-width: 240px;
     accent-color: #4c9aff;
+  }
+  .job-count {
+    color: #cfcfcf;
+    font-variant-numeric: tabular-nums;
+    margin-right: 4px;
   }
   .job-phase {
     flex: 1;

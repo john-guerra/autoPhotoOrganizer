@@ -221,9 +221,10 @@ export async function copyIdsIntoFolder(
       }
       manifest.push({ id: Number(id), from: photo.path, to: dst });
     }
-    if (i % 50 === 0 || i === total - 1) {
-      onProgress?.(i + 1, total, move ? "moving" : "copying");
-    }
+    // Report after every file so the UI can show a live count ("moved 45 of
+    // 1200") — the registry update is in-memory and the client polls, so this
+    // is cheap even on large jobs.
+    onProgress?.(i + 1, total, move ? "moving" : "copying");
     i++;
   }
 
