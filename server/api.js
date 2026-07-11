@@ -514,13 +514,16 @@ export function registerApi(app) {
       const photo = getPhotoById(db, id);
       if (!photo) continue;
       photosById.set(id, photo);
-      if (photo.width === null || photo.camera === null) need.push(photo);
+      if (photo.width === null || photo.camera === null || photo.lens === null)
+        need.push(photo);
     }
 
     if (need.length) {
       const metas = await processing.metadata(need.map((p) => p.path));
       const update = db.prepare(
-        `UPDATE photos SET taken_at = ?, width = ?, height = ?, camera = ?, duration = ? WHERE id = ?`
+        `UPDATE photos SET taken_at = ?, width = ?, height = ?, camera = ?,
+           duration = ?, aperture = ?, shutter = ?, iso = ?, focal_length = ?,
+           lens = ? WHERE id = ?`
       );
       metas.forEach((m, i) => {
         const photo = need[i];
@@ -530,12 +533,18 @@ export function registerApi(app) {
         // duration has no tried-sentinel duty (width remains the sole "attempted"
         // marker); NULL for images/undetermined is fine.
         const duration = m.duration ?? null;
+        const lens = m.lens ?? ""; // "" marks EXIF attempted (see exifToMeta)
         update.run(
           takenAtMs,
           m.width ?? 0,
           m.height ?? 0,
           m.camera ?? "",
           duration,
+          m.aperture ?? null,
+          m.shutter ?? null,
+          m.iso ?? null,
+          m.focalLength ?? null,
+          lens,
           photo.id
         );
         photosById.set(photo.id, {
@@ -545,6 +554,11 @@ export function registerApi(app) {
           height: m.height ?? 0,
           camera: m.camera ?? "",
           duration,
+          aperture: m.aperture ?? null,
+          shutter: m.shutter ?? null,
+          iso: m.iso ?? null,
+          focal_length: m.focalLength ?? null,
+          lens,
         });
       });
     }
@@ -558,6 +572,14 @@ export function registerApi(app) {
         width: p.width ?? null,
         height: p.height ?? null,
         duration: p.duration ?? null,
+        camera: p.camera ?? null,
+        aperture: p.aperture ?? null,
+        shutter: p.shutter ?? null,
+        iso: p.iso ?? null,
+        focalLength: p.focal_length ?? null,
+        lens: p.lens ?? null,
+        size: p.size ?? null,
+        folder: p.folder_abs_path ?? null,
       }));
     res.json(out);
   });
@@ -652,7 +674,9 @@ export function registerApi(app) {
       res.status(206);
       res.set("Content-Range", `bytes ${start}-${end}/${st.size}`);
       res.set("Content-Length", String(end - start + 1));
-      createReadStream(it.path, { start, end }).on("error", onStreamError).pipe(res);
+      createReadStream(it.path, { start, end })
+        .on("error", onStreamError)
+        .pipe(res);
       return;
     }
 
