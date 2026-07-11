@@ -3,6 +3,12 @@
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
+  import { applyStackOverrides } from "./lib/stackOverrides.js";
+  import {
+    buildStackMenuItems,
+    createManualStackFromSelection,
+    dissolveStackMembers,
+  } from "./lib/stackActions.js";
   import {
     nextSelectable,
     navVertical,
@@ -849,14 +855,44 @@
     }
   }
 
-  // Menu items for the current target. Kept as data so #25 can append more
-  // (multi-select actions, etc.) without reworking the menu component.
+  // Manual burst-stack actions (issue #24). All logic lives in
+  // lib/stackActions.js + lib/stackOverrides.js; these two handlers just do the
+  // toggleCover-style local-mutation-then-persist (no feed reload).
+  async function onCreateStack(ids) {
+    try {
+      const { nextItems } = await createManualStackFromSelection(items, ids);
+      items = nextItems;
+    } catch (e) {
+      error = e.message;
+    }
+  }
+  async function onDissolveStack(memberIds) {
+    try {
+      const { nextItems } = await dissolveStackMembers(items, memberIds);
+      items = nextItems;
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  // Menu items for the current target. Kept as data so actions can be appended
+  // without reworking the menu component; the stack items are built by the module.
   $: contextMenuItems = [
     {
       label: "Reveal in Finder",
       action: () => reveal(contextMenu.targetIndex),
       enabled: typeof resolvedPhotos[contextMenu.targetIndex]?.id === "number",
     },
+    ...buildStackMenuItems({
+      items,
+      selectedIds,
+      groupBy,
+      displayEntries,
+      targetIndex: contextMenu.targetIndex,
+      stacks,
+      onCreate: onCreateStack,
+      onDissolve: onDissolveStack,
+    }),
   ];
 
   function onTileClick(e, entry, i) {
@@ -1726,9 +1762,12 @@
       : 0;
   }
 
-  $: stacks = detectBurstsByGroup(items, groupBy, {
+  $: autoStacks = detectBurstsByGroup(items, groupBy, {
     gapMs: burstEnabled ? burstGapMs : 0,
   });
+  // Fold in the persisted manual create/dissolve overrides (issue #24) — all
+  // logic lives in ui/src/lib/stackOverrides.js; this is the only stacks change.
+  $: stacks = applyStackOverrides(autoStacks, items);
   $: displayEntries = buildDisplayEntries(items, stacks, expandedStackIds);
   $: resolvedPhotos = displayEntries.map(resolvePhoto); // passed to Loupe
   // deriveSectionHeaders' `index` must land in the same index space as the

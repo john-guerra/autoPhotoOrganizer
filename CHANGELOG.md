@@ -5,6 +5,14 @@ Notable changes to AutoGallery, newest first. Versions follow the scheme in
 gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
 short and user-facing — what you can now do, not how it's built.
 
+## 2.5.0-alpha
+
+- **Manual burst stacks**: select photos in one folder/day and right-click →
+  "Create stack" to force them into a single stack even when their timestamps
+  are too far apart to auto-group; right-click a mis-detected stack →
+  "Dissolve stack" to break it apart, and those photos stay separate on future
+  scans. Both choices persist (#24).
+
 ## 2.4.2-alpha
 
 - **Fixed: couldn't type an exact split gap** in Auto-albums — clicking the gap
