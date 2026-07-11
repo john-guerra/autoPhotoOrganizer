@@ -20,7 +20,9 @@
         { keys: ["0"], label: "Clear rating" },
         { keys: ["X"], label: "Toggle selection (auto-advances in loupe)" },
         { keys: ["C"], label: "Set / unset this photo as its stack's cover" },
-        { keys: ["Right-click"], label: "Reveal the file in Finder" },
+        { keys: ["G"], label: "Group the selected photos into one stack" },
+        { keys: ["Shift", "+", "G"], label: "Dissolve the stack at the cursor" },
+        { keys: ["Right-click"], label: "Reveal / stack actions menu" },
       ],
     },
     {

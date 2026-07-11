@@ -3,11 +3,15 @@
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
-  import { applyStackOverrides } from "./lib/stackOverrides.js";
+  import {
+    applyStackOverrides,
+    canCreateManualStack,
+  } from "./lib/stackOverrides.js";
   import {
     buildStackMenuItems,
     createManualStackFromSelection,
     dissolveStackMembers,
+    targetStackMemberIds,
   } from "./lib/stackActions.js";
   import {
     nextSelectable,
@@ -2181,6 +2185,20 @@
       if (entry?.stackId) {
         e.preventDefault();
         toggleCover(entry);
+      }
+      return;
+    }
+
+    // Manual stacks (issue #24): 'G' groups the current selection into one stack
+    // (when it's a valid ≥2 single-group selection); 'Shift+G' dissolves the
+    // stack at the cursor. Enablement/logic live in the stack modules.
+    if (key.toLowerCase() === "g") {
+      e.preventDefault();
+      if (e.shiftKey) {
+        const memberIds = targetStackMemberIds(displayEntries[selected], stacks);
+        if (memberIds) onDissolveStack(memberIds);
+      } else if (canCreateManualStack(items, selectedIds, groupBy)) {
+        onCreateStack([...selectedIds]);
       }
       return;
     }

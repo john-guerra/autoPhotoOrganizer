@@ -11,7 +11,8 @@ short and user-facing — what you can now do, not how it's built.
   "Create stack" to force them into a single stack even when their timestamps
   are too far apart to auto-group; right-click a mis-detected stack →
   "Dissolve stack" to break it apart, and those photos stay separate on future
-  scans. Both choices persist (#24).
+  scans. Both choices persist. Keyboard: <kbd>G</kbd> groups the selection,
+  <kbd>Shift</kbd>+<kbd>G</kbd> dissolves the stack at the cursor (#24).
 
 ## 2.4.2-alpha
 
