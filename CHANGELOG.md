@@ -5,6 +5,12 @@ Notable changes to AutoGallery, newest first. Versions follow the scheme in
 gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
 short and user-facing — what you can now do, not how it's built.
 
+## 2.5.0-alpha
+
+- **Video support** — videos are scanned alongside photos, shown in the grid
+  with a poster frame, a ▶ badge, and their duration, and play with scrubbing in
+  the loupe (streamed on demand, so large clips open instantly) (#69).
+
 ## 2.4.2-alpha
 
 - **Fixed: couldn't type an exact split gap** in Auto-albums — clicking the gap
