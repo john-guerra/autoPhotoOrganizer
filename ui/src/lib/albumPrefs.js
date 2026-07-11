@@ -6,7 +6,7 @@ const KEY = "autogallery.albumPrefs";
 export const DEFAULT_ALBUM_PREFS = {
   template: "%Y-%m-%d", // generic default; user saves e.g. "%Y/%Y_%m%b_%d"
   gapMode: "fixed", // "fixed" (a concrete gap) | "auto" (mean + k·stddev)
-  fixedGapMs: 60000, // 1 minute
+  fixedGapMs: 86400000, // 1 day
   k: 2, // stddev multiplier for auto mode
   move: true, // materialize default is MOVE
 };

@@ -11,7 +11,7 @@ user-facing — what you can now do, not how it's built.
 - **Auto Albums, explained and configurable** — the old "Albums" button is now
   "Auto Albums" with a clear tooltip, and entering it opens a friendly setup
   dialog that explains how time-gap grouping works. The split gap now starts at
-  a concrete **1 minute** with an **Auto** button for the automatic
+  a concrete **1 day** with an **Auto** button for the automatic
   (statistical) gap.
 - **Custom folder naming for albums** — name albums from a template with date
   tokens (e.g. `%Y/%Y_%m%b_%d` → `2017/2017_01Jan_09`), including nested year

@@ -11,7 +11,7 @@ describe("mergeAlbumPrefs", () => {
     expect(mergeAlbumPrefs({ template: "%Y/%Y_%m%b_%d" })).toMatchObject({
       template: "%Y/%Y_%m%b_%d",
       gapMode: "fixed",
-      fixedGapMs: 60000,
+      fixedGapMs: 86400000,
     });
   });
 
@@ -20,8 +20,8 @@ describe("mergeAlbumPrefs", () => {
     expect(mergeAlbumPrefs({ fixedGapMs: 5 }).fixedGapMs).toBe(1000);
   });
 
-  it("defaults the 1-minute fixed gap", () => {
-    expect(DEFAULT_ALBUM_PREFS.fixedGapMs).toBe(60000);
+  it("defaults the 1-day fixed gap", () => {
+    expect(DEFAULT_ALBUM_PREFS.fixedGapMs).toBe(86400000);
     expect(DEFAULT_ALBUM_PREFS.gapMode).toBe("fixed");
   });
 });
