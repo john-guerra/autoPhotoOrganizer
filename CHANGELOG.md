@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.7.1-alpha
+
+- **Fixed: flicker when expanding a collapsed section** — a group's already-loaded
+  thumbnails now reappear instantly instead of flashing a spinner and fading back
+  in one by one (#41).
+
 ## 2.7.0-alpha
 
 - **Manual burst stacks**: select photos in one folder/day and right-click →

@@ -28,6 +28,7 @@
   let el;
   let visible = false; // set true once the tile nears the viewport
   let loaded = false;
+  let cacheHit = false; // the <img> was already browser-cached at mount → skip the fade (issue #41)
   let failed = false; // server 500'd, or the request stalled past STALL_MS
   let retryNonce = 0; // bumped by the retry click to force a fresh request past caches
   let observer;
@@ -79,6 +80,26 @@
     loaded = ok;
     failed = !ok;
     dispatch("settled", { id: item.id, ok });
+  }
+
+  // Cache-hit fast path (issue #41). Thumbnails are served `Cache-Control:
+  // immutable`, so re-mounting an already-loaded group — e.g. expanding a
+  // section you just collapsed — recreates each <img> against a warm browser
+  // cache. Such an <img> is already `complete` with real dimensions the instant
+  // it's created, and its `load` event may not fire again. Without this, every
+  // tile would restart at `loaded = false` (spinner) and fade back in over
+  // 0.2s — the visible "flicker on expand". Detecting `complete` at creation
+  // (a state check, not a timer) lets us mark it loaded synchronously, before
+  // the first paint, and the `instant` class drops the fade so cached tiles
+  // just appear. A genuinely-uncached <img> is not `complete` here, so it keeps
+  // the normal spinner + fade.
+  function detectCache(node) {
+    if (node.complete && node.naturalWidth > 0) {
+      cacheHit = true;
+      settle(true);
+    } else {
+      cacheHit = false;
+    }
   }
 
   function retry() {
@@ -194,6 +215,8 @@
           loading="lazy"
           class="cover"
           class:loaded
+          class:instant={cacheHit}
+          use:detectCache
           on:load={() => settle(true)}
           on:error={() => settle(false)}
         />
@@ -328,6 +351,11 @@
   }
   img.cover.loaded {
     opacity: 1;
+  }
+  /* Cache hit (issue #41): the tile was already loaded before this mount, so
+     drop the fade entirely — it should just be there, not animate back in. */
+  img.cover.instant {
+    transition: none;
   }
   .stack-peek {
     /* NOT `inherit`: .stack-peek is a sibling of .thumb, a direct child
