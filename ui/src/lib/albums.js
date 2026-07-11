@@ -10,6 +10,8 @@
  * trip — the server only ever copies the id-groups this produces (materialize).
  */
 
+import * as d3 from "d3";
+
 /**
  * @param {number[]} times ascending photo timestamps (ms)
  * @returns {{mean:number, stdev:number, count:number, minGap:number, maxGap:number}}
@@ -78,4 +80,34 @@ export function defaultAlbumName(startAtMs) {
   const d = new Date(startAtMs);
   const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * Render an album folder name from a strftime-style template. Date tokens are
+ * delegated to d3.timeFormat; `%n` is the 1-based album index. The result MAY
+ * contain "/" to create nested folders (e.g. a year subfolder). Leading "/" and
+ * any ".." path segments are stripped so the name is always a safe relative
+ * path (the server's safeResolve also blocks traversal, but we keep it clean).
+ * An empty render falls back to `Album {n}`.
+ * @param {string} template e.g. "%Y/%Y_%m%b_%d"
+ * @param {Date} date album start date
+ * @param {number} n 1-based album index
+ * @returns {string}
+ */
+export function renderAlbumName(template, date, n) {
+  // %n isn't a d3 token — substitute it first (escape any literal % the user
+  // typed as %% so d3 doesn't choke), then run d3.timeFormat for the rest.
+  const withIndex = String(template ?? "").replace(/%n/g, String(n));
+  let rendered = "";
+  try {
+    rendered = d3.timeFormat(withIndex)(date);
+  } catch {
+    rendered = withIndex; // unparseable template: use it literally
+  }
+  const safe = rendered
+    .split("/")
+    .map((seg) => seg.trim())
+    .filter((seg) => seg.length > 0 && seg !== "..")
+    .join("/");
+  return safe.length ? safe : `Album ${n}`;
 }

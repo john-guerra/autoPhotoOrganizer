@@ -4,6 +4,7 @@ import {
   autoThresholdMs,
   clusterByGap,
   defaultAlbumName,
+  renderAlbumName,
 } from "./albums.js";
 
 const H = 3600_000; // one hour in ms
@@ -74,5 +75,36 @@ describe("defaultAlbumName", () => {
   it("formats the start date as YYYY-MM-DD", () => {
     const d = new Date(2024, 6, 6, 9, 30); // local time, Jul 6 2024
     expect(defaultAlbumName(d.getTime())).toBe("2024-07-06");
+  });
+});
+
+describe("renderAlbumName", () => {
+  // 2017-01-09 14:30 local. Build via components so the test is TZ-stable.
+  const d = new Date(2017, 0, 9, 14, 30, 0);
+
+  it("renders strftime date tokens", () => {
+    expect(renderAlbumName("%Y-%m-%d", d, 1)).toBe("2017-01-09");
+    expect(renderAlbumName("%Y_%m%b_%d", d, 1)).toBe("2017_01Jan_09");
+  });
+
+  it("renders the %n album index (1-based)", () => {
+    expect(renderAlbumName("Album %n", d, 3)).toBe("Album 3");
+    expect(renderAlbumName("%Y_%n", d, 12)).toBe("2017_12");
+  });
+
+  it("supports / for nested folders (year subfolder)", () => {
+    expect(renderAlbumName("%Y/%Y_%m%b_%d", d, 1)).toBe("2017/2017_01Jan_09");
+  });
+
+  it("strips a leading slash and .. segments (stay relative, no traversal)", () => {
+    expect(renderAlbumName("/%Y", d, 1)).toBe("2017");
+    expect(renderAlbumName("../%Y", d, 1)).toBe("2017");
+    expect(renderAlbumName("%Y/../x", d, 1)).toBe("2017/x");
+  });
+
+  it("falls back to Album {n} when the template renders empty", () => {
+    expect(renderAlbumName("", d, 4)).toBe("Album 4");
+    expect(renderAlbumName("   ", d, 4)).toBe("Album 4");
+    expect(renderAlbumName("/", d, 4)).toBe("Album 4");
   });
 });
