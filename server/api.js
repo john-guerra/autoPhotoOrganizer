@@ -1483,8 +1483,9 @@ export function registerApi(app) {
         let restored = 0;
         let skipped = 0;
         for (let i = 0; i < manifest.length; i++) {
-          // Same rationale as the materialize loop above: moveFile is
-          // synchronous, so yield periodically to keep cancel responsive.
+          // Same rationale as the materialize loop above: moveFile is async
+          // (it may fall back to copy+unlink across volumes), so we still
+          // yield periodically to keep cancel responsive between awaits.
           if (i % 50 === 0)
             await new Promise((resolve) => setImmediate(resolve));
           if (job.controller.signal.aborted) {
@@ -1496,7 +1497,7 @@ export function registerApi(app) {
           if (!existsSync(entry.to)) {
             skipped++;
           } else {
-            moveFile(entry.to, entry.from);
+            await moveFile(entry.to, entry.from);
             repointPhoto(db, Number(entry.id), entry.from);
             restored++;
           }

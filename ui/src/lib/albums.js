@@ -95,8 +95,9 @@ export function defaultAlbumName(startAtMs) {
  * @returns {string}
  */
 export function renderAlbumName(template, date, n) {
-  // %n isn't a d3 token — substitute it first (escape any literal % the user
-  // typed as %% so d3 doesn't choke), then run d3.timeFormat for the rest.
+  // %n isn't a d3 token — substitute it first, then delegate the rest to
+  // d3.timeFormat. The try/catch below covers a template that d3 can't parse
+  // (e.g. a stray trailing "%") by falling back to the literal string.
   const withIndex = String(template ?? "").replace(/%n/g, String(n));
   let rendered = "";
   try {

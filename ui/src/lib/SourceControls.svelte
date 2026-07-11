@@ -25,7 +25,11 @@
 </script>
 
 <div class="cluster source">
-  <div class="library">
+  <div
+    class="library"
+    use:clickOutside={() => (libraryOpen = false)}
+    use:onEscape={() => (libraryOpen = false)}
+  >
     <button
       class="library-toggle"
       on:click={() => (libraryOpen = !libraryOpen)}
@@ -34,11 +38,7 @@
       Library ▾
     </button>
     {#if libraryOpen}
-      <ul
-        class="library-panel"
-        use:clickOutside={() => (libraryOpen = false)}
-        use:onEscape={() => (libraryOpen = false)}
-      >
+      <ul class="library-panel">
         <li>
           <button
             class="library-entry"
@@ -65,7 +65,11 @@
       </ul>
     {/if}
   </div>
-  <div class="add-folder">
+  <div
+    class="add-folder"
+    use:clickOutside={() => (addFolderOpen = false)}
+    use:onEscape={() => (addFolderOpen = false)}
+  >
     <button
       class="add-toggle"
       on:click={() => (addFolderOpen = !addFolderOpen)}
@@ -75,11 +79,7 @@
       ＋
     </button>
     {#if addFolderOpen}
-      <div
-        class="add-panel"
-        use:clickOutside={() => (addFolderOpen = false)}
-        use:onEscape={() => (addFolderOpen = false)}
-      >
+      <div class="add-panel">
         <input
           class="dir"
           type="text"
