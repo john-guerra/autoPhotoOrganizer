@@ -6,12 +6,12 @@
 
 A group/album label offers **different actions depending on its display state**:
 
-| Action              | Expanded header | Snapshot header | Collapsed pill |
-| ------------------- | --------------- | --------------- | -------------- |
-| Select              | ✅              | ✅              | ❌             |
-| Keep only           | ✅              | ✅              | ❌             |
-| Remove (folders)    | ✅              | ✅              | ✅             |
-| Rename (dbl-click)  | ✅              | ❌              | ❌             |
+| Action             | Expanded header | Snapshot header | Collapsed pill |
+| ------------------ | --------------- | --------------- | -------------- |
+| Select             | ✅              | ✅              | ❌             |
+| Keep only          | ✅              | ✅              | ❌             |
+| Remove (folders)   | ✅              | ✅              | ✅             |
+| Rename (dbl-click) | ✅              | ❌              | ❌             |
 
 The actions should be identical regardless of collapse state (Google-Photos-style
 consistent header). Additionally, no group-level selection indicator exists today:

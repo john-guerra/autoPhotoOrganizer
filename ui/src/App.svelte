@@ -72,6 +72,8 @@
   import OrganizeControls from "./lib/OrganizeControls.svelte";
   import ViewControls from "./lib/ViewControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
+  import GroupLabelActions from "./lib/GroupLabelActions.svelte";
+  import { selectState, intersectionCount } from "./lib/groupSelection.js";
   import {
     DEFAULT_FILTER,
     isActive as filterIsActive,
@@ -730,6 +732,88 @@
       selectedIds = new Set([...selectedIds, ...ids]);
     } catch (e) {
       error = e.message;
+    }
+  }
+
+  // --- Group tri-state selection indicator (issue #88) -------------------
+  // A group label shows none/some/all of its photos selected. The client only
+  // holds a flat `selectedIds` set, so we cache each group's id list (fetched
+  // lazily, once, for visible headers) and intersect it with the selection.
+  // Entries are tagged with the current filter+sort signature so a stale one is
+  // ignored after the feed's ordering/filtering changes.
+  let groupIdCache = new Map(); // pathKey -> { ids: number[], sig: string }
+  let groupIdCacheVersion = 0; // bumped when the cache changes, to re-derive
+  let groupIdInFlight = new Set(); // pathKeys mid-fetch (dedup)
+  $: groupSelSig = JSON.stringify([displayFilter ?? null, sort ?? null]);
+  // Drop cached group ids whenever the header/count caches reset — the one
+  // signal (`countsEpoch`) that fires on every filter / keep-only / groupBy /
+  // rescan / library-reset, i.e. exactly when a group's membership can change.
+  let _groupCacheEpoch = 0;
+  $: if (countsEpoch !== _groupCacheEpoch) {
+    _groupCacheEpoch = countsEpoch;
+    groupIdCache = new Map();
+    groupIdInFlight = new Set();
+    groupIdCacheVersion++;
+  }
+
+  /** Kick off a one-shot id fetch for a group whose ids aren't cached yet. */
+  async function ensureGroupIds(path, key, sig) {
+    if (groupIdInFlight.has(key)) return;
+    groupIdInFlight.add(key);
+    try {
+      const ids = await fetchPhotoIds(
+        filterIsActive(displayFilter) ? displayFilter : null,
+        path,
+        sort
+      );
+      groupIdCache.set(key, { ids, sig });
+      groupIdCacheVersion++; // trigger the reactive re-derive
+    } catch {
+      // Leave uncached; a later render retries. The click path surfaces errors.
+    } finally {
+      groupIdInFlight.delete(key);
+    }
+  }
+
+  /** Derive a group's select indicator. Reads reactive `_sel`/`_ver`/`_sig` as
+   * args so Svelte re-runs this in the template when selection or cache change.
+   * @returns {"none"|"some"|"all"|"loading"} */
+  function groupSelectState(path, _sel, _ver, _sig) {
+    const key = pathKey(path);
+    const entry = groupIdCache.get(key);
+    if (!entry || entry.sig !== _sig) {
+      ensureGroupIds(path, key, _sig);
+      return "loading";
+    }
+    return selectState(intersectionCount(entry.ids, _sel), entry.ids.length);
+  }
+
+  /** Click the group's select icon: select-all, or deselect-all if already all. */
+  async function toggleGroupSelectAll(path) {
+    const key = pathKey(path);
+    let entry = groupIdCache.get(key);
+    if (!entry || entry.sig !== groupSelSig) {
+      try {
+        const ids = await fetchPhotoIds(
+          filterIsActive(displayFilter) ? displayFilter : null,
+          path,
+          sort
+        );
+        entry = { ids, sig: groupSelSig };
+        groupIdCache.set(key, entry);
+        groupIdCacheVersion++;
+      } catch (e) {
+        error = e.message;
+        return;
+      }
+    }
+    const n = intersectionCount(entry.ids, selectedIds);
+    if (selectState(n, entry.ids.length) === "all") {
+      const next = new Set(selectedIds);
+      for (const id of entry.ids) next.delete(id);
+      selectedIds = next;
+    } else {
+      selectedIds = new Set([...selectedIds, ...entry.ids]);
     }
   }
 
@@ -2993,37 +3077,20 @@
                     </span>
                   {/if}
                   {#if header.path}
-                    <span class="section-actions">
-                      <button
-                        class="section-act"
-                        title="Select every photo in this group"
-                        on:click|stopPropagation={() =>
-                          selectGroup(header.path)}
-                      >
-                        Select
-                      </button>
-                      <button
-                        class="section-act"
-                        title="Keep only this group as the working set"
-                        on:click|stopPropagation={() =>
-                          keepOnlyGroup(header.path)}
-                      >
-                        Keep only
-                      </button>
-                      {#if header.path.at(-1)?.dimension === "folder"}
-                        <button
-                          class="section-act"
-                          class:danger={removeArmedKey === pathKey(header.path)}
-                          title="Remove this album from the library (files on disk are untouched; ratings are lost)"
-                          on:click|stopPropagation={() =>
-                            removeAlbum(header.path)}
-                        >
-                          {removeArmedKey === pathKey(header.path)
-                            ? "Confirm remove"
-                            : "Remove"}
-                        </button>
-                      {/if}
-                    </span>
+                    <GroupLabelActions
+                      selectState={groupSelectState(
+                        header.path,
+                        selectedIds,
+                        groupIdCacheVersion,
+                        groupSelSig
+                      )}
+                      isFolder={header.path.at(-1)?.dimension === "folder"}
+                      removeArmed={removeArmedKey === pathKey(header.path)}
+                      on:toggleselect={() => toggleGroupSelectAll(header.path)}
+                      on:select={() => selectGroup(header.path)}
+                      on:keeponly={() => keepOnlyGroup(header.path)}
+                      on:remove={() => removeAlbum(header.path)}
+                    />
                   {/if}
                 </div>
               </div>
@@ -3058,38 +3125,23 @@
                       <span class="section-count">
                         {entry.item.count.toLocaleString()} items
                       </span>
-                      <span class="section-actions">
-                        <button
-                          class="section-act"
-                          title="Select every photo in this group"
-                          on:click|stopPropagation={() =>
-                            selectGroup(entry.item.path)}
-                        >
-                          Select
-                        </button>
-                        <button
-                          class="section-act"
-                          title="Keep only this group as the working set"
-                          on:click|stopPropagation={() =>
-                            keepOnlyGroup(entry.item.path)}
-                        >
-                          Keep only
-                        </button>
-                        {#if entry.item.path.at(-1)?.dimension === "folder"}
-                          <button
-                            class="section-act"
-                            class:danger={removeArmedKey ===
-                              pathKey(entry.item.path)}
-                            title="Remove this album from the library (files on disk are untouched; ratings are lost)"
-                            on:click|stopPropagation={() =>
-                              removeAlbum(entry.item.path)}
-                          >
-                            {removeArmedKey === pathKey(entry.item.path)
-                              ? "Confirm remove"
-                              : "Remove"}
-                          </button>
-                        {/if}
-                      </span>
+                      <GroupLabelActions
+                        selectState={groupSelectState(
+                          entry.item.path,
+                          selectedIds,
+                          groupIdCacheVersion,
+                          groupSelSig
+                        )}
+                        isFolder={entry.item.path.at(-1)?.dimension ===
+                          "folder"}
+                        removeArmed={removeArmedKey ===
+                          pathKey(entry.item.path)}
+                        on:toggleselect={() =>
+                          toggleGroupSelectAll(entry.item.path)}
+                        on:select={() => selectGroup(entry.item.path)}
+                        on:keeponly={() => keepOnlyGroup(entry.item.path)}
+                        on:remove={() => removeAlbum(entry.item.path)}
+                      />
                     </div>
                     <div class="snap-wrap">
                       <SnapshotStrip
@@ -3125,20 +3177,21 @@
                     <span class="placeholder-count">
                       {entry.item.count.toLocaleString()} items
                     </span>
-                    {#if entry.item.path.at(-1)?.dimension === "folder"}
-                      <button
-                        class="section-act"
-                        class:danger={removeArmedKey ===
-                          pathKey(entry.item.path)}
-                        title="Remove this album from the library (files on disk are untouched; ratings are lost)"
-                        on:click|stopPropagation={() =>
-                          removeAlbum(entry.item.path)}
-                      >
-                        {removeArmedKey === pathKey(entry.item.path)
-                          ? "Confirm remove"
-                          : "Remove"}
-                      </button>
-                    {/if}
+                    <GroupLabelActions
+                      selectState={groupSelectState(
+                        entry.item.path,
+                        selectedIds,
+                        groupIdCacheVersion,
+                        groupSelSig
+                      )}
+                      isFolder={entry.item.path.at(-1)?.dimension === "folder"}
+                      removeArmed={removeArmedKey === pathKey(entry.item.path)}
+                      on:toggleselect={() =>
+                        toggleGroupSelectAll(entry.item.path)}
+                      on:select={() => selectGroup(entry.item.path)}
+                      on:keeponly={() => keepOnlyGroup(entry.item.path)}
+                      on:remove={() => removeAlbum(entry.item.path)}
+                    />
                   </div>
                 {/if}
               {:else}
@@ -3478,36 +3531,18 @@
     /* Matches the collapsed-section placeholder's own count (.placeholder-count)
        so a section reads the same expanded or collapsed. */
   }
-  .section-actions {
-    display: inline-flex;
-    gap: 4px;
-    margin-left: 8px;
-    opacity: 0;
-    transition: opacity 0.1s ease;
-  }
-  .section-header:hover .section-actions {
+  /* The group actions (Select/Keep only/Remove) live in GroupLabelActions
+     (issue #88); its select icon is always visible, but its action buttons
+     (.gla-buttons) reveal only on hover of the surrounding header row. The
+     reveal target crosses the component boundary, so it's a :global rule keyed
+     on each of the three header states. */
+  .section-header:hover :global(.gla-buttons),
+  .section-header:focus-within :global(.gla-buttons),
+  .snapshot-head:hover :global(.gla-buttons),
+  .snapshot-head:focus-within :global(.gla-buttons),
+  .placeholder-row:hover :global(.gla-buttons),
+  .placeholder-row:focus-within :global(.gla-buttons) {
     opacity: 1;
-  }
-  .section-act {
-    background: #222;
-    border: 1px solid #3a3a3a;
-    color: #cfcfcf;
-    border-radius: 4px;
-    padding: 1px 7px;
-    font-size: 0.72rem;
-    cursor: pointer;
-  }
-  .section-act:hover {
-    background: #2f2f2f;
-    color: #fff;
-  }
-  .section-act.danger {
-    background: #5a1a1a;
-    border-color: #a33;
-    color: #ffd7d7;
-  }
-  .section-act.danger:hover {
-    background: #7a2020;
   }
   .snapshot-row {
     position: absolute;

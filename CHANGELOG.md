@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.16-alpha
+
+- **Every group label now offers the same actions and a select-all checkbox,
+  whether the group is expanded, shown as a snapshot strip, or collapsed.**
+  Previously a collapsed group only had "Remove" and a snapshot group's actions
+  were hidden. Each label gains a tri-state checkbox — empty, a dash when some of
+  the group's photos are selected, or filled when all are — and clicking it
+  selects or deselects the whole group at once (issue #88).
+
 ## 2.8.15-alpha
 
 - **Snapshot-strip thumbnails no longer get stuck broken.** Collapsing groups to
