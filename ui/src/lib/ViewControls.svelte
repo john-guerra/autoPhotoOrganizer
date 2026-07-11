@@ -76,9 +76,13 @@
     on:click={() =>
       albumMode ? (albumMode = false) : dispatch("detectalbums")}
     disabled={detectingAlbums}
-    title="Split the current working set into albums by time gaps"
+    title="Group the photos you're viewing into albums by the pauses between shots — a long gap starts a new album. Preview, rename, then save them into folders (photos and videos)."
   >
-    {detectingAlbums ? "Detecting…" : albumMode ? "✕ Albums" : "▤ Albums"}
+    {detectingAlbums
+      ? "Detecting…"
+      : albumMode
+        ? "✕ Auto Albums"
+        : "▤ Auto Albums"}
   </button>
   <div class="view-cell">
     <label class="zoom" title="Grid zoom (also + / - keys)">
