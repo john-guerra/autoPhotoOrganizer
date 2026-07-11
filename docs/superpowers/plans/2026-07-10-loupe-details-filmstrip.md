@@ -14,7 +14,7 @@
 - **Svelte 4** idioms only (`export let`, `$:`, `createEventDispatcher`, `class:`); no runes.
 - Tests: **vitest**, colocated `*.test.js` next to sources under `server/` (and `ui/src/lib/` for pure UI helpers).
 - Every change **bumps the patch version** in `package.json` and adds a user-facing `CHANGELOG.md` line in the same commit; keep the `-alpha` suffix. Current version at plan start: `2.8.0-alpha` → first patch is `2.8.1-alpha`.
-- **No Svelte component-test harness** exists — Svelte components are verified by live browser interaction, per CLAUDE.md/ROADMAP. Extract pure logic into `.js` modules and unit-test *those*.
+- **No Svelte component-test harness** exists — Svelte components are verified by live browser interaction, per CLAUDE.md/ROADMAP. Extract pure logic into `.js` modules and unit-test _those_.
 - Format your own changed files only (`npx prettier --write <file>`); the repo is not prettier-clean and `.svelte` has no parser configured.
 - Commit after each task.
 
@@ -23,11 +23,13 @@
 ### Task 1: EXIF extraction in the processing engine
 
 **Files:**
+
 - Modify: `server/processing/NodeProcessingService.js` (add `exifToMeta` export; extend `metadata()`'s exifr `pick` + mapping)
 - Modify: `server/processing/ProcessingService.js` (extend the `MediaMetadata` typedef)
 - Test: `server/processing/NodeProcessingService.test.js` (add an `exifToMeta` describe block)
 
 **Interfaces:**
+
 - Produces: `export function exifToMeta(exif): { aperture: number|null, shutter: number|null, iso: number|null, focalLength: number|null, lens: string }` — maps a parsed exifr result to raw persisted values (aperture as ƒ-number, shutter in seconds, focal length in mm). `lens` is `""` when absent (an "EXIF attempted" sentinel, mirroring how `width` marks dimensions attempted).
 - Produces: `metadata()` results now additionally carry `aperture, shutter, iso, focalLength, lens` for image files (unset for videos).
 
@@ -101,27 +103,27 @@ export function exifToMeta(exif) {
 In `server/processing/NodeProcessingService.js`, in the image branch of `metadata()` (around lines 307–316), replace the `exifr.parse` block with:
 
 ```js
-        try {
-          const exif = await exifr.parse(path, {
-            pick: [
-              "DateTimeOriginal",
-              "CreateDate",
-              "Make",
-              "Model",
-              "FNumber",
-              "ExposureTime",
-              "ISO",
-              "FocalLength",
-              "LensModel",
-            ],
-          });
-          const createDate = exif?.DateTimeOriginal || exif?.CreateDate;
-          if (createDate) meta.createDate = createDate;
-          meta.camera = formatCamera(exif?.Make, exif?.Model);
-          Object.assign(meta, exifToMeta(exif));
-        } catch {
-          /* no EXIF */
-        }
+try {
+  const exif = await exifr.parse(path, {
+    pick: [
+      "DateTimeOriginal",
+      "CreateDate",
+      "Make",
+      "Model",
+      "FNumber",
+      "ExposureTime",
+      "ISO",
+      "FocalLength",
+      "LensModel",
+    ],
+  });
+  const createDate = exif?.DateTimeOriginal || exif?.CreateDate;
+  if (createDate) meta.createDate = createDate;
+  meta.camera = formatCamera(exif?.Make, exif?.Model);
+  Object.assign(meta, exifToMeta(exif));
+} catch {
+  /* no EXIF */
+}
 ```
 
 - [ ] **Step 5: Extend the `MediaMetadata` typedef**
@@ -154,10 +156,12 @@ git commit -m "feat(processing): extract lens/aperture/shutter/ISO/focal EXIF (#
 ### Task 2: EXIF columns on the `photos` table
 
 **Files:**
+
 - Modify: `server/db/schema.js` (add `ensureColumn` calls in `applySchema`)
 - Test: `server/db/schema.test.js` (new file)
 
 **Interfaces:**
+
 - Produces: `photos` table columns `aperture REAL`, `shutter REAL`, `iso INTEGER`, `focal_length REAL`, `lens TEXT` (all nullable). Consumed by Task 3's `/api/meta`.
 
 - [ ] **Step 1: Write the failing test**
@@ -195,14 +199,14 @@ Expected: FAIL — `expect(cols).toContain("aperture")` fails (column missing).
 In `server/db/schema.js`, inside `applySchema` after the existing `duration` `ensureColumn` (around line 89):
 
 ```js
-  // Loupe details panel EXIF (issue #27). Nullable — populated lazily by
-  // /api/meta on first detailed view; `lens` doubles as the "EXIF attempted"
-  // sentinel (see NodeProcessingService.exifToMeta / api.js /api/meta trigger).
-  ensureColumn(db, "photos", "aperture", "REAL");
-  ensureColumn(db, "photos", "shutter", "REAL");
-  ensureColumn(db, "photos", "iso", "INTEGER");
-  ensureColumn(db, "photos", "focal_length", "REAL");
-  ensureColumn(db, "photos", "lens", "TEXT");
+// Loupe details panel EXIF (issue #27). Nullable — populated lazily by
+// /api/meta on first detailed view; `lens` doubles as the "EXIF attempted"
+// sentinel (see NodeProcessingService.exifToMeta / api.js /api/meta trigger).
+ensureColumn(db, "photos", "aperture", "REAL");
+ensureColumn(db, "photos", "shutter", "REAL");
+ensureColumn(db, "photos", "iso", "INTEGER");
+ensureColumn(db, "photos", "focal_length", "REAL");
+ensureColumn(db, "photos", "lens", "TEXT");
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -223,10 +227,12 @@ git commit -m "feat(db): add EXIF columns to photos (#27)"
 ### Task 3: `/api/meta` persists and returns EXIF
 
 **Files:**
+
 - Modify: `server/api.js` (the `GET /api/meta` handler, around lines 503–562)
 - Test: `server/api.test.js` (add a describe block)
 
 **Interfaces:**
+
 - Consumes: `photos` EXIF columns (Task 2); `metadata()` EXIF fields (Task 1).
 - Produces: `GET /api/meta?ids=…` response objects now include `camera, aperture, shutter, iso, focalLength, lens, size, folder` in addition to the existing `id, takenAt, width, height, duration`. The extraction trigger also fires when `lens === null`.
 
@@ -284,8 +290,8 @@ Expected: FAIL — response lacks `aperture`/`lens`/`folder` (undefined), `toMat
 In `server/api.js`, in `GET /api/meta`, change the "need extraction" test (around line 517) to also fire when EXIF was never attempted:
 
 ```js
-      if (photo.width === null || photo.camera === null || photo.lens === null)
-        need.push(photo);
+if (photo.width === null || photo.camera === null || photo.lens === null)
+  need.push(photo);
 ```
 
 - [ ] **Step 4: Persist the new columns on extraction**
@@ -293,43 +299,43 @@ In `server/api.js`, in `GET /api/meta`, change the "need extraction" test (aroun
 In the same handler, replace the `update` prepared statement and its `run(...)` (around lines 522–545) with:
 
 ```js
-      const update = db.prepare(
-        `UPDATE photos SET taken_at = ?, width = ?, height = ?, camera = ?,
+const update = db.prepare(
+  `UPDATE photos SET taken_at = ?, width = ?, height = ?, camera = ?,
            duration = ?, aperture = ?, shutter = ?, iso = ?, focal_length = ?,
            lens = ? WHERE id = ?`
-      );
-      metas.forEach((m, i) => {
-        const photo = need[i];
-        const takenAtMs = m.createDate ? new Date(m.createDate).getTime() : null;
-        const duration = m.duration ?? null;
-        const lens = m.lens ?? ""; // "" marks EXIF attempted (see exifToMeta)
-        update.run(
-          takenAtMs,
-          m.width ?? 0,
-          m.height ?? 0,
-          m.camera ?? "",
-          duration,
-          m.aperture ?? null,
-          m.shutter ?? null,
-          m.iso ?? null,
-          m.focalLength ?? null,
-          lens,
-          photo.id
-        );
-        photosById.set(photo.id, {
-          ...photo,
-          taken_at: takenAtMs,
-          width: m.width ?? 0,
-          height: m.height ?? 0,
-          camera: m.camera ?? "",
-          duration,
-          aperture: m.aperture ?? null,
-          shutter: m.shutter ?? null,
-          iso: m.iso ?? null,
-          focal_length: m.focalLength ?? null,
-          lens,
-        });
-      });
+);
+metas.forEach((m, i) => {
+  const photo = need[i];
+  const takenAtMs = m.createDate ? new Date(m.createDate).getTime() : null;
+  const duration = m.duration ?? null;
+  const lens = m.lens ?? ""; // "" marks EXIF attempted (see exifToMeta)
+  update.run(
+    takenAtMs,
+    m.width ?? 0,
+    m.height ?? 0,
+    m.camera ?? "",
+    duration,
+    m.aperture ?? null,
+    m.shutter ?? null,
+    m.iso ?? null,
+    m.focalLength ?? null,
+    lens,
+    photo.id
+  );
+  photosById.set(photo.id, {
+    ...photo,
+    taken_at: takenAtMs,
+    width: m.width ?? 0,
+    height: m.height ?? 0,
+    camera: m.camera ?? "",
+    duration,
+    aperture: m.aperture ?? null,
+    shutter: m.shutter ?? null,
+    iso: m.iso ?? null,
+    focal_length: m.focalLength ?? null,
+    lens,
+  });
+});
 ```
 
 - [ ] **Step 5: Return the new fields**
@@ -376,12 +382,14 @@ git commit -m "feat(api): /api/meta persists and returns EXIF + folder/size (#27
 ### Task 4: Pure frontend helpers — EXIF formatting + filmstrip windowing
 
 **Files:**
+
 - Create: `ui/src/lib/exifFormat.js`
 - Create: `ui/src/lib/exifFormat.test.js`
 - Create: `ui/src/lib/filmstrip.js`
 - Create: `ui/src/lib/filmstrip.test.js`
 
 **Interfaces:**
+
 - Produces: `formatAperture(f)`, `formatShutter(s)`, `formatIso(iso)`, `formatFocal(mm)`, `formatSize(bytes)`, `formatDimensions(w, h)` — each returns a display string, or `""` for a missing/invalid value (caller renders `—`).
 - Produces: `filmstripWindow(index, length, radius): { start, end }` — the `[start, end)` slice to render.
 
@@ -529,9 +537,11 @@ git commit -m "feat(ui): pure EXIF-format + filmstrip-window helpers (#27, #28)"
 ### Task 5: `LoupeDetails.svelte` — the right metadata panel
 
 **Files:**
+
 - Create: `ui/src/lib/LoupeDetails.svelte`
 
 **Interfaces:**
+
 - Consumes: `formatAperture/Shutter/Iso/Focal/Size/Dimensions` (Task 4); `Stars.svelte`.
 - Props: `item` (current photo, may be null), `meta` (fetched detail meta or null), `inSelection: boolean`, `selectedCount: number`.
 - Presentational only; no fetching. Verified live in Task 7.
@@ -589,10 +599,13 @@ Create `ui/src/lib/LoupeDetails.svelte`:
       <div class="v name" title={item.name}>{item.name}</div>
       {#if folder}<div class="v sub" title={folder}>{folder}</div>{/if}
       <dl>
-        <dt>Size</dt><dd>{or(formatSize(meta?.size ?? item?.size))}</dd>
-        <dt>Kind</dt><dd>{item.kind}</dd>
+        <dt>Size</dt>
+        <dd>{or(formatSize(meta?.size ?? item?.size))}</dd>
+        <dt>Kind</dt>
+        <dd>{item.kind}</dd>
         {#if isVideo}
-          <dt>Length</dt><dd>{fmtDuration(meta?.duration ?? item?.duration)}</dd>
+          <dt>Length</dt>
+          <dd>{fmtDuration(meta?.duration ?? item?.duration)}</dd>
         {/if}
       </dl>
     </section>
@@ -600,8 +613,10 @@ Create `ui/src/lib/LoupeDetails.svelte`:
     <section>
       <h4>Image</h4>
       <dl>
-        <dt>Dimensions</dt><dd>{or(dims)}</dd>
-        <dt>Taken</dt><dd>{fmtDate(takenAt)}</dd>
+        <dt>Dimensions</dt>
+        <dd>{or(dims)}</dd>
+        <dt>Taken</dt>
+        <dd>{fmtDate(takenAt)}</dd>
       </dl>
     </section>
 
@@ -609,12 +624,18 @@ Create `ui/src/lib/LoupeDetails.svelte`:
       <section>
         <h4>Camera</h4>
         <dl>
-          <dt>Camera</dt><dd>{or(meta?.camera)}</dd>
-          <dt>Lens</dt><dd>{or(meta?.lens)}</dd>
-          <dt>Aperture</dt><dd>{or(formatAperture(meta?.aperture))}</dd>
-          <dt>Shutter</dt><dd>{or(formatShutter(meta?.shutter))}</dd>
-          <dt>ISO</dt><dd>{or(formatIso(meta?.iso))}</dd>
-          <dt>Focal</dt><dd>{or(formatFocal(meta?.focalLength))}</dd>
+          <dt>Camera</dt>
+          <dd>{or(meta?.camera)}</dd>
+          <dt>Lens</dt>
+          <dd>{or(meta?.lens)}</dd>
+          <dt>Aperture</dt>
+          <dd>{or(formatAperture(meta?.aperture))}</dd>
+          <dt>Shutter</dt>
+          <dd>{or(formatShutter(meta?.shutter))}</dd>
+          <dt>ISO</dt>
+          <dd>{or(formatIso(meta?.iso))}</dd>
+          <dt>Focal</dt>
+          <dd>{or(formatFocal(meta?.focalLength))}</dd>
         </dl>
       </section>
     {/if}
@@ -723,9 +744,11 @@ git commit -m "feat(loupe): details panel component (#27)"
 ### Task 6: `LoupeFilmstrip.svelte` — the bottom neighbor strip
 
 **Files:**
+
 - Create: `ui/src/lib/LoupeFilmstrip.svelte`
 
 **Interfaces:**
+
 - Consumes: `filmstripWindow` (Task 4); `thumbUrl` from `./api.js`.
 - Props: `items` (array; may contain collapsed placeholders whose `id` is a string), `index` (current), `selectedIds` (Set of selected numeric ids).
 - Emits: `select` with `{ index }` when a thumb is clicked.
@@ -736,6 +759,14 @@ git commit -m "feat(loupe): details panel component (#27)"
 Create `ui/src/lib/LoupeFilmstrip.svelte`:
 
 ```svelte
+<script context="module">
+  // A tiny action that records the node when it is the current cell, so the
+  // reactive scroll-into-view can target it without a querySelector.
+  export function centerIfCurrent() {
+    return {};
+  }
+</script>
+
 <script>
   import { createEventDispatcher, tick } from "svelte";
   import { thumbUrl } from "./api.js";
@@ -762,7 +793,7 @@ Create `ui/src/lib/LoupeFilmstrip.svelte`:
   let stripEl;
   let currentEl;
   // Keep the current thumb centered horizontally whenever the index changes.
-  $: index, scrollCurrentIntoView();
+  $: (index, scrollCurrentIntoView());
   async function scrollCurrentIntoView() {
     await tick();
     currentEl?.scrollIntoView({ inline: "center", block: "nearest" });
@@ -790,14 +821,6 @@ Create `ui/src/lib/LoupeFilmstrip.svelte`:
     {/if}
   {/each}
 </div>
-
-<script context="module">
-  // A tiny action that records the node when it is the current cell, so the
-  // reactive scroll-into-view can target it without a querySelector.
-  export function centerIfCurrent() {
-    return {};
-  }
-</script>
 
 <style>
   .filmstrip {
@@ -888,12 +911,14 @@ git commit -m "feat(loupe): windowed neighbor filmstrip component (#28)"
 ### Task 7: Integrate into the Loupe + App (toggles, persistence, shortcuts)
 
 **Files:**
+
 - Modify: `ui/src/lib/Loupe.svelte` (shell: fetch detail meta, render panel + strip, drop the old `.hud`)
 - Modify: `ui/src/App.svelte` (`showLoupeDetails`/`showLoupeFilmstrip` state + persistence, pass props, `I`/`F` keydown, wire filmstrip `select`)
 - Modify: `ui/src/lib/ShortcutsOverlay.svelte` (document `I`/`F`)
 - Modify: `package.json` (version bump), `CHANGELOG.md`
 
 **Interfaces:**
+
 - Consumes: `LoupeDetails` (Task 5), `LoupeFilmstrip` (Task 6), `fetchMeta` from `./api.js` (existing — already returns the extended object as of Task 3).
 - Props added to `Loupe`: `showDetails: boolean`, `showFilmstrip: boolean`, `selectedIds: Set`.
 
@@ -950,7 +975,8 @@ Replace the contents of `ui/src/lib/Loupe.svelte` with (keeps the existing stage
     try {
       const metas = await fetchMeta(ids);
       for (const m of metas) detailMeta.set(m.id, m);
-      if (item && item.id === id) currentMeta = detailMeta.get(id) ?? currentMeta;
+      if (item && item.id === id)
+        currentMeta = detailMeta.get(id) ?? currentMeta;
     } catch {
       /* metadata is an enhancement; panel falls back to item fields */
     }
@@ -1047,22 +1073,22 @@ Replace the contents of `ui/src/lib/Loupe.svelte` with (keeps the existing stage
 Then simplify `loadMeta` — delete the dead first `for` loop (the scaffolding comment block) so the function is just the second loop:
 
 ```js
-  async function loadMeta(id) {
-    currentMeta = detailMeta.get(id) ?? null;
-    const ids = [];
-    for (let d = -1; d <= 1; d++) {
-      const it = items[index + d];
-      if (isRealPhoto(it) && !detailMeta.has(it.id)) ids.push(it.id);
-    }
-    if (!ids.length) return;
-    try {
-      const metas = await fetchMeta(ids);
-      for (const m of metas) detailMeta.set(m.id, m);
-      if (item && item.id === id) currentMeta = detailMeta.get(id) ?? currentMeta;
-    } catch {
-      /* metadata is an enhancement; panel falls back to item fields */
-    }
+async function loadMeta(id) {
+  currentMeta = detailMeta.get(id) ?? null;
+  const ids = [];
+  for (let d = -1; d <= 1; d++) {
+    const it = items[index + d];
+    if (isRealPhoto(it) && !detailMeta.has(it.id)) ids.push(it.id);
   }
+  if (!ids.length) return;
+  try {
+    const metas = await fetchMeta(ids);
+    for (const m of metas) detailMeta.set(m.id, m);
+    if (item && item.id === id) currentMeta = detailMeta.get(id) ?? currentMeta;
+  } catch {
+    /* metadata is an enhancement; panel falls back to item fields */
+  }
+}
 ```
 
 - [ ] **Step 2: Add toggle state + persistence in `App.svelte`**
@@ -1070,14 +1096,12 @@ Then simplify `loadMeta` — delete the dead first `for` loop (the scaffolding c
 In `ui/src/App.svelte`, near the other `LS_*`/localStorage state (around lines 112–129), add:
 
 ```js
-  const LS_LOUPE_DETAILS = "autogallery.loupeDetails";
-  const LS_LOUPE_FILMSTRIP = "autogallery.loupeFilmstrip";
-  let showLoupeDetails =
-    localStorage.getItem(LS_LOUPE_DETAILS) !== "false"; // default on
-  let showLoupeFilmstrip =
-    localStorage.getItem(LS_LOUPE_FILMSTRIP) !== "false"; // default on
-  $: localStorage.setItem(LS_LOUPE_DETAILS, String(showLoupeDetails));
-  $: localStorage.setItem(LS_LOUPE_FILMSTRIP, String(showLoupeFilmstrip));
+const LS_LOUPE_DETAILS = "autogallery.loupeDetails";
+const LS_LOUPE_FILMSTRIP = "autogallery.loupeFilmstrip";
+let showLoupeDetails = localStorage.getItem(LS_LOUPE_DETAILS) !== "false"; // default on
+let showLoupeFilmstrip = localStorage.getItem(LS_LOUPE_FILMSTRIP) !== "false"; // default on
+$: localStorage.setItem(LS_LOUPE_DETAILS, String(showLoupeDetails));
+$: localStorage.setItem(LS_LOUPE_FILMSTRIP, String(showLoupeFilmstrip));
 ```
 
 - [ ] **Step 3: Pass props to `<Loupe>`**
@@ -1085,17 +1109,17 @@ In `ui/src/App.svelte`, near the other `LS_*`/localStorage state (around lines 1
 In `ui/src/App.svelte`, update the `<Loupe .../>` invocation (around line 3026) to:
 
 ```svelte
-  <Loupe
-    items={resolvedPhotos}
-    bind:index={selected}
-    inSelection={typeof resolvedPhotos[selected]?.id === "number" &&
-      selectedIds.has(resolvedPhotos[selected].id)}
-    selectedCount={selectedCount}
-    {selectedIds}
-    showDetails={showLoupeDetails}
-    showFilmstrip={showLoupeFilmstrip}
-    on:contextmenu={(e) => openContextMenu(e.detail.x, e.detail.y, selected)}
-  />
+<Loupe
+  items={resolvedPhotos}
+  bind:index={selected}
+  inSelection={typeof resolvedPhotos[selected]?.id === "number" &&
+    selectedIds.has(resolvedPhotos[selected].id)}
+  {selectedCount}
+  {selectedIds}
+  showDetails={showLoupeDetails}
+  showFilmstrip={showLoupeFilmstrip}
+  on:contextmenu={(e) => openContextMenu(e.detail.x, e.detail.y, selected)}
+/>
 ```
 
 - [ ] **Step 4: Add the `I`/`F` toggles in `onKeydown`**
@@ -1103,15 +1127,15 @@ In `ui/src/App.svelte`, update the `<Loupe .../>` invocation (around line 3026) 
 In `ui/src/App.svelte`, in `onKeydown`, after the input-guard and before the rating-digit block (around line 2288, right after the loupe navigation handling), add:
 
 ```js
-    // Loupe-only view toggles: I = details panel, F = filmstrip. Guarded on
-    // loupeOpen so they never clash with grid usage; localStorage persists via
-    // the reactive setters above.
-    if (loupeOpen && (key === "i" || key === "f")) {
-      e.preventDefault();
-      if (key === "i") showLoupeDetails = !showLoupeDetails;
-      else showLoupeFilmstrip = !showLoupeFilmstrip;
-      return;
-    }
+// Loupe-only view toggles: I = details panel, F = filmstrip. Guarded on
+// loupeOpen so they never clash with grid usage; localStorage persists via
+// the reactive setters above.
+if (loupeOpen && (key === "i" || key === "f")) {
+  e.preventDefault();
+  if (key === "i") showLoupeDetails = !showLoupeDetails;
+  else showLoupeFilmstrip = !showLoupeFilmstrip;
+  return;
+}
 ```
 
 (Place this after the existing `if (loupeOpen) { ... arrow nav ... }` block and before the `/^[0-5]$/` rating block, so digits/rating still work and the toggles only fire in the Loupe.)
@@ -1172,6 +1196,7 @@ git commit -m "feat(loupe): details panel + filmstrip, I/F toggles, persisted (#
 ## Self-Review
 
 **Spec coverage:**
+
 - Component split (shell + LoupeDetails + LoupeFilmstrip) → Tasks 5, 6, 7. ✓
 - Backend EXIF extraction (exifr pick + mapping) → Task 1. ✓
 - Schema columns → Task 2. ✓

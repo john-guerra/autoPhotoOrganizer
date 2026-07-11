@@ -21,10 +21,12 @@
 ### Task 1: `detectBursts` pure function
 
 **Files:**
+
 - Create: `ui/src/lib/bursts.js`
 - Test: `ui/src/lib/bursts.test.js`
 
 **Interfaces:**
+
 - Produces: `detectBursts(items, { gapMs }) → Array<{ id: string, memberIds: Array<number|string>, coverId: number|string, count: number }>`, exported from `ui/src/lib/bursts.js`. `items` is `Array<{id, name, rating?, mtimeMs, takenAt?}>` — the same item shape already used throughout `ui/src/App.svelte`.
 
 - [ ] **Step 1: Write the failing tests**

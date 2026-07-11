@@ -17,9 +17,11 @@
 ### Task 1: Wire offline Library entries to `jumpToPath`
 
 **Files:**
+
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: `jumpToPath(path)` (existing function, `App.svelte:267`).
 - Produces: no new exports — this is the finished feature.
 
@@ -29,30 +31,30 @@ In `ui/src/App.svelte`, find `selectFromLibrary` (search for
 `function selectFromLibrary`) and change it from:
 
 ```js
-  function selectFromLibrary(entry) {
-    if (!entry.mounted) return;
-    dir = entry.path;
-    libraryOpen = false;
-    doScan();
-  }
+function selectFromLibrary(entry) {
+  if (!entry.mounted) return;
+  dir = entry.path;
+  libraryOpen = false;
+  doScan();
+}
 ```
 
 to:
 
 ```js
-  function selectFromLibrary(entry) {
-    libraryOpen = false;
-    if (!entry.mounted) {
-      // Offline folders can still be browsed read-only from the SQLite
-      // cache (the app's offline-mirror invariant) — reuse the same
-      // jumpToPath the tree sidebar already uses for any folder, rather
-      // than requiring a live rescan this folder's volume can't provide.
-      jumpToPath([{ dimension: "folder", value: entry.path }]);
-      return;
-    }
-    dir = entry.path;
-    doScan();
+function selectFromLibrary(entry) {
+  libraryOpen = false;
+  if (!entry.mounted) {
+    // Offline folders can still be browsed read-only from the SQLite
+    // cache (the app's offline-mirror invariant) — reuse the same
+    // jumpToPath the tree sidebar already uses for any folder, rather
+    // than requiring a live rescan this folder's volume can't provide.
+    jumpToPath([{ dimension: "folder", value: entry.path }]);
+    return;
   }
+  dir = entry.path;
+  doScan();
+}
 ```
 
 - [ ] **Step 2: Remove the `disabled` attribute on offline entries**

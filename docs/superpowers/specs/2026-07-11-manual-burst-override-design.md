@@ -30,6 +30,7 @@ user overrides layered on top of it:
 ## Three-state model (mutually exclusive, enforced at write time)
 
 A photo is in exactly one of:
+
 1. **auto** — neither override; participates in time-gap detection.
 2. **manually grouped** — a `manual_stacks(photo_id, group_id)` row; forced into
    the stack of everyone sharing its `group_id`.

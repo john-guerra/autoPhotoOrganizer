@@ -26,11 +26,13 @@ Full design: `docs/superpowers/specs/2026-07-06-tree-sidebar-design.md`.
 ### Task 1: Server — hierarchy-count query
 
 **Files:**
+
 - Create: `server/db/tree.js`
 - Modify: `server/db/feed.js:27` (add `export` to `resolveDimensions` — needed by `tree.js`; no other change to this function)
 - Test: `server/db/tree.test.js`
 
 **Interfaces:**
+
 - Consumes: `resolveDimensions(groupBy)` (now exported from `server/db/feed.js`) — returns `Array<{name, expr, direction}>`, throws `Error` on an unknown dimension name.
 - Produces: `getTreeNode(db, {groupBy, path})` from `server/db/tree.js`, returning `{total: number, nodes: Array<{value, label, count, hasChildren}>}`. Later tasks (2) call this directly.
 
@@ -300,10 +302,12 @@ git commit -m "feat: add getTreeNode, a lazy per-level hierarchy-count query"
 ### Task 2: Server — `GET /api/tree` endpoint
 
 **Files:**
+
 - Modify: `server/api.js`
 - Test: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: `getTreeNode(db, {groupBy, path})` from Task 1; `DIMENSIONS` (already exported from `server/db/feed.js`).
 - Produces: `GET /api/tree?groupBy=<comma-list>&path=<json>` → `{total, nodes}`. Consumed by Task 7's `fetchTreeNode` client wrapper.
 
@@ -356,7 +360,9 @@ describe("GET /api/tree", () => {
   });
 
   it("400s on malformed path JSON", async () => {
-    const res = await fetch(`${srv.base}/api/tree?groupBy=folder&path=not-json`);
+    const res = await fetch(
+      `${srv.base}/api/tree?groupBy=folder&path=not-json`
+    );
     expect(res.status).toBe(400);
   });
 
@@ -394,38 +400,38 @@ import { getTreeNode } from "./db/tree.js";
 Add this route in `registerApi`, immediately after the existing `GET /api/feed` route (right before the closing `}` of `registerApi`, i.e. before line 291's closing brace):
 
 ```js
-  // --- Hierarchy tree (lazy, per-level) --------------------------------------
-  app.get("/api/tree", (req, res) => {
-    const groupBy = String(req.query.groupBy ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!groupBy.length) {
-      return res.status(400).json({ error: "groupBy is required" });
-    }
-    if (groupBy.some((d) => !DIMENSIONS[d])) {
-      return res.status(400).json({
-        error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
-      });
-    }
+// --- Hierarchy tree (lazy, per-level) --------------------------------------
+app.get("/api/tree", (req, res) => {
+  const groupBy = String(req.query.groupBy ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!groupBy.length) {
+    return res.status(400).json({ error: "groupBy is required" });
+  }
+  if (groupBy.some((d) => !DIMENSIONS[d])) {
+    return res.status(400).json({
+      error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
+    });
+  }
 
-    let path = [];
-    if (req.query.path) {
-      try {
-        path = JSON.parse(String(req.query.path));
-      } catch {
-        return res.status(400).json({ error: "path must be JSON" });
-      }
-    }
-
-    const db = getDb();
+  let path = [];
+  if (req.query.path) {
     try {
-      const { total, nodes } = getTreeNode(db, { groupBy, path });
-      res.json({ total, nodes });
-    } catch (err) {
-      res.status(400).json({ error: err.message });
+      path = JSON.parse(String(req.query.path));
+    } catch {
+      return res.status(400).json({ error: "path must be JSON" });
     }
-  });
+  }
+
+  const db = getDb();
+  try {
+    const { total, nodes } = getTreeNode(db, { groupBy, path });
+    res.json({ total, nodes });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -450,16 +456,18 @@ git commit -m "feat: add GET /api/tree endpoint"
 ### Task 3: Server — in-place collapsed placeholder + arbitrary-path seeking
 
 **Files:**
+
 - Modify: `server/db/feed.js`
 - Modify: `server/api.js`
 - Test: `server/db/feed.test.js`
 - Test: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: nothing new from earlier tasks.
 - Produces: `getFeedPage(db, {groupBy, collapsed, focusId, startPath, before, after})` — same signature as before, PLUS a new optional `startPath` (`Array<{dimension,value}>`, mutually exclusive with `focusId` in practice though not enforced — if both are given, `focusId` takes precedence since it's resolved first). Returns `{items, focusItem}` — **`sections` is removed** from the return value; a currently-collapsed path that falls within the fetched window now appears as an entry in `items` shaped `{collapsed: true, id, path, count, groupValues}` instead. Real (non-collapsed) items are unchanged in shape. Task 4/5/6 consume this new `items` shape on the client. Task 9 updates `GET /api/feed`'s callers to stop reading `sections` and to pass `startPath` for tree-driven jumps.
 
-**Why the placeholder needs its own splicing pass:** the real-row query already excludes collapsed rows (unchanged, cheap — no real rows for a collapsed range are ever fetched). This task adds a *second*, small pass that decides, per collapsed path, whether its block falls inside what THIS specific page actually covers (using the same per-dimension ASC/DESC comparator already used for keyset seeking), and if so, builds a one-row synthetic placeholder and splices it into the correct position among the real rows. A collapsed path outside the current window costs nothing (no query at all beyond a cheap comparison against already-fetched boundary values) until scrolled near.
+**Why the placeholder needs its own splicing pass:** the real-row query already excludes collapsed rows (unchanged, cheap — no real rows for a collapsed range are ever fetched). This task adds a _second_, small pass that decides, per collapsed path, whether its block falls inside what THIS specific page actually covers (using the same per-dimension ASC/DESC comparator already used for keyset seeking), and if so, builds a one-row synthetic placeholder and splices it into the correct position among the real rows. A collapsed path outside the current window costs nothing (no query at all beyond a cheap comparison against already-fetched boundary values) until scrolled near.
 
 **Why `startPath` is needed:** jumping to a tree node has no specific photo id to seek from (the target section may never have been loaded) — `startPath` seeks to the first row whose hierarchy prefix matches (or sorts after) the given path, independent of any particular row's id.
 
@@ -824,7 +832,9 @@ function keyPassesSeek(key, focusValues, dims, wantAfter) {
   for (let i = 0; i < key.length; i++) {
     if (key[i] === focusValues[i]) continue;
     const gt =
-      dims[i].direction === "ASC" ? key[i] > focusValues[i] : key[i] < focusValues[i];
+      dims[i].direction === "ASC"
+        ? key[i] > focusValues[i]
+        : key[i] < focusValues[i];
     return wantAfter ? gt : !gt;
   }
   return false;
@@ -852,7 +862,15 @@ function countCollapsedPath(db, path, dims) {
  * `limit` real rows, meaning this direction hit the true edge of the whole
  * dataset, so nothing bounds it from that side.
  */
-function selectPlaceholders(db, collapsed, dims, focusValues, wantAfter, realRows, limit) {
+function selectPlaceholders(
+  db,
+  collapsed,
+  dims,
+  focusValues,
+  wantAfter,
+  realRows,
+  limit
+) {
   if (!collapsed.length) return [];
   const hitEdge = realRows.length < limit;
   const boundaryRow = realRows.length
@@ -871,7 +889,11 @@ function selectPlaceholders(db, collapsed, dims, focusValues, wantAfter, realRow
         return false;
       }
       if (!hitEdge && boundaryKey) {
-        const cmp = compareKeyTuples(key, boundaryKey.slice(0, key.length), dims);
+        const cmp = compareKeyTuples(
+          key,
+          boundaryKey.slice(0, key.length),
+          dims
+        );
         const withinBound = wantAfter ? cmp <= 0 : cmp >= 0;
         if (!withinBound) return false;
       }
@@ -1012,10 +1034,22 @@ export function getFeedPage(
   const afterReal = fetchRealRows(true, after);
 
   const beforePlaceholders = selectPlaceholders(
-    db, collapsed, dims, focusValues, false, beforeReal, before
+    db,
+    collapsed,
+    dims,
+    focusValues,
+    false,
+    beforeReal,
+    before
   );
   const afterPlaceholders = selectPlaceholders(
-    db, collapsed, dims, focusValues, true, afterReal, after
+    db,
+    collapsed,
+    dims,
+    focusValues,
+    true,
+    afterReal,
+    after
   );
 
   const items = [
@@ -1038,62 +1072,62 @@ Expected: PASS (all tests, including the new placeholder and startPath blocks).
 Change the route handler (currently around line 246–290) from:
 
 ```js
-    const focusIdParam = req.query.focusId;
-    const focusId =
-      focusIdParam !== undefined && focusIdParam !== ""
-        ? Number(focusIdParam)
-        : null;
-    const before = Math.max(0, Number(req.query.before) || 0);
-    const after = Math.max(0, Number(req.query.after) || 50);
+const focusIdParam = req.query.focusId;
+const focusId =
+  focusIdParam !== undefined && focusIdParam !== ""
+    ? Number(focusIdParam)
+    : null;
+const before = Math.max(0, Number(req.query.before) || 0);
+const after = Math.max(0, Number(req.query.after) || 50);
 
-    const db = getDb();
-    try {
-      const { items, sections, focusItem } = getFeedPage(db, {
-        groupBy,
-        collapsed,
-        focusId,
-        before,
-        after,
-      });
-      res.json({ items, sections, focusItem });
-    } catch (err) {
-      res.status(400).json({ error: err.message });
-    }
+const db = getDb();
+try {
+  const { items, sections, focusItem } = getFeedPage(db, {
+    groupBy,
+    collapsed,
+    focusId,
+    before,
+    after,
+  });
+  res.json({ items, sections, focusItem });
+} catch (err) {
+  res.status(400).json({ error: err.message });
+}
 ```
 
 to:
 
 ```js
-    const focusIdParam = req.query.focusId;
-    const focusId =
-      focusIdParam !== undefined && focusIdParam !== ""
-        ? Number(focusIdParam)
-        : null;
-    let startPath = null;
-    if (req.query.startPath) {
-      try {
-        startPath = JSON.parse(String(req.query.startPath));
-      } catch {
-        return res.status(400).json({ error: "startPath must be JSON" });
-      }
-    }
-    const before = Math.max(0, Number(req.query.before) || 0);
-    const after = Math.max(0, Number(req.query.after) || 50);
+const focusIdParam = req.query.focusId;
+const focusId =
+  focusIdParam !== undefined && focusIdParam !== ""
+    ? Number(focusIdParam)
+    : null;
+let startPath = null;
+if (req.query.startPath) {
+  try {
+    startPath = JSON.parse(String(req.query.startPath));
+  } catch {
+    return res.status(400).json({ error: "startPath must be JSON" });
+  }
+}
+const before = Math.max(0, Number(req.query.before) || 0);
+const after = Math.max(0, Number(req.query.after) || 50);
 
-    const db = getDb();
-    try {
-      const { items, focusItem } = getFeedPage(db, {
-        groupBy,
-        collapsed,
-        focusId,
-        startPath,
-        before,
-        after,
-      });
-      res.json({ items, focusItem });
-    } catch (err) {
-      res.status(400).json({ error: err.message });
-    }
+const db = getDb();
+try {
+  const { items, focusItem } = getFeedPage(db, {
+    groupBy,
+    collapsed,
+    focusId,
+    startPath,
+    before,
+    after,
+  });
+  res.json({ items, focusItem });
+} catch (err) {
+  res.status(400).json({ error: err.message });
+}
 ```
 
 - [ ] **Step 6: Update the existing `/api/feed` tests that reference `sections`**
@@ -1101,63 +1135,69 @@ to:
 In `server/api.test.js`, within the existing `describe("GET /api/feed", ...)` block:
 
 Change:
+
 ```js
-    expect(body.items[0]).toHaveProperty("groupValues.folder");
-    expect(body.sections).toEqual([]);
+expect(body.items[0]).toHaveProperty("groupValues.folder");
+expect(body.sections).toEqual([]);
 ```
+
 to:
+
 ```js
-    expect(body.items[0]).toHaveProperty("groupValues.folder");
+expect(body.items[0]).toHaveProperty("groupValues.folder");
 ```
 
 Change the `"excludes a collapsed folder and returns its summary count"` test from:
+
 ```js
-  it("excludes a collapsed folder and returns its summary count", async () => {
-    await scan(srv.base, photosDir);
-    const collapsed = encodeURIComponent(
-      JSON.stringify([[{ dimension: "folder", value: photosDir }]])
-    );
-    const res = await fetch(
-      `${srv.base}/api/feed?groupBy=folder&collapsed=${collapsed}&after=50`
-    );
-    const body = await res.json();
-    expect(body.items).toEqual([]);
-    expect(body.sections).toHaveLength(1);
-    expect(body.sections[0].count).toBeGreaterThan(0);
-  });
+it("excludes a collapsed folder and returns its summary count", async () => {
+  await scan(srv.base, photosDir);
+  const collapsed = encodeURIComponent(
+    JSON.stringify([[{ dimension: "folder", value: photosDir }]])
+  );
+  const res = await fetch(
+    `${srv.base}/api/feed?groupBy=folder&collapsed=${collapsed}&after=50`
+  );
+  const body = await res.json();
+  expect(body.items).toEqual([]);
+  expect(body.sections).toHaveLength(1);
+  expect(body.sections[0].count).toBeGreaterThan(0);
+});
 ```
+
 to:
+
 ```js
-  it("folds a collapsed folder into one in-place placeholder item", async () => {
-    await scan(srv.base, photosDir);
-    const collapsed = encodeURIComponent(
-      JSON.stringify([[{ dimension: "folder", value: photosDir }]])
-    );
-    const res = await fetch(
-      `${srv.base}/api/feed?groupBy=folder&collapsed=${collapsed}&after=50`
-    );
-    const body = await res.json();
-    expect(body.items).toHaveLength(1);
-    expect(body.items[0].collapsed).toBe(true);
-    expect(body.items[0].count).toBeGreaterThan(0);
-  });
+it("folds a collapsed folder into one in-place placeholder item", async () => {
+  await scan(srv.base, photosDir);
+  const collapsed = encodeURIComponent(
+    JSON.stringify([[{ dimension: "folder", value: photosDir }]])
+  );
+  const res = await fetch(
+    `${srv.base}/api/feed?groupBy=folder&collapsed=${collapsed}&after=50`
+  );
+  const body = await res.json();
+  expect(body.items).toHaveLength(1);
+  expect(body.items[0].collapsed).toBe(true);
+  expect(body.items[0].count).toBeGreaterThan(0);
+});
 ```
 
 Add a new test for `startPath` at the end of the same describe block, before its closing `});`:
 
 ```js
-  it("supports startPath to jump to an arbitrary hierarchy path", async () => {
-    await scan(srv.base, photosDir);
-    const startPath = encodeURIComponent(
-      JSON.stringify([{ dimension: "folder", value: photosDir }])
-    );
-    const res = await fetch(
-      `${srv.base}/api/feed?groupBy=folder&startPath=${startPath}&after=50`
-    );
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.items.length).toBeGreaterThan(0);
-  });
+it("supports startPath to jump to an arbitrary hierarchy path", async () => {
+  await scan(srv.base, photosDir);
+  const startPath = encodeURIComponent(
+    JSON.stringify([{ dimension: "folder", value: photosDir }])
+  );
+  const res = await fetch(
+    `${srv.base}/api/feed?groupBy=folder&startPath=${startPath}&after=50`
+  );
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.items.length).toBeGreaterThan(0);
+});
 ```
 
 - [ ] **Step 7: Run the full server test suite**
@@ -1177,10 +1217,12 @@ git commit -m "feat: splice in-place collapsed placeholders into getFeedPage, ad
 ### Task 4: Client — `feed.js` helpers for placeholder-aware rendering and pagination
 
 **Files:**
+
 - Modify: `ui/src/lib/feed.js`
 - Test: `ui/src/lib/feed.test.js`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: `suppressPlaceholderHeaders(headers, displayEntries)` and `nearestRealItemId(items, from)`, both exported from `ui/src/lib/feed.js`. Task 9 uses both in `App.svelte`.
 
@@ -1327,10 +1369,12 @@ git commit -m "feat: add suppressPlaceholderHeaders and nearestRealItemId to fee
 ### Task 5: Client — `displayEntries.js` placeholder entry kind
 
 **Files:**
+
 - Modify: `ui/src/lib/displayEntries.js`
 - Test: `ui/src/lib/displayEntries.test.js`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: `buildDisplayEntries` now emits a third entry kind, `{kind: "placeholder", item}`, for any input item shaped `{collapsed: true, ...}`. `entryDomId`/`resolvePhoto` handle it. Task 6/9 rely on this.
 
@@ -1494,10 +1538,12 @@ git commit -m "feat: add a placeholder display-entry kind for in-place collapsed
 ### Task 6: Client — `sectionedJustified.js` placeholder-aware layout
 
 **Files:**
+
 - Modify: `ui/src/lib/layouts/sectionedJustified.js`
 - Test: `ui/src/lib/layouts/sectionedJustified.test.js`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: `sectionedJustifiedLayout` now accepts an `items` array where an entry can be `{id, placeholder: true}` instead of `{id, aspectRatio}`. Return shape is UNCHANGED (`{boxes, headers, totalHeight}`) — `boxes` stays index-aligned 1:1 with `items` (this is the critical property: every index gets exactly one box, either `{id,x,y,width,height}` for a real photo or `{id,y,height,placeholder:true}` for a placeholder, so callers can keep using positional `boxes[i]` lookups without a separate id-lookup map). Task 9 relies on this alignment.
 
@@ -1539,9 +1585,7 @@ it("reserves a band for a placeholder, excludes it from photo packing, and keeps
   expect(placeholderBox.y + placeholderBox.height).toBeLessThanOrEqual(
     minAfterY
   );
-  expect(totalHeight).toBeGreaterThan(
-    placeholderBox.y + placeholderBox.height
-  );
+  expect(totalHeight).toBeGreaterThan(placeholderBox.y + placeholderBox.height);
 });
 
 it("combines a placeholder with a header at the same index without conflict", () => {
@@ -1719,11 +1763,13 @@ git commit -m "feat: make sectionedJustifiedLayout placeholder-aware, keeping bo
 ### Task 7: Client — `treeState.js`, `fetchTreeNode`, `fetchFeed`'s `startPath`
 
 **Files:**
+
 - Create: `ui/src/lib/treeState.js`
 - Test: `ui/src/lib/treeState.test.js`
 - Modify: `ui/src/lib/api.js`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: `treeKey(path)`, `collapseDescendants(expandedKeys, path)` from `ui/src/lib/treeState.js`; `fetchTreeNode({groupBy, path})` from `ui/src/lib/api.js`; `fetchFeed` gains an optional `startPath` param. Task 8/9 consume all three.
 
@@ -1935,10 +1981,12 @@ git commit -m "feat: add treeState helpers, fetchTreeNode, and fetchFeed's start
 ### Task 8: Client — `TreeNode.svelte` and `TreeSidebar.svelte`
 
 **Files:**
+
 - Create: `ui/src/lib/TreeNode.svelte`
 - Create: `ui/src/lib/TreeSidebar.svelte`
 
 **Interfaces:**
+
 - Consumes: `fetchTreeNode` (Task 7's `api.js`), `treeKey`/`collapseDescendants` (Task 7's `treeState.js`).
 - Produces: `TreeSidebar.svelte` — props `groupBy` (`string[]`), `collapsedPaths` (`Array<Array<{dimension,value}>>`); dispatches `toggle` (detail: `path`) and `jump` (detail: `path`); exports `revealPath(targetPath)` for a parent to call via `bind:this`. Task 9 wires this into `App.svelte`.
 
@@ -2006,7 +2054,10 @@ No automated test for these two files — Svelte components, manual browser veri
         {#each children as child (child.value)}
           <svelte:self
             {groupBy}
-            path={[...path, { dimension: groupBy[depth + 1], value: child.value }]}
+            path={[
+              ...path,
+              { dimension: groupBy[depth + 1], value: child.value },
+            ]}
             node={child}
             {expandedKeys}
             {childrenByKey}
@@ -2129,7 +2180,7 @@ No automated test for these two files — Svelte components, manual browser veri
     highlightedKey = null;
     loadRoot();
   }
-  $: groupBy, resetAndLoad();
+  $: (groupBy, resetAndLoad());
 
   async function loadChildren(path) {
     const key = treeKey(path);
@@ -2265,9 +2316,11 @@ git commit -m "feat: add TreeNode and TreeSidebar components (lazy hierarchy tre
 ### Task 9: Client — `App.svelte` integration
 
 **Files:**
+
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: everything from Tasks 4–8.
 - Produces: the finished feature, wired into the running app. No new exports — this is the integration point.
 
@@ -2276,46 +2329,46 @@ git commit -m "feat: add TreeNode and TreeSidebar components (lazy hierarchy tre
 Read the current top of `ui/src/App.svelte` (lines 1–26) before editing — this section may have shifted slightly since last read. Change the import block from:
 
 ```js
-  import {
-    mergeFeedPage,
-    deriveSectionHeaders,
-    formatGroupValue,
-  } from "./lib/feed.js";
-  import {
-    fetchFeed,
-    setRating as apiSetRating,
-    setCover as apiSetCover,
-    fetchMeta,
-    fetchLibrary,
-    scan as apiScan,
-  } from "./lib/api.js";
-  import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
-  import Loupe from "./lib/Loupe.svelte";
-  import MultiAutoSelect from "multi-auto-select";
+import {
+  mergeFeedPage,
+  deriveSectionHeaders,
+  formatGroupValue,
+} from "./lib/feed.js";
+import {
+  fetchFeed,
+  setRating as apiSetRating,
+  setCover as apiSetCover,
+  fetchMeta,
+  fetchLibrary,
+  scan as apiScan,
+} from "./lib/api.js";
+import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
+import Loupe from "./lib/Loupe.svelte";
+import MultiAutoSelect from "multi-auto-select";
 ```
 
 to:
 
 ```js
-  import {
-    mergeFeedPage,
-    deriveSectionHeaders,
-    suppressPlaceholderHeaders,
-    nearestRealItemId,
-    formatGroupValue,
-  } from "./lib/feed.js";
-  import {
-    fetchFeed,
-    setRating as apiSetRating,
-    setCover as apiSetCover,
-    fetchMeta,
-    fetchLibrary,
-    scan as apiScan,
-  } from "./lib/api.js";
-  import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
-  import Loupe from "./lib/Loupe.svelte";
-  import TreeSidebar from "./lib/TreeSidebar.svelte";
-  import MultiAutoSelect from "multi-auto-select";
+import {
+  mergeFeedPage,
+  deriveSectionHeaders,
+  suppressPlaceholderHeaders,
+  nearestRealItemId,
+  formatGroupValue,
+} from "./lib/feed.js";
+import {
+  fetchFeed,
+  setRating as apiSetRating,
+  setCover as apiSetCover,
+  fetchMeta,
+  fetchLibrary,
+  scan as apiScan,
+} from "./lib/api.js";
+import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
+import Loupe from "./lib/Loupe.svelte";
+import TreeSidebar from "./lib/TreeSidebar.svelte";
+import MultiAutoSelect from "multi-auto-select";
 ```
 
 - [ ] **Step 2: Remove the `collapsedSummaries` state and its topbar chip rendering**
@@ -2323,39 +2376,39 @@ to:
 Remove these lines (currently around line 100–106):
 
 ```js
-  // Summaries (path + count) for every currently-collapsed path, as returned
-  // alongside items/focusItem by the most recent successful feed fetch —
-  // getCollapsedSummaries computes these from the full `collapsed` array
-  // passed to getFeedPage, not just newly-collapsed paths, so any fetch's
-  // response reflects the complete current list regardless of which page
-  // triggered it. Rendered as re-expand chips in the topbar.
-  let collapsedSummaries = [];
+// Summaries (path + count) for every currently-collapsed path, as returned
+// alongside items/focusItem by the most recent successful feed fetch —
+// getCollapsedSummaries computes these from the full `collapsed` array
+// passed to getFeedPage, not just newly-collapsed paths, so any fetch's
+// response reflects the complete current list regardless of which page
+// triggered it. Rendered as re-expand chips in the topbar.
+let collapsedSummaries = [];
 ```
 
 Add a `treeSidebarRef` binding variable in its place:
 
 ```js
-  let treeSidebarRef; // bound to TreeSidebar, for revealCurrentLocation to call revealPath
+let treeSidebarRef; // bound to TreeSidebar, for revealCurrentLocation to call revealPath
 ```
 
 Search the file for every `collapsedSummaries = sections;` line (there are three — in `loadInitialFeed`, `onGroupByChange`, and `loadMore`) and delete each one. Search for every `const { items: page, sections } = await fetchFeed(...)`-shaped destructure (or `afterPage, focusItem, sections`) and drop `sections` from the destructure, since `getFeedPage`/`/api/feed` no longer returns it (Task 3). For example, in `loadInitialFeed`, change:
 
 ```js
-      const { items: page, sections } = await fetchFeed({
-        groupBy,
-        collapsed: collapsedPaths,
-        after: PAGE_SIZE,
-      });
+const { items: page, sections } = await fetchFeed({
+  groupBy,
+  collapsed: collapsedPaths,
+  after: PAGE_SIZE,
+});
 ```
 
 to:
 
 ```js
-      const { items: page } = await fetchFeed({
-        groupBy,
-        collapsed: collapsedPaths,
-        after: PAGE_SIZE,
-      });
+const { items: page } = await fetchFeed({
+  groupBy,
+  collapsed: collapsedPaths,
+  after: PAGE_SIZE,
+});
 ```
 
 In `onGroupByChange`, change:
@@ -2385,19 +2438,22 @@ to:
 Find and remove the topbar chip template block (currently around lines 807–815, right after `<div class="group-by" ...></div>` in the `<header class="topbar">`):
 
 ```svelte
-    {#if collapsedSummaries.length}
-      <div class="collapsed-sections">
-        {#each collapsedSummaries as entry (pathKey(entry.path))}
-          <button
-            class="collapsed-chip"
-            on:click={() => toggleSectionCollapse(entry.path)}
-          >
-            {formatGroupValue(entry.path[entry.path.length - 1].dimension, entry.path[entry.path.length - 1].value)}
-            ({entry.count.toLocaleString()})
-          </button>
-        {/each}
-      </div>
-    {/if}
+{#if collapsedSummaries.length}
+  <div class="collapsed-sections">
+    {#each collapsedSummaries as entry (pathKey(entry.path))}
+      <button
+        class="collapsed-chip"
+        on:click={() => toggleSectionCollapse(entry.path)}
+      >
+        {formatGroupValue(
+          entry.path[entry.path.length - 1].dimension,
+          entry.path[entry.path.length - 1].value
+        )}
+        ({entry.count.toLocaleString()})
+      </button>
+    {/each}
+  </div>
+{/if}
 ```
 
 (read the actual current block first — the exact chip markup may differ slightly from this reconstruction; remove whatever renders `collapsedSummaries` in the topbar, along with its CSS rules `.collapsed-sections`/`.collapsed-chip`/`.collapsed-chip:hover` in the `<style>` block.)
@@ -2407,24 +2463,24 @@ Find and remove the topbar chip template block (currently around lines 807–815
 Change (currently around line 296–297):
 
 ```js
-    const focusId =
-      direction === "after" ? items[items.length - 1].id : items[0].id;
+const focusId =
+  direction === "after" ? items[items.length - 1].id : items[0].id;
 ```
 
 to:
 
 ```js
-    const focusId =
-      direction === "after"
-        ? nearestRealItemId(items, "end")
-        : nearestRealItemId(items, "start");
-    if (focusId == null) {
-      // Every currently-loaded item is a placeholder (e.g. everything
-      // visible right now is collapsed) — nothing real to seek from yet.
-      if (direction === "after") fetchingAfter = false;
-      else fetchingBefore = false;
-      return;
-    }
+const focusId =
+  direction === "after"
+    ? nearestRealItemId(items, "end")
+    : nearestRealItemId(items, "start");
+if (focusId == null) {
+  // Every currently-loaded item is a placeholder (e.g. everything
+  // visible right now is collapsed) — nothing real to seek from yet.
+  if (direction === "after") fetchingAfter = false;
+  else fetchingBefore = false;
+  return;
+}
 ```
 
 - [ ] **Step 4: Add `suppressPlaceholderHeaders` to the section-header pipeline, and mark placeholder entries in the layout input**
@@ -2432,95 +2488,95 @@ to:
 Find (currently around line 448):
 
 ```js
-  $: sectionHeaders = deriveSectionHeaders(resolvedPhotos, groupBy);
+$: sectionHeaders = deriveSectionHeaders(resolvedPhotos, groupBy);
 ```
 
 Change to:
 
 ```js
-  $: sectionHeaders = suppressPlaceholderHeaders(
-    deriveSectionHeaders(resolvedPhotos, groupBy),
-    displayEntries
-  );
+$: sectionHeaders = suppressPlaceholderHeaders(
+  deriveSectionHeaders(resolvedPhotos, groupBy),
+  displayEntries
+);
 ```
 
 This alone is not sufficient — `layoutResult` (computed just below `sectionHeaders`) builds its own `{id, aspectRatio}` array from `displayEntries`, and currently has no branch for a placeholder entry, so it would compute a normal (fallback-ratio) photo box for one instead of the `{id, placeholder:true}` marker Task 6's `sectionedJustifiedLayout` needs to recognize. Find the reactive block that builds this array (currently around line 449-477):
 
 ```js
-  $: layoutResult =
-    displayEntries.length && gridWidth > 2 * PAD
-      ? sectionedJustifiedLayout(
-          displayEntries.map((e) => {
-            const photo = resolvePhoto(e);
-            const baseRatio =
-              photo.width && photo.height
-                ? photo.width / photo.height
-                : DEFAULT_RATIO;
-            // Reserve extra width for a collapsed stack's peek layers (see
-            // stackMarginPx) by inflating its aspect ratio at the target
-            // row height — an approximation, not pixel-exact once a row's
-            // uniform scale factor is applied, but close enough for a
-            // cosmetic margin.
-            const marginPx = stackMarginPx(e);
-            return {
-              id: entryDomId(e),
-              aspectRatio: baseRatio + (2 * marginPx) / rowHeight,
-            };
-          }),
-          sectionHeaders,
-          {
-            containerWidth: gridWidth - 2 * PAD,
-            gap: 8,
-            targetRowHeight: rowHeight,
-            headerHeight: HEADER_HEIGHT,
-          }
-        )
-      : null;
+$: layoutResult =
+  displayEntries.length && gridWidth > 2 * PAD
+    ? sectionedJustifiedLayout(
+        displayEntries.map((e) => {
+          const photo = resolvePhoto(e);
+          const baseRatio =
+            photo.width && photo.height
+              ? photo.width / photo.height
+              : DEFAULT_RATIO;
+          // Reserve extra width for a collapsed stack's peek layers (see
+          // stackMarginPx) by inflating its aspect ratio at the target
+          // row height — an approximation, not pixel-exact once a row's
+          // uniform scale factor is applied, but close enough for a
+          // cosmetic margin.
+          const marginPx = stackMarginPx(e);
+          return {
+            id: entryDomId(e),
+            aspectRatio: baseRatio + (2 * marginPx) / rowHeight,
+          };
+        }),
+        sectionHeaders,
+        {
+          containerWidth: gridWidth - 2 * PAD,
+          gap: 8,
+          targetRowHeight: rowHeight,
+          headerHeight: HEADER_HEIGHT,
+        }
+      )
+    : null;
 ```
 
 (read the actual current block first to confirm this matches exactly — it may have shifted slightly since last documented) and change it to:
 
 ```js
-  $: layoutResult =
-    displayEntries.length && gridWidth > 2 * PAD
-      ? sectionedJustifiedLayout(
-          displayEntries.map((e) => {
-            if (e.kind === "placeholder") {
-              return { id: entryDomId(e), placeholder: true };
-            }
-            const photo = resolvePhoto(e);
-            const baseRatio =
-              photo.width && photo.height
-                ? photo.width / photo.height
-                : DEFAULT_RATIO;
-            // Reserve extra width for a collapsed stack's peek layers (see
-            // stackMarginPx) by inflating its aspect ratio at the target
-            // row height — an approximation, not pixel-exact once a row's
-            // uniform scale factor is applied, but close enough for a
-            // cosmetic margin.
-            const marginPx = stackMarginPx(e);
-            return {
-              id: entryDomId(e),
-              aspectRatio: baseRatio + (2 * marginPx) / rowHeight,
-            };
-          }),
-          sectionHeaders,
-          {
-            containerWidth: gridWidth - 2 * PAD,
-            gap: 8,
-            targetRowHeight: rowHeight,
-            headerHeight: HEADER_HEIGHT,
-            placeholderHeight: PLACEHOLDER_HEIGHT,
+$: layoutResult =
+  displayEntries.length && gridWidth > 2 * PAD
+    ? sectionedJustifiedLayout(
+        displayEntries.map((e) => {
+          if (e.kind === "placeholder") {
+            return { id: entryDomId(e), placeholder: true };
           }
-        )
-      : null;
+          const photo = resolvePhoto(e);
+          const baseRatio =
+            photo.width && photo.height
+              ? photo.width / photo.height
+              : DEFAULT_RATIO;
+          // Reserve extra width for a collapsed stack's peek layers (see
+          // stackMarginPx) by inflating its aspect ratio at the target
+          // row height — an approximation, not pixel-exact once a row's
+          // uniform scale factor is applied, but close enough for a
+          // cosmetic margin.
+          const marginPx = stackMarginPx(e);
+          return {
+            id: entryDomId(e),
+            aspectRatio: baseRatio + (2 * marginPx) / rowHeight,
+          };
+        }),
+        sectionHeaders,
+        {
+          containerWidth: gridWidth - 2 * PAD,
+          gap: 8,
+          targetRowHeight: rowHeight,
+          headerHeight: HEADER_HEIGHT,
+          placeholderHeight: PLACEHOLDER_HEIGHT,
+        }
+      )
+    : null;
 ```
 
 Add a `PLACEHOLDER_HEIGHT` constant next to the existing `HEADER_HEIGHT` constant (find `const HEADER_HEIGHT = 32;`):
 
 ```js
-  const HEADER_HEIGHT = 32;
-  const PLACEHOLDER_HEIGHT = 40; // a bit taller than a header — needs room for an icon, label, and count on one line
+const HEADER_HEIGHT = 32;
+const PLACEHOLDER_HEIGHT = 40; // a bit taller than a header — needs room for an icon, label, and count on one line
 ```
 
 - [ ] **Step 5: Add `jumpToPath` and `revealCurrentLocation` functions**
@@ -2528,56 +2584,56 @@ Add a `PLACEHOLDER_HEIGHT` constant next to the existing `HEADER_HEIGHT` constan
 Add these near `onGroupByChange` (after it, before `pathKey`):
 
 ```js
-  /** Jump the feed to an arbitrary hierarchy path from the tree — unlike
-   * onGroupByChange's re-centering, there's no specific photo id to seek
-   * from (the target section may never have been loaded), so this uses
-   * getFeedPage's startPath seek instead of a focusId. */
-  async function jumpToPath(path) {
-    error = "";
-    status = "loading…";
-    const epoch = ++feedEpoch;
-    try {
-      const { items: page } = await fetchFeed({
-        groupBy,
-        collapsed: collapsedPaths,
-        startPath: path,
-        after: PAGE_SIZE,
-      });
-      if (epoch !== feedEpoch) return;
-      const merged = mergeFeedPage(
-        { items: [], hasMoreBefore: false, hasMoreAfter: true },
-        { items: page },
-        "after",
-        PAGE_SIZE
-      );
-      items = merged.items;
-      hasMoreBefore = merged.hasMoreBefore;
-      hasMoreAfter = merged.hasMoreAfter;
-      selected = 0;
-      loupeOpen = false;
-      focusPending = true;
-      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-      enrichMeta(page.map((i) => i.id));
-    } catch (e) {
-      error = e.message;
-      status = "";
-    }
+/** Jump the feed to an arbitrary hierarchy path from the tree — unlike
+ * onGroupByChange's re-centering, there's no specific photo id to seek
+ * from (the target section may never have been loaded), so this uses
+ * getFeedPage's startPath seek instead of a focusId. */
+async function jumpToPath(path) {
+  error = "";
+  status = "loading…";
+  const epoch = ++feedEpoch;
+  try {
+    const { items: page } = await fetchFeed({
+      groupBy,
+      collapsed: collapsedPaths,
+      startPath: path,
+      after: PAGE_SIZE,
+    });
+    if (epoch !== feedEpoch) return;
+    const merged = mergeFeedPage(
+      { items: [], hasMoreBefore: false, hasMoreAfter: true },
+      { items: page },
+      "after",
+      PAGE_SIZE
+    );
+    items = merged.items;
+    hasMoreBefore = merged.hasMoreBefore;
+    hasMoreAfter = merged.hasMoreAfter;
+    selected = 0;
+    loupeOpen = false;
+    focusPending = true;
+    status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+    enrichMeta(page.map((i) => i.id));
+  } catch (e) {
+    error = e.message;
+    status = "";
   }
+}
 
-  /** "Reveal current location": walks the tree down to whatever photo is
-   * currently selected, expanding/fetching each level as needed. Manual,
-   * not continuous — doesn't fight the tree's own navigation while the
-   * user is mid-scroll or has it open to a different part of the library. */
-  async function revealCurrentLocation() {
-    const entry = displayEntries[selected];
-    if (!entry || entry.kind === "placeholder") return;
-    const photo = resolvePhoto(entry);
-    if (!photo?.groupValues) return;
-    const path = groupBy
-      .filter((d) => photo.groupValues[d] !== undefined)
-      .map((d) => ({ dimension: d, value: photo.groupValues[d] }));
-    treeSidebarRef?.revealPath(path);
-  }
+/** "Reveal current location": walks the tree down to whatever photo is
+ * currently selected, expanding/fetching each level as needed. Manual,
+ * not continuous — doesn't fight the tree's own navigation while the
+ * user is mid-scroll or has it open to a different part of the library. */
+async function revealCurrentLocation() {
+  const entry = displayEntries[selected];
+  if (!entry || entry.kind === "placeholder") return;
+  const photo = resolvePhoto(entry);
+  if (!photo?.groupValues) return;
+  const path = groupBy
+    .filter((d) => photo.groupValues[d] !== undefined)
+    .map((d) => ({ dimension: d, value: photo.groupValues[d] }));
+  treeSidebarRef?.revealPath(path);
+}
 ```
 
 - [ ] **Step 6: Wire the persistent sidebar layout and the "reveal" button**
@@ -2596,9 +2652,7 @@ Change the structure from:
   </header>
 
   {#if items.length}
-    <div class="grid" ...>
-      ...
-    </div>
+    <div class="grid" ...>...</div>
   {:else if !scanning && status !== "loading…"}
     <div class="empty">Nothing indexed yet — scan a folder to get started.</div>
   {/if}
@@ -2632,11 +2686,11 @@ to:
     />
     <div class="main-column">
       {#if items.length}
-        <div class="grid" ...>
-          ...
-        </div>
+        <div class="grid" ...>...</div>
       {:else if !scanning && status !== "loading…"}
-        <div class="empty">Nothing indexed yet — scan a folder to get started.</div>
+        <div class="empty">
+          Nothing indexed yet — scan a folder to get started.
+        </div>
       {/if}
     </div>
   </div>
@@ -2648,28 +2702,28 @@ to:
 Add to the `<style>` block:
 
 ```css
-  .app-body {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-  }
-  .main-column {
-    flex: 1;
-    min-width: 0;
-    overflow-y: auto;
-  }
-  .reveal-btn {
-    background: #1a1a1a;
-    border: 1px solid #2a2a2a;
-    color: inherit;
-    font: inherit;
-    padding: 4px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .reveal-btn:hover {
-    background: #2a2a2a;
-  }
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.main-column {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+.reveal-btn {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  color: inherit;
+  font: inherit;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.reveal-btn:hover {
+  background: #2a2a2a;
+}
 ```
 
 Today the WHOLE PAGE scrolls (`<svelte:window on:scroll={scheduleVisibleRangeUpdate}>`), and `topbarHeight` (measured via `bind:clientHeight`) exists solely so sticky section headers can clear the ALSO-sticky topbar sharing that same page-level scroll. Once `.main-column` becomes its own `overflow-y:auto` container — a flex sibling of the topbar, not its scrolling descendant — the topbar is no longer in the same scroll box as the grid at all, so `topbarHeight` and its offset math become unnecessary; a sticky header only needs to clear `.main-column`'s own top edge.
@@ -2677,14 +2731,14 @@ Today the WHOLE PAGE scrolls (`<svelte:window on:scroll={scheduleVisibleRangeUpd
 Add `let mainColumnEl;` next to the existing `let gridEl;` (line 123):
 
 ```js
-  let gridEl;
-  let mainColumnEl;
+let gridEl;
+let mainColumnEl;
 ```
 
 Remove `topbarHeight` entirely — its declaration (line 418):
 
 ```js
-  let topbarHeight = 0;
+let topbarHeight = 0;
 ```
 
 delete this line. Its binding on the topbar (line 804):
@@ -2724,62 +2778,62 @@ to:
 In `updateVisibleRange` (around line 611-634), `gridEl.getBoundingClientRect().top` is already viewport-relative and scroll-container-agnostic — no change needed there. Only `viewportHeight` needs to reflect `.main-column`'s own visible height rather than the whole window (the window is now taller than what's actually visible within the scroll container). Change:
 
 ```js
-    const rect = gridEl.getBoundingClientRect();
-    const range = visibleRange(boxes, {
-      scrollTop: -rect.top,
-      viewportHeight: window.innerHeight,
-    });
+const rect = gridEl.getBoundingClientRect();
+const range = visibleRange(boxes, {
+  scrollTop: -rect.top,
+  viewportHeight: window.innerHeight,
+});
 ```
 
 to:
 
 ```js
-    const rect = gridEl.getBoundingClientRect();
-    const range = visibleRange(boxes, {
-      scrollTop: -rect.top,
-      viewportHeight: mainColumnEl.clientHeight,
-    });
+const rect = gridEl.getBoundingClientRect();
+const range = visibleRange(boxes, {
+  scrollTop: -rect.top,
+  viewportHeight: mainColumnEl.clientHeight,
+});
 ```
 
 In `scrollToSection` (around line 279-285), change:
 
 ```js
-  function scrollToSection(pos) {
-    if (!gridEl) return;
-    const gridTop = gridEl.getBoundingClientRect().top + window.scrollY;
-    const target =
-      gridTop + pos.y - topbarHeight - pos.depth * HEADER_HEIGHT + PAD;
-    window.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-  }
+function scrollToSection(pos) {
+  if (!gridEl) return;
+  const gridTop = gridEl.getBoundingClientRect().top + window.scrollY;
+  const target =
+    gridTop + pos.y - topbarHeight - pos.depth * HEADER_HEIGHT + PAD;
+  window.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+}
 ```
 
 to:
 
 ```js
-  function scrollToSection(pos) {
-    if (!gridEl || !mainColumnEl) return;
-    const gridTop = gridEl.getBoundingClientRect().top + mainColumnEl.scrollTop;
-    const target = gridTop + pos.y - pos.depth * HEADER_HEIGHT + PAD;
-    mainColumnEl.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-  }
+function scrollToSection(pos) {
+  if (!gridEl || !mainColumnEl) return;
+  const gridTop = gridEl.getBoundingClientRect().top + mainColumnEl.scrollTop;
+  const target = gridTop + pos.y - pos.depth * HEADER_HEIGHT + PAD;
+  mainColumnEl.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+}
 ```
 
 In `loadMore` (around line 302-328), change:
 
 ```js
-    const gridHeightBefore = gridEl ? gridEl.getBoundingClientRect().height : 0;
+const gridHeightBefore = gridEl ? gridEl.getBoundingClientRect().height : 0;
 ```
 
 (unchanged — this line doesn't reference `window` and stays as-is) and change:
 
 ```js
-        window.scrollBy(0, gridHeightAfter - gridHeightBefore);
+window.scrollBy(0, gridHeightAfter - gridHeightBefore);
 ```
 
 to:
 
 ```js
-        mainColumnEl.scrollBy(0, gridHeightAfter - gridHeightBefore);
+mainColumnEl.scrollBy(0, gridHeightAfter - gridHeightBefore);
 ```
 
 (read the surrounding 5-10 lines in the actual file first to confirm this is the only `window.scrollBy` call and that the variable names `gridHeightAfter`/`gridHeightBefore` match exactly before applying — this reconstruction is based on the plan's own earlier-read excerpt of this function, which may have shifted slightly since)
@@ -2787,16 +2841,15 @@ to:
 Finally, the section-header's sticky `top` style (around line 917-919), change:
 
 ```svelte
-              class="section-header"
-              style="top:{topbarHeight +
-                header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
+class="section-header" style="top:{topbarHeight +
+  header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
 ```
 
 to:
 
 ```svelte
-              class="section-header"
-              style="top:{header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
+class="section-header" style="top:{header.depth * HEADER_HEIGHT}px; z-index:{15 -
+  header.depth};"
 ```
 
 Verify all of this live in Task 10 — sticky positioning and scroll-container behavior are exactly the class of thing this project's own experience shows can look right in code and still be wrong on screen (see the `live-verify-ui-beyond-review` memory from the previous branch's three-round header-positioning saga).
@@ -2806,49 +2859,41 @@ Verify all of this live in Task 10 — sticky positioning and scroll-container b
 Read the current `{#each visibleItems as { i, entry } (entryDomId(entry))}` loop (search for it) before editing. Add a branch before the existing `<Thumb ... />` for non-placeholder entries. Change:
 
 ```svelte
-        {#each visibleItems as { i, entry } (entryDomId(entry))}
-          <!-- (header rendering, unchanged) -->
-          <Thumb
-            item={resolvePhoto(entry)}
-            box={boxes[i]}
-            ...
-          />
-        {/each}
+{#each visibleItems as { i, entry } (entryDomId(entry))}
+  <!-- (header rendering, unchanged) -->
+  <Thumb item={resolvePhoto(entry)} box={boxes[i]} ... />
+{/each}
 ```
 
 to:
 
 ```svelte
-        {#each visibleItems as { i, entry } (entryDomId(entry))}
-          <!-- (header rendering, unchanged) -->
-          {#if entry.kind === "placeholder"}
-            <div
-              class="placeholder-row"
-              style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
-              role="button"
-              tabindex="0"
-              on:click={() => toggleSectionCollapse(entry.item.path)}
-              on:keydown={(e) =>
-                e.key === "Enter" && toggleSectionCollapse(entry.item.path)}
-            >
-              <span class="placeholder-icon">▸</span>
-              <span class="placeholder-label">
-                {entry.item.path
-                  .map((p) => formatGroupValue(p.dimension, p.value))
-                  .join(" / ")}
-              </span>
-              <span class="placeholder-count">
-                {entry.item.count.toLocaleString()} items
-              </span>
-            </div>
-          {:else}
-            <Thumb
-              item={resolvePhoto(entry)}
-              box={boxes[i]}
-              ...
-            />
-          {/if}
-        {/each}
+{#each visibleItems as { i, entry } (entryDomId(entry))}
+  <!-- (header rendering, unchanged) -->
+  {#if entry.kind === "placeholder"}
+    <div
+      class="placeholder-row"
+      style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
+      role="button"
+      tabindex="0"
+      on:click={() => toggleSectionCollapse(entry.item.path)}
+      on:keydown={(e) =>
+        e.key === "Enter" && toggleSectionCollapse(entry.item.path)}
+    >
+      <span class="placeholder-icon">▸</span>
+      <span class="placeholder-label">
+        {entry.item.path
+          .map((p) => formatGroupValue(p.dimension, p.value))
+          .join(" / ")}
+      </span>
+      <span class="placeholder-count">
+        {entry.item.count.toLocaleString()} items
+      </span>
+    </div>
+  {:else}
+    <Thumb item={resolvePhoto(entry)} box={boxes[i]} ... />
+  {/if}
+{/each}
 ```
 
 (the `...` inside `<Thumb ...>` is every existing prop on that element, unchanged — only the `{#if}`/`{:else}` wrapper and the new placeholder branch are added)
@@ -2856,31 +2901,31 @@ to:
 Add to the `<style>` block:
 
 ```css
-  .placeholder-row {
-    position: absolute;
-    left: 0;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 12px;
-    box-sizing: border-box;
-    background: #1a1a1a;
-    border: 1px solid #2a2a2a;
-    border-radius: 4px;
-    cursor: pointer;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-  }
-  .placeholder-row:hover {
-    background: #2a2a2a;
-  }
-  .placeholder-count {
-    margin-left: auto;
-    color: #888;
-    font-size: 0.85em;
-  }
+.placeholder-row {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.placeholder-row:hover {
+  background: #2a2a2a;
+}
+.placeholder-count {
+  margin-left: auto;
+  color: #888;
+  font-size: 0.85em;
+}
 ```
 
 - [ ] **Step 8: Run the full test suite**

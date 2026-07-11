@@ -311,35 +311,35 @@ Modify the `<svelte:window on:keydown={onKeydown} />` line to:
 Replace the grid's `{#each}` block:
 
 ```svelte
-      {#if boxes}
-        {#each items as item, i (item.id)}
-          <Thumb
-            {item}
-            box={boxes[i]}
-            pad={PAD}
-            size={thumbSize}
-            selected={i === selected}
-            on:click={() => openLoupe(i)}
-          />
-        {/each}
-      {/if}
+{#if boxes}
+  {#each items as item, i (item.id)}
+    <Thumb
+      {item}
+      box={boxes[i]}
+      pad={PAD}
+      size={thumbSize}
+      selected={i === selected}
+      on:click={() => openLoupe(i)}
+    />
+  {/each}
+{/if}
 ```
 
 with:
 
 ```svelte
-      {#if boxes}
-        {#each visibleItems as { i, item } (item.id)}
-          <Thumb
-            {item}
-            box={boxes[i]}
-            pad={PAD}
-            size={thumbSize}
-            selected={i === selected}
-            on:click={() => openLoupe(i)}
-          />
-        {/each}
-      {/if}
+{#if boxes}
+  {#each visibleItems as { i, item } (item.id)}
+    <Thumb
+      {item}
+      box={boxes[i]}
+      pad={PAD}
+      size={thumbSize}
+      selected={i === selected}
+      on:click={() => openLoupe(i)}
+    />
+  {/each}
+{/if}
 ```
 
 - [ ] **Step 7: Run the full test suite**

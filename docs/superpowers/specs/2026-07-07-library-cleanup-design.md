@@ -81,7 +81,7 @@ this session, now a button. Fully safe: the cache is content-hash keyed and
 rebuilds automatically as thumbnails are re-requested.
 
 **`POST /api/cache/prune`** computes the same "photo × bucket → expected
-hash" set described above, but across *every* photo in the index (not one
+hash" set described above, but across _every_ photo in the index (not one
 folder), then deletes any file in `thumbsDir()` whose filename (sans `.jpg`)
 isn't in that expected set — these are orphans: thumbnails for photos or
 folders removed from the index, or stale entries left behind when a file

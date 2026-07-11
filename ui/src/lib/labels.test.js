@@ -50,9 +50,7 @@ describe("shortLeafLabel", () => {
     });
 
     it("includes the month when the previous value is a different month, same year", () => {
-      expect(shortLeafLabel("day", "2024-06-14", "2024-05-30")).toBe(
-        "Jun 14"
-      );
+      expect(shortLeafLabel("day", "2024-06-14", "2024-05-30")).toBe("Jun 14");
     });
 
     it("includes the year and month when the previous value is a different year", () => {

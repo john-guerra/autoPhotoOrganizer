@@ -4,7 +4,7 @@
 
 A grouped feed section (a day, a month, a folder) can hold thousands of photos. Today a
 group is either **expanded** (every thumbnail rendered) or **collapsed** (a one-line
-placeholder with just a count). There's no way to *glance* at a big group's contents
+placeholder with just a count). There's no way to _glance_ at a big group's contents
 without expanding it and scrolling.
 
 John wants a third state: a **fisheye snapshot** — a single, width-fitted row that stands
@@ -143,6 +143,6 @@ Behavior:
 
 - The background-job system, panel, and materialize-move — separate spec
   (`2026-07-09-background-jobs-panel-design.md`).
-- Virtualizing the *expanded* album grid (snapshot sidesteps the need for now).
+- Virtualizing the _expanded_ album grid (snapshot sidesteps the need for now).
 - Persisting per-group snapshot/collapsed state across reloads (nice-to-have; the existing
   collapse state's persistence approach, if any, extends naturally later).

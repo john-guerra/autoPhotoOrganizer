@@ -99,7 +99,7 @@ Loupe stays presentational — it dispatches, it does not call the API.
   open the menu at `e.clientX/clientY`. In the loupe, the dispatched
   `contextmenu` sets `targetIndex = selected`.
 - Menu items: `[{ label: "Reveal in Finder", action: () => reveal(targetIndex),
-  enabled: <photo resolves to a real id> }]`.
+enabled: <photo resolves to a real id> }]`.
 - `reveal(index)`: resolve the photo at `index`; if it has a numeric id, call
   `revealInFinder(id)`. On a non-ok response, show a brief **non-blocking**
   notice (toast/console) — **never `alert()`**, which would freeze the Electron

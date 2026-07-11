@@ -66,7 +66,10 @@
         {#each children as child (child.value)}
           <svelte:self
             {groupBy}
-            path={[...path, { dimension: groupBy[depth + 1], value: child.value }]}
+            path={[
+              ...path,
+              { dimension: groupBy[depth + 1], value: child.value },
+            ]}
             node={child}
             {expandedKeys}
             {childrenByKey}

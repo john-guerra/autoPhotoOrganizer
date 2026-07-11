@@ -55,8 +55,9 @@ describe("JobRegistry", () => {
   });
 
   it("update() on an unknown id is a no-op (no throw)", () => {
-    expect(() => registry.update("job-does-not-exist", { done: 1 })).not
-      .toThrow();
+    expect(() =>
+      registry.update("job-does-not-exist", { done: 1 })
+    ).not.toThrow();
   });
 
   it("finish() sets terminal status 'done', stores result, and emits", () => {

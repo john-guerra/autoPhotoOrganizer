@@ -31,7 +31,8 @@
   let editingThresh = false;
   let threshInput = "";
   // Destination: prefer the opened folder (in-place), else the remembered dest.
-  let dest = defaultDest || localStorage.getItem("autogallery.exportDest") || "";
+  let dest =
+    defaultDest || localStorage.getItem("autogallery.exportDest") || "";
   // Track whether the user has hand-edited the destination; until they do, keep
   // it in sync with a changing defaultDest (e.g. focusing a different folder).
   let destEdited = false;
@@ -64,7 +65,9 @@
   let names = [];
   let lastAlbumSig = "";
   $: {
-    const sig = albums.map((a) => `${a.index}:${a.ids.length}:${a.startAt}`).join("|");
+    const sig = albums
+      .map((a) => `${a.index}:${a.ids.length}:${a.startAt}`)
+      .join("|");
     if (sig !== lastAlbumSig) {
       lastAlbumSig = sig;
       names = albums.map((a) => defaultAlbumName(a.startAt));
@@ -81,7 +84,9 @@
   // Parse a compact duration like "6h", "90m", "2.5d", "1w", or a bare number
   // (interpreted as days) into ms. Returns null on anything unparseable.
   function parseDuration(s) {
-    const m = String(s).trim().match(/^([\d.]+)\s*([smhdw]?)$/i);
+    const m = String(s)
+      .trim()
+      .match(/^([\d.]+)\s*([smhdw]?)$/i);
     if (!m) return null;
     const n = parseFloat(m[1]);
     if (!Number.isFinite(n) || n <= 0) return null;
@@ -93,7 +98,7 @@
   function threshAsInput(ms) {
     const h = ms / 3600_000;
     if (h < 1) return `${Math.round(ms / 60_000)}m`;
-    if (h < 48) return `${(+h.toFixed(1))}h`;
+    if (h < 48) return `${+h.toFixed(1)}h`;
     return `${+(h / 24).toFixed(1)}d`;
   }
 
@@ -210,7 +215,7 @@
           bind:value={threshInput}
           on:keydown={(e) => {
             if (e.key === "Enter") commitThresh();
-            if (e.key === "Escape") (editingThresh = false);
+            if (e.key === "Escape") editingThresh = false;
           }}
           on:blur={commitThresh}
           placeholder="e.g. 6h, 2d, 90m"
@@ -229,12 +234,19 @@
           on:mousedown|preventDefault={startEditThresh}
           on:click={startEditThresh}
         >
-          {manualThresholdMs != null ? "manual" : `${k}×`} · {fmtDur(thresholdMs)}
+          {manualThresholdMs != null ? "manual" : `${k}×`} · {fmtDur(
+            thresholdMs
+          )}
         </button>
       {/if}
     </div>
-    <span class="albums-count">{albums.length} albums · {photos.length} photos</span>
-    <label class="maxphotos" title="Max photos to analyze. Albums render as fisheye snapshot strips, so this stays cheap regardless of size (server caps at 200,000).">
+    <span class="albums-count"
+      >{albums.length} albums · {photos.length} photos</span
+    >
+    <label
+      class="maxphotos"
+      title="Max photos to analyze. Albums render as fisheye snapshot strips, so this stays cheap regardless of size (server caps at 200,000)."
+    >
       Max
       <input
         type="number"
@@ -246,13 +258,27 @@
       />
     </label>
     <span class="spacer"></span>
-    <div class="move-toggle" role="radiogroup" aria-label="Move or copy into the album folders">
+    <div
+      class="move-toggle"
+      role="radiogroup"
+      aria-label="Move or copy into the album folders"
+    >
       <label class="move-opt">
-        <input type="radio" name="materialize-mode" value={true} bind:group={move} />
+        <input
+          type="radio"
+          name="materialize-mode"
+          value={true}
+          bind:group={move}
+        />
         Move
       </label>
       <label class="move-opt">
-        <input type="radio" name="materialize-mode" value={false} bind:group={move} />
+        <input
+          type="radio"
+          name="materialize-mode"
+          value={false}
+          bind:group={move}
+        />
         Copy
       </label>
     </div>
@@ -267,7 +293,11 @@
     {#if hasNativePicker}
       <button class="mat-btn" on:click={pickDest}>Choose…</button>
     {/if}
-    <button class="mat-btn primary" on:click={doMaterialize} disabled={materializing}>
+    <button
+      class="mat-btn primary"
+      on:click={doMaterialize}
+      disabled={materializing}
+    >
       {materializing
         ? move
           ? "Moving…"
@@ -279,7 +309,8 @@
 
   {#if move}
     <p class="albums-msg warn">
-      Move relocates originals out of the source folders — undoable from the jobs panel.
+      Move relocates originals out of the source folders — undoable from the
+      jobs panel.
     </p>
   {/if}
 
@@ -287,15 +318,16 @@
     <p class="albums-msg err">{result.error}</p>
   {:else if result}
     <p class="albums-msg ok">
-      {result.move ? "Moved" : "Materialized"} {result.albums.length} album(s) →
+      {result.move ? "Moved" : "Materialized"}
+      {result.albums.length} album(s) →
       {result.destParent}
     </p>
   {/if}
   {#if truncated}
     <p class="albums-msg warn">
       Showing the first {photos.length.toLocaleString()} photos (Max {limit.toLocaleString()}).
-      Raise “Max” above, or use “Keep only” to narrow the working set, then detect
-      again.
+      Raise “Max” above, or use “Keep only” to narrow the working set, then
+      detect again.
     </p>
   {/if}
 
@@ -316,7 +348,11 @@
         >
       </div>
       <div class="album-snapshot">
-        <SnapshotStrip ids={album.ids} {mtimeById} on:select={(e) => dispatch("openphoto", e.detail)} />
+        <SnapshotStrip
+          ids={album.ids}
+          {mtimeById}
+          on:select={(e) => dispatch("openphoto", e.detail)}
+        />
       </div>
     {/each}
   </div>

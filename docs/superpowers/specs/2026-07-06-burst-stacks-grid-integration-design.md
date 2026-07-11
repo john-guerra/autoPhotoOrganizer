@@ -20,9 +20,10 @@ Part 2 of GitHub issue #2 ("Burst stacks"). Part 1 (`detectBursts`, the
 pure detection algorithm) is done — see
 `docs/superpowers/specs/2026-07-06-burst-detection-design.md`. This spec
 wires that detection into the grid: a burst collapses to one tile (cover
-+ count badge), click/Enter expands it inline, and every existing
-interaction (keyboard nav, rating, Loupe) keeps working against the
-resulting display list.
+
+- count badge), click/Enter expands it inline, and every existing
+  interaction (keyboard nav, rating, Loupe) keeps working against the
+  resulting display list.
 
 ## Recap of decisions already made (interactively, earlier this session)
 
@@ -136,6 +137,7 @@ resolvePhoto(entry) -> item   // the underlying photo (cover, for a collapsed st
 ## `Thumb.svelte` additions
 
 Two new optional props:
+
 - `stackCount` (number, undefined for non-stack tiles) — renders a small
   "×N" badge (new corner, since the existing rating-stars badge already
   occupies bottom-left).

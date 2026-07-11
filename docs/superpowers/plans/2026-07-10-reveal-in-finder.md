@@ -15,7 +15,7 @@ then implement. UI verified live per the App.svelte convention.
    - `win32` → `"explorer"`, `["/select,", <path>]`.
    - `linux` → `"xdg-open"`, `[<dirname>]`.
    - unsupported platform → `501 { ok: false }`.
-   Run `npm test` — the reveal tests fail (endpoint absent).
+     Run `npm test` — the reveal tests fail (endpoint absent).
 2. Implement `POST /api/reveal/:id` in `server/api.js`:
    - import `execFile` from `node:child_process`, `dirname` from `node:path`
      (check existing imports first — `stat` and `extname` are already imported).
@@ -23,7 +23,7 @@ then implement. UI verified live per the App.svelte convention.
      `process.platform`; `execFile(cmd, args)`; respond.
    - Keep launch fire-and-forget; only spawn errors (the `execFile` callback err
      for genuinely-failed spawns, not Explorer's non-zero exit) map to a 500.
-   Run `npm test` — green.
+     Run `npm test` — green.
 
 **Checkpoint commit:** `feat(reveal): POST /api/reveal/:id server endpoint (#18)`.
 
@@ -35,6 +35,7 @@ matching the existing fetch helpers there.
 ## Step 3 — `ContextMenu.svelte` (reusable, generic)
 
 New `ui/src/lib/ContextMenu.svelte`:
+
 - Props `x`, `y`, `items: [{ label, action, enabled }]`.
 - `position: fixed`, clamped to `window.innerWidth/innerHeight` (measure after
   mount via `bind:this`, adjust if overflowing).
@@ -63,8 +64,8 @@ New `ui/src/lib/ContextMenu.svelte`:
   `!ok`, non-blocking notice (reuse any existing toast; else `console.warn` +
   a transient status line — no `alert`).
 - Render `{#if contextMenu.open}<ContextMenu ... items={[{ label: "Reveal in Finder",
-  action: () => reveal(contextMenu.targetIndex), enabled: <resolves to id> }]}
-  on:close={() => (contextMenu.open = false)} />`.
+action: () => reveal(contextMenu.targetIndex), enabled: <resolves to id> }]}
+on:close={() => (contextMenu.open = false)} />`.
 
 **Checkpoint commit:** `feat(reveal): right-click "Reveal in Finder" context menu (#18)`.
 

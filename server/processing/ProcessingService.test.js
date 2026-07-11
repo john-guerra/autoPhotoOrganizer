@@ -26,8 +26,8 @@ describe("ProcessingService (smoke)", () => {
     // videoThumb is implemented (ffmpeg); a missing file must reject with the
     // VideoDecodeError surface, not hang or resolve. Real poster-frame behavior
     // is exercised in NodeProcessingService.test.js against a generated clip.
-    await expect(svc.videoThumb("/tmp/does-not-exist.mov", 100)).rejects.toMatchObject(
-      { name: "VideoDecodeError" }
-    );
+    await expect(
+      svc.videoThumb("/tmp/does-not-exist.mov", 100)
+    ).rejects.toMatchObject({ name: "VideoDecodeError" });
   });
 });

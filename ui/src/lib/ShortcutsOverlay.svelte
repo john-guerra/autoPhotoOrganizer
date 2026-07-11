@@ -21,7 +21,10 @@
         { keys: ["X"], label: "Toggle selection (auto-advances in loupe)" },
         { keys: ["C"], label: "Set / unset this photo as its stack's cover" },
         { keys: ["G"], label: "Group the selected photos into one stack" },
-        { keys: ["Shift", "+", "G"], label: "Dissolve the stack at the cursor" },
+        {
+          keys: ["Shift", "+", "G"],
+          label: "Dissolve the stack at the cursor",
+        },
         { keys: ["Right-click"], label: "Reveal / stack actions menu" },
       ],
     },
@@ -31,7 +34,10 @@
         { keys: ["+"], label: "Zoom in (larger thumbnails)" },
         { keys: ["−"], label: "Zoom out (smaller thumbnails)" },
         { keys: ["←", "→", "↑", "↓"], label: "Move selection" },
-        { keys: ["Shift", "+", "arrow"], label: "Extend selection while moving" },
+        {
+          keys: ["Shift", "+", "arrow"],
+          label: "Extend selection while moving",
+        },
         { keys: ["Home"], label: "Jump to the first photo" },
         { keys: ["End"], label: "Jump to the last photo" },
         { keys: ["Enter"], label: "Open in loupe (or expand a stack)" },
@@ -51,7 +57,6 @@
       ],
     },
   ];
-
 </script>
 
 <div class="shortcuts-backdrop" on:click={close}>

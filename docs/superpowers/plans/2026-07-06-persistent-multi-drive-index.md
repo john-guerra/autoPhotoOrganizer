@@ -25,7 +25,7 @@ in-memory `session` object.
 ## Global Constraints
 
 - ESM everywhere (`"type": "module"`) — no TypeScript.
-- No comments explaining *what* code does; only non-obvious *why* (existing
+- No comments explaining _what_ code does; only non-obvious _why_ (existing
   project convention, see `CLAUDE.md`).
 - Every test is colocated as `*.test.js` next to its source, vitest.
 - Real photo folders (`docs/TEST_FOLDERS.local.md`) are **strictly
@@ -42,6 +42,7 @@ in-memory `session` object.
 ## Task 1: SQLite dependency, schema, and connection
 
 **Files:**
+
 - Modify: `package.json` (add `better-sqlite3` dependency, add
   `node_modules/better-sqlite3/**` to the `build.asarUnpack` array next to
   the existing `node_modules/sharp/**` entry — same reasoning: native
@@ -52,6 +53,7 @@ in-memory `session` object.
 - Test: `server/db/connection.test.js`
 
 **Interfaces:**
+
 - Produces: `indexDbFile(): string` (from `cachePaths.js`) — absolute path
   to `~/.autogallery/index.db`, respects `AUTOGALLERY_HOME`.
 - Produces: `applySchema(db: BetterSqlite3.Database): void` (from
@@ -280,10 +282,12 @@ git commit -m "feat: add SQLite index schema and connection module"
 ## Task 2: Volume identity (diskutil-backed)
 
 **Files:**
+
 - Create: `server/db/volumes.js`
 - Test: `server/db/volumes.test.js`
 
 **Interfaces:**
+
 - Consumes: `getDb()` from `server/db/connection.js` (Task 1).
 - Produces: `volumeRootForPath(absPath: string): string`,
   `getVolumeInfo(mountRoot: string, exec?: (mountRoot: string) => string): {uuid: string|null, label: string}`,
@@ -485,14 +489,14 @@ export function upsertVolume(db, mountRoot, exec = defaultExec) {
   // No stable identifier available (non-macOS, or diskutil failed): key on
   // mount path instead, same degraded behavior as today's path-only check.
   const existing = db
-    .prepare(`SELECT id FROM volumes WHERE last_mount_path = ? AND uuid IS NULL`)
+    .prepare(
+      `SELECT id FROM volumes WHERE last_mount_path = ? AND uuid IS NULL`
+    )
     .get(mountRoot);
   if (existing) {
-    db.prepare(`UPDATE volumes SET label = ?, last_seen_at = ? WHERE id = ?`).run(
-      label,
-      now,
-      existing.id
-    );
+    db.prepare(
+      `UPDATE volumes SET label = ?, last_seen_at = ? WHERE id = ?`
+    ).run(label, now, existing.id);
     return existing.id;
   }
   return db
@@ -539,10 +543,12 @@ git commit -m "feat: add diskutil-backed volume identity tracking"
 ## Task 3: Folder/photo upsert and lookup
 
 **Files:**
+
 - Create: `server/db/photos.js`
 - Test: `server/db/photos.test.js`
 
 **Interfaces:**
+
 - Consumes: `getDb()` (Task 1).
 - Produces: `upsertScan(db, folderAbsPath: string, volumeId: number, files: Array<{name: string, size: number, mtimeMs: number, kind: string}>): Array<{id: number, name: string, size: number, mtimeMs: number, rating: number, preferredCover: number}>`,
   `getPhotoById(db, id: number): {id, folder_id, filename, size, mtime, content_hash, taken_at, width, height, camera, kind, perceptual_hash, rating, preferred_cover, stale, folder_abs_path, path} | undefined`,
@@ -723,7 +729,9 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
         ELSE NULL
       END
   `);
-  const markAllStale = db.prepare(`UPDATE photos SET stale = 1 WHERE folder_id = ?`);
+  const markAllStale = db.prepare(
+    `UPDATE photos SET stale = 1 WHERE folder_id = ?`
+  );
 
   const tx = db.transaction((files) => {
     markAllStale.run(folderId);
@@ -795,10 +803,12 @@ git commit -m "feat: add folder/photo upsert, lookup, and rating/cover setters"
 ## Task 4: Lazy content-hash background job
 
 **Files:**
+
 - Create: `server/db/hashing.js`
 - Test: `server/db/hashing.test.js`
 
 **Interfaces:**
+
 - Consumes: `getDb()` (Task 1), `upsertScan`/`getPhotoById` (Task 3).
 - Produces: `hashFile(path: string): Promise<string>`,
   `hashPendingPhotos(db, opts?: {limit?: number}): Promise<{hashed: number, remaining: boolean}>`
@@ -964,10 +974,12 @@ git commit -m "feat: add lazy content-hash background job"
 ## Task 5: Backup-coverage queries
 
 **Files:**
+
 - Create: `server/db/backupCoverage.js`
 - Test: `server/db/backupCoverage.test.js`
 
 **Interfaces:**
+
 - Consumes: `getDb()` (Task 1), `upsertScan` (Task 3).
 - Produces: `getBackupCoverage(db, photoId: number): {volumeIds: number[]}`,
   `getUnbackedUpPhotos(db, volumeId: number): Array<{id, filename, folder_abs_path}>`
@@ -1135,10 +1147,12 @@ git commit -m "feat: add exact-hash backup-coverage queries"
 ## Task 6: Legacy JSON migration
 
 **Files:**
+
 - Create: `server/migrateLegacyJson.js`
 - Test: `server/migrateLegacyJson.test.js`
 
 **Interfaces:**
+
 - Consumes: `getDb()` (Task 1), `ratingsFile()`, `coverChoicesFile()`,
   `libraryFile()`, `cacheRoot()` (all from `server/lib/cachePaths.js`,
   already exist).
@@ -1379,6 +1393,7 @@ This is the integration task: it must land as one unit since the API can't
 be half on the old session model and half on the DB.
 
 **Files:**
+
 - Modify: `server/api.js` (full rewrite of the session-based lookups)
 - Modify: `server/api.test.js` (rewrite the assertions that depended on
   0-based sequential ids and on the retired modules)
@@ -1386,6 +1401,7 @@ be half on the old session model and half on the DB.
   `server/metaCache.js`, `server/library.js`
 
 **Interfaces:**
+
 - Consumes: `getDb()` (Task 1), `volumeRootForPath`/`upsertVolume`/
   `isVolumeMounted` (Task 2), `upsertScan`/`getPhotoById`/`setPhotoRating`/
   `setPhotoCover` (Task 3), `hashPendingPhotos` (Task 4).
@@ -1409,7 +1425,11 @@ import { extname, join, basename } from "node:path";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { thumbsDir } from "./lib/cachePaths.js";
 import { getDb } from "./db/connection.js";
-import { volumeRootForPath, upsertVolume, isVolumeMounted } from "./db/volumes.js";
+import {
+  volumeRootForPath,
+  upsertVolume,
+  isVolumeMounted,
+} from "./db/volumes.js";
 import {
   upsertScan,
   getPhotoById,
@@ -1501,7 +1521,9 @@ export function registerApi(app) {
       );
       metas.forEach((m, i) => {
         const photo = need[i];
-        const takenAtMs = m.createDate ? new Date(m.createDate).getTime() : null;
+        const takenAtMs = m.createDate
+          ? new Date(m.createDate).getTime()
+          : null;
         update.run(takenAtMs, m.width ?? null, m.height ?? null, photo.id);
         photosById.set(photo.id, {
           ...photo,
@@ -1616,7 +1638,10 @@ export function registerApi(app) {
       name: basename(r.path),
       lastScannedAt: r.lastScannedAt,
       mounted: r.volumeUuid
-        ? isVolumeMounted({ uuid: r.volumeUuid, last_mount_path: r.volumeMountPath })
+        ? isVolumeMounted({
+            uuid: r.volumeUuid,
+            last_mount_path: r.volumeMountPath,
+          })
         : existsSync(r.path),
     }));
     res.json(entries);
@@ -1763,7 +1788,9 @@ describe("GET /api/meta", () => {
     await fetch(`${srv.base}/api/meta?ids=${id}`);
 
     const db = getDb();
-    const row = db.prepare("SELECT width, height FROM photos WHERE id = ?").get(id);
+    const row = db
+      .prepare("SELECT width, height FROM photos WHERE id = ?")
+      .get(id);
     expect(row).toMatchObject({ width: 48, height: 32 });
 
     const again = await (await fetch(`${srv.base}/api/meta?ids=${id}`)).json();
@@ -1935,9 +1962,11 @@ git commit -m "feat: cut over api.js to the SQLite index, retire legacy JSON sto
 ## Task 8: Wire migration into server startup
 
 **Files:**
+
 - Modify: `server/index.js`
 
 **Interfaces:**
+
 - Consumes: `getDb()` (Task 1), `migrateLegacyJsonIfNeeded` (Task 6).
 
 - [ ] **Step 1: Call the migration once at app creation**

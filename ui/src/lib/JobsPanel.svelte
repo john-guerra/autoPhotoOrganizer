@@ -30,7 +30,9 @@
       return parts.join(" · ") || "done";
     }
     if (job.type === "export") {
-      return r.skipped ? `copied ${r.copied} · skipped ${r.skipped}` : `copied ${r.copied}`;
+      return r.skipped
+        ? `copied ${r.copied} · skipped ${r.skipped}`
+        : `copied ${r.copied}`;
     }
     if (job.type === "scan") {
       const folders = r.folders ?? 0;
@@ -38,7 +40,9 @@
       return `${folders} folder${folders === 1 ? "" : "s"} · ${count} photo${count === 1 ? "" : "s"}`;
     }
     if (job.type === "undo-move") {
-      return r.skipped ? `restored ${r.restored} · skipped ${r.skipped}` : `restored ${r.restored}`;
+      return r.skipped
+        ? `restored ${r.restored} · skipped ${r.skipped}`
+        : `restored ${r.restored}`;
     }
     return "";
   }
@@ -46,7 +50,11 @@
   /** Undo is offered for a completed OR canceled move-materialize — the
    * backend stashes a partial manifest on cancel too. */
   function canUndo(job) {
-    return job.type === "materialize" && !!job.result?.move && !!job.result?.manifest?.length;
+    return (
+      job.type === "materialize" &&
+      !!job.result?.move &&
+      !!job.result?.manifest?.length
+    );
   }
 </script>
 
@@ -67,28 +75,36 @@
             max={job.total || undefined}
           ></progress>
           <span class="job-phase">{job.phase}</span>
-          <button class="job-btn" on:click={() => cancelJob(job.id)}>Cancel</button>
+          <button class="job-btn" on:click={() => cancelJob(job.id)}
+            >Cancel</button
+          >
         {:else if job.status === "done"}
           <span class="job-icon ok" aria-hidden="true">✓</span>
           <span class="job-summary">{summarize(job)}</span>
           {#if canUndo(job)}
-            <button class="job-btn" on:click={() => undoMove(job.result.manifest)}
-              >Undo</button
+            <button
+              class="job-btn"
+              on:click={() => undoMove(job.result.manifest)}>Undo</button
             >
           {/if}
-          <button class="job-dismiss" title="Dismiss" on:click={() => dismissJob(job.id)}
-            >×</button
+          <button
+            class="job-dismiss"
+            title="Dismiss"
+            on:click={() => dismissJob(job.id)}>×</button
           >
         {:else}
           <span class="job-icon err" aria-hidden="true">✗</span>
           <span class="job-summary">{job.error}</span>
           {#if canUndo(job)}
-            <button class="job-btn" on:click={() => undoMove(job.result.manifest)}
-              >Undo</button
+            <button
+              class="job-btn"
+              on:click={() => undoMove(job.result.manifest)}>Undo</button
             >
           {/if}
-          <button class="job-dismiss" title="Dismiss" on:click={() => dismissJob(job.id)}
-            >×</button
+          <button
+            class="job-dismiss"
+            title="Dismiss"
+            on:click={() => dismissJob(job.id)}>×</button
           >
         {/if}
       </div>

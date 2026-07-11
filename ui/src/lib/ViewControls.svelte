@@ -73,7 +73,8 @@
   <button
     class="reveal-btn"
     class:active={albumMode}
-    on:click={() => (albumMode ? (albumMode = false) : dispatch("detectalbums"))}
+    on:click={() =>
+      albumMode ? (albumMode = false) : dispatch("detectalbums")}
     disabled={detectingAlbums}
     title="Split the current working set into albums by time gaps"
   >

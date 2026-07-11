@@ -30,6 +30,7 @@ debounced atomic-write pattern (temp file + rename, 150ms debounce).
 the existing `ratingsFile()`.
 
 API surface, mirroring the existing `/api/rating` route:
+
 - `POST /api/cover` — body `{id, isCover: boolean}`. Resolves `id` to its
   session path (same `itemById` helper `/api/rating` already uses),
   calls `setCoverChoice(path, isCover)`, responds `{id, preferredCover: isCover}`.
@@ -57,7 +58,7 @@ above the existing three:
 This only changes `coverId`'s derivation — it does **not** affect
 `stack.id`, which is already anchored to the chronologically-first
 member (`cluster[0].item.id`, fixed during the earlier whole-branch
-review) specifically *because* it needed to be stable across cover
+review) specifically _because_ it needed to be stable across cover
 changes. A manual pick is just one more thing that can change `coverId`,
 exactly like a rating already could — the earlier fix already covers
 this case, no new stability work needed.
@@ -65,8 +66,8 @@ this case, no new stability work needed.
 ### Trigger and interaction
 
 A new key, **`C`**, toggles the manual cover choice for the currently
-selected photo — but only when that photo is a member of a *currently
-expanded* stack (`displayEntries[selected]?.stackId` is set). It's a
+selected photo — but only when that photo is a member of a _currently
+expanded_ stack (`displayEntries[selected]?.stackId` is set). It's a
 no-op otherwise (a collapsed stack tile, or an ungrouped photo). Works
 identically whether the grid or the Loupe is focused, since both share
 the same `selected` index into the same `displayEntries` list — the
@@ -75,8 +76,9 @@ existing digit-rating check lives (before the `loupeOpen` branch splits
 handling), so it fires uniformly in both contexts.
 
 Toggle semantics:
+
 - Pressing `C` on a photo that is **not** the current manual pick for its
-  stack: clears `preferredCover` on any *other* member of that same
+  stack: clears `preferredCover` on any _other_ member of that same
   stack that currently has it set (at most one, by construction — see
   below), then sets `preferredCover = true` on the target photo. Local
   `items` mutation + `items = items` reactivity trigger, matching the
@@ -142,9 +144,13 @@ or `Thumb.svelte`.
 ### Rendering: `Thumb.svelte`
 
 New prop `stackPeekItems` (array, default `[]`). Reactive:
+
 ```js
-$: peekSrcs = visible ? stackPeekItems.map((it) => thumbUrl(it.id, size, it.mtimeMs)) : [];
+$: peekSrcs = visible
+  ? stackPeekItems.map((it) => thumbUrl(it.id, size, it.mtimeMs))
+  : [];
 ```
+
 — gated on the same `visible` (IntersectionObserver) flag as the cover
 image, so peek thumbnails don't load until the tile is actually near the
 viewport, same lazy-loading discipline as everything else in this
@@ -164,7 +170,7 @@ cover image gets a fixed z-index of 50 (comfortably above any realistic
 peek count); the rating badge, count badge, and expanded-stack marker
 all need an explicit z-index of 100 (**this is a required change to
 existing CSS, not just new rules** — those elements currently rely on
-`z-index: auto`, which the CSS spec treats as effectively `0` once *any*
+`z-index: auto`, which the CSS spec treats as effectively `0` once _any_
 sibling has an explicit z-index, so without this bump the badges would
 silently render **behind** the newly z-indexed cover/peek images instead
 of on top of them).

@@ -47,7 +47,11 @@
   // lines up with the axis by construction. The axis is always full-domain (the
   // brush is an overlay band, not a re-zoom), so this mapping is stable.
   $: markerPx =
-    currentTime == null || min == null || max == null || max <= min || !(width > 0)
+    currentTime == null ||
+    min == null ||
+    max == null ||
+    max <= min ||
+    !(width > 0)
       ? null
       : AXIS_MARGIN +
         Math.max(0, Math.min(1, (currentTime - min) / (max - min))) *
@@ -71,7 +75,8 @@
       timer = setTimeout(() => {
         // Brush spanning (nearly) the whole domain = no constraint → clear.
         const span = last.max - last.min || 1;
-        const covered = lo - last.min <= span * 0.004 && last.max - hi <= span * 0.004;
+        const covered =
+          lo - last.min <= span * 0.004 && last.max - hi <= span * 0.004;
         if (covered) dispatch("clear");
         else dispatch("range", [Math.round(lo), Math.round(hi)]);
       }, 120);
@@ -84,7 +89,13 @@
         widget = null;
       }
       last = np;
-      if (!(np.width > 0) || np.min == null || np.max == null || np.min >= np.max) return;
+      if (
+        !(np.width > 0) ||
+        np.min == null ||
+        np.max == null ||
+        np.min >= np.max
+      )
+        return;
       const length = Math.max(60, np.width - AXIS_MARGIN * 2);
       const scale = scaleTime().domain([new Date(np.min), new Date(np.max)]);
       widget = zoomableAxisInput(scale, {

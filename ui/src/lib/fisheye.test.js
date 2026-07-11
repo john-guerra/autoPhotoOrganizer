@@ -32,8 +32,10 @@ describe("fisheyePosition", () => {
 
   it("magnifies near the focus (a small step there spans more pixels than far away)", () => {
     const [min, max, a, d] = [0, 100, 50, 4];
-    const nearSpan = fisheyePosition(51, a, min, max, d) - fisheyePosition(49, a, min, max, d);
-    const farSpan = fisheyePosition(11, a, min, max, d) - fisheyePosition(9, a, min, max, d);
+    const nearSpan =
+      fisheyePosition(51, a, min, max, d) - fisheyePosition(49, a, min, max, d);
+    const farSpan =
+      fisheyePosition(11, a, min, max, d) - fisheyePosition(9, a, min, max, d);
     expect(nearSpan).toBeGreaterThan(farSpan);
   });
 });
@@ -93,7 +95,8 @@ describe("sampleLeaves", () => {
     const focusI = 150;
     const kept = sampleLeaves(many, cps, focusI, { maxRows: 30, vicinity: 4 });
     const keptI = new Set(kept.map((k) => k.i));
-    for (let i = focusI - 4; i <= focusI + 4; i++) expect(keptI.has(i)).toBe(true);
+    for (let i = focusI - 4; i <= focusI + 4; i++)
+      expect(keptI.has(i)).toBe(true);
     cps.forEach((d, i) => {
       if (d != null) expect(keptI.has(i)).toBe(true);
     });
@@ -114,12 +117,18 @@ describe("layoutFisheye", () => {
 
   it("returns empty for empty input or zero height", () => {
     expect(layoutFisheye([], GB, { height: 500, focusI: 0 }).rows).toEqual([]);
-    expect(layoutFisheye(leaves, GB, { height: 0, focusI: 0 }).rows).toEqual([]);
+    expect(layoutFisheye(leaves, GB, { height: 0, focusI: 0 }).rows).toEqual(
+      []
+    );
   });
 
   it("tiles the padded column, ordered, with positive thickness", () => {
     const height = 600;
-    const { rows } = layoutFisheye(leaves, GB, { height, focusI: 60, pad: PAD });
+    const { rows } = layoutFisheye(leaves, GB, {
+      height,
+      focusI: 60,
+      pad: PAD,
+    });
     expect(rows[0].y - rows[0].thickness / 2).toBeCloseTo(PAD, 1); // top edge
     const last = rows[rows.length - 1];
     expect(last.y + last.thickness / 2).toBeCloseTo(height - PAD, 1); // bottom edge
@@ -144,7 +153,8 @@ describe("layoutFisheye", () => {
     const focusPx = 300;
     const { rows, focusI } = layoutFisheye(leaves, GB, { height, focusPx });
     const hit = rows.find(
-      (r) => focusPx >= r.y - r.thickness / 2 && focusPx <= r.y + r.thickness / 2
+      (r) =>
+        focusPx >= r.y - r.thickness / 2 && focusPx <= r.y + r.thickness / 2
     );
     expect(hit).toBeTruthy(); // some rendered row's band contains the cursor
     expect(Math.abs(hit.i - focusI)).toBeLessThanOrEqual(1);
@@ -155,7 +165,11 @@ describe("layoutFisheye", () => {
 
   it("works at both edges without error", () => {
     for (const focusI of [0, leaves.length - 1]) {
-      const { rows } = layoutFisheye(leaves, GB, { height: 500, focusI, pad: PAD });
+      const { rows } = layoutFisheye(leaves, GB, {
+        height: 500,
+        focusI,
+        pad: PAD,
+      });
       expect(rows[0].y - rows[0].thickness / 2).toBeCloseTo(PAD, 0);
       const last = rows[rows.length - 1];
       const bottom = last.y + last.thickness / 2;
@@ -204,7 +218,8 @@ describe("layoutFisheye positioning modes on a decimated list", () => {
     const focusPx = 250;
     const { rows } = layoutFisheye(many, GB1, { height, focusPx });
     const hit = rows.find(
-      (r) => focusPx >= r.y - r.thickness / 2 && focusPx <= r.y + r.thickness / 2
+      (r) =>
+        focusPx >= r.y - r.thickness / 2 && focusPx <= r.y + r.thickness / 2
     );
     expect(hit).toBeTruthy();
     const maxThick = Math.max(...rows.map((r) => r.thickness));

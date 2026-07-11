@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildDisplayEntries, entryDomId, resolvePhoto } from "./displayEntries.js";
+import {
+  buildDisplayEntries,
+  entryDomId,
+  resolvePhoto,
+} from "./displayEntries.js";
 
 const items = [
   { id: 1, name: "solo.jpg", mtimeMs: 0 },
@@ -31,7 +35,9 @@ describe("buildDisplayEntries", () => {
   it("expands every member of an expanded stack individually, tagged with stackId", () => {
     const entries = buildDisplayEntries(items, [stack], new Set(["burst-3"]));
     expect(entries).toHaveLength(4); // solo + 3 expanded members
-    const members = entries.filter((e) => e.kind === "photo" && e.stackId === "burst-3");
+    const members = entries.filter(
+      (e) => e.kind === "photo" && e.stackId === "burst-3"
+    );
     expect(members.map((e) => e.item.id)).toEqual([2, 3, 4]);
   });
 
@@ -50,21 +56,29 @@ describe("buildDisplayEntries", () => {
 
 describe("entryDomId", () => {
   it("returns the stack id for a collapsed stack entry", () => {
-    expect(entryDomId({ kind: "stack", stack, coverItem: items[2] })).toBe("burst-3");
+    expect(entryDomId({ kind: "stack", stack, coverItem: items[2] })).toBe(
+      "burst-3"
+    );
   });
 
   it("returns the photo id for a photo entry", () => {
-    expect(entryDomId({ kind: "photo", item: items[0], stackId: null })).toBe("1");
+    expect(entryDomId({ kind: "photo", item: items[0], stackId: null })).toBe(
+      "1"
+    );
   });
 });
 
 describe("resolvePhoto", () => {
   it("returns the cover item for a collapsed stack entry", () => {
-    expect(resolvePhoto({ kind: "stack", stack, coverItem: items[2] })).toBe(items[2]);
+    expect(resolvePhoto({ kind: "stack", stack, coverItem: items[2] })).toBe(
+      items[2]
+    );
   });
 
   it("returns the item itself for a photo entry", () => {
-    expect(resolvePhoto({ kind: "photo", item: items[0], stackId: null })).toBe(items[0]);
+    expect(resolvePhoto({ kind: "photo", item: items[0], stackId: null })).toBe(
+      items[0]
+    );
   });
 });
 

@@ -74,7 +74,8 @@ export function shortLeafLabel(dimension, value, prevValue) {
     const [, year, monthNum] = m;
     const name = monthName(monthNum);
     if (name === null) return value;
-    const prevYear = prevValue !== undefined ? prevValue.slice(0, 4) : undefined;
+    const prevYear =
+      prevValue !== undefined ? prevValue.slice(0, 4) : undefined;
     if (prevValue === undefined || prevYear !== year) {
       return `${year} ${name}`;
     }

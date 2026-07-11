@@ -9,7 +9,10 @@ describe("parseSort", () => {
     expect(parseSort("rating:asc")).toEqual({ by: "rating", dir: "asc" });
   });
   it("rejects unknown attribute and bad direction", () => {
-    expect(parseSort("bogus:sideways")).toEqual({ by: "date_taken", dir: "desc" });
+    expect(parseSort("bogus:sideways")).toEqual({
+      by: "date_taken",
+      dir: "desc",
+    });
   });
 });
 

@@ -31,8 +31,8 @@ Decisions locked in with John:
 
 ## Invariant tension (read before implementing)
 
-Invariant #1 (`CLAUDE.md`): *folders on disk are the source of truth; the app only ever
-copies.* Move breaks the "only copies" half. This is sanctioned — John explicitly asked —
+Invariant #1 (`CLAUDE.md`): _folders on disk are the source of truth; the app only ever
+copies._ Move breaks the "only copies" half. This is sanctioned — John explicitly asked —
 but it means move is the **only** code path allowed to remove a source file, and it must
 never be reachable except through an explicit materialize-with-move that the user
 triggered. It must obey the "always recoverable" rule (`CLAUDE.md`): a move is undoable.
@@ -77,7 +77,7 @@ Registry API:
 
 ### Endpoints (`server/api.js`)
 
-Each of the three handlers changes from *do-work-then-respond* to *spawn-job-then-respond*:
+Each of the three handlers changes from _do-work-then-respond_ to _spawn-job-then-respond_:
 
 1. Validate inputs exactly as today (same 400s).
 2. `const job = registry.create(type, { label, total })`.

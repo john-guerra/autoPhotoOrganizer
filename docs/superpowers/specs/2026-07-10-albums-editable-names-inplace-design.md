@@ -11,13 +11,13 @@ Make materializing auto-albums a one-click "organize this folder in place" actio
 1. **Edit each album's folder name** before materializing, instead of accepting
    the auto-generated `YYYY-MM-DD` name.
 2. **Default the destination to the folder you've opened** (the `focusPath`
-   added by #66) so album subfolders are created *inside* it, and **move**
+   added by #66) so album subfolders are created _inside_ it, and **move**
    (already the default) relocates the originals into them. When you're not
    focused on a folder, the destination is empty and you pick one.
 
 ## Invariants & authorization
 
-- Writing *into* a scanned source folder normally violates
+- Writing _into_ a scanned source folder normally violates
   `resolveExportTarget`'s guard (it refuses targets inside any scanned source
   folder). John has **explicitly authorized** materializing in place, so this
   slice relaxes that guard for materialize only (see [[export-into-source-folder-ok]]

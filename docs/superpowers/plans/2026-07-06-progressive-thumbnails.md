@@ -24,11 +24,13 @@ Full design: `docs/superpowers/specs/2026-07-06-progressive-thumbnails-design.md
 ### Task 1: Server — `extractPreview`, RAW file discovery, `thumbnail()`'s RAW guard
 
 **Files:**
+
 - Modify: `server/processing/NodeProcessingService.js`
 - Modify: `server/processing/ProcessingService.test.js`
 - Create: `server/processing/NodeProcessingService.test.js`
 
 **Interfaces:**
+
 - Consumes: `exifr.thumbnail(path)` (already a dependency) — resolves to a `Buffer` if the file has an embedded preview, `undefined` otherwise; throws on genuine I/O failure (confirmed by direct testing during design: `ENOENT` for a missing file).
 - Produces: `NodeProcessingService.extractPreview(file)` returning `Promise<{data: Buffer, source: "embedded"} | null>` (null = no embedded preview, a normal outcome — not an error). `NodeProcessingService.scan(dir)` now also discovers RAW files, tagging them `kind: "raw"` (vs `kind: "image"` for the existing formats) — `MediaFile.kind`'s type already anticipated this (`"image"|"raw"|"video"` in `ProcessingService.js`), just unused until now. `NodeProcessingService.thumbnail(file, size)` now throws a new, named `RawDecodeUnavailableError` for a RAW extension instead of attempting (and failing) a sharp decode. Task 2/3/5 consume these.
 
@@ -79,9 +81,7 @@ describe("thumbnail — RAW guard", () => {
     const raw = join(dir, "photo.cr2");
     await writeFile(raw, Buffer.from([0])); // not valid image data — if sharp were
     // attempted, it would throw a DIFFERENT (generic decode-failure) error, not this one
-    await expect(svc.thumbnail(raw, 320)).rejects.toThrow(
-      /RAW/
-    );
+    await expect(svc.thumbnail(raw, 320)).rejects.toThrow(/RAW/);
     await expect(svc.thumbnail(raw, 320)).rejects.toMatchObject({
       name: "RawDecodeUnavailableError",
     });
@@ -320,29 +320,29 @@ Expected: PASS (6 tests).
 `extractPreview` no longer always throws "not implemented" — only `videoThumb` still does. Change `server/processing/ProcessingService.test.js`'s third test from:
 
 ```js
-  it("NodeProcessingService still throws on the not-yet-implemented engines", async () => {
-    const svc = new NodeProcessingService();
-    // RAW embedded-preview extraction and video poster frames come later.
-    await expect(svc.extractPreview("/tmp/x.cr2")).rejects.toThrow(
-      /not implemented/i
-    );
-    await expect(svc.videoThumb("/tmp/x.mov")).rejects.toThrow(
-      /not implemented/i
-    );
-  });
+it("NodeProcessingService still throws on the not-yet-implemented engines", async () => {
+  const svc = new NodeProcessingService();
+  // RAW embedded-preview extraction and video poster frames come later.
+  await expect(svc.extractPreview("/tmp/x.cr2")).rejects.toThrow(
+    /not implemented/i
+  );
+  await expect(svc.videoThumb("/tmp/x.mov")).rejects.toThrow(
+    /not implemented/i
+  );
+});
 ```
 
 to:
 
 ```js
-  it("NodeProcessingService still throws on the not-yet-implemented video engine", async () => {
-    const svc = new NodeProcessingService();
-    // Video poster frames come later; RAW/JPEG embedded-preview extraction
-    // is implemented now (see NodeProcessingService.test.js).
-    await expect(svc.videoThumb("/tmp/x.mov")).rejects.toThrow(
-      /not implemented/i
-    );
-  });
+it("NodeProcessingService still throws on the not-yet-implemented video engine", async () => {
+  const svc = new NodeProcessingService();
+  // Video poster frames come later; RAW/JPEG embedded-preview extraction
+  // is implemented now (see NodeProcessingService.test.js).
+  await expect(svc.videoThumb("/tmp/x.mov")).rejects.toThrow(
+    /not implemented/i
+  );
+});
 ```
 
 - [ ] **Step 6: Run the full server test suite to confirm no regressions**
@@ -362,10 +362,12 @@ git commit -m "feat: implement extractPreview via exifr, discover RAW files in s
 ### Task 2: Server — `GET /api/preview/:id` endpoint
 
 **Files:**
+
 - Modify: `server/api.js`
 - Modify: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: `processing.extractPreview(path)` from Task 1 — `Promise<{data: Buffer, source: "embedded"} | null>`.
 - Produces: `GET /api/preview/:id` → the embedded preview's raw JPEG bytes (200), or 404 if the photo id is unknown or it has no embedded preview. Task 4's client wrapper consumes this.
 
@@ -402,23 +404,23 @@ Expected: FAIL — both requests 404 with a generic Express "not found" (no rout
 In `server/api.js`, add this route immediately after the existing `GET /api/thumb/:id` route (find it by searching for `app.get("/api/thumb/:id"`):
 
 ```js
-  // --- Embedded preview (fast tier) ----------------------------------------
-  app.get("/api/preview/:id", async (req, res) => {
-    const db = getDb();
-    const it = getPhotoById(db, Number(req.params.id));
-    if (!it) return res.status(404).end();
+// --- Embedded preview (fast tier) ----------------------------------------
+app.get("/api/preview/:id", async (req, res) => {
+  const db = getDb();
+  const it = getPhotoById(db, Number(req.params.id));
+  if (!it) return res.status(404).end();
 
-    res.set("Cache-Control", "public, max-age=31536000, immutable");
-    res.type("image/jpeg");
+  res.set("Cache-Control", "public, max-age=31536000, immutable");
+  res.type("image/jpeg");
 
-    try {
-      const preview = await processing.extractPreview(it.path);
-      if (!preview) return res.status(404).end();
-      res.send(preview.data);
-    } catch (err) {
-      res.status(500).json({ error: `preview failed: ${err.message}` });
-    }
-  });
+  try {
+    const preview = await processing.extractPreview(it.path);
+    if (!preview) return res.status(404).end();
+    res.send(preview.data);
+  } catch (err) {
+    res.status(500).json({ error: `preview failed: ${err.message}` });
+  }
+});
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -443,10 +445,12 @@ git commit -m "feat: add GET /api/preview/:id endpoint for the fast embedded-pre
 ### Task 3: Server — thread `kind` through the feed query
 
 **Files:**
+
 - Modify: `server/db/feed.js`
 - Test: `server/db/feed.test.js`
 
 **Interfaces:**
+
 - Consumes: `photos.kind` (already stored by `upsertScan`, per `server/db/photos.js` and `server/db/schema.js` — this task only reads it back out, no schema change).
 - Produces: every real item `getFeedPage`/`GET /api/feed` returns now includes `kind: "image"|"raw"`. Task 5's `Thumb.svelte` reads this to distinguish "no full-resolution tier available" (RAW) from a genuine transient failure.
 
@@ -554,9 +558,11 @@ git commit -m "feat: include kind (image/raw) in feed items"
 ### Task 4: Client — `previewUrl` in `ui/src/lib/api.js`
 
 **Files:**
+
 - Modify: `ui/src/lib/api.js`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: `previewUrl(id, v)` — same shape as the existing `thumbUrl`/`imageUrl`. Task 5 consumes this.
 
@@ -590,9 +596,11 @@ git commit -m "feat: add previewUrl client helper for the fast embedded-preview 
 ### Task 5: Client — `Thumb.svelte`'s two-tier swap
 
 **Files:**
+
 - Modify: `ui/src/lib/Thumb.svelte`
 
 **Interfaces:**
+
 - Consumes: `previewUrl` from Task 4; `item.kind` from Task 3 (already flows through automatically once Task 3 lands — `item` is passed to `Thumb` as the whole feed-item object, no new prop threading needed).
 - Produces: the finished feature. No new exports.
 
@@ -607,26 +615,26 @@ Read `ui/src/lib/Thumb.svelte` in full before editing — this plan's code below
 Change the import line (currently):
 
 ```js
-  import { thumbUrl } from "./api.js";
+import { thumbUrl } from "./api.js";
 ```
 
 to:
 
 ```js
-  import { thumbUrl, previewUrl } from "./api.js";
+import { thumbUrl, previewUrl } from "./api.js";
 ```
 
 Add a new exported constant near the existing `STALL_MS` (in the `context="module"` script block):
 
 ```js
-  export const PREVIEW_DELAY_MS = 150; // only fetch the embedded-preview fallback if the full thumbnail hasn't already loaded by then — avoids a wasted request on every already-cached (warm) view, where the full thumbnail resolves well under this delay
+export const PREVIEW_DELAY_MS = 150; // only fetch the embedded-preview fallback if the full thumbnail hasn't already loaded by then — avoids a wasted request on every already-cached (warm) view, where the full thumbnail resolves well under this delay
 ```
 
 Add new instance state near the existing `let stallTimer;`:
 
 ```js
-  let previewSrc = null; // the fast-tier embedded-preview URL, set only if the full thumbnail hasn't loaded within PREVIEW_DELAY_MS
-  let previewTimer;
+let previewSrc = null; // the fast-tier embedded-preview URL, set only if the full thumbnail hasn't loaded within PREVIEW_DELAY_MS
+let previewTimer;
 ```
 
 - [ ] **Step 3: Update `armAttempt`, `settle`, and `onDestroy`**
@@ -634,72 +642,72 @@ Add new instance state near the existing `let stallTimer;`:
 Change `armAttempt` (currently):
 
 ```js
-  function armAttempt(url) {
-    loaded = false; // re-fade in when the source changes
-    failed = false;
-    dispatch("attempt", { id: item.id });
-    clearTimeout(stallTimer);
-    stallTimer = setTimeout(() => {
-      if (src === url) settle(false);
-    }, STALL_MS);
-  }
+function armAttempt(url) {
+  loaded = false; // re-fade in when the source changes
+  failed = false;
+  dispatch("attempt", { id: item.id });
+  clearTimeout(stallTimer);
+  stallTimer = setTimeout(() => {
+    if (src === url) settle(false);
+  }, STALL_MS);
+}
 ```
 
 to:
 
 ```js
-  function armAttempt(url) {
-    loaded = false; // re-fade in when the source changes
-    failed = false;
-    previewSrc = null;
-    dispatch("attempt", { id: item.id });
-    clearTimeout(stallTimer);
-    clearTimeout(previewTimer);
-    stallTimer = setTimeout(() => {
-      if (src === url) settle(false);
-    }, STALL_MS);
-    previewTimer = setTimeout(() => {
-      if (src === url && !loaded) previewSrc = previewUrl(item.id, item.mtimeMs);
-    }, PREVIEW_DELAY_MS);
-  }
+function armAttempt(url) {
+  loaded = false; // re-fade in when the source changes
+  failed = false;
+  previewSrc = null;
+  dispatch("attempt", { id: item.id });
+  clearTimeout(stallTimer);
+  clearTimeout(previewTimer);
+  stallTimer = setTimeout(() => {
+    if (src === url) settle(false);
+  }, STALL_MS);
+  previewTimer = setTimeout(() => {
+    if (src === url && !loaded) previewSrc = previewUrl(item.id, item.mtimeMs);
+  }, PREVIEW_DELAY_MS);
+}
 ```
 
 Change `settle` (currently):
 
 ```js
-  function settle(ok) {
-    clearTimeout(stallTimer);
-    loaded = ok;
-    failed = !ok;
-    dispatch("settled", { id: item.id, ok });
-  }
+function settle(ok) {
+  clearTimeout(stallTimer);
+  loaded = ok;
+  failed = !ok;
+  dispatch("settled", { id: item.id, ok });
+}
 ```
 
 to:
 
 ```js
-  function settle(ok) {
-    clearTimeout(stallTimer);
-    clearTimeout(previewTimer);
-    loaded = ok;
-    failed = !ok;
-    dispatch("settled", { id: item.id, ok });
-  }
+function settle(ok) {
+  clearTimeout(stallTimer);
+  clearTimeout(previewTimer);
+  loaded = ok;
+  failed = !ok;
+  dispatch("settled", { id: item.id, ok });
+}
 ```
 
 Change `onDestroy` (currently):
 
 ```js
-  onDestroy(() => clearTimeout(stallTimer));
+onDestroy(() => clearTimeout(stallTimer));
 ```
 
 to:
 
 ```js
-  onDestroy(() => {
-    clearTimeout(stallTimer);
-    clearTimeout(previewTimer);
-  });
+onDestroy(() => {
+  clearTimeout(stallTimer);
+  clearTimeout(previewTimer);
+});
 ```
 
 - [ ] **Step 4: Render the preview image behind the cover, and suppress retry for RAW**
@@ -707,9 +715,9 @@ to:
 Inside `<button class="thumb" ...>`, immediately before the existing `{#if src}...cover...{/if}` block (search for `{#key \`${item.id}:${item.mtimeMs}\`}`), add:
 
 ```svelte
-    {#if src && previewSrc && !loaded}
-      <img src={previewSrc} alt="" loading="lazy" class="preview" />
-    {/if}
+{#if src && previewSrc && !loaded}
+  <img src={previewSrc} alt="" loading="lazy" class="preview" />
+{/if}
 ```
 
 (the `src &&` check matters even though `previewSrc` is only ever set while `src` is truthy — Svelte reuses this component across scroll/rescan, keyed by id, and `previewSrc`/`loaded` are only reset inside `armAttempt`, which itself only runs when `src` is truthy; if the tile scrolls out of view (`visible` goes false, `src` becomes `null`) neither gets reset, exactly mirroring how `loaded`/`failed` already work for the existing cover image today — without this check, a since-hidden or about-to-be-reused tile could momentarily render a stale preview image alongside no cover at all)
@@ -717,25 +725,25 @@ Inside `<button class="thumb" ...>`, immediately before the existing `{#if src}.
 Change the existing retry block from:
 
 ```svelte
-    {#if failed}
-      <button
-        class="thumb-retry"
-        title="Failed to load — click to retry"
-        on:click|stopPropagation={retry}>⟳ Retry</button
-      >
-    {/if}
+{#if failed}
+  <button
+    class="thumb-retry"
+    title="Failed to load — click to retry"
+    on:click|stopPropagation={retry}>⟳ Retry</button
+  >
+{/if}
 ```
 
 to:
 
 ```svelte
-    {#if failed && item.kind !== "raw"}
-      <button
-        class="thumb-retry"
-        title="Failed to load — click to retry"
-        on:click|stopPropagation={retry}>⟳ Retry</button
-      >
-    {/if}
+{#if failed && item.kind !== "raw"}
+  <button
+    class="thumb-retry"
+    title="Failed to load — click to retry"
+    on:click|stopPropagation={retry}>⟳ Retry</button
+  >
+{/if}
 ```
 
 (a RAW file's full-resolution decode is intentionally unavailable — `failed` still becomes true when the `/api/thumb` request 500s, correctly leaving the embedded preview visible as the final image per Step 5's CSS layering, but there's nothing to retry, so the retry affordance is suppressed specifically for this case rather than shown as if it were a transient error)
@@ -745,16 +753,16 @@ to:
 In the `<style>` block, add this immediately after the existing `img.cover, .stack-peek { ... }` rule (search for `object-fit: cover;` to find it — there are two occurrences; this new rule goes after the FIRST one, which is shared by `img.cover` and `.stack-peek`):
 
 ```css
-  .preview {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-    border-radius: inherit;
-    z-index: 1;
-  }
+.preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: inherit;
+  z-index: 1;
+}
 ```
 
 (`z-index: 1` keeps it below `img.cover`'s `z-index: 50` — confirmed by reading the existing CSS comment on `.thumb`'s stacking context before making this change — so the real thumbnail's fade-in always visually covers the placeholder once it loads, and the placeholder is only ever visible while the cover is genuinely not yet loaded)

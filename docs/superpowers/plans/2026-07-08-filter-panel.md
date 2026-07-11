@@ -22,10 +22,12 @@
 ### Task 1: Filter compiler (`server/db/filters.js`)
 
 **Files:**
+
 - Create: `server/db/filters.js`
 - Test: `server/db/filters.test.js`
 
 **Interfaces:**
+
 - Produces: `buildFilter(spec?) → { sql: string, params: any[] }`. Empty/no-op spec returns `{ sql: "1=1", params: [] }`. Also exports `ALLOWED_ORIENTATIONS: string[]`.
 
 - [ ] **Step 1: Write the failing test**
@@ -53,7 +55,10 @@ describe("buildFilter", () => {
       sql: "1=1",
       params: [],
     });
-    expect(buildFilter({ orientations: [] })).toEqual({ sql: "1=1", params: [] });
+    expect(buildFilter({ orientations: [] })).toEqual({
+      sql: "1=1",
+      params: [],
+    });
   });
 
   it("a strict orientation subset emits a non-null-guarded OR", () => {
@@ -124,7 +129,10 @@ export function buildFilter(spec = {}) {
     ? spec.orientations.filter((o) => ORIENTATION_FRAGMENTS[o])
     : [];
   // A strict, non-empty subset constrains; all three (or none) shows all.
-  if (orientations.length > 0 && orientations.length < ALLOWED_ORIENTATIONS.length) {
+  if (
+    orientations.length > 0 &&
+    orientations.length < ALLOWED_ORIENTATIONS.length
+  ) {
     const ors = orientations.map((o) => ORIENTATION_FRAGMENTS[o]).join(" OR ");
     clauses.push(
       `photos.width IS NOT NULL AND photos.height IS NOT NULL AND (${ors})`
@@ -161,10 +169,12 @@ git commit -m "feat: filter compiler (rating threshold + orientation)"
 ### Task 2: camera + kind grouping dimensions (`server/db/feed.js`)
 
 **Files:**
+
 - Modify: `server/db/feed.js` (the `DIMENSIONS` object, ~lines 11–25)
 - Test: `server/db/feed.test.js` (add cases)
 
 **Interfaces:**
+
 - Produces: `DIMENSIONS.camera`, `DIMENSIONS.kind` usable anywhere a groupBy dimension is accepted.
 
 - [ ] **Step 1: Write the failing test**
@@ -180,7 +190,10 @@ describe("getFeedPage — camera/kind dimensions", () => {
       { name: "canon.jpg", size: 1, mtimeMs: 1, kind: "image" },
       { name: "nocam.jpg", size: 1, mtimeMs: 1, kind: "image" },
     ]);
-    db.prepare(`UPDATE photos SET camera = ? WHERE id = ?`).run("Canon R6", a.id);
+    db.prepare(`UPDATE photos SET camera = ? WHERE id = ?`).run(
+      "Canon R6",
+      a.id
+    );
     // nocam.jpg keeps camera = NULL → COALESCE '' sorts last in ASC.
     const { items } = getFeedPage(db, { groupBy: ["camera"], after: 10 });
     expect(items.map((i) => i.groupValues.camera)).toEqual(["Canon R6", ""]);
@@ -230,10 +243,12 @@ git commit -m "feat: camera and kind grouping dimensions"
 ### Task 3: thread filter into `getFeedPage` (`server/db/feed.js`)
 
 **Files:**
+
 - Modify: `server/db/feed.js` — import `buildFilter`; `countCollapsedPath`, `selectPlaceholders`, `getFeedPage`.
 - Test: `server/db/feed.test.js`
 
 **Interfaces:**
+
 - Consumes: `buildFilter` from Task 1.
 - Produces: `getFeedPage(db, { ..., filter })` where `filter` is a spec object (default `{}`). Filtered-out rows never appear; placeholder counts reflect the filter.
 
@@ -269,8 +284,12 @@ describe("getFeedPage — filter", () => {
       { name: "land.jpg", size: 1, mtimeMs: 1, kind: "image" },
       { name: "port.jpg", size: 1, mtimeMs: 1, kind: "image" },
     ]);
-    db.prepare(`UPDATE photos SET width = 400, height = 300 WHERE id = ?`).run(land.id);
-    db.prepare(`UPDATE photos SET width = 300, height = 400 WHERE id = ?`).run(port.id);
+    db.prepare(`UPDATE photos SET width = 400, height = 300 WHERE id = ?`).run(
+      land.id
+    );
+    db.prepare(`UPDATE photos SET width = 300, height = 400 WHERE id = ?`).run(
+      port.id
+    );
     const { items } = getFeedPage(db, {
       groupBy: ["folder"],
       after: 10,
@@ -387,12 +406,26 @@ In `fetchRealRows`, change the query's WHERE and params (the focus-row lookup ab
 Update the two `selectPlaceholders(...)` calls to pass `filter` as the final arg:
 
 ```js
-  const beforePlaceholders = selectPlaceholders(
-    db, collapsed, dims, focusValues, false, beforeReal, before, filter
-  );
-  const afterPlaceholders = selectPlaceholders(
-    db, collapsed, dims, focusValues, true, afterReal, after, filter
-  );
+const beforePlaceholders = selectPlaceholders(
+  db,
+  collapsed,
+  dims,
+  focusValues,
+  false,
+  beforeReal,
+  before,
+  filter
+);
+const afterPlaceholders = selectPlaceholders(
+  db,
+  collapsed,
+  dims,
+  focusValues,
+  true,
+  afterReal,
+  after,
+  filter
+);
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -412,10 +445,12 @@ git commit -m "feat: thread filter through getFeedPage rows and placeholder coun
 ### Task 4: thread filter into `findGroupBoundary` (`server/db/feed.js`)
 
 **Files:**
+
 - Modify: `server/db/feed.js` — `findGroupBoundary`.
 - Test: `server/db/feed.test.js`
 
 **Interfaces:**
+
 - Produces: `findGroupBoundary(db, { ..., filter })`. Group jumps skip groups with no matching photos.
 
 - [ ] **Step 1: Write the failing test**
@@ -435,7 +470,10 @@ describe("findGroupBoundary — filter", () => {
     const [c1] = upsertScan(db, "/photos/ccc", 1, [
       { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
     ]);
-    db.prepare(`UPDATE photos SET rating = 5 WHERE id IN (?, ?)`).run(a1.id, c1.id);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id IN (?, ?)`).run(
+      a1.id,
+      c1.id
+    );
     const res = findGroupBoundary(db, {
       groupBy: ["folder"],
       focusId: a1.id,
@@ -502,10 +540,12 @@ git commit -m "feat: thread filter through findGroupBoundary"
 ### Task 5: thread filter into the tree (`server/db/tree.js`)
 
 **Files:**
+
 - Modify: `server/db/tree.js` — import `buildFilter`; `getTreeNode`, `getFlatTree`.
 - Test: `server/db/tree.test.js` (create if absent, else append)
 
 **Interfaces:**
+
 - Produces: `getTreeNode(db, { ..., filter })` and `getFlatTree(db, { ..., filter })`. `total` reflects the filter; groups with zero matching photos are naturally omitted (the WHERE runs before GROUP BY, so empty groups never appear — no explicit hiding needed).
 
 - [ ] **Step 1: Write the failing test**
@@ -533,7 +573,10 @@ afterEach(async () => {
   delete process.env.AUTOGALLERY_HOME;
 });
 function seedVolume(db, id) {
-  db.prepare(`INSERT INTO volumes (id, label) VALUES (?, ?)`).run(id, `vol${id}`);
+  db.prepare(`INSERT INTO volumes (id, label) VALUES (?, ?)`).run(
+    id,
+    `vol${id}`
+  );
 }
 
 describe("getTreeNode/getFlatTree — filter", () => {
@@ -548,11 +591,17 @@ describe("getTreeNode/getFlatTree — filter", () => {
     ]);
     db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(a1.id);
 
-    const node = getTreeNode(db, { groupBy: ["folder"], filter: { minRating: 4 } });
+    const node = getTreeNode(db, {
+      groupBy: ["folder"],
+      filter: { minRating: 4 },
+    });
     expect(node.total).toBe(1);
     expect(node.nodes.map((n) => n.value)).toEqual(["/photos/aaa"]);
 
-    const flat = getFlatTree(db, { groupBy: ["folder"], filter: { minRating: 4 } });
+    const flat = getFlatTree(db, {
+      groupBy: ["folder"],
+      filter: { minRating: 4 },
+    });
     expect(flat.total).toBe(1);
     expect(flat.leaves.map((l) => l.values.folder)).toEqual(["/photos/aaa"]);
   });
@@ -580,25 +629,29 @@ import { buildFilter } from "./filters.js";
 - total query:
 
 ```js
-  const filter = buildFilter(filterSpec);
-  const total = db
-    .prepare(`SELECT COUNT(*) AS count FROM photos WHERE stale = 0 AND (${filter.sql})`)
-    .get(...filter.params).count;
+const filter = buildFilter(filterSpec);
+const total = db
+  .prepare(
+    `SELECT COUNT(*) AS count FROM photos WHERE stale = 0 AND (${filter.sql})`
+  )
+  .get(...filter.params).count;
 ```
 
 - nodes query WHERE + params (filter goes first so its params bind first):
 
 ```js
-  const whereSql = ["photos.stale = 0", `(${filter.sql})`, ...prefixClauses].join(" AND ");
-  const rows = db
-    .prepare(
-      `SELECT ${nextDim.expr} AS value, COUNT(*) AS count
+const whereSql = ["photos.stale = 0", `(${filter.sql})`, ...prefixClauses].join(
+  " AND "
+);
+const rows = db
+  .prepare(
+    `SELECT ${nextDim.expr} AS value, COUNT(*) AS count
        FROM photos JOIN folders ON folders.id = photos.folder_id
        WHERE ${whereSql}
        GROUP BY ${nextDim.expr}
        ORDER BY ${nextDim.expr} ${nextDim.direction}`
-    )
-    .all(...filter.params, ...prefixParams);
+  )
+  .all(...filter.params, ...prefixParams);
 ```
 
 3. `getFlatTree(db, { groupBy, filter: filterSpec = {} })` — compile, then:
@@ -632,10 +685,12 @@ git commit -m "feat: thread filter through tree node + flat-tree counts"
 ### Task 6: API layer — parse/validate `filter` on 4 endpoints (`server/api.js`)
 
 **Files:**
+
 - Modify: `server/api.js` — add `parseFilterParam` helper; use it in `/api/feed`, `/api/feed/boundary`, `/api/tree`, `/api/tree/flat`.
 - Test: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: `buildFilter`'s spec shape; `ALLOWED_ORIENTATIONS` from `filters.js`.
 - Produces: each endpoint accepts `?filter=<JSON>` and forwards a validated spec to the DB layer; returns 400 on malformed filter.
 
@@ -702,7 +757,8 @@ function parseFilterParam(req) {
     ) {
       return {
         spec: {},
-        error: "orientations must be a subset of " + ALLOWED_ORIENTATIONS.join("/"),
+        error:
+          "orientations must be a subset of " + ALLOWED_ORIENTATIONS.join("/"),
       };
     }
     spec.orientations = raw.orientations;
@@ -714,11 +770,12 @@ function parseFilterParam(req) {
 In each of the 4 endpoints, right after the existing `groupBy` validation, add:
 
 ```js
-    const { spec: filter, error: filterError } = parseFilterParam(req);
-    if (filterError) return res.status(400).json({ error: filterError });
+const { spec: filter, error: filterError } = parseFilterParam(req);
+if (filterError) return res.status(400).json({ error: filterError });
 ```
 
 and pass `filter` into the DB call:
+
 - `/api/feed`: `getFeedPage(db, { groupBy, collapsed, focusId, startPath, before, after, filter })`
 - `/api/feed/boundary`: `findGroupBoundary(db, { groupBy, collapsed, focusId, direction, filter })`
 - `/api/tree`: `getTreeNode(db, { groupBy, path, filter })`
@@ -741,10 +798,12 @@ git commit -m "feat: accept and validate filter param on feed/boundary/tree endp
 ### Task 7: client filter-spec helpers (`ui/src/lib/filterSpec.js`)
 
 **Files:**
+
 - Create: `ui/src/lib/filterSpec.js`
 - Test: `ui/src/lib/filterSpec.test.js`
 
 **Interfaces:**
+
 - Produces: `DEFAULT_FILTER`, `isActive(spec) → boolean`, `toQueryParam(spec) → string|null`, `ORIENTATIONS: string[]`.
 
 - [ ] **Step 1: Write the failing test**
@@ -752,7 +811,12 @@ git commit -m "feat: accept and validate filter param on feed/boundary/tree endp
 ```js
 // ui/src/lib/filterSpec.js.test — colocated
 import { describe, it, expect } from "vitest";
-import { DEFAULT_FILTER, isActive, toQueryParam, ORIENTATIONS } from "./filterSpec.js";
+import {
+  DEFAULT_FILTER,
+  isActive,
+  toQueryParam,
+  ORIENTATIONS,
+} from "./filterSpec.js";
 
 describe("filterSpec", () => {
   it("the default is inactive", () => {
@@ -768,7 +832,9 @@ describe("filterSpec", () => {
     expect(isActive({ minRating: 0, orientations: ["portrait"] })).toBe(true);
     expect(isActive({ minRating: 0, orientations: ORIENTATIONS })).toBe(false);
     expect(isActive({ minRating: 0, orientations: [] })).toBe(false);
-    expect(JSON.parse(toQueryParam({ minRating: 0, orientations: ["portrait"] }))).toEqual({
+    expect(
+      JSON.parse(toQueryParam({ minRating: 0, orientations: ["portrait"] }))
+    ).toEqual({
       orientations: ["portrait"],
     });
   });
@@ -827,9 +893,11 @@ git commit -m "feat: client filter-spec helpers (isActive/toQueryParam)"
 ### Task 8: thread `filter` into client fetch helpers (`ui/src/lib/api.js`)
 
 **Files:**
+
 - Modify: `ui/src/lib/api.js` — `fetchFeed`, `fetchGroupBoundary`, `fetchTreeNode`, `fetchFlatTree`.
 
 **Interfaces:**
+
 - Consumes: `toQueryParam` from Task 7.
 - Produces: each helper accepts an optional `filter` (a spec object); appends `filter=<json>` only when active.
 
@@ -844,8 +912,8 @@ import { toQueryParam } from "./filterSpec.js";
 In each of the four helpers, add `filter = null` to the destructured options and, after the existing `params` are built (before the `fetch`), add:
 
 ```js
-  const fp = filter ? toQueryParam(filter) : null;
-  if (fp) params.set("filter", fp);
+const fp = filter ? toQueryParam(filter) : null;
+if (fp) params.set("filter", fp);
 ```
 
 For `fetchFlatTree(groupBy)` (positional arg), change its signature to `fetchFlatTree(groupBy, filter = null)` and apply the same two lines.
@@ -867,9 +935,11 @@ git commit -m "feat: pass active filter to feed/boundary/tree fetch helpers"
 ### Task 9: FilterPanel component (`ui/src/lib/FilterPanel.svelte`)
 
 **Files:**
+
 - Create: `ui/src/lib/FilterPanel.svelte`
 
 **Interfaces:**
+
 - Consumes: `DEFAULT_FILTER`, `ORIENTATIONS`, `isActive` from `filterSpec.js`.
 - Produces: a component with `export let filter` and a `change` event (`detail: newSpec`). A `Filter ▾` button opens a popover with a rating segmented control (`Any · ≥1..≥5`) and three orientation toggle chips + Clear. Shows an active dot when `isActive(filter)`.
 
@@ -885,7 +955,11 @@ git commit -m "feat: pass active filter to feed/boundary/tree fetch helpers"
   let open = false;
 
   const RATINGS = [0, 1, 2, 3, 4, 5];
-  const ORIENTATION_LABELS = { landscape: "Landscape", portrait: "Portrait", square: "Square" };
+  const ORIENTATION_LABELS = {
+    landscape: "Landscape",
+    portrait: "Portrait",
+    square: "Square",
+  };
 
   $: active = isActive(filter);
 
@@ -908,7 +982,12 @@ git commit -m "feat: pass active filter to feed/boundary/tree fetch helpers"
 </script>
 
 <div class="filter">
-  <button class="filter-toggle" class:active on:click={() => (open = !open)} title="Filter photos">
+  <button
+    class="filter-toggle"
+    class:active
+    on:click={() => (open = !open)}
+    title="Filter photos"
+  >
     Filter{#if active}<span class="dot" aria-label="filter active"></span>{/if} ▾
   </button>
   {#if open}
@@ -920,8 +999,8 @@ git commit -m "feat: pass active filter to feed/boundary/tree fetch helpers"
             <button
               class="seg"
               class:on={(filter.minRating ?? 0) === r}
-              on:click={() => setRating(r)}
-            >{r === 0 ? "Any" : `≥${r}`}</button>
+              on:click={() => setRating(r)}>{r === 0 ? "Any" : `≥${r}`}</button
+            >
           {/each}
         </div>
       </div>
@@ -929,47 +1008,136 @@ git commit -m "feat: pass active filter to feed/boundary/tree fetch helpers"
         <span class="label">Orientation</span>
         <div class="chips">
           {#each ORIENTATIONS as o}
-            <button class="chip" class:on={has(o)} on:click={() => toggleOrientation(o)}>
+            <button
+              class="chip"
+              class:on={has(o)}
+              on:click={() => toggleOrientation(o)}
+            >
               {ORIENTATION_LABELS[o]}
             </button>
           {/each}
         </div>
       </div>
       <div class="row end">
-        <button class="clear" on:click={clearAll} disabled={!active}>Clear</button>
+        <button class="clear" on:click={clearAll} disabled={!active}
+          >Clear</button
+        >
       </div>
     </div>
   {/if}
 </div>
 
 <style>
-  .filter { position: relative; display: inline-block; }
-  .filter-toggle {
-    background: #101010; border: 1px solid #333; color: #cfcfcf;
-    border-radius: 6px; padding: 4px 10px; font-size: 0.8rem; cursor: pointer;
+  .filter {
+    position: relative;
+    display: inline-block;
   }
-  .filter-toggle.active { border-color: #4c9aff; color: #fff; }
+  .filter-toggle {
+    background: #101010;
+    border: 1px solid #333;
+    color: #cfcfcf;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .filter-toggle.active {
+    border-color: #4c9aff;
+    color: #fff;
+  }
   .dot {
-    display: inline-block; width: 6px; height: 6px; margin: 0 4px;
-    background: #4c9aff; border-radius: 50%; vertical-align: middle;
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin: 0 4px;
+    background: #4c9aff;
+    border-radius: 50%;
+    vertical-align: middle;
   }
   .filter-panel {
-    position: absolute; top: calc(100% + 6px); left: 0; z-index: 50;
-    background: #0d0d0d; border: 1px solid #333; border-radius: 8px;
-    padding: 12px; min-width: 260px; display: flex; flex-direction: column; gap: 12px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 50;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 12px;
+    min-width: 260px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   }
-  .row { display: flex; flex-direction: column; gap: 6px; }
-  .row.end { align-items: flex-end; }
-  .label { font-size: 0.72rem; color: #8a8a8a; text-transform: uppercase; letter-spacing: 0.04em; }
-  .segmented { display: flex; gap: 2px; background: #101010; border: 1px solid #333; border-radius: 6px; padding: 2px; }
-  .seg { flex: 1; border: none; border-radius: 4px; padding: 4px 6px; font-size: 0.78rem; cursor: pointer; background: transparent; color: #9a9a9a; }
-  .seg.on { background: #4c9aff; color: #06121f; font-weight: 600; }
-  .chips { display: flex; gap: 6px; }
-  .chip { border: 1px solid #333; border-radius: 999px; padding: 4px 12px; font-size: 0.78rem; cursor: pointer; background: transparent; color: #9a9a9a; }
-  .chip.on { background: #4c9aff; color: #06121f; border-color: #4c9aff; font-weight: 600; }
-  .clear { background: transparent; border: 1px solid #444; color: #cfcfcf; border-radius: 6px; padding: 3px 10px; font-size: 0.78rem; cursor: pointer; }
-  .clear:disabled { opacity: 0.4; cursor: default; }
+  .row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .row.end {
+    align-items: flex-end;
+  }
+  .label {
+    font-size: 0.72rem;
+    color: #8a8a8a;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .segmented {
+    display: flex;
+    gap: 2px;
+    background: #101010;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 2px;
+  }
+  .seg {
+    flex: 1;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    background: transparent;
+    color: #9a9a9a;
+  }
+  .seg.on {
+    background: #4c9aff;
+    color: #06121f;
+    font-weight: 600;
+  }
+  .chips {
+    display: flex;
+    gap: 6px;
+  }
+  .chip {
+    border: 1px solid #333;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    background: transparent;
+    color: #9a9a9a;
+  }
+  .chip.on {
+    background: #4c9aff;
+    color: #06121f;
+    border-color: #4c9aff;
+    font-weight: 600;
+  }
+  .clear {
+    background: transparent;
+    border: 1px solid #444;
+    color: #cfcfcf;
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .clear:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
 </style>
 ```
 
@@ -990,9 +1158,11 @@ git commit -m "feat: FilterPanel component (rating + orientation popover)"
 ### Task 10: wire filter into App.svelte
 
 **Files:**
+
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: `FilterPanel`, `DEFAULT_FILTER`, `isActive` from Tasks 7/9; the `filter`-aware fetch helpers from Task 8.
 
 **Read first:** before editing, read `ui/src/App.svelte` around the `groupBy` state (lines ~95–115), `onGroupByChange` and the feed-reset/reload it triggers (~270–360), and every fetch call site (`grep -n "fetchFeed\|fetchGroupBoundary\|fetchTreeNode\|fetchFlatTree" ui/src/App.svelte`). The filter must ride along on **every** one of those calls, exactly like `groupBy` does.
@@ -1002,24 +1172,30 @@ git commit -m "feat: FilterPanel component (rating + orientation popover)"
 Near the `groupBy` block:
 
 ```js
-  import FilterPanel from "./lib/FilterPanel.svelte";
-  import { DEFAULT_FILTER, isActive as filterIsActive } from "./lib/filterSpec.js";
+import FilterPanel from "./lib/FilterPanel.svelte";
+import {
+  DEFAULT_FILTER,
+  isActive as filterIsActive,
+} from "./lib/filterSpec.js";
 
-  const LS_FILTER = "autogallery.filter";
-  let filter = (() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(LS_FILTER) ?? "null");
-      if (stored && typeof stored === "object") return { ...DEFAULT_FILTER, ...stored };
-    } catch { /* fall through */ }
-    return { ...DEFAULT_FILTER };
-  })();
-  $: localStorage.setItem(LS_FILTER, JSON.stringify(filter));
+const LS_FILTER = "autogallery.filter";
+let filter = (() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(LS_FILTER) ?? "null");
+    if (stored && typeof stored === "object")
+      return { ...DEFAULT_FILTER, ...stored };
+  } catch {
+    /* fall through */
+  }
+  return { ...DEFAULT_FILTER };
+})();
+$: localStorage.setItem(LS_FILTER, JSON.stringify(filter));
 ```
 
 And extend `ALL_DIMENSIONS`:
 
 ```js
-  const ALL_DIMENSIONS = ["folder", "year", "month", "day", "camera", "kind"];
+const ALL_DIMENSIONS = ["folder", "year", "month", "day", "camera", "kind"];
 ```
 
 - [ ] **Step 2: Thread `filter` into every fetch call**
@@ -1031,13 +1207,15 @@ At each `fetchFeed({...})`, `fetchGroupBoundary({...})`, `fetchTreeNode({...})` 
 Mirror whatever `onGroupByChange` does to reset the window and reload from the current focus. Add:
 
 ```js
-  function onFilterChange(next) {
-    filter = next;
-    // If the currently-selected photo still passes the filter, keep it as the
-    // reload focus; otherwise reload from the top of the current hierarchy.
-    const focusId = filterIsActive(filter) ? currentFocusIdIfStillMatching() : selectedPhotoId();
-    reloadFeed(focusId); // ← use the same reset/reload path onGroupByChange uses
-  }
+function onFilterChange(next) {
+  filter = next;
+  // If the currently-selected photo still passes the filter, keep it as the
+  // reload focus; otherwise reload from the top of the current hierarchy.
+  const focusId = filterIsActive(filter)
+    ? currentFocusIdIfStillMatching()
+    : selectedPhotoId();
+  reloadFeed(focusId); // ← use the same reset/reload path onGroupByChange uses
+}
 ```
 
 Concretely: match `onGroupByChange`'s body — reset `items`, bump `feedEpoch`/`countsEpoch`, clear `headerCounts`/`fetchedParents`, and call the initial-feed loader. The simplest correct behavior for v1: **reload from the top of the current hierarchy** (do not attempt focus preservation) — pass no `focusId`. Preserving focus is a nice-to-have; if `onGroupByChange` already preserves focus, reuse that; otherwise top-reload is acceptable and honest. Do NOT hand-roll a new `fetchingBefore/fetchingAfter/feedEpoch` guard block — route through the existing loader (CLAUDE.md rule).
@@ -1047,7 +1225,7 @@ Concretely: match `onGroupByChange`'s body — reset `items`, bump `feedEpoch`/`
 In the `<header class="topbar">`, next to the `group-by` selector:
 
 ```svelte
-    <FilterPanel {filter} on:change={(e) => onFilterChange(e.detail)} />
+<FilterPanel {filter} on:change={(e) => onFilterChange(e.detail)} />
 ```
 
 - [ ] **Step 5: Verify build + unit tests**

@@ -65,7 +65,10 @@
       title="Toggle ascending / descending"
       aria-label="Toggle sort direction"
       on:click={() =>
-        dispatch("sortchange", { ...sort, dir: sort.dir === "asc" ? "desc" : "asc" })}
+        dispatch("sortchange", {
+          ...sort,
+          dir: sort.dir === "asc" ? "desc" : "asc",
+        })}
     >
       {sort.dir === "asc" ? "↑" : "↓"}
     </button>
@@ -122,8 +125,14 @@
       </svg>
     </button>
   </div>
-  <RatingFilter {filter} on:change={(e) => dispatch("filterchange", e.detail)} />
-  <OrientationFilter {filter} on:change={(e) => dispatch("filterchange", e.detail)} />
+  <RatingFilter
+    {filter}
+    on:change={(e) => dispatch("filterchange", e.detail)}
+  />
+  <OrientationFilter
+    {filter}
+    on:change={(e) => dispatch("filterchange", e.detail)}
+  />
   {#if timeMin != null && timeMax != null && timeMax > timeMin}
     <div class="time-filter" title="Filter by capture time — drag the handles">
       <TimelineFilter
@@ -149,7 +158,10 @@
       title="Clear filters"
       aria-label="Clear filters"
       on:click={() =>
-        dispatch("filterchange", { ...DEFAULT_FILTER, dateAttr: filter.dateAttr })}
+        dispatch("filterchange", {
+          ...DEFAULT_FILTER,
+          dateAttr: filter.dateAttr,
+        })}
     >
       ✕
     </button>

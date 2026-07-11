@@ -51,12 +51,12 @@ Replace the single-folder grid with a continuous, cross-folder feed that:
 Four dimensions, each a plain SQL expression over `photos`/`folders` — no
 new schema, no precomputation:
 
-| Dimension | Expression                                                  | Default direction |
-|-----------|--------------------------------------------------------------|--------------------|
-| `folder`  | `folders.abs_path`                                            | ascending          |
-| `year`    | `COALESCE(strftime('%Y', photos.taken_at/1000, 'unixepoch'), 'Unknown')` | descending |
-| `month`   | `COALESCE(strftime('%Y-%m', photos.taken_at/1000, 'unixepoch'), 'Unknown')` | descending |
-| `day`     | `COALESCE(strftime('%Y-%m-%d', photos.taken_at/1000, 'unixepoch'), 'Unknown')` | descending |
+| Dimension | Expression                                                                     | Default direction |
+| --------- | ------------------------------------------------------------------------------ | ----------------- |
+| `folder`  | `folders.abs_path`                                                             | ascending         |
+| `year`    | `COALESCE(strftime('%Y', photos.taken_at/1000, 'unixepoch'), 'Unknown')`       | descending        |
+| `month`   | `COALESCE(strftime('%Y-%m', photos.taken_at/1000, 'unixepoch'), 'Unknown')`    | descending        |
+| `day`     | `COALESCE(strftime('%Y-%m-%d', photos.taken_at/1000, 'unixepoch'), 'Unknown')` | descending        |
 
 `taken_at` is nullable (stored as epoch ms); photos with no capture date
 collapse into an `'Unknown'` bucket sorted last, rather than being dropped.
@@ -116,12 +116,12 @@ together). For each collapsed path whose range falls inside the requested
 window, a separate `GROUP BY`-count query produces one summary row
 (`{collapsed: true, path, count}`) inserted at the correct sort position —
 so the header still renders with a real count, with nothing underneath
-fetched. Only collapsed paths overlapping the *current* window are
+fetched. Only collapsed paths overlapping the _current_ window are
 summarized; a collapsed path far outside the loaded range costs nothing
 until scrolled near.
 
 **Changing the hierarchy** discards the loaded window, clears the
-collapsed-path set (a collapsed path is a prefix in the *old* `groupBy`
+collapsed-path set (a collapsed path is a prefix in the _old_ `groupBy`
 order and generally isn't even a valid prefix of the new one), and
 re-fetches centered on the currently-focused photo's position in the new
 order — "currently-focused" meaning whichever photo is presently

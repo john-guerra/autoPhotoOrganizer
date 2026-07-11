@@ -105,7 +105,7 @@ resets descendant tree nodes' own expand memory.
 Extends `getFeedPage` (`server/db/feed.js`): the real (non-collapsed) rows
 for a page are computed exactly as today — unchanged query, unchanged
 cost. Additionally, for each path in `collapsed`, compute where that
-path's fixed prefix values would sort *within this specific page*, using
+path's fixed prefix values would sort _within this specific page_, using
 the same per-dimension comparator convention already used for keyset
 seeking (`cmpOp`/`seekCondition`). If that position falls within the
 page's actual boundary (between two adjacent real rows already returned,

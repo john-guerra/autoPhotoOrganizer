@@ -90,16 +90,16 @@ npm run format # prettier
 
 ## Keyboard shortcuts
 
-| Key | Action |
-| --- | --- |
-| `←` `→` `↑` `↓` | Move selection in the grid |
-| `Home` / `End` | Jump to first / last photo |
-| `Enter` / `Space` | Open the loupe (or expand/collapse a burst stack) |
-| `Esc` | Close the loupe / collapse the expanded stack |
-| `1`–`5` | Rate the selected photo (auto-advances) |
-| `0` | Clear the rating |
-| `C` | Set/unset the current photo as its burst stack's cover |
-| `+` / `-` | Zoom the grid density |
+| Key               | Action                                                 |
+| ----------------- | ------------------------------------------------------ |
+| `←` `→` `↑` `↓`   | Move selection in the grid                             |
+| `Home` / `End`    | Jump to first / last photo                             |
+| `Enter` / `Space` | Open the loupe (or expand/collapse a burst stack)      |
+| `Esc`             | Close the loupe / collapse the expanded stack          |
+| `1`–`5`           | Rate the selected photo (auto-advances)                |
+| `0`               | Clear the rating                                       |
+| `C`               | Set/unset the current photo as its burst stack's cover |
+| `+` / `-`         | Zoom the grid density                                  |
 
 ## Architecture
 

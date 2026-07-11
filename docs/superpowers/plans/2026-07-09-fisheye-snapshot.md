@@ -23,11 +23,13 @@
 ### Task 1: Sampling math (server + client port)
 
 **Files:**
+
 - Create: `server/db/sampleGroup.js`, `server/db/sampleGroup.test.js`
 - Create: `ui/src/lib/snapshot.js`, `ui/src/lib/snapshot.test.js`
 
 **Interfaces:**
-- Produces: `sampleOffsets(count, slots) -> { offsets: number[], gaps: number[] }`. `offsets` strictly increasing indices in `[0,count)`; `gaps` = the positions *within `offsets`* after which a real omission occurs (for rendering a `…`). Identical logic in both files (server is authoritative; client is a copy — note the twin in a comment, like `feed.js`/`tree.js` MONTH_NAMES).
+
+- Produces: `sampleOffsets(count, slots) -> { offsets: number[], gaps: number[] }`. `offsets` strictly increasing indices in `[0,count)`; `gaps` = the positions _within `offsets`_ after which a real omission occurs (for rendering a `…`). Identical logic in both files (server is authoritative; client is a copy — note the twin in a comment, like `feed.js`/`tree.js` MONTH_NAMES).
 - Also `slotCount(widthPx, thumbPx, gapPx) -> number` in `ui/src/lib/snapshot.js`: `Math.max(1, Math.floor((widthPx + gapPx) / (thumbPx + gapPx)))`.
 
 - [ ] **Step 1: Write failing tests** for `sampleOffsets`:
@@ -41,29 +43,34 @@
 ```js
 export function sampleOffsets(count, slots) {
   if (count <= 0 || slots <= 0) return { offsets: [], gaps: [] };
-  if (count <= slots) return { offsets: Array.from({ length: count }, (_, i) => i), gaps: [] };
+  if (count <= slots)
+    return { offsets: Array.from({ length: count }, (_, i) => i), gaps: [] };
   const last = Math.min(2, slots);
   const first = Math.max(0, Math.ceil((slots - last) * 0.6));
   const mid = slots - last - first;
   const offsets = [];
   for (let i = 0; i < first; i++) offsets.push(i);
   // middle: evenly sample `mid` indices strictly inside (first-1, count-last)
-  const lo = first, hi = count - last - 1; // inclusive middle band
+  const lo = first,
+    hi = count - last - 1; // inclusive middle band
   for (let k = 0; k < mid; k++) {
     const t = (k + 1) / (mid + 1);
     let idx = Math.round(lo + t * (hi - lo));
-    if (offsets.length && idx <= offsets[offsets.length - 1]) idx = offsets[offsets.length - 1] + 1;
+    if (offsets.length && idx <= offsets[offsets.length - 1])
+      idx = offsets[offsets.length - 1] + 1;
     if (idx <= hi) offsets.push(idx);
   }
   for (let i = count - last; i < count; i++) offsets.push(i);
   // gaps: after any offset whose successor skips ≥2
   const gaps = [];
-  for (let i = 0; i < offsets.length - 1; i++) if (offsets[i + 1] - offsets[i] > 1) gaps.push(i);
+  for (let i = 0; i < offsets.length - 1; i++)
+    if (offsets[i + 1] - offsets[i] > 1) gaps.push(i);
   return { offsets, gaps };
 }
 ```
 
-  Copy verbatim into `ui/src/lib/snapshot.js`; add `slotCount` there.
+Copy verbatim into `ui/src/lib/snapshot.js`; add `slotCount` there.
+
 - [ ] **Step 4: Run tests** — expect PASS.
 - [ ] **Step 5: Commit** `feat(snapshot): pure sampleOffsets (first/middle/last) + client slotCount`.
 
@@ -72,6 +79,7 @@ export function sampleOffsets(count, slots) {
 **Files:** Modify `server/api.js`; test `server/api.test.js`.
 
 **Interfaces:**
+
 - Produces: `GET /api/group/sample?path=<json>&filter=&sort=&groupBy=&slots=` → `{ count, samples: Array<{...photo, offset, gapAfter}> }`. `samples` ordered by the same feed ORDER BY; ids equal the `sampleOffsets(count,slots)` slice of the group's ordered rows.
 
 - [ ] **Step 1: Write failing test**: scan a temp folder; `GET /api/group/sample` for a `folder` group with `slots=5` returns `count` = folder size and `samples.length = min(count,5)`; sample ids match the same `LIMIT/OFFSET` slice of `GET /api/feed?groupBy=folder` order; `gapAfter` true only at real gaps.
@@ -85,6 +93,7 @@ export function sampleOffsets(count, slots) {
 **Files:** Modify `ui/src/lib/api.js`.
 
 **Interfaces:**
+
 - Produces: `fetchGroupSample({ path, filter, sort, groupBy, slots }) -> {count, samples}` (follows the existing `fetchFeed` param-building style, including `sort`/`filter` serialization already used there).
 
 - [ ] **Step 1:** Implement following the existing helpers; no separate unit test (thin wrapper — covered live).
@@ -96,6 +105,7 @@ export function sampleOffsets(count, slots) {
 **Files:** Create `ui/src/lib/SnapshotStrip.svelte`.
 
 **Interfaces:**
+
 - Props (two shapes): `{ ids }` (ordered id list — samples client-side, no fetch) OR `{ groupPath, count, filter, sort, groupBy }` (fetches). Optional `thumbPx = 110`, `gapPx = 4`, `mtimeById` (Map, for cache-busting thumb URLs when available).
 - Emits `select` with `{ id }` on thumbnail click.
 
@@ -133,6 +143,7 @@ export function sampleOffsets(count, slots) {
 **Files:** Modify `ui/src/lib/displayEntries.js` (+ its test), `ui/src/App.svelte`.
 
 **Interfaces:**
+
 - Consumes: `SnapshotStrip`, `pathKey` (from `feed.js`).
 - Produces: a per-group `snapshotGroupKeys` Set in App.svelte; a new `displayEntries` entry `kind: "snapshot"` emitted for a group in snapshot state (sibling of the existing `kind: "placeholder"` collapsed case); header click cycles expanded → snapshot → collapsed → expanded.
 

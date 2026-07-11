@@ -69,7 +69,9 @@
     </div>
 
     {#if state === "downloading"}
-      <div class="bar"><div class="fill" style="width:{status.percent ?? 0}%"></div></div>
+      <div class="bar">
+        <div class="fill" style="width:{status.percent ?? 0}%"></div>
+      </div>
     {/if}
 
     {#if state === "downloaded"}
@@ -78,8 +80,11 @@
       </button>
     {/if}
 
-    <button class="close" title="Dismiss" aria-label="Dismiss" on:click={() => (dismissed = true)}
-      >×</button
+    <button
+      class="close"
+      title="Dismiss"
+      aria-label="Dismiss"
+      on:click={() => (dismissed = true)}>×</button
     >
   </div>
 {/if}

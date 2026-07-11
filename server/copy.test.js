@@ -180,9 +180,9 @@ describe("copyIdsIntoFolder — move mode, cross-volume (EXDEV) fallback", () =>
 
     forceExdev = true;
     forceCorruptCopy = true;
-    expect(() =>
-      copyIdsIntoFolder(db, destDir, [id], { move: true })
-    ).toThrow(/verify failed/i);
+    expect(() => copyIdsIntoFolder(db, destDir, [id], { move: true })).toThrow(
+      /verify failed/i
+    );
 
     // Source must survive a failed verification — never lost.
     expect(existsSync(join(srcDir, "a.jpg"))).toBe(true);

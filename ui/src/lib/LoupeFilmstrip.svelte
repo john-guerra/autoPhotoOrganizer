@@ -23,7 +23,7 @@
 
   let stripEl;
   // Keep the current thumb centered horizontally whenever the index changes.
-  $: index, scrollCurrentIntoView();
+  $: (index, scrollCurrentIntoView());
   async function scrollCurrentIntoView() {
     await tick();
     stripEl?.querySelector(".cell.current")?.scrollIntoView({

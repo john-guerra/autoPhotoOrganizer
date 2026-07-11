@@ -53,7 +53,11 @@ describe("mergeFeedPage", () => {
 
   it("never introduces a duplicate id across merges", () => {
     const win = mergeFeedPage(
-      { items: [{ id: 1 }, { id: 2 }], hasMoreBefore: false, hasMoreAfter: true },
+      {
+        items: [{ id: 1 }, { id: 2 }],
+        hasMoreBefore: false,
+        hasMoreAfter: true,
+      },
       { items: [{ id: 2 }, { id: 3 }] }, // id 2 overlaps
       "after",
       2

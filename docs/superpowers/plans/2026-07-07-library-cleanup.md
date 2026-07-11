@@ -30,20 +30,21 @@ reachable from the existing "Library ▾" dropdown in `App.svelte`.
   recomputation must check exactly these five buckets, not an arbitrary
   range.
 - The thumbnail cache key formula, unchanged, from `server/api.js`'s
-  existing `/api/thumb/:id` route: `sha1(\`${path}:${mtime}:${size}:${bucket}\`)`
-  hex digest, filename `<hex>.jpg` under `thumbsDir()`.
+  existing `/api/thumb/:id` route: `sha1(\`${path}:${mtime}:${size}:${bucket}\`)`hex digest, filename`<hex>.jpg`under`thumbsDir()`.
 
 ---
 
 ### Task 1: Server — folder removal
 
 **Files:**
+
 - Modify: `server/db/photos.js`
 - Modify: `server/db/photos.test.js`
 - Modify: `server/api.js`
 - Modify: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: `deleteFolder(db, folderId)` returning `boolean` (`true` if a
   folder with that id existed and was removed, `false` if not found) — used
@@ -104,7 +105,9 @@ describe("deleteFolder", () => {
       .get();
     expect(folderBRow).toBeDefined();
     expect(
-      db.prepare(`SELECT filename FROM photos WHERE folder_id = ?`).all(folderBRow.id)
+      db
+        .prepare(`SELECT filename FROM photos WHERE folder_id = ?`)
+        .all(folderBRow.id)
     ).toEqual([{ filename: "2.jpg" }]);
   });
 
@@ -180,7 +183,12 @@ describe("DELETE /api/folders/:id", () => {
   it("removes the folder and its photos; real files on disk are untouched", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "ag-removeme-"));
     await sharp({
-      create: { width: 40, height: 30, channels: 3, background: { r: 1, g: 2, b: 3 } },
+      create: {
+        width: 40,
+        height: 30,
+        channels: 3,
+        background: { r: 1, g: 2, b: 3 },
+      },
     })
       .jpeg()
       .toFile(join(tempDir, "x.jpg"));
@@ -234,93 +242,93 @@ Change the `GET /api/library` route's SELECT and mapping (find it by
 searching for `app.get("/api/library"`) from:
 
 ```js
-  app.get("/api/library", (_req, res) => {
-    const db = getDb();
-    const rows = db
-      .prepare(
-        `SELECT folders.abs_path AS path, folders.last_scanned_at AS lastScannedAt,
+app.get("/api/library", (_req, res) => {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT folders.abs_path AS path, folders.last_scanned_at AS lastScannedAt,
                 volumes.uuid AS volumeUuid, volumes.last_mount_path AS volumeMountPath
          FROM folders LEFT JOIN volumes ON volumes.id = folders.volume_id
          ORDER BY folders.last_scanned_at DESC`
-      )
-      .all();
-    // isVolumeMounted shells out to `diskutil info` synchronously; memoize per
-    // volume so N folders on the same volume cost one subprocess, not N.
-    const mountedByVolumeKey = new Map();
-    const entries = rows.map((r) => {
-      const volumeKey = r.volumeUuid ?? r.volumeMountPath ?? null;
-      let volumeMounted = true;
-      if (volumeKey !== null) {
-        if (!mountedByVolumeKey.has(volumeKey)) {
-          mountedByVolumeKey.set(
-            volumeKey,
-            isVolumeMounted({
-              uuid: r.volumeUuid,
-              last_mount_path: r.volumeMountPath,
-            })
-          );
-        }
-        volumeMounted = mountedByVolumeKey.get(volumeKey);
+    )
+    .all();
+  // isVolumeMounted shells out to `diskutil info` synchronously; memoize per
+  // volume so N folders on the same volume cost one subprocess, not N.
+  const mountedByVolumeKey = new Map();
+  const entries = rows.map((r) => {
+    const volumeKey = r.volumeUuid ?? r.volumeMountPath ?? null;
+    let volumeMounted = true;
+    if (volumeKey !== null) {
+      if (!mountedByVolumeKey.has(volumeKey)) {
+        mountedByVolumeKey.set(
+          volumeKey,
+          isVolumeMounted({
+            uuid: r.volumeUuid,
+            last_mount_path: r.volumeMountPath,
+          })
+        );
       }
-      return {
-        path: r.path,
-        name: basename(r.path),
-        lastScannedAt: r.lastScannedAt,
-        mounted: volumeMounted && existsSync(r.path),
-      };
-    });
-    res.json(entries);
+      volumeMounted = mountedByVolumeKey.get(volumeKey);
+    }
+    return {
+      path: r.path,
+      name: basename(r.path),
+      lastScannedAt: r.lastScannedAt,
+      mounted: volumeMounted && existsSync(r.path),
+    };
   });
+  res.json(entries);
+});
 ```
 
 to:
 
 ```js
-  app.get("/api/library", (_req, res) => {
-    const db = getDb();
-    const rows = db
-      .prepare(
-        `SELECT folders.id AS id, folders.abs_path AS path, folders.last_scanned_at AS lastScannedAt,
+app.get("/api/library", (_req, res) => {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT folders.id AS id, folders.abs_path AS path, folders.last_scanned_at AS lastScannedAt,
                 volumes.uuid AS volumeUuid, volumes.last_mount_path AS volumeMountPath
          FROM folders LEFT JOIN volumes ON volumes.id = folders.volume_id
          ORDER BY folders.last_scanned_at DESC`
-      )
-      .all();
-    // isVolumeMounted shells out to `diskutil info` synchronously; memoize per
-    // volume so N folders on the same volume cost one subprocess, not N.
-    const mountedByVolumeKey = new Map();
-    const entries = rows.map((r) => {
-      const volumeKey = r.volumeUuid ?? r.volumeMountPath ?? null;
-      let volumeMounted = true;
-      if (volumeKey !== null) {
-        if (!mountedByVolumeKey.has(volumeKey)) {
-          mountedByVolumeKey.set(
-            volumeKey,
-            isVolumeMounted({
-              uuid: r.volumeUuid,
-              last_mount_path: r.volumeMountPath,
-            })
-          );
-        }
-        volumeMounted = mountedByVolumeKey.get(volumeKey);
+    )
+    .all();
+  // isVolumeMounted shells out to `diskutil info` synchronously; memoize per
+  // volume so N folders on the same volume cost one subprocess, not N.
+  const mountedByVolumeKey = new Map();
+  const entries = rows.map((r) => {
+    const volumeKey = r.volumeUuid ?? r.volumeMountPath ?? null;
+    let volumeMounted = true;
+    if (volumeKey !== null) {
+      if (!mountedByVolumeKey.has(volumeKey)) {
+        mountedByVolumeKey.set(
+          volumeKey,
+          isVolumeMounted({
+            uuid: r.volumeUuid,
+            last_mount_path: r.volumeMountPath,
+          })
+        );
       }
-      return {
-        id: r.id,
-        path: r.path,
-        name: basename(r.path),
-        lastScannedAt: r.lastScannedAt,
-        mounted: volumeMounted && existsSync(r.path),
-      };
-    });
-    res.json(entries);
+      volumeMounted = mountedByVolumeKey.get(volumeKey);
+    }
+    return {
+      id: r.id,
+      path: r.path,
+      name: basename(r.path),
+      lastScannedAt: r.lastScannedAt,
+      mounted: volumeMounted && existsSync(r.path),
+    };
   });
+  res.json(entries);
+});
 
-  app.delete("/api/folders/:id", (req, res) => {
-    const db = getDb();
-    const removed = deleteFolder(db, Number(req.params.id));
-    if (!removed) return res.status(404).end();
-    res.json({ removed: true });
-  });
+app.delete("/api/folders/:id", (req, res) => {
+  const db = getDb();
+  const removed = deleteFolder(db, Number(req.params.id));
+  if (!removed) return res.status(404).end();
+  res.json({ removed: true });
+});
 ```
 
 - [ ] **Step 8: Run the tests to verify they pass**
@@ -346,16 +354,18 @@ git commit -m "feat: add folder removal (DELETE /api/folders/:id) and expose fol
 ### Task 2: Server — cache management module and routes
 
 **Files:**
+
 - Create: `server/lib/cacheStats.js`
 - Create: `server/lib/cacheStats.test.js`
 - Modify: `server/api.js`
 - Modify: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: `thumbsDir()` from `server/lib/cachePaths.js` (existing).
 - Produces: `getCacheStats()` → `{totalBytes:number, totalFiles:number}`.
   `getCacheBreakdown(db)` → `{folders: Array<{id:number, path:string,
-  cachedBytes:number, cachedFiles:number}>}`. `clearCache()` →
+cachedBytes:number, cachedFiles:number}>}`. `clearCache()` →
   `{freedBytes:number, freedFiles:number}`. `pruneOrphanedCache(db)` →
   `{freedBytes:number, freedFiles:number}`. Four routes:
   `GET /api/cache/stats`, `GET /api/cache/breakdown`,
@@ -666,21 +676,21 @@ Add these routes immediately after the `DELETE /api/folders/:id` route
 added in Task 1:
 
 ```js
-  app.get("/api/cache/stats", (_req, res) => {
-    res.json(getCacheStats());
-  });
+app.get("/api/cache/stats", (_req, res) => {
+  res.json(getCacheStats());
+});
 
-  app.get("/api/cache/breakdown", (_req, res) => {
-    res.json(getCacheBreakdown(getDb()));
-  });
+app.get("/api/cache/breakdown", (_req, res) => {
+  res.json(getCacheBreakdown(getDb()));
+});
 
-  app.post("/api/cache/clear", (_req, res) => {
-    res.json(clearCache());
-  });
+app.post("/api/cache/clear", (_req, res) => {
+  res.json(clearCache());
+});
 
-  app.post("/api/cache/prune", (_req, res) => {
-    res.json(pruneOrphanedCache(getDb()));
-  });
+app.post("/api/cache/prune", (_req, res) => {
+  res.json(pruneOrphanedCache(getDb()));
+});
 ```
 
 - [ ] **Step 6: Write the failing route-level tests**
@@ -723,7 +733,9 @@ describe("cache management routes", () => {
     const scanBody = await scan(srv.base, photosDir);
     const id = scanBody.items[0].id;
     await fetch(`${srv.base}/api/thumb/${id}?size=160`);
-    expect((await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles).toBeGreaterThan(0);
+    expect(
+      (await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles
+    ).toBeGreaterThan(0);
 
     const result = await (
       await fetch(`${srv.base}/api/cache/clear`, { method: "POST" })
@@ -740,7 +752,12 @@ describe("cache management routes", () => {
     await fetch(`${srv.base}/api/cache/clear`, { method: "POST" });
     const tempDir = await mkdtemp(join(tmpdir(), "ag-prunetest-"));
     await sharp({
-      create: { width: 40, height: 30, channels: 3, background: { r: 9, g: 9, b: 9 } },
+      create: {
+        width: 40,
+        height: 30,
+        channels: 3,
+        background: { r: 9, g: 9, b: 9 },
+      },
     })
       .jpeg()
       .toFile(join(tempDir, "z.jpg"));
@@ -748,7 +765,9 @@ describe("cache management routes", () => {
     const scanBody = await scan(srv.base, tempDir);
     const id = scanBody.items[0].id;
     await fetch(`${srv.base}/api/thumb/${id}?size=160`);
-    expect((await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles).toBe(1);
+    expect(
+      (await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles
+    ).toBe(1);
 
     const lib = await (await fetch(`${srv.base}/api/library`)).json();
     const entry = lib.find((e) => e.path === tempDir);
@@ -790,9 +809,11 @@ git commit -m "feat: add cache stats/breakdown/clear/prune module and routes"
 ### Task 3: Client — API helpers
 
 **Files:**
+
 - Modify: `ui/src/lib/api.js`
 
 **Interfaces:**
+
 - Consumes: the five routes from Tasks 1-2.
 - Produces: `deleteFolder(id)`, `fetchCacheStats()`, `fetchCacheBreakdown()`,
   `clearCache()`, `pruneCache()`. Task 4 consumes all five.
@@ -861,10 +882,12 @@ git commit -m "feat: add client API helpers for folder removal and cache managem
 ### Task 4: Client — `ManageLibrary.svelte` panel and `App.svelte` integration
 
 **Files:**
+
 - Create: `ui/src/lib/ManageLibrary.svelte`
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: `deleteFolder`, `fetchCacheStats`, `fetchCacheBreakdown`,
   `clearCache`, `pruneCache` from Task 3; `library` (existing state, an
   array of `{id, path, name, lastScannedAt, mounted}` from `fetchLibrary`)
@@ -919,7 +942,11 @@ git commit -m "feat: add client API helpers for folder removal and cache managem
   }
 
   async function removeFolder(entry) {
-    if (!confirm(`Remove "${entry.name}" from the library? Real files on disk are not affected.`)) {
+    if (
+      !confirm(
+        `Remove "${entry.name}" from the library? Real files on disk are not affected.`
+      )
+    ) {
       return;
     }
     busy = true;
@@ -935,7 +962,11 @@ git commit -m "feat: add client API helpers for folder removal and cache managem
   }
 
   async function doClearCache() {
-    if (!confirm("Clear the entire thumbnail cache? It will regenerate automatically as photos are viewed again.")) {
+    if (
+      !confirm(
+        "Clear the entire thumbnail cache? It will regenerate automatically as photos are viewed again."
+      )
+    ) {
       return;
     }
     busy = true;
@@ -1021,7 +1052,8 @@ git commit -m "feat: add client API helpers for folder removal and cache managem
             {#each breakdown.folders as f (f.id)}
               <li>
                 <span class="folder-path" title={f.path}>{f.path}</span>
-                <span>{formatBytes(f.cachedBytes)} ({f.cachedFiles} files)</span>
+                <span>{formatBytes(f.cachedBytes)} ({f.cachedFiles} files)</span
+                >
               </li>
             {/each}
           </ul>
@@ -1144,25 +1176,25 @@ git commit -m "feat: add client API helpers for folder removal and cache managem
 Add the import (find the line `import TreeSidebar from "./lib/TreeSidebar.svelte";`):
 
 ```js
-  import TreeSidebar from "./lib/TreeSidebar.svelte";
-  import ManageLibrary from "./lib/ManageLibrary.svelte";
+import TreeSidebar from "./lib/TreeSidebar.svelte";
+import ManageLibrary from "./lib/ManageLibrary.svelte";
 ```
 
 Add new state near the existing `let libraryOpen` declaration (search for
 `libraryOpen`):
 
 ```js
-  let manageLibraryOpen = false;
+let manageLibraryOpen = false;
 ```
 
 Add a handler function near `refreshLibrary` (search for
 `async function refreshLibrary`):
 
 ```js
-  async function onFolderRemoved() {
-    await refreshLibrary();
-    loadInitialFeed();
-  }
+async function onFolderRemoved() {
+  await refreshLibrary();
+  loadInitialFeed();
+}
 ```
 
 In the template, add a "Manage library…" entry to the existing library
@@ -1203,13 +1235,13 @@ div (search for the end of the library dropdown block, right before the
 next major template section):
 
 ```svelte
-    {#if manageLibraryOpen}
-      <ManageLibrary
-        {library}
-        on:close={() => (manageLibraryOpen = false)}
-        on:folderRemoved={onFolderRemoved}
-      />
-    {/if}
+{#if manageLibraryOpen}
+  <ManageLibrary
+    {library}
+    on:close={() => (manageLibraryOpen = false)}
+    on:folderRemoved={onFolderRemoved}
+  />
+{/if}
 ```
 
 - [ ] **Step 3: Run the full test suite and build**

@@ -20,7 +20,9 @@ describe("listenOnOpenPort (issue #64)", () => {
 
   it("falls back to a different free port when the preferred one is taken", async () => {
     // Occupy a real port first.
-    const first = track(await listenOnOpenPort(express(), { preferredPort: 0 }));
+    const first = track(
+      await listenOnOpenPort(express(), { preferredPort: 0 })
+    );
     const taken = first.port;
     // Asking for that same (now-occupied) port must not throw EADDRINUSE —
     // it should transparently land on a different free port.

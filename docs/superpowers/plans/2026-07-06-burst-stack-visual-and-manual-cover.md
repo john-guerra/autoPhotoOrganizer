@@ -22,6 +22,7 @@
 ### Task 1: Manual cover choice persistence + API
 
 **Files:**
+
 - Modify: `server/lib/cachePaths.js`
 - Create: `server/coverChoices.js`
 - Modify: `server/api.js`
@@ -29,6 +30,7 @@
 - Modify: `ui/src/lib/api.js`
 
 **Interfaces:**
+
 - Produces: `getAllCoverChoices() → Record<string, true>`, `setCoverChoice(absPath: string, isCover: boolean) → void`, `flushNow()`, `_resetForTest()` from `server/coverChoices.js`. `POST /api/cover` (body `{id, isCover}`) → `{id, preferredCover}`. `/api/scan`'s response items gain a `preferredCover: boolean` field. `setCover(id, isCover) → Promise<{id, preferredCover}>` from `ui/src/lib/api.js`.
 
 - [ ] **Step 1: Add `coverChoicesFile()` to `server/lib/cachePaths.js`**
@@ -144,44 +146,44 @@ import { getAllCoverChoices, setCoverChoice } from "./coverChoices.js";
 Replace the `/api/scan` handler's item-mapping block (currently lines 68-75):
 
 ```js
-    const ratings = getAllRatings();
-    const items = session.items.map((it) => ({
-      id: it.id,
-      name: it.name,
-      size: it.size,
-      mtimeMs: it.mtimeMs,
-      rating: ratings[it.path] ?? 0,
-    }));
+const ratings = getAllRatings();
+const items = session.items.map((it) => ({
+  id: it.id,
+  name: it.name,
+  size: it.size,
+  mtimeMs: it.mtimeMs,
+  rating: ratings[it.path] ?? 0,
+}));
 ```
 
 with:
 
 ```js
-    const ratings = getAllRatings();
-    const coverChoices = getAllCoverChoices();
-    const items = session.items.map((it) => ({
-      id: it.id,
-      name: it.name,
-      size: it.size,
-      mtimeMs: it.mtimeMs,
-      rating: ratings[it.path] ?? 0,
-      preferredCover: coverChoices[it.path] === true,
-    }));
+const ratings = getAllRatings();
+const coverChoices = getAllCoverChoices();
+const items = session.items.map((it) => ({
+  id: it.id,
+  name: it.name,
+  size: it.size,
+  mtimeMs: it.mtimeMs,
+  rating: ratings[it.path] ?? 0,
+  preferredCover: coverChoices[it.path] === true,
+}));
 ```
 
 Add a new route right after the existing `/api/rating` route (currently ends at line 202, just before the closing `}` of `registerApi`):
 
 ```js
-  app.post("/api/cover", (req, res) => {
-    const { id, isCover } = req.body ?? {};
-    const it = itemById(Number(id));
-    if (!it) return res.status(404).json({ error: "unknown id" });
-    if (typeof isCover !== "boolean") {
-      return res.status(400).json({ error: "isCover must be a boolean" });
-    }
-    setCoverChoice(it.path, isCover);
-    res.json({ id: it.id, preferredCover: isCover });
-  });
+app.post("/api/cover", (req, res) => {
+  const { id, isCover } = req.body ?? {};
+  const it = itemById(Number(id));
+  if (!it) return res.status(404).json({ error: "unknown id" });
+  if (typeof isCover !== "boolean") {
+    return res.status(400).json({ error: "isCover must be a boolean" });
+  }
+  setCoverChoice(it.path, isCover);
+  res.json({ id: it.id, preferredCover: isCover });
+});
 ```
 
 - [ ] **Step 4: Add integration tests to `server/api.test.js`**
@@ -195,7 +197,7 @@ import { _resetForTest as _resetCoverChoicesForTest } from "./coverChoices.js";
 In `beforeAll`, right after the existing `_resetForTest();` call (currently line 32):
 
 ```js
-  _resetCoverChoicesForTest();
+_resetCoverChoicesForTest();
 ```
 
 Add a new `describe` block at the end of the file, after the existing `describe("ratings round-trip", ...)` block:
@@ -308,10 +310,12 @@ EOF
 ### Task 2: Manual-override priority tier in `pickCover`
 
 **Files:**
+
 - Modify: `ui/src/lib/bursts.js`
 - Modify: `ui/src/lib/bursts.test.js`
 
 **Interfaces:**
+
 - Consumes: `item.preferredCover?: boolean` (populated by Task 1's `/api/scan` response, flowing into `items` the same way `item.rating` already does).
 - Produces: `detectBursts`'s `coverId` now reflects the new top-priority tier; `id` (already stable per the earlier whole-branch-review fix) is unaffected by this new tier, same as it's unaffected by rating changes.
 
@@ -320,37 +324,37 @@ EOF
 Add these tests to `ui/src/lib/bursts.test.js`, after the existing `"keeps a stack's id stable when a rating changes which member is the cover"` test:
 
 ```js
-  it("prefers a manually-chosen cover over a higher-rated or COVER-marked member", () => {
-    const items = [
-      { id: 1, name: "PXL_1.BURST-01.COVER.jpg", mtimeMs: 0, rating: 0 },
-      { id: 2, name: "PXL_1.BURST-02.jpg", mtimeMs: 200, rating: 4 },
-      {
-        id: 3,
-        name: "PXL_1.BURST-03.jpg",
-        mtimeMs: 400,
-        rating: 0,
-        preferredCover: true,
-      },
-    ];
-    const stacks = detectBursts(items, { gapMs: 1000 });
-    expect(stacks[0].coverId).toBe(3);
-  });
+it("prefers a manually-chosen cover over a higher-rated or COVER-marked member", () => {
+  const items = [
+    { id: 1, name: "PXL_1.BURST-01.COVER.jpg", mtimeMs: 0, rating: 0 },
+    { id: 2, name: "PXL_1.BURST-02.jpg", mtimeMs: 200, rating: 4 },
+    {
+      id: 3,
+      name: "PXL_1.BURST-03.jpg",
+      mtimeMs: 400,
+      rating: 0,
+      preferredCover: true,
+    },
+  ];
+  const stacks = detectBursts(items, { gapMs: 1000 });
+  expect(stacks[0].coverId).toBe(3);
+});
 
-  it("keeps a stack's id stable when a manual cover choice is set", () => {
-    const items = [
-      { id: 1, name: "a.jpg", mtimeMs: 0 },
-      { id: 2, name: "b.jpg", mtimeMs: 200 },
-      { id: 3, name: "c.jpg", mtimeMs: 400 },
-    ];
-    const before = detectBursts(items, { gapMs: 1000 });
-    const stackIdBefore = before[0].id;
-    expect(before[0].coverId).toBe(1);
+it("keeps a stack's id stable when a manual cover choice is set", () => {
+  const items = [
+    { id: 1, name: "a.jpg", mtimeMs: 0 },
+    { id: 2, name: "b.jpg", mtimeMs: 200 },
+    { id: 3, name: "c.jpg", mtimeMs: 400 },
+  ];
+  const before = detectBursts(items, { gapMs: 1000 });
+  const stackIdBefore = before[0].id;
+  expect(before[0].coverId).toBe(1);
 
-    items[2].preferredCover = true; // item id 3
-    const after = detectBursts(items, { gapMs: 1000 });
-    expect(after[0].coverId).toBe(3);
-    expect(after[0].id).toBe(stackIdBefore);
-  });
+  items[2].preferredCover = true; // item id 3
+  const after = detectBursts(items, { gapMs: 1000 });
+  expect(after[0].coverId).toBe(3);
+  expect(after[0].id).toBe(stackIdBefore);
+});
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -462,10 +466,12 @@ EOF
 ### Task 3: Manual cover keyboard trigger and visual feedback
 
 **Files:**
+
 - Modify: `ui/src/App.svelte`
 - Modify: `ui/src/lib/Thumb.svelte`
 
 **Interfaces:**
+
 - Consumes: `setCover` from `ui/src/lib/api.js` (Task 1); `stacks`/`displayEntries`/`resolvePhoto` already in scope in `App.svelte`.
 - Produces: `Thumb.svelte` gains `isCurrentCover` (boolean, default `false`) — later tasks don't depend on this, it's UI-terminal for this feature.
 
@@ -474,22 +480,22 @@ EOF
 Change the existing import block (currently lines 11-15):
 
 ```js
-  import {
-    scan as apiScan,
-    setRating as apiSetRating,
-    fetchMeta,
-  } from "./lib/api.js";
+import {
+  scan as apiScan,
+  setRating as apiSetRating,
+  fetchMeta,
+} from "./lib/api.js";
 ```
 
 to:
 
 ```js
-  import {
-    scan as apiScan,
-    setRating as apiSetRating,
-    setCover as apiSetCover,
-    fetchMeta,
-  } from "./lib/api.js";
+import {
+  scan as apiScan,
+  setRating as apiSetRating,
+  setCover as apiSetCover,
+  fetchMeta,
+} from "./lib/api.js";
 ```
 
 - [ ] **Step 2: Add `toggleCover`**
@@ -497,34 +503,34 @@ to:
 Add this function right after the existing `rate` function:
 
 ```js
-  /**
-   * Toggle the manual cover choice for the given display entry: if it's
-   * already the stack's manual pick, clear it (revert to automatic
-   * selection); otherwise make it the pick, clearing any other member of
-   * the same stack that was previously manually chosen. At most one
-   * manual pick per stack is enforced here, in the UI — pickCover's own
-   * fallback (first-in-cluster-order) only matters if that invariant is
-   * ever violated some other way.
-   */
-  function toggleCover(entry) {
-    if (entry?.kind !== "photo" || !entry.stackId) return;
-    const stack = stacks.find((s) => s.id === entry.stackId);
-    if (!stack) return;
+/**
+ * Toggle the manual cover choice for the given display entry: if it's
+ * already the stack's manual pick, clear it (revert to automatic
+ * selection); otherwise make it the pick, clearing any other member of
+ * the same stack that was previously manually chosen. At most one
+ * manual pick per stack is enforced here, in the UI — pickCover's own
+ * fallback (first-in-cluster-order) only matters if that invariant is
+ * ever violated some other way.
+ */
+function toggleCover(entry) {
+  if (entry?.kind !== "photo" || !entry.stackId) return;
+  const stack = stacks.find((s) => s.id === entry.stackId);
+  if (!stack) return;
 
-    const target = entry.item;
-    const makingManual = !target.preferredCover;
+  const target = entry.item;
+  const makingManual = !target.preferredCover;
 
-    for (const id of stack.memberIds) {
-      const it = items.find((i) => i.id === id);
-      if (!it) continue;
-      const shouldBeCover = makingManual && id === target.id;
-      if (it.preferredCover !== shouldBeCover) {
-        it.preferredCover = shouldBeCover;
-        apiSetCover(it.id, shouldBeCover).catch((e) => (error = e.message));
-      }
+  for (const id of stack.memberIds) {
+    const it = items.find((i) => i.id === id);
+    if (!it) continue;
+    const shouldBeCover = makingManual && id === target.id;
+    if (it.preferredCover !== shouldBeCover) {
+      it.preferredCover = shouldBeCover;
+      apiSetCover(it.id, shouldBeCover).catch((e) => (error = e.message));
     }
-    items = items; // trigger reactivity
   }
+  items = items; // trigger reactivity
+}
 ```
 
 - [ ] **Step 3: Add the `C` key handler to `onKeydown`**
@@ -532,18 +538,18 @@ Add this function right after the existing `rate` function:
 In `onKeydown`, add this new block right after the existing star-rating block (`if (/^[0-5]$/.test(key)) { ... }`) and before the `if (loupeOpen) { ... }` block:
 
 ```js
-    // Manual cover choice: 'C' toggles whether the selected photo is its
-    // stack's manually-chosen cover. Only meaningful for a member of a
-    // currently expanded stack; a no-op otherwise. Works in both grid and
-    // loupe, since both share the same selected index into displayEntries.
-    if (key.toLowerCase() === "c") {
-      const entry = displayEntries[selected];
-      if (entry?.stackId) {
-        e.preventDefault();
-        toggleCover(entry);
-      }
-      return;
-    }
+// Manual cover choice: 'C' toggles whether the selected photo is its
+// stack's manually-chosen cover. Only meaningful for a member of a
+// currently expanded stack; a no-op otherwise. Works in both grid and
+// loupe, since both share the same selected index into displayEntries.
+if (key.toLowerCase() === "c") {
+  const entry = displayEntries[selected];
+  if (entry?.stackId) {
+    e.preventDefault();
+    toggleCover(entry);
+  }
+  return;
+}
 ```
 
 - [ ] **Step 4: Add `isCurrentCover` to `Thumb.svelte`**
@@ -551,37 +557,40 @@ In `onKeydown`, add this new block right after the existing star-rating block (`
 Add this prop right after the existing `export let inExpandedStack = false;`:
 
 ```js
-  export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
+export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
 ```
 
 Replace the existing marker markup:
 
 ```svelte
-  {#if inExpandedStack}
-    <span class="stack-marker" title="Part of a burst — press Escape to collapse">⚏</span>
-  {/if}
+{#if inExpandedStack}
+  <span class="stack-marker" title="Part of a burst — press Escape to collapse"
+    >⚏</span
+  >
+{/if}
 ```
 
 with:
 
 ```svelte
-  {#if inExpandedStack}
-    <span
-      class="stack-marker"
-      class:is-cover={isCurrentCover}
-      title={isCurrentCover
-        ? "Current cover for this stack — press C to unset, Escape to collapse"
-        : "Part of a burst — press C to make this the cover, Escape to collapse"}>⚏</span
-    >
-  {/if}
+{#if inExpandedStack}
+  <span
+    class="stack-marker"
+    class:is-cover={isCurrentCover}
+    title={isCurrentCover
+      ? "Current cover for this stack — press C to unset, Escape to collapse"
+      : "Part of a burst — press C to make this the cover, Escape to collapse"}
+    >⚏</span
+  >
+{/if}
 ```
 
 Add this CSS rule right after the existing `.stack-marker { ... }` rule:
 
 ```css
-  .stack-marker.is-cover {
-    background: rgba(255, 196, 0, 0.85);
-  }
+.stack-marker.is-cover {
+  background: rgba(255, 196, 0, 0.85);
+}
 ```
 
 - [ ] **Step 5: Wire `isCurrentCover` from `App.svelte`'s template**
@@ -589,10 +598,10 @@ Add this CSS rule right after the existing `.stack-marker { ... }` rule:
 In the `<Thumb ...>` invocation inside the `{#each visibleItems as { i, entry } (entryDomId(entry))}` block, add a new prop alongside the existing `inExpandedStack`:
 
 ```svelte
-            inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
-            isCurrentCover={entry.kind === "photo" &&
-              entry.stackId !== null &&
-              stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
+inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
+isCurrentCover={entry.kind === "photo" &&
+  entry.stackId !== null &&
+  stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
 ```
 
 - [ ] **Step 6: Run the full test suite to check for regressions**
@@ -628,10 +637,12 @@ Per the working agreement in `docs/ROADMAP.md`, do **not** run automated browser
 ### Task 4: `peekItems` in `displayEntries.js`
 
 **Files:**
+
 - Modify: `ui/src/lib/displayEntries.js`
 - Modify: `ui/src/lib/displayEntries.test.js`
 
 **Interfaces:**
+
 - Produces: a collapsed `kind: 'stack'` entry now also carries `peekItems: object[]` — the stack's other members (excluding the cover), resolved to item objects, in their original `memberIds` order.
 
 - [ ] **Step 1: Update the existing test that asserts the full stack-entry shape**
@@ -639,32 +650,32 @@ Per the working agreement in `docs/ROADMAP.md`, do **not** run automated browser
 The existing test `"collapses a stack to one entry, at its first member's position, using the cover photo"` in `ui/src/lib/displayEntries.test.js` currently reads:
 
 ```js
-  it("collapses a stack to one entry, at its first member's position, using the cover photo", () => {
-    const entries = buildDisplayEntries(items, [stack], new Set());
-    expect(entries).toHaveLength(2); // solo + one collapsed stack entry
-    expect(entries[0].item.id).toBe(1); // solo stays first
-    expect(entries[1]).toEqual({
-      kind: "stack",
-      stack,
-      coverItem: items[2], // id 3, the cover
-    });
+it("collapses a stack to one entry, at its first member's position, using the cover photo", () => {
+  const entries = buildDisplayEntries(items, [stack], new Set());
+  expect(entries).toHaveLength(2); // solo + one collapsed stack entry
+  expect(entries[0].item.id).toBe(1); // solo stays first
+  expect(entries[1]).toEqual({
+    kind: "stack",
+    stack,
+    coverItem: items[2], // id 3, the cover
   });
+});
 ```
 
 Change the `toEqual` block to include the new field (the fixture's `stack.memberIds` is `[2, 3, 4]` with `coverId: 3`, so `peekItems` is `items` ids 2 and 4, in that order):
 
 ```js
-  it("collapses a stack to one entry, at its first member's position, using the cover photo", () => {
-    const entries = buildDisplayEntries(items, [stack], new Set());
-    expect(entries).toHaveLength(2); // solo + one collapsed stack entry
-    expect(entries[0].item.id).toBe(1); // solo stays first
-    expect(entries[1]).toEqual({
-      kind: "stack",
-      stack,
-      coverItem: items[2], // id 3, the cover
-      peekItems: [items[1], items[3]], // ids 2 and 4, excluding the cover
-    });
+it("collapses a stack to one entry, at its first member's position, using the cover photo", () => {
+  const entries = buildDisplayEntries(items, [stack], new Set());
+  expect(entries).toHaveLength(2); // solo + one collapsed stack entry
+  expect(entries[0].item.id).toBe(1); // solo stays first
+  expect(entries[1]).toEqual({
+    kind: "stack",
+    stack,
+    coverItem: items[2], // id 3, the cover
+    peekItems: [items[1], items[3]], // ids 2 and 4, excluding the cover
   });
+});
 ```
 
 - [ ] **Step 2: Add a dedicated `peekItems` test**
@@ -672,11 +683,11 @@ Change the `toEqual` block to include the new field (the fixture's `stack.member
 Add this new test, after the existing `"does not duplicate a collapsed stack's later members"` test:
 
 ```js
-  it("computes peekItems as the stack's other members, excluding the cover, in memberIds order", () => {
-    const entries = buildDisplayEntries(items, [stack], new Set());
-    const stackEntry = entries.find((e) => e.kind === "stack");
-    expect(stackEntry.peekItems).toEqual([items[1], items[3]]); // ids 2, 4 — not 3 (the cover)
-  });
+it("computes peekItems as the stack's other members, excluding the cover, in memberIds order", () => {
+  const entries = buildDisplayEntries(items, [stack], new Set());
+  const stackEntry = entries.find((e) => e.kind === "stack");
+  expect(stackEntry.peekItems).toEqual([items[1], items[3]]); // ids 2, 4 — not 3 (the cover)
+});
 ```
 
 - [ ] **Step 3: Run the tests to verify the updated/new tests fail**
@@ -762,10 +773,12 @@ EOF
 ### Task 5: Stacked-photos peek rendering
 
 **Files:**
+
 - Modify: `ui/src/lib/Thumb.svelte`
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: `entry.peekItems` from Task 4's `displayEntries.js`.
 
 This task adds no new automated tests (`Thumb.svelte`/`App.svelte` have no component test harness, consistent with the rest of the codebase, and with Task 3 in this same plan).
@@ -775,22 +788,22 @@ This task adds no new automated tests (`Thumb.svelte`/`App.svelte` have no compo
 Add this constant near the top of the `<script>` block (after the imports):
 
 ```js
-  const PEEK_STEP_PX = 2; // px offset per peeking layer, alternating left/right
+const PEEK_STEP_PX = 2; // px offset per peeking layer, alternating left/right
 ```
 
 Add this prop right after the existing `export let isCurrentCover = false;` (added in Task 3):
 
 ```js
-  export let stackPeekItems = []; // this stack's other members (excludes the cover), for the peeking-photos visual
+export let stackPeekItems = []; // this stack's other members (excludes the cover), for the peeking-photos visual
 ```
 
 Add these reactive statements right after the existing `$: if (src) loaded = false;` line:
 
 ```js
-  // Split alternately: chronologically-nearer non-cover members peek out
-  // closer to the cover (right first, then left, then right again, ...).
-  $: rightPeekItems = stackPeekItems.filter((_, i) => i % 2 === 0);
-  $: leftPeekItems = stackPeekItems.filter((_, i) => i % 2 === 1);
+// Split alternately: chronologically-nearer non-cover members peek out
+// closer to the cover (right first, then left, then right again, ...).
+$: rightPeekItems = stackPeekItems.filter((_, i) => i % 2 === 0);
+$: leftPeekItems = stackPeekItems.filter((_, i) => i % 2 === 1);
 ```
 
 - [ ] **Step 2: Replace the image markup**
@@ -798,48 +811,48 @@ Add these reactive statements right after the existing `$: if (src) loaded = fal
 Replace the existing `{#if src}` block:
 
 ```svelte
-  {#if src}
-    <img
-      {src}
-      alt={item.name}
-      loading="lazy"
-      class:loaded
-      on:load={() => (loaded = true)}
-    />
-  {/if}
+{#if src}
+  <img
+    {src}
+    alt={item.name}
+    loading="lazy"
+    class:loaded
+    on:load={() => (loaded = true)}
+  />
+{/if}
 ```
 
 with:
 
 ```svelte
-  {#if src}
-    {#each rightPeekItems as peekItem, i (peekItem.id)}
-      <img
-        src={thumbUrl(peekItem.id, size, peekItem.mtimeMs)}
-        alt=""
-        loading="lazy"
-        class="stack-peek"
-        style={`transform: translateX(${(i + 1) * PEEK_STEP_PX}px); z-index: ${rightPeekItems.length - i};`}
-      />
-    {/each}
-    {#each leftPeekItems as peekItem, i (peekItem.id)}
-      <img
-        src={thumbUrl(peekItem.id, size, peekItem.mtimeMs)}
-        alt=""
-        loading="lazy"
-        class="stack-peek"
-        style={`transform: translateX(-${(i + 1) * PEEK_STEP_PX}px); z-index: ${leftPeekItems.length - i};`}
-      />
-    {/each}
+{#if src}
+  {#each rightPeekItems as peekItem, i (peekItem.id)}
     <img
-      {src}
-      alt={item.name}
+      src={thumbUrl(peekItem.id, size, peekItem.mtimeMs)}
+      alt=""
       loading="lazy"
-      class="cover"
-      class:loaded
-      on:load={() => (loaded = true)}
+      class="stack-peek"
+      style={`transform: translateX(${(i + 1) * PEEK_STEP_PX}px); z-index: ${rightPeekItems.length - i};`}
     />
-  {/if}
+  {/each}
+  {#each leftPeekItems as peekItem, i (peekItem.id)}
+    <img
+      src={thumbUrl(peekItem.id, size, peekItem.mtimeMs)}
+      alt=""
+      loading="lazy"
+      class="stack-peek"
+      style={`transform: translateX(-${(i + 1) * PEEK_STEP_PX}px); z-index: ${leftPeekItems.length - i};`}
+    />
+  {/each}
+  <img
+    {src}
+    alt={item.name}
+    loading="lazy"
+    class="cover"
+    class:loaded
+    on:load={() => (loaded = true)}
+  />
+{/if}
 ```
 
 - [ ] **Step 3: Update the CSS**
@@ -847,54 +860,54 @@ with:
 Replace the existing generic image rules:
 
 ```css
-  img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-  }
-  img.loaded {
-    opacity: 1;
-  }
+img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+img.loaded {
+  opacity: 1;
+}
 ```
 
 with:
 
 ```css
-  img.cover,
-  .stack-peek {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-    border-radius: inherit;
-  }
-  img.cover {
-    z-index: 50;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-  }
-  img.cover.loaded {
-    opacity: 1;
-  }
-  .stack-peek {
-    filter: brightness(0.75);
-    pointer-events: none;
-  }
+img.cover,
+.stack-peek {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: inherit;
+}
+img.cover {
+  z-index: 50;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+img.cover.loaded {
+  opacity: 1;
+}
+.stack-peek {
+  filter: brightness(0.75);
+  pointer-events: none;
+}
 ```
 
-**Required z-index bump on the existing badges/marker** — without this, they'd render *behind* the newly z-indexed cover/peek images instead of on top, since CSS treats `z-index: auto` as effectively `0` once any sibling has an explicit z-index. Add this new rule right after the existing `.stack-marker.is-cover { ... }` rule (added in Task 3):
+**Required z-index bump on the existing badges/marker** — without this, they'd render _behind_ the newly z-indexed cover/peek images instead of on top, since CSS treats `z-index: auto` as effectively `0` once any sibling has an explicit z-index. Add this new rule right after the existing `.stack-marker.is-cover { ... }` rule (added in Task 3):
 
 ```css
-  .badge,
-  .stack-badge,
-  .stack-marker {
-    z-index: 100;
-  }
+.badge,
+.stack-badge,
+.stack-marker {
+  z-index: 100;
+}
 ```
 
 - [ ] **Step 4: Wire `stackPeekItems` from `App.svelte`'s template**
@@ -902,8 +915,8 @@ with:
 In the `<Thumb ...>` invocation, add this prop alongside the existing `stackCount`:
 
 ```svelte
-            stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
-            stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
+stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
+stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
 ```
 
 - [ ] **Step 5: Run the full test suite to check for regressions**

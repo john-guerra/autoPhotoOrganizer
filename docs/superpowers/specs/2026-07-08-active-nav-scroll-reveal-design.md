@@ -17,7 +17,7 @@ no-op when already visible" behaviour the spec wanted for keyboard nav for free.
 `scroll.js` was deleted.
 
 The spec's "one re-reveal after `enrichMeta` settles" (§ Group-jump) proved
-insufficient on its own: a *single* one-shot re-reveal fires at one frame and
+insufficient on its own: a _single_ one-shot re-reveal fires at one frame and
 can land on a bad one (rapid jumps ended up scrolled far past the target). The
 shipped version instead **re-asserts on every reflow while a jump's metadata is
 still loading** (`jumpRevealPending` gates a `$: boxes` reactive), which is
@@ -29,14 +29,14 @@ gated to the post-jump window so it never fights ordinary browsing scroll.
 
 ## Problem
 
-The grid force-scrolls the selected tile back to center on *every* layout
+The grid force-scrolls the selected tile back to center on _every_ layout
 reflow, so the user can never scroll away from their selection: any background
 metadata reflow or scroll-triggered load yanks the view back. The offending
 code is a reactive block in `Thumb.svelte`:
 
 ```js
 $: if (selected && el) {
-  void box.x;   // makes this re-fire on every reflow that moves the tile
+  void box.x; // makes this re-fire on every reflow that moves the tile
   void box.y;
   el.scrollIntoView({ block: "center" });
 }
@@ -52,7 +52,7 @@ Two additional problems with the current design:
 1. A **child tile imperatively scrolls the whole page**, reaching past its own
    responsibility into the App-owned scroll container (the layering smell
    issue #40 names).
-2. Firing on *any* `selected` change means the block also scrolls when
+2. Firing on _any_ `selected` change means the block also scrolls when
    `loadMore`/jump **re-anchor** `selected` to the same photo at a shifted
    index — a programmatic change the user never made — producing spurious
    "why did it just move" scrolls.
@@ -88,11 +88,11 @@ side-effect of layout:
  * @returns {number|null}
  */
 export function revealScrollTop(box, viewTop, viewHeight, margin) {
-  const top = box.top - margin;          // where the tile's top sits, header-adjusted
+  const top = box.top - margin; // where the tile's top sits, header-adjusted
   const bottom = box.top + box.height;
-  if (top < viewTop) return top;                        // above the fold → scroll up to it
+  if (top < viewTop) return top; // above the fold → scroll up to it
   if (bottom > viewTop + viewHeight) return bottom - viewHeight; // below → scroll down just enough
-  return null;                                          // already fully visible → no-op
+  return null; // already fully visible → no-op
 }
 ```
 
@@ -142,5 +142,7 @@ the viewport (prefer showing its top), and margin handling.
   3. Option+Right into a new group → landing photo visible, and still visible
      after its metadata finishes loading; then scroll freely beyond it.
   4. Rapid `loadMore` (scroll near an edge) → no scroll snap-back.
+
 ```
 
+```

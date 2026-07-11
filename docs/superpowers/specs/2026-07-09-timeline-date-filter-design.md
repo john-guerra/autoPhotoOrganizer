@@ -6,7 +6,7 @@ AutoGallery filters the working set by rating, orientation, and a "keep only"
 scope — all compiled through one `buildFilter(spec)` (`server/db/filters.js`) and
 threaded to the grid, tree, fisheye, counts, and auto-albums via a single
 `displayFilter` derived value in `App.svelte`. There is **no way to filter by
-date**, and no view of *when* the displayed photos actually fall in time.
+date**, and no view of _when_ the displayed photos actually fall in time.
 
 For a photographer culling thousands of trip photos, "show me just December
 2019" and "where do my photos cluster over the years" are core questions. This
@@ -37,7 +37,7 @@ buckets labeled `2002-12`.
 - **Configurable series cap.** The stack's top-N cap is a user-adjustable value
   (like the albums "Max"); everything past it rolls into an **"Others"** band.
 - **Undated photos** (`taken_at` NULL) surface as a **selectable "Unknown"**
-  segment: visible in the chart, and clicking it filters the working set *to*
+  segment: visible in the chart, and clicking it filters the working set _to_
   the undated photos (needs an `undated` filter flag — see below).
 - **Svelte 4, not 5.** The repo is pinned to `svelte@4`; the new timeline
   components use Svelte 4 idioms (`export let`, `$:`, `createEventDispatcher`) to
@@ -49,7 +49,7 @@ buckets labeled `2002-12`.
 1. Add `dateFrom` / `dateTo` / `undated` to the filter spec so a date range (or
    "undated only") narrows the grid, tree, fisheye, counts, and auto-albums — all
    in agreement, for free.
-2. A toolbar **sparkline** showing the time distribution of the *displayed* set.
+2. A toolbar **sparkline** showing the time distribution of the _displayed_ set.
 3. A **popup streamgraph** with brush + manual date entry + a stack-by selector +
    configurable series cap + a selectable "Unknown" (undated) segment.
 4. Redefine the `month` grouping dimension to month-of-year with month-name
@@ -60,7 +60,7 @@ buckets labeled `2002-12`.
 - Not virtualizing or infinite-zooming the timeline; adaptive fixed buckets only.
 - Not a d3 album-boundary timeline (that remains a separate deferred issue).
 - **No feed/group sorting here** — that is a separate spec (feed sort). This spec
-  only sets the `month` dimension's *default* direction; the sort feature makes it
+  only sets the `month` dimension's _default_ direction; the sort feature makes it
   adjustable.
 
 ---
@@ -83,8 +83,14 @@ if (spec.undated) {
   // when set, dateFrom/dateTo are ignored.
   clauses.push("photos.taken_at IS NULL");
 } else {
-  if (Number.isFinite(dateFrom)) { clauses.push("photos.taken_at >= ?"); params.push(dateFrom); }
-  if (Number.isFinite(dateTo))   { clauses.push("photos.taken_at <  ?"); params.push(dateTo); }
+  if (Number.isFinite(dateFrom)) {
+    clauses.push("photos.taken_at >= ?");
+    params.push(dateFrom);
+  }
+  if (Number.isFinite(dateTo)) {
+    clauses.push("photos.taken_at <  ?");
+    params.push(dateTo);
+  }
 }
 ```
 
@@ -101,7 +107,7 @@ segment becomes an actual filter — the date range can't express "has no date."
 
 ### 2. Histogram aggregation endpoint
 
-The chart needs *bucketed counts*, a different shape from the existing
+The chart needs _bucketed counts_, a different shape from the existing
 `workingSetTimeline` (which returns up to N individual photos for albums). New:
 
 ```
@@ -112,15 +118,20 @@ Response:
 
 ```jsonc
 {
-  "bucket": "month",                 // resolved unit (echoes the auto choice)
-  "stackBy": "camera",               // resolved stacking dimension, or null
+  "bucket": "month", // resolved unit (echoes the auto choice)
+  "stackBy": "camera", // resolved stacking dimension, or null
   "series": ["Canon EOS", "Pixel 7", "…", "Others"], // ordered series keys
-  "buckets": [                       // time-ascending
-    { "t": 1575158400000, "counts": { "Canon EOS": 3, "Pixel 7": 5 }, "total": 8 }
+  "buckets": [
+    // time-ascending
+    {
+      "t": 1575158400000,
+      "counts": { "Canon EOS": 3, "Pixel 7": 5 },
+      "total": 8,
+    },
   ],
-  "unknown": 42,                     // count of NULL taken_at (no time position)
+  "unknown": 42, // count of NULL taken_at (no time position)
   "total": 12048,
-  "range": { "from": 1039564800000, "to": 1734048000000 }  // min/max taken_at
+  "range": { "from": 1039564800000, "to": 1734048000000 }, // min/max taken_at
 }
 ```
 
@@ -128,9 +139,9 @@ Implementation (`server/db/histogram.js`, one query + a JS reshape):
 
 - `bucketExpr` = `strftime('%Y'|'%Y-%m'|'%Y-%m-%d', taken_at/1000,'unixepoch')`.
 - `SELECT bucketExpr AS b, <stackByExpr> AS s, COUNT(*) AS n FROM photos JOIN
-  folders … WHERE stale=0 AND (filter.sql) AND taken_at IS NOT NULL GROUP BY b,s`.
+folders … WHERE stale=0 AND (filter.sql) AND taken_at IS NOT NULL GROUP BY b,s`.
 - Undated count: a second one-row `COUNT(*) … WHERE taken_at IS NULL AND
-  (filter.sql)`.
+(filter.sql)`.
 - Reshape rows → `buckets[]`, converting each bucket label back to an epoch-ms
   `t` (start of the period) via `d3.timeParse` on the server? No — server has no
   d3; parse the `YYYY[-MM[-DD]]` label to a UTC epoch with `Date.UTC`, matching
@@ -150,16 +161,16 @@ Implementation (`server/db/histogram.js`, one query + a JS reshape):
 `ui/src/lib/histogram.js#pickBucket(spanMs)` used client-side to request, and
 mirrored server-side as the fallback when `bucket` is omitted:
 
-| span of the filtered set | bucket |
-| --- | --- |
-| > ~5 years | `year` |
-| ~4 months – 5 years | `month` |
-| < ~4 months | `day` |
+| span of the filtered set | bucket  |
+| ------------------------ | ------- |
+| > ~5 years               | `year`  |
+| ~4 months – 5 years      | `month` |
+| < ~4 months              | `day`   |
 
 Thresholds are named constants; the resolved unit is echoed in the response so
 the axis labels itself correctly.
 
-### 3. What the chart reflects — the range is an *overlay*, not a filter of itself
+### 3. What the chart reflects — the range is an _overlay_, not a filter of itself
 
 Both the sparkline and popup show the distribution of the displayed set **with
 its own date bounds stripped**: they query `displayFilter` **minus** `dateFrom`/
@@ -247,7 +258,7 @@ feed/tree/fisheye bucket + label groups — it does not interact with
 - Invalid `dateFrom`/`dateTo` (non-integer, or from > to) → **400** from
   `parseFilterParam`, consistent with existing filter validation.
 - Unknown `stackBy` dimension → treated as `none` (single "All" series), not an
-  error. This deliberately differs from the feed (which *throws* on an unknown
+  error. This deliberately differs from the feed (which _throws_ on an unknown
   groupBy dimension): `stackBy` is a display nicety, so a stale/unknown value
   should degrade to a plain area rather than break the chart.
 - Empty result set → `buckets: []`, `total: 0`; the sparkline renders an empty
@@ -263,6 +274,7 @@ feed/tree/fisheye bucket + label groups — it does not interact with
 ## Testing
 
 **Unit (vitest, colocated):**
+
 - `buildFilter` date clauses: from-only, to-only, both, from>to rejected upstream,
   NULL `taken_at` excluded when a bound is set; `undated:true` → only NULL
   `taken_at`, and it overrides a range. (`filters.test.js`)
@@ -278,6 +290,7 @@ feed/tree/fisheye bucket + label groups — it does not interact with
 
 **Live (per the App.svelte manual-verify convention — feed-window/filter changes
 aren't "done" on a green suite alone):**
+
 - Sparkline renders the displayed distribution; opening the popup shows the
   streamgraph stacked by the current groupBy, turbo-colored, with an Unknown bar.
 - Brush a range → the from/to inputs update; typing dates moves the brush; Apply

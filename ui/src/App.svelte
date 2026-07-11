@@ -74,7 +74,11 @@
     DEFAULT_FILTER,
     isActive as filterIsActive,
   } from "./lib/filterSpec.js";
-  import { ALL_DIMENSIONS, SORT_ATTRS, DATE_SORT_ATTRS } from "./lib/dimensions.js";
+  import {
+    ALL_DIMENSIONS,
+    SORT_ATTRS,
+    DATE_SORT_ATTRS,
+  } from "./lib/dimensions.js";
 
   // Injected at build time by Vite (see ui/vite.config.js `define`).
   const APP_VERSION = __APP_VERSION__;
@@ -104,9 +108,10 @@
     localStorage.getItem(LS_BURST_GAP) ?? "",
     10
   );
-  let burstGapMs = Number.isFinite(storedBurstGap) && storedBurstGap >= 0
-    ? storedBurstGap
-    : DEFAULT_BURST_GAP_MS;
+  let burstGapMs =
+    Number.isFinite(storedBurstGap) && storedBurstGap >= 0
+      ? storedBurstGap
+      : DEFAULT_BURST_GAP_MS;
   $: localStorage.setItem(LS_BURST_GAP, String(burstGapMs));
 
   const LS_BURST_ENABLED = "autogallery.burstEnabled";
@@ -140,7 +145,10 @@
   let groupBy = (() => {
     try {
       const stored = JSON.parse(localStorage.getItem(LS_GROUP_BY) ?? "null");
-      if (Array.isArray(stored) && stored.every((d) => ALL_DIMENSIONS.includes(d))) {
+      if (
+        Array.isArray(stored) &&
+        stored.every((d) => ALL_DIMENSIONS.includes(d))
+      ) {
         return stored;
       }
     } catch {
@@ -157,7 +165,11 @@
   let sort = (() => {
     try {
       const s = JSON.parse(localStorage.getItem(LS_SORT) ?? "null");
-      if (s && SORT_ATTRS.includes(s.by) && (s.dir === "asc" || s.dir === "desc"))
+      if (
+        s &&
+        SORT_ATTRS.includes(s.by) &&
+        (s.dir === "asc" || s.dir === "desc")
+      )
         return s;
     } catch {
       /* fall through to default */
@@ -170,7 +182,8 @@
   let filter = (() => {
     try {
       const stored = JSON.parse(localStorage.getItem(LS_FILTER) ?? "null");
-      if (stored && typeof stored === "object") return { ...DEFAULT_FILTER, ...stored };
+      if (stored && typeof stored === "object")
+        return { ...DEFAULT_FILTER, ...stored };
     } catch {
       /* fall through to default */
     }
@@ -187,7 +200,8 @@
     : DATE_SORT_ATTRS.includes(filter.dateAttr)
       ? filter.dateAttr
       : "date_taken";
-  if (filter.dateAttr !== lastDateSort) filter = { ...filter, dateAttr: lastDateSort };
+  if (filter.dateAttr !== lastDateSort)
+    filter = { ...filter, dateAttr: lastDateSort };
 
   /** The per-photo epoch-ms for a given date attribute, mirroring the server's
    * NULL-safe exprs (COALESCE to mtime), so the "you are here" marker sits on the
@@ -237,7 +251,9 @@
   // is just a scoped view. Persisted so it survives a reload. null = unfocused.
   const LS_FOCUS_PATH = "autogallery.focusPath";
   let focusPath = localStorage.getItem(LS_FOCUS_PATH) || null;
-  $: focusName = focusPath ? focusPath.split("/").filter(Boolean).pop() || focusPath : "";
+  $: focusName = focusPath
+    ? focusPath.split("/").filter(Boolean).pop() || focusPath
+    : "";
   $: if (focusPath) localStorage.setItem(LS_FOCUS_PATH, focusPath);
   else localStorage.removeItem(LS_FOCUS_PATH);
 
@@ -586,7 +602,8 @@
     // the timeline's attribute; a non-date sort keeps the last date attr. Updating
     // filter.dateAttr re-plots the density (via timesKey) and re-bounds the brush.
     if (DATE_SORT_ATTRS.includes(next.by)) lastDateSort = next.by;
-    if (filter.dateAttr !== lastDateSort) filter = { ...filter, dateAttr: lastDateSort };
+    if (filter.dateAttr !== lastDateSort)
+      filter = { ...filter, dateAttr: lastDateSort };
     rebuildFeedForFilterOrSort();
   }
 
@@ -1200,7 +1217,11 @@
   }
   // Pass dateAttr so the marker recomputes when the sort date changes, not just
   // on scroll (Svelte only tracks deps named in the reactive expression).
-  $: currentTime = deriveCurrentTime(hereIndex, displayEntries, filter.dateAttr);
+  $: currentTime = deriveCurrentTime(
+    hereIndex,
+    displayEntries,
+    filter.dateAttr
+  );
   // The marker follows the loaded feed window (`displayEntries`), which is rebuilt
   // asynchronously on each filter change, while the selection band follows `filter`
   // synchronously. During rapid brushing the window lags the band, which would
@@ -1276,7 +1297,10 @@
    * that photo. Guarded by feedEpoch + fetchingBefore/After. Returns the
    * resolved `selected` index, or -1 if the epoch was superseded/errored.
    * onGroupByChange and toggleSectionCollapse both route through this. */
-  async function recenterFeedOnId(focusId, { collapsed = collapsedPaths } = {}) {
+  async function recenterFeedOnId(
+    focusId,
+    { collapsed = collapsedPaths } = {}
+  ) {
     return withFeedTransaction(
       async (epoch) => {
         const { items: beforePage } = focusId
@@ -1301,10 +1325,15 @@
         });
         if (epoch !== feedEpoch) return -1;
         items = focusId
-          ? dedupeById([...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage])
+          ? dedupeById([
+              ...beforePage,
+              ...(focusItem ? [focusItem] : []),
+              ...afterPage,
+            ])
           : afterPage;
         hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
-        hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
+        hasMoreAfter =
+          afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
         await tick();
         selected = resolveSelectedIndex(displayEntries, focusId);
         focusPending = true;
@@ -1508,7 +1537,9 @@
       (n) => n.dataset.groupKey === key
     );
     if (!el) return null;
-    return el.getBoundingClientRect().top - mainColumnEl.getBoundingClientRect().top;
+    return (
+      el.getBoundingClientRect().top - mainColumnEl.getBoundingClientRect().top
+    );
   }
 
   /** Hold the just-expanded group's header at its captured pre-expand offset —
@@ -1924,7 +1955,12 @@
       inFlightParents.add(key);
       let node;
       try {
-        node = await fetchTreeNode({ groupBy: groupByAtCall, path: parent, filter: displayFilter, sort });
+        node = await fetchTreeNode({
+          groupBy: groupByAtCall,
+          path: parent,
+          filter: displayFilter,
+          sort,
+        });
       } catch {
         inFlightParents.delete(key); // transient failure — allow a retry
         continue;
@@ -2014,7 +2050,12 @@
     updateVisibleRange();
     tick().then(() => requestAnimationFrame(updateVisibleRange));
   }
-  $: visibleItems = buildVisibleItems(displayEntries, renderStart, renderEnd, selected);
+  $: visibleItems = buildVisibleItems(
+    displayEntries,
+    renderStart,
+    renderEnd,
+    selected
+  );
 
   // First scan of a session: bind:clientWidth's initial value arrives
   // asynchronously (Svelte's iframe resize-listener fires on iframe.onload),
@@ -2116,7 +2157,9 @@
     // Return focus to the grid, scrolled to the current item. (Key on
     // resolvePhoto(entry).id, matching Thumb's data-id — see focusPending.)
     const entry = displayEntries[selected];
-    gridEl?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)?.focus();
+    gridEl
+      ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
+      ?.focus();
   }
 
   /** Re-collapse a stack: remove it from expandedStackIds, then re-select
@@ -2230,7 +2273,6 @@
     return indices.map((i) => ({ i, entry: entries[i] }));
   }
 
-
   async function onKeydown(e) {
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
 
@@ -2334,7 +2376,10 @@
     if (key.toLowerCase() === "g") {
       e.preventDefault();
       if (e.shiftKey) {
-        const memberIds = targetStackMemberIds(displayEntries[selected], stacks);
+        const memberIds = targetStackMemberIds(
+          displayEntries[selected],
+          stacks
+        );
         if (memberIds) onDissolveStack(memberIds);
       } else if (canCreateManualStack(items, selectedIds, groupBy)) {
         onCreateStack([...selectedIds]);
@@ -2622,7 +2667,10 @@
           >
             {scanning ? "Opening…" : "Open"}
           </button>
-          <button class="open-folder-cancel" on:click={() => (openFolderOpen = false)}>
+          <button
+            class="open-folder-cancel"
+            on:click={() => (openFolderOpen = false)}
+          >
             Cancel
           </button>
         </div>
@@ -2690,7 +2738,9 @@
       <button
         class="focus-chip"
         on:click={exitFocus}
-        title={"Exit folder focus — back to the whole library (" + focusPath + ")"}
+        title={"Exit folder focus — back to the whole library (" +
+          focusPath +
+          ")"}
       >
         ▣ Focused: {focusName} ✕
       </button>
@@ -2736,7 +2786,6 @@
       />
     {/if}
   </header>
-
 
   <div class="app-body">
     {#if sidebarMode === "tree"}
@@ -2802,7 +2851,8 @@
               >
                 <div
                   class="section-header"
-                  style="top:{header.depth * HEADER_HEIGHT}px; z-index:{15 - header.depth};"
+                  style="top:{header.depth * HEADER_HEIGHT}px; z-index:{15 -
+                    header.depth};"
                 >
                   <button
                     class="section-toggle-icon"
@@ -2851,14 +2901,16 @@
                       <button
                         class="section-act"
                         title="Select every photo in this group"
-                        on:click|stopPropagation={() => selectGroup(header.path)}
+                        on:click|stopPropagation={() =>
+                          selectGroup(header.path)}
                       >
                         Select
                       </button>
                       <button
                         class="section-act"
                         title="Keep only this group as the working set"
-                        on:click|stopPropagation={() => keepOnlyGroup(header.path)}
+                        on:click|stopPropagation={() =>
+                          keepOnlyGroup(header.path)}
                       >
                         Keep only
                       </button>
@@ -2867,7 +2919,8 @@
                           class="section-act"
                           class:danger={removeArmedKey === pathKey(header.path)}
                           title="Remove this album from the library (files on disk are untouched; ratings are lost)"
-                          on:click|stopPropagation={() => removeAlbum(header.path)}
+                          on:click|stopPropagation={() =>
+                            removeAlbum(header.path)}
                         >
                           {removeArmedKey === pathKey(header.path)
                             ? "Confirm remove"
@@ -2896,9 +2949,12 @@
                       >
                         ◐
                       </button>
-                      <span class="snapshot-label" title={entry.item.path
-                        .map((p) => formatGroupValue(p.dimension, p.value))
-                        .join(" / ")}>
+                      <span
+                        class="snapshot-label"
+                        title={entry.item.path
+                          .map((p) => formatGroupValue(p.dimension, p.value))
+                          .join(" / ")}
+                      >
                         {entry.item.path
                           .map((p) => formatGroupValue(p.dimension, p.value))
                           .join(" / ")}
@@ -2947,7 +3003,8 @@
                         {sort}
                         {groupBy}
                         thumbPx={SNAPSHOT_ROW_HEIGHT - 44}
-                        on:select={(e) => openPhotoById(e.detail.id, entry.item.path)}
+                        on:select={(e) =>
+                          openPhotoById(e.detail.id, entry.item.path)}
                       />
                     </div>
                   </div>
@@ -2974,7 +3031,8 @@
                     {#if entry.item.path.at(-1)?.dimension === "folder"}
                       <button
                         class="section-act"
-                        class:danger={removeArmedKey === pathKey(entry.item.path)}
+                        class:danger={removeArmedKey ===
+                          pathKey(entry.item.path)}
                         title="Remove this album from the library (files on disk are untouched; ratings are lost)"
                         on:click|stopPropagation={() =>
                           removeAlbum(entry.item.path)}
@@ -2994,13 +3052,17 @@
                   size={thumbSize}
                   selected={i === selected}
                   inSelection={selectedIds.has(resolvePhoto(entry).id)}
-                  stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
+                  stackCount={entry.kind === "stack"
+                    ? entry.stack.count
+                    : undefined}
                   stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
                   stackMarginPx={stackMarginPx(entry)}
-                  inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
+                  inExpandedStack={entry.kind === "photo" &&
+                    entry.stackId !== null}
                   isCurrentCover={entry.kind === "photo" &&
                     entry.stackId !== null &&
-                    stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
+                    stacks.find((s) => s.id === entry.stackId)?.coverId ===
+                      entry.item.id}
                   on:click={(e) => onTileClick(e, entry, i)}
                   on:contextmenu={(e) => onTileContextMenu(e, entry, i)}
                   on:attempt={handleThumbAttempt}
@@ -3012,25 +3074,30 @@
         </div>
       {:else if !scanning && status !== "loading…"}
         {#if libraryTotal === 0}
-          <div class="empty">Nothing indexed yet — scan a folder to get started.</div>
+          <div class="empty">
+            Nothing indexed yet — scan a folder to get started.
+          </div>
         {:else if filterIsActive(filter) || keepIds}
           <div class="empty">
             <p class="empty-title">No photos match your current filters.</p>
             <p class="empty-hint">
-              {libraryTotal.toLocaleString()} photos are indexed — none match the active
-              {activeFacetLabels.length ? activeFacetLabels.join(" + ") + " filter" : "filters"}{activeFacetLabels.length >
-              1
-                ? "s"
-                : ""}. Widen or clear them to see photos again.
+              {libraryTotal.toLocaleString()} photos are indexed — none match the
+              active
+              {activeFacetLabels.length
+                ? activeFacetLabels.join(" + ") + " filter"
+                : "filters"}{activeFacetLabels.length > 1 ? "s" : ""}. Widen or
+              clear them to see photos again.
             </p>
-            <button class="empty-action" on:click={clearAllFilters}>Clear filters</button>
+            <button class="empty-action" on:click={clearAllFilters}
+              >Clear filters</button
+            >
           </div>
         {:else}
           <div class="empty">
             <p class="empty-title">No photos to show here.</p>
             <p class="empty-hint">
-              {libraryTotal.toLocaleString()} photos are indexed. Try a different grouping
-              or sort.
+              {libraryTotal.toLocaleString()} photos are indexed. Try a different
+              grouping or sort.
             </p>
           </div>
         {/if}
@@ -3047,7 +3114,7 @@
     bind:index={selected}
     inSelection={typeof resolvedPhotos[selected]?.id === "number" &&
       selectedIds.has(resolvedPhotos[selected].id)}
-    selectedCount={selectedCount}
+    {selectedCount}
     {selectedIds}
     showDetails={showLoupeDetails}
     showFilmstrip={showLoupeFilmstrip}

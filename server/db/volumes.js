@@ -22,7 +22,8 @@ export function getVolumeInfo(mountRoot, exec = defaultExec) {
     const captured = /Volume UUID:\s+(\S+)/.exec(output)?.[1] ?? null;
     // FAT32/exFAT (common on SD cards) may report "Not applicable" instead of a UUID;
     // validate it matches the UUID format (8-4-4-4-12 hex) to avoid false positives.
-    const uuidPattern = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
+    const uuidPattern =
+      /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
     const uuid = captured && uuidPattern.test(captured) ? captured : null;
     const label =
       /Volume Name:\s+(.+)/.exec(output)?.[1]?.trim() ?? basename(mountRoot);
@@ -57,14 +58,14 @@ export function upsertVolume(db, mountRoot, exec = defaultExec) {
   // No stable identifier available (non-macOS, or diskutil failed): key on
   // mount path instead, same degraded behavior as today's path-only check.
   const existing = db
-    .prepare(`SELECT id FROM volumes WHERE last_mount_path = ? AND uuid IS NULL`)
+    .prepare(
+      `SELECT id FROM volumes WHERE last_mount_path = ? AND uuid IS NULL`
+    )
     .get(mountRoot);
   if (existing) {
-    db.prepare(`UPDATE volumes SET label = ?, last_seen_at = ? WHERE id = ?`).run(
-      label,
-      now,
-      existing.id
-    );
+    db.prepare(
+      `UPDATE volumes SET label = ?, last_seen_at = ? WHERE id = ?`
+    ).run(label, now, existing.id);
     return existing.id;
   }
   return db

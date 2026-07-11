@@ -5,7 +5,7 @@
 ## Goal
 
 Add an always-on, brushable **density timeline** under the toolbar that filters
-the photo set by *when* photos were taken. Brushing a time range on it adds a
+the photo set by _when_ photos were taken. Brushing a time range on it adds a
 `dateFrom`/`dateTo` facet to the existing shared filter spec, so it narrows the
 feed (and everything else) exactly like the rating and orientation filters do.
 
@@ -15,14 +15,14 @@ data distribution and emits a `[lo, hi]` range in data space.
 
 ## Decisions locked with the user
 
-- **Role:** a new *filtering* method (not an album-boundary editor, not a feed
+- **Role:** a new _filtering_ method (not an album-boundary editor, not a feed
   scrubber).
 - **Integration:** one facet of the **existing filter spec** — `dateFrom` /
   `dateTo` AND-combine with rating/orientation and honor the Display/Select
   mode toggle. No second, parallel filtering system.
 - **Placement:** an **always-on** full-width strip between the toolbar and the
   feed (dynamic-query philosophy — persistent, tight feedback).
-- **Density scope:** **crossfilter** — the histogram reflects the *other* active
+- **Density scope:** **crossfilter** — the histogram reflects the _other_ active
   filters (rating/orientation) with the time facet itself excluded, refetching
   when they change.
 - **Packaging:** a normal **npm dependency** (`@john-guerra/d3-zoomable-axis`),
@@ -68,10 +68,10 @@ no per-endpoint wiring.
 
 - Query: `filter` (same encoding as `/api/feed`).
 - **Strips the time facet** from the incoming spec before querying (so the
-  histogram shows the full temporal span you brush *within*), but keeps
+  histogram shows the full temporal span you brush _within_), but keeps
   rating/orientation → true crossfilter.
 - Returns `{ times: number[], total: number, min: number|null,
-  max: number|null, sampled: boolean }` where `times` is the `t` column,
+max: number|null, sampled: boolean }` where `times` is the `t` column,
   **even-stride down-sampled** to a cap (`TIMES_SAMPLE_MAX = 12000`) so the KDE
   is cheap regardless of library size. `total` is the true unsampled count;
   `min`/`max` are the exact domain bounds (computed unsampled) so the axis scale
@@ -95,13 +95,32 @@ import { zoomableAxisInput } from "@john-guerra/d3-zoomable-axis";
 function timeline(node, { min, max, times, value, width }) {
   const scale = d3.scaleTime().domain([new Date(min), new Date(max)]);
   const w = zoomableAxisInput(scale, {
-    orient: "bottom", length: width, value, // value: [Date|ms, Date|ms] or full domain
+    orient: "bottom",
+    length: width,
+    value, // value: [Date|ms, Date|ms] or full domain
     format: (d) => d3.timeFormat("%b %e, %Y")(new Date(+d)),
-    scent: { values: times, type: "violin", style: "kde", colorSelected: "#4c9aff" },
+    scent: {
+      values: times,
+      type: "violin",
+      style: "kde",
+      colorSelected: "#4c9aff",
+    },
   });
-  w.addEventListener("input", () => dispatch("range", w.value.map((d) => +d)));
+  w.addEventListener("input", () =>
+    dispatch(
+      "range",
+      w.value.map((d) => +d)
+    )
+  );
   node.appendChild(w);
-  return { update(next) { /* rebuild on data/width change */ }, destroy() { w.remove(); } };
+  return {
+    update(next) {
+      /* rebuild on data/width change */
+    },
+    destroy() {
+      w.remove();
+    },
+  };
 }
 ```
 
@@ -144,6 +163,7 @@ function timeline(node, { min, max, times, value, width }) {
 ## Testing
 
 **Unit (vitest, colocated):**
+
 - `buildFilter` emits the `COALESCE(taken_at,mtime) BETWEEN`/`>=`/`<=` clause for
   each of {both bounds, from-only, to-only, neither} and AND-composes with a
   rating facet.
@@ -154,6 +174,7 @@ function timeline(node, { min, max, times, value, width }) {
 - `filterSpec.isActive` true when either date bound is set.
 
 **Live-verify (browser, per project convention — feed-window/filter changes):**
+
 - Brush a range → feed narrows to it, header "showing" count drops, no duplicate
   ids.
 - Zoom (drag handles) refines; the emitted range updates the feed.

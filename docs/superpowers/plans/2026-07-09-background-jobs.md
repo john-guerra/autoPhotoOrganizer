@@ -23,10 +23,12 @@
 ### Task 1: Job registry
 
 **Files:**
+
 - Create: `server/jobs/registry.js`
 - Test: `server/jobs/registry.test.js`
 
 **Interfaces:**
+
 - Produces: a singleton `registry` with `create(type,{label,total}) -> job`, `update(id,patch)`, `finish(id,result)`, `fail(id,error)`, `cancel(id)`, `dismiss(id)`, `list()`, and `on(event,cb)` (extends EventEmitter). `job` fields: `id,type,label,status,done,total,phase,result,error,controller`. `list()` returns each job WITHOUT `controller`.
 
 - [ ] **Step 1: Write failing tests** covering: `create` returns status `running`, monotonic id, fresh `AbortController`, emits `"change"`; `update` merges done/total/phase + emits; `finish`/`fail` set terminal status + result/error + emit; `cancel` calls `controller.abort()` and sets status `canceled`; `dismiss` removes a terminal job and refuses a running one; `list()` omits `controller` and is a snapshot (mutating it doesn't affect internal state).
@@ -45,27 +47,65 @@ class JobRegistry extends EventEmitter {
   create(type, { label, total = 0 } = {}) {
     const id = `job-${++this.#seq}`;
     const job = {
-      id, type, label: label ?? type,
-      status: "running", done: 0, total, phase: "",
-      result: null, error: null,
+      id,
+      type,
+      label: label ?? type,
+      status: "running",
+      done: 0,
+      total,
+      phase: "",
+      result: null,
+      error: null,
       controller: new AbortController(),
     };
     this.#jobs.set(id, job);
     this.#emit();
     return job;
   }
-  update(id, patch) { const j = this.#jobs.get(id); if (!j) return; Object.assign(j, patch); this.#emit(); }
-  finish(id, result) { const j = this.#jobs.get(id); if (!j) return; j.status = "done"; j.result = result ?? null; this.#emit(); }
-  fail(id, error) {
-    const j = this.#jobs.get(id); if (!j) return;
-    j.status = j.controller.signal.aborted ? "canceled" : "failed";
-    j.error = String(error?.message ?? error); this.#emit();
+  update(id, patch) {
+    const j = this.#jobs.get(id);
+    if (!j) return;
+    Object.assign(j, patch);
+    this.#emit();
   }
-  cancel(id) { const j = this.#jobs.get(id); if (!j || j.status !== "running") return false; j.controller.abort(); return true; }
-  dismiss(id) { const j = this.#jobs.get(id); if (!j || j.status === "running") return false; this.#jobs.delete(id); this.#emit(); return true; }
-  get(id) { return this.#jobs.get(id); }
-  list() { return [...this.#jobs.values()].map(({ controller, ...rest }) => ({ ...rest })); }
-  #emit() { this.emit("change", this.list()); }
+  finish(id, result) {
+    const j = this.#jobs.get(id);
+    if (!j) return;
+    j.status = "done";
+    j.result = result ?? null;
+    this.#emit();
+  }
+  fail(id, error) {
+    const j = this.#jobs.get(id);
+    if (!j) return;
+    j.status = j.controller.signal.aborted ? "canceled" : "failed";
+    j.error = String(error?.message ?? error);
+    this.#emit();
+  }
+  cancel(id) {
+    const j = this.#jobs.get(id);
+    if (!j || j.status !== "running") return false;
+    j.controller.abort();
+    return true;
+  }
+  dismiss(id) {
+    const j = this.#jobs.get(id);
+    if (!j || j.status === "running") return false;
+    this.#jobs.delete(id);
+    this.#emit();
+    return true;
+  }
+  get(id) {
+    return this.#jobs.get(id);
+  }
+  list() {
+    return [...this.#jobs.values()].map(({ controller, ...rest }) => ({
+      ...rest,
+    }));
+  }
+  #emit() {
+    this.emit("change", this.list());
+  }
 }
 
 export const registry = new JobRegistry();
@@ -79,10 +119,12 @@ export const registry = new JobRegistry();
 ### Task 2: Jobs endpoints + SSE
 
 **Files:**
+
 - Modify: `server/api.js` (add routes inside `registerApi`, import `registry`)
 - Test: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: `registry` (Task 1).
 - Produces: `GET /api/jobs -> {jobs}`; `GET /api/jobs/events` (SSE); `POST /api/jobs/:id/cancel`; `POST /api/jobs/:id/dismiss`.
 
@@ -109,7 +151,8 @@ app.get("/api/jobs/events", (req, res) => {
 app.post("/api/jobs/:id/cancel", (req, res) => {
   const j = registry.get(req.params.id);
   if (!j) return res.status(404).json({ error: "no such job" });
-  if (j.status !== "running") return res.status(409).json({ error: "not running" });
+  if (j.status !== "running")
+    return res.status(409).json({ error: "not running" });
   registry.cancel(req.params.id);
   res.json({ ok: true });
 });
@@ -117,7 +160,8 @@ app.post("/api/jobs/:id/cancel", (req, res) => {
 app.post("/api/jobs/:id/dismiss", (req, res) => {
   const j = registry.get(req.params.id);
   if (!j) return res.status(404).json({ error: "no such job" });
-  if (j.status === "running") return res.status(409).json({ error: "still running" });
+  if (j.status === "running")
+    return res.status(409).json({ error: "still running" });
   registry.dismiss(req.params.id);
   res.json({ ok: true });
 });
@@ -131,10 +175,12 @@ app.post("/api/jobs/:id/dismiss", (req, res) => {
 ### Task 3: Cancelable + move-capable copy loop
 
 **Files:**
+
 - Modify: `server/api.js` (`copyIdsIntoFolder`, ~line 106; helpers `nextAvailablePath`)
 - Test: `server/copy.test.js` (new)
 
 **Interfaces:**
+
 - Produces: `copyIdsIntoFolder(db, targetDir, ids, { signal, onProgress, move }) -> { copied, moved, skipped, manifest }` where `manifest: Array<{id, from, to}>`. Throws an `AbortError` (`error.name === "AbortError"`) when `signal.aborted`.
 
 - [ ] **Step 1: Write failing tests** (all in scratchpad temp dirs + temp `AUTOGALLERY_HOME`; seed a temp DB with a couple photo rows pointing at temp source files):
@@ -151,36 +197,62 @@ app.post("/api/jobs/:id/dismiss", (req, res) => {
 import { renameSync, fsyncSync, openSync, closeSync } from "node:fs";
 
 function moveFile(src, dst) {
-  try { renameSync(src, dst); return; }
-  catch (e) { if (e.code !== "EXDEV") throw e; }
-  copyFileSync(src, dst);                       // cross-volume
-  const fd = openSync(dst, "r"); fsyncSync(fd); closeSync(fd);
-  if (statSync(dst).size !== statSync(src).size) throw new Error(`move verify failed: ${src}`);
-  unlinkSync(src);                              // remove source only after verified
+  try {
+    renameSync(src, dst);
+    return;
+  } catch (e) {
+    if (e.code !== "EXDEV") throw e;
+  }
+  copyFileSync(src, dst); // cross-volume
+  const fd = openSync(dst, "r");
+  fsyncSync(fd);
+  closeSync(fd);
+  if (statSync(dst).size !== statSync(src).size)
+    throw new Error(`move verify failed: ${src}`);
+  unlinkSync(src); // remove source only after verified
 }
 
-function copyIdsIntoFolder(db, targetDir, ids, { signal, onProgress, move = false } = {}) {
+function copyIdsIntoFolder(
+  db,
+  targetDir,
+  ids,
+  { signal, onProgress, move = false } = {}
+) {
   mkdirSync(targetDir, { recursive: true });
-  let copied = 0, moved = 0, skipped = 0;
+  let copied = 0,
+    moved = 0,
+    skipped = 0;
   const manifest = [];
   const total = ids.length;
   ids.forEach((id, i) => {
-    if (signal?.aborted) { const e = new Error("canceled"); e.name = "AbortError"; throw e; }
+    if (signal?.aborted) {
+      const e = new Error("canceled");
+      e.name = "AbortError";
+      throw e;
+    }
     const photo = getPhotoById(db, Number(id));
-    if (!photo || !existsSync(photo.path)) { skipped++; }
-    else {
+    if (!photo || !existsSync(photo.path)) {
+      skipped++;
+    } else {
       const dst = nextAvailablePath(targetDir, basename(photo.path));
-      if (move) { moveFile(photo.path, dst); moved++; }
-      else { copyFileSync(photo.path, dst); copied++; }
+      if (move) {
+        moveFile(photo.path, dst);
+        moved++;
+      } else {
+        copyFileSync(photo.path, dst);
+        copied++;
+      }
       manifest.push({ id: Number(id), from: photo.path, to: dst });
     }
-    if (i % 50 === 0 || i === total - 1) onProgress?.(i + 1, total, move ? "moving" : "copying");
+    if (i % 50 === 0 || i === total - 1)
+      onProgress?.(i + 1, total, move ? "moving" : "copying");
   });
   return { copied, moved, skipped, manifest };
 }
 ```
 
-  (Index repoint on move is added in Task 4 — leave a `// TODO(task4): repoint index` marker right after `manifest.push`.)
+(Index repoint on move is added in Task 4 — leave a `// TODO(task4): repoint index` marker right after `manifest.push`.)
+
 - [ ] **Step 4: Run tests** — expect PASS.
 - [ ] **Step 5: Commit** `feat(export): cancelable copy loop with move (copy-verify-unlink) + manifest`.
 
@@ -189,10 +261,12 @@ function copyIdsIntoFolder(db, targetDir, ids, { signal, onProgress, move = fals
 ### Task 4: Repoint the index after a move
 
 **Files:**
+
 - Modify: `server/api.js` (call into a new helper), `server/db/photos.js` (helper)
 - Test: `server/db/photos.test.js` (add cases) or `server/copy.test.js`
 
 **Interfaces:**
+
 - Consumes: the moved-file `{id, to}` from Task 3.
 - Produces: `repointPhoto(db, id, newAbsPath)` in `server/db/photos.js` — ensures a `folders` row for `dirname(newAbsPath)` on the same volume, sets the photo's `folder_id` + `filename`, so `getPhotoById(db,id).path === newAbsPath` afterward and the photo is not "missing".
 
@@ -207,10 +281,12 @@ function copyIdsIntoFolder(db, targetDir, ids, { signal, onProgress, move = fals
 ### Task 5: Export as a job
 
 **Files:**
+
 - Modify: `server/api.js` (`POST /api/export`)
 - Test: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: `registry`, `copyIdsIntoFolder`.
 - Produces: `POST /api/export` now returns `202 {jobId}`; job `result` = `{target, copied, skipped}`.
 
@@ -219,16 +295,31 @@ function copyIdsIntoFolder(db, targetDir, ids, { signal, onProgress, move = fals
 - [ ] **Step 3: Implement** — after validation + `resolveExportTarget`, spawn:
 
 ```js
-const job = registry.create("export", { label: `Export ${photoIds.length} photos`, total: photoIds.length });
+const job = registry.create("export", {
+  label: `Export ${photoIds.length} photos`,
+  total: photoIds.length,
+});
 res.status(202).json({ jobId: job.id });
 (async () => {
   try {
-    const { copied, skipped, moved } = copyIdsIntoFolder(db, resolved.target, photoIds, {
-      signal: job.controller.signal,
-      onProgress: (done, total, phase) => registry.update(job.id, { done, total, phase }),
+    const { copied, skipped, moved } = copyIdsIntoFolder(
+      db,
+      resolved.target,
+      photoIds,
+      {
+        signal: job.controller.signal,
+        onProgress: (done, total, phase) =>
+          registry.update(job.id, { done, total, phase }),
+      }
+    );
+    registry.finish(job.id, {
+      target: resolved.target,
+      copied: copied + moved,
+      skipped,
     });
-    registry.finish(job.id, { target: resolved.target, copied: copied + moved, skipped });
-  } catch (e) { registry.fail(job.id, e); }
+  } catch (e) {
+    registry.fail(job.id, e);
+  }
 })();
 ```
 
@@ -240,10 +331,12 @@ res.status(202).json({ jobId: job.id });
 ### Task 6: Materialize as a job, with move flag
 
 **Files:**
+
 - Modify: `server/api.js` (`POST /api/albums/materialize`)
 - Test: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: `registry`, `copyIdsIntoFolder`.
 - Produces: `POST /api/albums/materialize` body gains `move?: boolean` (default **true**); returns `202 {jobId}`; job `result` = `{destParent, albums:[{name,target,copied,moved,skipped}], move, manifest}` (manifest = concatenated per-album manifests, for undo).
 
@@ -252,29 +345,46 @@ res.status(202).json({ jobId: job.id });
 - [ ] **Step 3: Implement** — keep the existing per-album validation; then:
 
 ```js
-const move = req.body?.move !== false;                 // default MOVE
+const move = req.body?.move !== false; // default MOVE
 const total = albums.reduce((n, a) => n + a.photoIds.length, 0);
 const job = registry.create("materialize", {
-  label: `Materialize ${albums.length} albums (${move ? "move" : "copy"})`, total,
+  label: `Materialize ${albums.length} albums (${move ? "move" : "copy"})`,
+  total,
 });
 res.status(202).json({ jobId: job.id });
 (async () => {
   try {
-    const results = []; const manifest = []; let done = 0;
+    const results = [];
+    const manifest = [];
+    let done = 0;
     for (const album of albums) {
-      if (job.controller.signal.aborted) throw Object.assign(new Error("canceled"), { name: "AbortError" });
+      if (job.controller.signal.aborted)
+        throw Object.assign(new Error("canceled"), { name: "AbortError" });
       const resolved = resolveExportTarget(db, destParent, album.name);
       if (resolved.error) throw new Error(resolved.error);
       const r = copyIdsIntoFolder(db, resolved.target, album.photoIds, {
-        signal: job.controller.signal, move,
-        onProgress: (d, _t, phase) => registry.update(job.id, { done: done + d, phase: `${album.name}: ${phase}` }),
+        signal: job.controller.signal,
+        move,
+        onProgress: (d, _t, phase) =>
+          registry.update(job.id, {
+            done: done + d,
+            phase: `${album.name}: ${phase}`,
+          }),
       });
       done += album.photoIds.length;
-      results.push({ name: album.name, target: resolved.target, copied: r.copied, moved: r.moved, skipped: r.skipped });
+      results.push({
+        name: album.name,
+        target: resolved.target,
+        copied: r.copied,
+        moved: r.moved,
+        skipped: r.skipped,
+      });
       manifest.push(...r.manifest);
     }
     registry.finish(job.id, { destParent, albums: results, move, manifest });
-  } catch (e) { registry.fail(job.id, e); }
+  } catch (e) {
+    registry.fail(job.id, e);
+  }
 })();
 ```
 
@@ -286,10 +396,12 @@ res.status(202).json({ jobId: job.id });
 ### Task 7: Recursive scan as a job
 
 **Files:**
+
 - Modify: `server/api.js` (`POST /api/scan`, recursive branch)
 - Test: `server/api.test.js`
 
 **Interfaces:**
+
 - Produces: recursive scan returns `202 {jobId}`; job `result` = `{root, count, folders, elapsedMs}`; per-subfolder progress; abortable between subfolders. Non-recursive (single-folder) scan stays synchronous (fast; returns items for immediate render) — do NOT change it.
 
 - [ ] **Step 1: Add test**: `POST /api/scan {dir, recursive:true}` → 202 `{jobId}`; job completes `done` with `folders`/`count`. Single-folder scan test unchanged (still 200 + items).
@@ -303,10 +415,12 @@ res.status(202).json({ jobId: job.id });
 ### Task 8: Undo-move endpoint
 
 **Files:**
+
 - Modify: `server/api.js`
 - Test: `server/api.test.js` / `server/copy.test.js`
 
 **Interfaces:**
+
 - Consumes: a completed move job's `result.manifest`.
 - Produces: `POST /api/albums/undo-move {manifest}` → `202 {jobId}` (type `undo-move`); moves each `to` back to `from` (copy→verify→unlink), repoints the index back; job `result` = `{restored, skipped}`.
 
@@ -321,11 +435,13 @@ res.status(202).json({ jobId: job.id });
 ### Task 9: Frontend jobs store
 
 **Files:**
+
 - Create: `ui/src/lib/jobs.js`
 - Modify: `ui/src/lib/api.js` (add `startScan/startExport/startMaterialize/undoMove` POST helpers returning `{jobId}`)
 - Test: `ui/src/lib/jobs.test.js` (store reducer logic only; mock EventSource)
 
 **Interfaces:**
+
 - Produces: a `jobs` readable store (array); `startExport(...)`, `startMaterialize({destParent,albums,move})`, `startScan(dir,{recursive})`, `cancelJob(id)`, `dismissJob(id)`, `undoMove(job)`, and `waitForJob(id): Promise<job>` (resolves when that id leaves `running`).
 
 - [ ] **Step 1: Write failing test** for the pure reducer: given a sequence of SSE snapshots, the store holds the latest array; `waitForJob(id)` resolves once the matching job's status !== "running". (Inject a fake EventSource.)
@@ -339,10 +455,12 @@ res.status(202).json({ jobId: job.id });
 ### Task 10: JobsPanel component + mount
 
 **Files:**
+
 - Create: `ui/src/lib/JobsPanel.svelte`
 - Modify: `ui/src/App.svelte` (mount in the bottom status bar)
 
 **Interfaces:**
+
 - Consumes: `jobs` store, `cancelJob/dismissJob/undoMove`.
 
 - [ ] **Step 1: Implement** `JobsPanel.svelte` (Svelte 4): subscribe `$jobs`; render nothing when empty; else a bottom bar row per job — label, `<progress value={job.done} max={job.total || undefined}>`, `phase`; **Cancel** button (`on:click={() => cancelJob(job.id)}`) while `status==="running"`; on `done` show a summary (materialize: `moved/copied/skipped`; export: `copied/skipped`; scan: `folders/count`) + dismiss × + **Undo** for `type==="materialize" && result?.move`; on `canceled/failed` show ✗ + `error` + dismiss ×.
@@ -355,9 +473,11 @@ res.status(202).json({ jobId: job.id });
 ### Task 11: Rewire callers
 
 **Files:**
+
 - Modify: `ui/src/App.svelte` (export + recursive-scan callers), `ui/src/lib/AlbumsView.svelte` (materialize + Move/Copy toggle)
 
 **Interfaces:**
+
 - Consumes: `startExport/startScan/startMaterialize` + `waitForJob`.
 
 - [ ] **Step 1: Export caller** — replace the awaited `exportSelection(...)` with `const {jobId} = await startExport(...); await waitForJob(jobId)` then the existing post-export UI (result now comes from the job; the panel shows progress). Remove the now-redundant inline result toast if the panel covers it.

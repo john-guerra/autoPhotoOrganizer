@@ -57,16 +57,16 @@ reviewed on return. Newest entries at the bottom.
      virtualization's `buildVisibleItems` glue function is (untested,
      inline) — this function has more branching/risk than that precedent,
      so it got its own module + tests instead.
-  Also chose reasonable-but-arbitrary visual details (badge corners, gap
-  slider range 0-10s/500ms steps, default 3000ms) — cheap to tweak after
-  you look at it.
+     Also chose reasonable-but-arbitrary visual details (badge corners, gap
+     slider range 0-10s/500ms steps, default 3000ms) — cheap to tweak after
+     you look at it.
 - **Part 2, Task 1 (`displayEntries.js`) — one Important review finding
   deliberately not fixed.** The reviewer flagged that
   `buildDisplayEntries` doesn't guard against `stack.coverId` missing
   from the `items`-derived `byId` map (would produce an `undefined`
   `coverItem`). I judged this structurally unreachable given the
   documented calling contract: `stacks` is always
-  `detectBursts(items, ...)`'s direct output, computed from the *same*
+  `detectBursts(items, ...)`'s direct output, computed from the _same_
   `items` array immediately before `buildDisplayEntries(items, stacks, ...)`
   runs (both are `$:` reactive statements in `App.svelte`, same reactive
   pass) — so `coverId` can never point outside `items`. Chose not to
@@ -153,15 +153,15 @@ Only live browser testing (screenshots from John, then direct
 2. Even after a non-clipping wrapper fix, peeks were still imperceptible
    live — added diagonal offset + a margin that scaled with stack size.
 3. Screenshot showed large stacks overlapping/too-wide — clamped the
-   *visual* depth to a fixed `MAX_PEEK_DEPTH=2` (data/count stays
+   _visual_ depth to a fixed `MAX_PEEK_DEPTH=2` (data/count stays
    uncapped).
 4. Screenshot showed stacks still touching — a review pass traced the
    CSS **by hand** and declared the containment fix correct (`inset: 0
-   Mpx` on the peek layer should shrink its box to match the reserved
+Mpx` on the peek layer should shrink its box to match the reserved
    margin). **This reasoning was wrong**, and the review didn't catch
    it: `<img>` is a CSS "replaced element," and per spec, an
    absolutely-positioned replaced element with `width: auto` sizes to
-   its *intrinsic* dimensions, ignoring `inset`-implied width entirely —
+   its _intrinsic_ dimensions, ignoring `inset`-implied width entirely —
    unlike a `<div>`/`<button>` (non-replaced), which is why the cover
    button sized correctly under the identical-looking rule but the peek
    `<img>` didn't. Only live DOM measurement (`getBoundingClientRect()`
@@ -176,20 +176,21 @@ Only live browser testing (screenshots from John, then direct
    radius set) instead of the button — square corners instead of
    rounded; and the button's own selection border/box-shadow (no
    z-index of its own) got promoted into the wrapper's shared stacking
-   context *below* the peek layers' explicit z-index, so the blue
+   context _below_ the peek layers' explicit z-index, so the blue
    selection highlight was invisible specifically on stack tiles. Both
    fixed (explicit `border-radius` on peeks; explicit `z-index: 10` on
    the button so it owns its own stacking context).
 
 **Takeaway for future visual/CSS work in this repo:** given there's no
 component test harness, static code review of CSS geometry is
-*insufficient* — verify pixel-level rendering claims (containment,
+_insufficient_ — verify pixel-level rendering claims (containment,
 z-index/stacking, inherited properties) via live DOM measurement
 (`claude-in-chrome` + `getBoundingClientRect()`/`getComputedStyle()`),
 not by tracing the cascade by hand. Two independent review passes both
 traced the same wrong conclusion by hand in this session.
 
 **Also logged mid-testing, not yet acted on:**
+
 - John noted while testing: "I think this is the first burst
   `PXL_20240822_165336928.MP.jpg`" — a filename he expects to be the
   chronological start of a real burst in the test folder. Attempted to
@@ -205,7 +206,7 @@ traced the same wrong conclusion by hand in this session.
   compared the grid tile at that same selection directly against the
   Loupe — the tile's `data-id`, `title`, and even its `<img src>`
   attribute all correctly pointed to the right photo, but the
-  *rendered pixels* showed a different photo entirely. A direct
+  _rendered pixels_ showed a different photo entirely. A direct
   `fetch()` of the same `/api/thumb/:id` URL (bypassing the existing
   `<img>` element) returned the CORRECT image, and John independently
   confirmed switching to a different browser also showed the correct

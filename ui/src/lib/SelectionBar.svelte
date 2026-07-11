@@ -22,8 +22,10 @@
 
 {#if selectedCount > 0}
   <div class="cluster selection">
-    <button class="sel-btn" on:click={() => dispatch("clear")} title="Clear selection"
-      >Clear</button
+    <button
+      class="sel-btn"
+      on:click={() => dispatch("clear")}
+      title="Clear selection">Clear</button
     >
     <button
       class="sel-btn"
@@ -57,7 +59,10 @@
                 spellcheck="false"
               />
               {#if hasNativePicker}
-                <button class="choose-folder" on:click={() => dispatch("choosedest")}>
+                <button
+                  class="choose-folder"
+                  on:click={() => dispatch("choosedest")}
+                >
                   Choose…
                 </button>
               {/if}

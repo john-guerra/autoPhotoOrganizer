@@ -18,7 +18,8 @@ export function computeGapStats(times) {
   const gaps = [];
   for (let i = 1; i < times.length; i++) gaps.push(times[i] - times[i - 1]);
   const n = gaps.length;
-  if (!n) return { mean: 0, stdev: 0, count: times.length, minGap: 0, maxGap: 0 };
+  if (!n)
+    return { mean: 0, stdev: 0, count: times.length, minGap: 0, maxGap: 0 };
   const mean = gaps.reduce((a, b) => a + b, 0) / n;
   const variance = gaps.reduce((a, b) => a + (b - mean) ** 2, 0) / n;
   return {
@@ -56,7 +57,12 @@ export function clusterByGap(photos, thresholdMs) {
     if (gap > thresholdMs) {
       cur.endAt = photos[i - 1].t;
       albums.push(cur);
-      cur = { index: albums.length, startAt: photos[i].t, endAt: photos[i].t, ids: [photos[i].id] };
+      cur = {
+        index: albums.length,
+        startAt: photos[i].t,
+        endAt: photos[i].t,
+        ids: [photos[i].id],
+      };
     } else {
       cur.ids.push(photos[i].id);
     }

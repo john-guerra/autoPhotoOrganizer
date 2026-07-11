@@ -49,8 +49,7 @@ export function mergeFeedPage(window, page, direction, requestedCount) {
   const gotFullPage = page.items.length >= requestedCount;
   return {
     items,
-    hasMoreBefore:
-      direction === "before" ? gotFullPage : window.hasMoreBefore,
+    hasMoreBefore: direction === "before" ? gotFullPage : window.hasMoreBefore,
     hasMoreAfter: direction === "after" ? gotFullPage : window.hasMoreAfter,
   };
 }

@@ -13,11 +13,10 @@ describe("sectionedJustifiedLayout", () => {
   it("behaves like plain justifiedLayout when there are no headers", () => {
     const its = items(9);
     const plain = justifiedLayout(its, opts);
-    const { boxes, headers, totalHeight } = sectionedJustifiedLayout(
-      its,
-      [],
-      { ...opts, headerHeight }
-    );
+    const { boxes, headers, totalHeight } = sectionedJustifiedLayout(its, [], {
+      ...opts,
+      headerHeight,
+    });
     expect(boxes).toEqual(plain);
     expect(headers).toEqual([]);
     // The single (only) chunk still gets its trailing inter-chunk gap added,
@@ -80,11 +79,10 @@ describe("sectionedJustifiedLayout", () => {
       { index: 0, depth: 1, dimension: "year", value: "2020", label: "2020" },
       { index: 5, depth: 1, dimension: "year", value: "2019", label: "2019" },
     ];
-    const { headers, totalHeight } = sectionedJustifiedLayout(
-      its,
-      headersIn,
-      { ...opts, headerHeight }
-    );
+    const { headers, totalHeight } = sectionedJustifiedLayout(its, headersIn, {
+      ...opts,
+      headerHeight,
+    });
     expect(headers).toHaveLength(3);
 
     const depth0 = headers.find((h) => h.depth === 0);

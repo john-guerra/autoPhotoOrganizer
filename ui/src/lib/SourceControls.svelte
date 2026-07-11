@@ -79,12 +79,19 @@
           on:keydown={(e) => e.key === "Enter" && dispatch("scan")}
           spellcheck="false"
         />
-        <label class="recursive-opt" title="Scan this folder and all folders inside it">
+        <label
+          class="recursive-opt"
+          title="Scan this folder and all folders inside it"
+        >
           <input type="checkbox" bind:checked={recursiveScan} />
           <span>Include subfolders</span>
         </label>
         <div class="add-actions">
-          <button class="scan" on:click={() => dispatch("scan")} disabled={scanning}>
+          <button
+            class="scan"
+            on:click={() => dispatch("scan")}
+            disabled={scanning}
+          >
             {scanning ? "Scanning…" : "Scan"}
           </button>
           {#if hasNativePicker}

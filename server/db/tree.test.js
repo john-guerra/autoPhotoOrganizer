@@ -284,11 +284,17 @@ describe("getTreeNode/getFlatTree — filter", () => {
     ]);
     db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(a1.id);
 
-    const node = getTreeNode(db, { groupBy: ["folder"], filter: { minRating: 4 } });
+    const node = getTreeNode(db, {
+      groupBy: ["folder"],
+      filter: { minRating: 4 },
+    });
     expect(node.total).toBe(1);
     expect(node.nodes.map((n) => n.value)).toEqual(["/photos/aaa"]);
 
-    const flat = getFlatTree(db, { groupBy: ["folder"], filter: { minRating: 4 } });
+    const flat = getFlatTree(db, {
+      groupBy: ["folder"],
+      filter: { minRating: 4 },
+    });
     expect(flat.total).toBe(1);
     expect(flat.leaves.map((l) => l.values.folder)).toEqual(["/photos/aaa"]);
   });
@@ -296,11 +302,18 @@ describe("getTreeNode/getFlatTree — filter", () => {
   it("defaults to no filter (both folders present)", () => {
     const db = getDb();
     seedVolume(db, 1);
-    upsertScan(db, "/photos/aaa", 1, [{ name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" }]);
-    upsertScan(db, "/photos/bbb", 1, [{ name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" }]);
+    upsertScan(db, "/photos/aaa", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/photos/bbb", 1, [
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
     const node = getTreeNode(db, { groupBy: ["folder"] });
     expect(node.total).toBe(2);
-    expect(node.nodes.map((n) => n.value)).toEqual(["/photos/aaa", "/photos/bbb"]);
+    expect(node.nodes.map((n) => n.value)).toEqual([
+      "/photos/aaa",
+      "/photos/bbb",
+    ]);
   });
 });
 

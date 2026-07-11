@@ -39,7 +39,11 @@ describe("clusterByGap", () => {
       [3, 4],
     ]);
     expect(albums[0]).toMatchObject({ index: 0, startAt: 0, endAt: 1 * H });
-    expect(albums[1]).toMatchObject({ index: 1, startAt: 10 * H, endAt: 10.5 * H });
+    expect(albums[1]).toMatchObject({
+      index: 1,
+      startAt: 10 * H,
+      endAt: 10.5 * H,
+    });
   });
 
   it("makes one album when the threshold exceeds every gap", () => {

@@ -12,7 +12,7 @@ gaps from live use: folder rows show near-identical `abs_path` strings whose
 differentiating tail is ellipsis-truncated (the list reads as noise), and it
 gives no sense of **where you are** in the whole library or how far a jump is.
 
-We add a **fisheye / focus+context navigator** as a *toggle-able alternative*
+We add a **fisheye / focus+context navigator** as a _toggle-able alternative_
 (persisted `sidebarMode`), plus a label-shortening fix that also improves the
 tree.
 
@@ -25,6 +25,7 @@ boundaries. The "you are here" marker **continuously follows the feed's scroll**
 clicking a leaf/checkpoint jumps the feed.
 
 ### Data — `server/db/tree.js` `getFlatTree(db,{groupBy})`
+
 One `GROUP BY` over all groupBy dimensions, ordered exactly as the feed orders
 groups (`resolveDimensions` + per-dim direction). Returns
 `{ total, leaves:[{ values:{dim:value}, count }] }` in feed order. Bounded by the
@@ -32,9 +33,11 @@ number of distinct leaf groups; one query per groupBy change. Exposed at
 `GET /api/tree/flat`; client helper `fetchFlatTree` in `ui/src/lib/api.js`.
 
 ### Distortion — `ui/src/lib/fisheye.js` (pure, tested; uses `d3.scaleLinear`)
+
 Reformulated from PhotoRing's absolute-position fisheye scale to a
 degree-of-interest **weight → cumulative layout**, which guarantees the column
 fills the viewport, `y` is monotonic, and thickness is positive:
+
 - `doiWeight(dist)` — flat in the near zone (`vicinity`), smooth lens decay
   (`falloff`, `distortion`) outside.
 - `deriveCheckpointDepth(leaves, groupBy)` — shallowest outer dimension that
@@ -47,11 +50,13 @@ fills the viewport, `y` is monotonic, and thickness is positive:
 - Tuning knobs (`FISHEYE_DEFAULTS`) are exposed for John to tune — his domain.
 
 ### Labels — `ui/src/lib/labels.js` `shortLeafLabel(dimension,value,prevValue)`
+
 Folder → basename (parent/basename on collision); dates → the differentiating
 component with coarser context added only where it changed vs `prevValue`;
 `""` → "Unknown". Used by the fisheye AND retrofitted into `TreeNode.svelte`.
 
 ### View + wiring
+
 - `ui/src/lib/FisheyeSidebar.svelte` — SVG column, count-weighted bars, shortened
   labels, checkpoint bands, a dot at the current position; `mousemove` sets a
   transient hover focus, `mouseleave` snaps back to current; click → `jump`.
@@ -62,6 +67,7 @@ component with coarser context added only where it changed vs `prevValue`;
   reuses `jumpToPath`.
 
 ## Testing
+
 - Unit (vitest): `fisheye.test.js` (10), `labels.test.js` (14), `tree.test.js`
   extended (`getFlatTree`, 4). Full suite: 254 passing. Vite build compiles.
 - Live (John, per working agreement): toggle persistence; dot follows scroll with
@@ -70,5 +76,6 @@ component with coarser context added only where it changed vs `prevValue`;
   sampling; tree labels now show differentiating segments.
 
 ## Out of scope
+
 Album/tag dimensions; horizontal orientation; persisting hover state; changes to
 feed pagination / rating / burst-stacks / loupe.

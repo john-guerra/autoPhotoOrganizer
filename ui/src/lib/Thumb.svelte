@@ -63,7 +63,8 @@
       if (src === url) settle(false);
     }, STALL_MS);
     previewTimer = setTimeout(() => {
-      if (src === url && !loaded) previewSrc = previewUrl(item.id, item.mtimeMs);
+      if (src === url && !loaded)
+        previewSrc = previewUrl(item.id, item.mtimeMs);
     }, PREVIEW_DELAY_MS);
   }
 
@@ -252,7 +253,8 @@
         class:is-cover={isCurrentCover}
         title={isCurrentCover
           ? "Current cover for this stack — press C to unset, Escape to collapse"
-          : "Part of a burst — press C to make this the cover, Escape to collapse"}>⚏</span
+          : "Part of a burst — press C to make this the cover, Escape to collapse"}
+        >⚏</span
       >
     {/if}
   </button>

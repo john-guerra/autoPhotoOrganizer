@@ -7,7 +7,14 @@
  */
 
 /** Every grouping level the multi-select offers, in menu order. */
-export const ALL_DIMENSIONS = ["folder", "year", "month", "day", "camera", "kind"];
+export const ALL_DIMENSIONS = [
+  "folder",
+  "year",
+  "month",
+  "day",
+  "camera",
+  "kind",
+];
 
 /** Feed-sort attributes, in dropdown order. */
 export const SORT_ATTRS = [

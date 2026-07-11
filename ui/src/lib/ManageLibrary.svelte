@@ -41,7 +41,11 @@
   }
 
   async function removeFolder(entry) {
-    if (!confirm(`Remove "${entry.name}" from the library? Real files on disk are not affected.`)) {
+    if (
+      !confirm(
+        `Remove "${entry.name}" from the library? Real files on disk are not affected.`
+      )
+    ) {
       return;
     }
     busy = true;
@@ -57,7 +61,11 @@
   }
 
   async function doClearCache() {
-    if (!confirm("Clear the entire thumbnail cache? It will regenerate automatically as photos are viewed again.")) {
+    if (
+      !confirm(
+        "Clear the entire thumbnail cache? It will regenerate automatically as photos are viewed again."
+      )
+    ) {
       return;
     }
     busy = true;
@@ -158,7 +166,8 @@
             {#each breakdown.folders as f (f.id)}
               <li>
                 <span class="folder-path" title={f.path}>{f.path}</span>
-                <span>{formatBytes(f.cachedBytes)} ({f.cachedFiles} files)</span>
+                <span>{formatBytes(f.cachedBytes)} ({f.cachedFiles} files)</span
+                >
               </li>
             {/each}
           </ul>
@@ -172,8 +181,8 @@
         Resetting wipes the entire index — <strong
           >every rating and cover choice</strong
         >
-        and the thumbnail cache. Your photos on disk are never touched, but the
-        ratings live only here and cannot be recovered. Type
+        and the thumbnail cache. Your photos on disk are never touched, but the ratings
+        live only here and cannot be recovered. Type
         <code>{RESET_WORD}</code> to confirm.
       </p>
       <div class="danger-actions">

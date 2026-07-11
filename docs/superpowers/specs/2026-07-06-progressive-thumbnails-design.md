@@ -131,7 +131,7 @@ background, identical to today). If the full-thumbnail request fails (the
 RAW `RawDecodeUnavailableError` case, surfaced as the route's existing error
 response), the preview stays visible as the final image — no stall
 countdown, no retry button, since there's nothing to retry: the embedded
-preview *is* the thumbnail for that file. This requires `Thumb.svelte` to
+preview _is_ the thumbnail for that file. This requires `Thumb.svelte` to
 distinguish "RAW, no slow tier available" from a genuine transient failure
 (network hiccup, corrupted file) so it doesn't show a misleading retry
 button for a file that will never succeed at the full-decode tier — the

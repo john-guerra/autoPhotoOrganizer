@@ -24,7 +24,7 @@ adding a drag-orderable hierarchy selector (`multi-auto-select` +
 ## Global Constraints
 
 - ESM everywhere (`"type": "module"`) — no TypeScript.
-- No comments explaining *what* code does; only non-obvious *why*.
+- No comments explaining _what_ code does; only non-obvious _why_.
 - Every test is colocated as `*.test.js` next to its source, vitest.
 - Real photo folders (`docs/TEST_FOLDERS.local.md`) are strictly
   read-only — tests use synthetic temp fixtures only; only the final
@@ -37,10 +37,12 @@ adding a drag-orderable hierarchy selector (`multi-auto-select` +
 ## Task 1: Composite ordering, collapse-exclusion, and keyset pagination
 
 **Files:**
+
 - Create: `server/db/feed.js`
 - Test: `server/db/feed.test.js`
 
 **Interfaces:**
+
 - Produces: `DIMENSIONS: Record<string, {expr: string, direction: 'ASC'|'DESC'}>`,
   `getFeedPage(db, {groupBy: string[], collapsed?: Array<Array<{dimension:string, value:string}>>, focusId?: number|null, before?: number, after?: number}): {items: Array<{id, name, size, mtimeMs, rating, preferredCover, width, height, takenAt, groupValues: Record<string,string>}>}`
   — consumed by Task 2 (adds `sections`) and Task 3 (the API endpoint).
@@ -73,9 +75,10 @@ afterEach(async () => {
 });
 
 function seedVolume(db, id) {
-  db.prepare(
-    `INSERT INTO volumes (id, label) VALUES (?, ?)`
-  ).run(id, `vol${id}`);
+  db.prepare(`INSERT INTO volumes (id, label) VALUES (?, ?)`).run(
+    id,
+    `vol${id}`
+  );
 }
 
 function setTakenAt(db, id, isoOrNull) {
@@ -316,7 +319,9 @@ function collapsedPathCondition(path, dims) {
   for (const { dimension, value } of path) {
     const dim = dims.find((d) => d.name === dimension);
     if (!dim) {
-      throw new Error(`collapsed path references unknown dimension: ${dimension}`);
+      throw new Error(
+        `collapsed path references unknown dimension: ${dimension}`
+      );
     }
     clauses.push(`${dim.expr} = ?`);
     params.push(value);
@@ -404,7 +409,10 @@ export function getFeedPage(
   { groupBy, collapsed = [], focusId = null, before = 0, after = 50 }
 ) {
   const dims = resolveDimensions(groupBy);
-  const seekDims = [...dims, { name: "__id", expr: "photos.id", direction: "ASC" }];
+  const seekDims = [
+    ...dims,
+    { name: "__id", expr: "photos.id", direction: "ASC" },
+  ];
   const selectDimCols = dims.map((d, i) => `${d.expr} AS dim${i}`).join(", ");
   const { sql: exclSql, params: exclParams } = exclusionClause(collapsed, dims);
 
@@ -437,7 +445,11 @@ export function getFeedPage(
     const orderCols = seekDims
       .map((d, i) => {
         const col = i < dims.length ? `dim${i}` : "photos.id";
-        const direction = wantAfter ? d.direction : d.direction === "ASC" ? "DESC" : "ASC";
+        const direction = wantAfter
+          ? d.direction
+          : d.direction === "ASC"
+            ? "DESC"
+            : "ASC";
         return `${col} ${direction}`;
       })
       .join(", ");
@@ -482,10 +494,12 @@ git commit -m "feat: add composite grouping, collapse-exclusion, and keyset pagi
 ## Task 2: Collapsed-section summary counts
 
 **Files:**
+
 - Modify: `server/db/feed.js`
 - Test: `server/db/feed.test.js`
 
 **Interfaces:**
+
 - Consumes: `DIMENSIONS`, `resolveDimensions` (module-private, Task 1 — this
   task adds a new module-level function in the same file, so it can reuse
   the private helper directly).
@@ -570,14 +584,14 @@ Then update `getFeedPage`'s return statement (the last line of the
 function) from:
 
 ```js
-  return { items: [...beforeItems, ...afterItems] };
+return { items: [...beforeItems, ...afterItems] };
 ```
 
 to:
 
 ```js
-  const sections = getCollapsedSummaries(db, { groupBy, collapsed });
-  return { items: [...beforeItems, ...afterItems], sections };
+const sections = getCollapsedSummaries(db, { groupBy, collapsed });
+return { items: [...beforeItems, ...afterItems], sections };
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -597,10 +611,12 @@ git commit -m "feat: add collapsed-section count summaries to the feed query"
 ## Task 3: `GET /api/feed` endpoint
 
 **Files:**
+
 - Modify: `server/api.js`
 - Modify: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: `getFeedPage` (Task 2), `getDb` (already imported in `api.js`).
 - Produces: `GET /api/feed` HTTP contract — consumed by Task 5
   (`ui/src/lib/api.js`'s `fetchFeed`).
@@ -680,52 +696,52 @@ route (the last route in the function, right before the function's closing
 `}`):
 
 ```js
-  // --- Grouped endless feed --------------------------------------------------
-  app.get("/api/feed", (req, res) => {
-    const groupBy = String(req.query.groupBy ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!groupBy.length) {
-      return res.status(400).json({ error: "groupBy is required" });
-    }
-    if (groupBy.some((d) => !DIMENSIONS[d])) {
-      return res.status(400).json({
-        error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
-      });
-    }
+// --- Grouped endless feed --------------------------------------------------
+app.get("/api/feed", (req, res) => {
+  const groupBy = String(req.query.groupBy ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!groupBy.length) {
+    return res.status(400).json({ error: "groupBy is required" });
+  }
+  if (groupBy.some((d) => !DIMENSIONS[d])) {
+    return res.status(400).json({
+      error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
+    });
+  }
 
-    let collapsed = [];
-    if (req.query.collapsed) {
-      try {
-        collapsed = JSON.parse(String(req.query.collapsed));
-      } catch {
-        return res.status(400).json({ error: "collapsed must be JSON" });
-      }
-    }
-
-    const focusIdParam = req.query.focusId;
-    const focusId =
-      focusIdParam !== undefined && focusIdParam !== ""
-        ? Number(focusIdParam)
-        : null;
-    const before = Math.max(0, Number(req.query.before) || 0);
-    const after = Math.max(0, Number(req.query.after) || 50);
-
-    const db = getDb();
+  let collapsed = [];
+  if (req.query.collapsed) {
     try {
-      const { items, sections } = getFeedPage(db, {
-        groupBy,
-        collapsed,
-        focusId,
-        before,
-        after,
-      });
-      res.json({ items, sections });
-    } catch (err) {
-      res.status(400).json({ error: err.message });
+      collapsed = JSON.parse(String(req.query.collapsed));
+    } catch {
+      return res.status(400).json({ error: "collapsed must be JSON" });
     }
-  });
+  }
+
+  const focusIdParam = req.query.focusId;
+  const focusId =
+    focusIdParam !== undefined && focusIdParam !== ""
+      ? Number(focusIdParam)
+      : null;
+  const before = Math.max(0, Number(req.query.before) || 0);
+  const after = Math.max(0, Number(req.query.after) || 50);
+
+  const db = getDb();
+  try {
+    const { items, sections } = getFeedPage(db, {
+      groupBy,
+      collapsed,
+      focusId,
+      before,
+      after,
+    });
+    res.json({ items, sections });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -745,10 +761,12 @@ git commit -m "feat: add GET /api/feed endpoint"
 ## Task 4: Frontend feed window logic (pure functions)
 
 **Files:**
+
 - Create: `ui/src/lib/feed.js`
 - Test: `ui/src/lib/feed.test.js`
 
 **Interfaces:**
+
 - Produces: `formatGroupValue(dimension: string, value: string): string`,
   `mergeFeedPage(window: FeedWindow, page: {items: object[]}, direction: 'before'|'after'): FeedWindow`,
   `deriveSectionHeaders(items: object[], groupBy: string[]): Array<{index: number, depth: number, dimension: string, value: string, label: string}>`
@@ -810,7 +828,11 @@ describe("mergeFeedPage", () => {
 
   it("never introduces a duplicate id across merges", () => {
     const win = mergeFeedPage(
-      { items: [{ id: 1 }, { id: 2 }], hasMoreBefore: false, hasMoreAfter: true },
+      {
+        items: [{ id: 1 }, { id: 2 }],
+        hasMoreBefore: false,
+        hasMoreAfter: true,
+      },
       { items: [{ id: 2 }, { id: 3 }] }, // id 2 overlaps
       "after",
       2
@@ -893,8 +915,7 @@ export function mergeFeedPage(window, page, direction, requestedCount) {
   const gotFullPage = page.items.length >= requestedCount;
   return {
     items,
-    hasMoreBefore:
-      direction === "before" ? gotFullPage : window.hasMoreBefore,
+    hasMoreBefore: direction === "before" ? gotFullPage : window.hasMoreBefore,
     hasMoreAfter: direction === "after" ? gotFullPage : window.hasMoreAfter,
   };
 }
@@ -950,9 +971,11 @@ git commit -m "feat: add pure feed-window merge and section-header derivation lo
 ## Task 5: Frontend `fetchFeed` API client
 
 **Files:**
+
 - Modify: `ui/src/lib/api.js`
 
 **Interfaces:**
+
 - Consumes: `GET /api/feed` (Task 3).
 - Produces: `fetchFeed({groupBy: string[], collapsed?: Array, focusId?: number|null, before?: number, after?: number}): Promise<{items: object[], sections: object[]}>`
   — consumed by Task 6 (`App.svelte`).
@@ -1025,6 +1048,7 @@ before, just fetched from `/api/feed` instead of `/api/scan` + in-memory
 array.
 
 **Files:**
+
 - Modify: `ui/src/App.svelte`
 - Test: manual verification only (this file has no existing test — see
   `docs/ROADMAP.md`'s working agreement: John verifies visually at
@@ -1033,8 +1057,9 @@ array.
   `displayEntries.js`, `bursts.js` — is already tested.)
 
 **Interfaces:**
+
 - Consumes: `fetchFeed` (Task 5), `mergeFeedPage`/`deriveSectionHeaders`
-  (Task 4, though `deriveSectionHeaders`'s actual header *rendering* is
+  (Task 4, though `deriveSectionHeaders`'s actual header _rendering_ is
   Task 7 — this task only needs `mergeFeedPage` for the window itself).
 - Produces: no new exports — internal `App.svelte` state only.
 
@@ -1076,34 +1101,34 @@ Replace these lines (the `dir`/`items`/scan-related state block, currently
 right after the `THUMB_BUCKETS`/`thumbSize` block):
 
 ```js
-  let dir = localStorage.getItem(LS_KEY) || "";
-  let items = [];
-  let status = "";
-  let error = "";
-  let scanning = false;
-  let scanEpoch = 0; // invalidates in-flight meta fetches on rescan
-  let library = [];
-  let libraryOpen = false;
+let dir = localStorage.getItem(LS_KEY) || "";
+let items = [];
+let status = "";
+let error = "";
+let scanning = false;
+let scanEpoch = 0; // invalidates in-flight meta fetches on rescan
+let library = [];
+let libraryOpen = false;
 ```
 
 with:
 
 ```js
-  let dir = localStorage.getItem(LS_KEY) || "";
-  const groupBy = ["folder"]; // hardcoded here; Task 7 makes this user-configurable
-  let items = []; // the currently-loaded feed window, ordered
-  let hasMoreBefore = false;
-  let hasMoreAfter = true;
-  let fetchingBefore = false;
-  let fetchingAfter = false;
-  const PAGE_SIZE = 60;
-  const FETCH_THRESHOLD = 20; // start fetching more when within this many items of an edge
-  let status = "";
-  let error = "";
-  let scanning = false;
-  let feedEpoch = 0; // invalidates in-flight meta fetches when the window resets
-  let library = [];
-  let libraryOpen = false;
+let dir = localStorage.getItem(LS_KEY) || "";
+const groupBy = ["folder"]; // hardcoded here; Task 7 makes this user-configurable
+let items = []; // the currently-loaded feed window, ordered
+let hasMoreBefore = false;
+let hasMoreAfter = true;
+let fetchingBefore = false;
+let fetchingAfter = false;
+const PAGE_SIZE = 60;
+const FETCH_THRESHOLD = 20; // start fetching more when within this many items of an edge
+let status = "";
+let error = "";
+let scanning = false;
+let feedEpoch = 0; // invalidates in-flight meta fetches when the window resets
+let library = [];
+let libraryOpen = false;
 ```
 
 - [ ] **Step 3: Replace `doScan`/`enrichMeta` with feed-loading functions**
@@ -1112,160 +1137,160 @@ Replace the entire `doScan` function and the `enrichMeta` function
 (currently two separate functions) with:
 
 ```js
-  onMount(() => {
-    refreshLibrary();
-    loadInitialFeed();
-  });
+onMount(() => {
+  refreshLibrary();
+  loadInitialFeed();
+});
 
-  async function loadInitialFeed() {
-    error = "";
-    status = "loading…";
-    const epoch = ++feedEpoch;
-    try {
-      const { items: page } = await fetchFeed({ groupBy, after: PAGE_SIZE });
-      if (epoch !== feedEpoch) return;
-      const merged = mergeFeedPage(
-        { items: [], hasMoreBefore: false, hasMoreAfter: true },
-        { items: page },
-        "after",
-        PAGE_SIZE
-      );
-      items = merged.items;
-      hasMoreBefore = merged.hasMoreBefore;
-      hasMoreAfter = merged.hasMoreAfter;
-      // Matches the original doScan's reset — a fresh/reset feed load
-      // always re-focuses the first item and closes any open loupe,
-      // rather than leaving `selected` pointing at whatever index the
-      // user had scrolled to in a now-discarded window.
-      selected = 0;
-      loupeOpen = false;
-      focusPending = true;
-      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-      enrichMeta(page.map((i) => i.id));
-    } catch (e) {
-      error = e.message;
-      status = "";
-    }
+async function loadInitialFeed() {
+  error = "";
+  status = "loading…";
+  const epoch = ++feedEpoch;
+  try {
+    const { items: page } = await fetchFeed({ groupBy, after: PAGE_SIZE });
+    if (epoch !== feedEpoch) return;
+    const merged = mergeFeedPage(
+      { items: [], hasMoreBefore: false, hasMoreAfter: true },
+      { items: page },
+      "after",
+      PAGE_SIZE
+    );
+    items = merged.items;
+    hasMoreBefore = merged.hasMoreBefore;
+    hasMoreAfter = merged.hasMoreAfter;
+    // Matches the original doScan's reset — a fresh/reset feed load
+    // always re-focuses the first item and closes any open loupe,
+    // rather than leaving `selected` pointing at whatever index the
+    // user had scrolled to in a now-discarded window.
+    selected = 0;
+    loupeOpen = false;
+    focusPending = true;
+    status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+    enrichMeta(page.map((i) => i.id));
+  } catch (e) {
+    error = e.message;
+    status = "";
   }
+}
 
-  async function loadMore(direction) {
-    if (direction === "after") {
-      if (fetchingAfter || !hasMoreAfter || !items.length) return;
-      fetchingAfter = true;
-    } else {
-      if (fetchingBefore || !hasMoreBefore || !items.length) return;
-      fetchingBefore = true;
-    }
-    const epoch = feedEpoch;
-    const focusId =
-      direction === "after" ? items[items.length - 1].id : items[0].id;
-    // Preserve scroll position when prepending: content inserted above
-    // the fold shifts everything below it down by the same amount, so
-    // without this the browser's fixed scrollTop would visually jump
-    // (the user would suddenly be looking at different content).
-    const gridHeightBefore = gridEl ? gridEl.getBoundingClientRect().height : 0;
-    try {
-      const { items: page } = await fetchFeed({
-        groupBy,
-        focusId,
-        before: direction === "before" ? PAGE_SIZE : 0,
-        after: direction === "after" ? PAGE_SIZE : 0,
-      });
-      if (epoch !== feedEpoch) return;
-      const merged = mergeFeedPage(
-        { items, hasMoreBefore, hasMoreAfter },
-        { items: page },
-        direction,
-        PAGE_SIZE
-      );
-      items = merged.items;
-      hasMoreBefore = merged.hasMoreBefore;
-      hasMoreAfter = merged.hasMoreAfter;
-      enrichMeta(page.map((i) => i.id));
-      if (direction === "before" && page.length) {
-        await tick();
-        const gridHeightAfter = gridEl
-          ? gridEl.getBoundingClientRect().height
-          : 0;
-        window.scrollBy(0, gridHeightAfter - gridHeightBefore);
-      }
-    } catch (e) {
-      error = e.message;
-    } finally {
-      if (direction === "after") fetchingAfter = false;
-      else fetchingBefore = false;
-    }
+async function loadMore(direction) {
+  if (direction === "after") {
+    if (fetchingAfter || !hasMoreAfter || !items.length) return;
+    fetchingAfter = true;
+  } else {
+    if (fetchingBefore || !hasMoreBefore || !items.length) return;
+    fetchingBefore = true;
   }
-
-  // Progressively fetch dimensions for a batch of newly-loaded ids; the
-  // justified layout refines itself as each batch lands (grid appears
-  // immediately with placeholders). Unlike the old per-folder-scan
-  // version, a feed page is already a bounded batch (PAGE_SIZE), so no
-  // further chunking is needed here.
-  async function enrichMeta(ids) {
-    const epoch = feedEpoch;
-    const need = ids.filter((id) => {
-      const it = items.find((i) => i.id === id);
-      return it && it.width == null;
+  const epoch = feedEpoch;
+  const focusId =
+    direction === "after" ? items[items.length - 1].id : items[0].id;
+  // Preserve scroll position when prepending: content inserted above
+  // the fold shifts everything below it down by the same amount, so
+  // without this the browser's fixed scrollTop would visually jump
+  // (the user would suddenly be looking at different content).
+  const gridHeightBefore = gridEl ? gridEl.getBoundingClientRect().height : 0;
+  try {
+    const { items: page } = await fetchFeed({
+      groupBy,
+      focusId,
+      before: direction === "before" ? PAGE_SIZE : 0,
+      after: direction === "after" ? PAGE_SIZE : 0,
     });
-    if (!need.length) return;
-    try {
-      const metas = await fetchMeta(need);
-      if (epoch !== feedEpoch) return;
-      for (const m of metas) {
-        const it = items.find((i) => i.id === m.id);
-        if (it && m.width && m.height) {
-          it.width = m.width;
-          it.height = m.height;
-          it.takenAt = m.takenAt;
-        }
+    if (epoch !== feedEpoch) return;
+    const merged = mergeFeedPage(
+      { items, hasMoreBefore, hasMoreAfter },
+      { items: page },
+      direction,
+      PAGE_SIZE
+    );
+    items = merged.items;
+    hasMoreBefore = merged.hasMoreBefore;
+    hasMoreAfter = merged.hasMoreAfter;
+    enrichMeta(page.map((i) => i.id));
+    if (direction === "before" && page.length) {
+      await tick();
+      const gridHeightAfter = gridEl
+        ? gridEl.getBoundingClientRect().height
+        : 0;
+      window.scrollBy(0, gridHeightAfter - gridHeightBefore);
+    }
+  } catch (e) {
+    error = e.message;
+  } finally {
+    if (direction === "after") fetchingAfter = false;
+    else fetchingBefore = false;
+  }
+}
+
+// Progressively fetch dimensions for a batch of newly-loaded ids; the
+// justified layout refines itself as each batch lands (grid appears
+// immediately with placeholders). Unlike the old per-folder-scan
+// version, a feed page is already a bounded batch (PAGE_SIZE), so no
+// further chunking is needed here.
+async function enrichMeta(ids) {
+  const epoch = feedEpoch;
+  const need = ids.filter((id) => {
+    const it = items.find((i) => i.id === id);
+    return it && it.width == null;
+  });
+  if (!need.length) return;
+  try {
+    const metas = await fetchMeta(need);
+    if (epoch !== feedEpoch) return;
+    for (const m of metas) {
+      const it = items.find((i) => i.id === m.id);
+      if (it && m.width && m.height) {
+        it.width = m.width;
+        it.height = m.height;
+        it.takenAt = m.takenAt;
       }
-      items = items; // re-layout with real aspect ratios
-    } catch {
-      return; // metadata is an enhancement; the grid still works without it
     }
+    items = items; // re-layout with real aspect ratios
+  } catch {
+    return; // metadata is an enhancement; the grid still works without it
   }
+}
 
-  async function refreshLibrary() {
-    library = await fetchLibrary().catch(() => library);
+async function refreshLibrary() {
+  library = await fetchLibrary().catch(() => library);
+}
+
+async function doScan() {
+  if (!dir.trim()) return;
+  error = "";
+  scanning = true;
+  status = "scanning…";
+  try {
+    await apiScan(dir.trim());
+    localStorage.setItem(LS_KEY, dir.trim());
+    refreshLibrary();
+    // The scanned folder is now indexed — reload the feed from the
+    // start so the newly-scanned photos appear (they may sort anywhere
+    // in the current grouping, not necessarily at the loaded window's
+    // edge, so a full reset is simpler and correct here).
+    await loadInitialFeed();
+  } catch (e) {
+    error = e.message;
+    status = "";
+  } finally {
+    scanning = false;
   }
+}
 
-  async function doScan() {
-    if (!dir.trim()) return;
-    error = "";
-    scanning = true;
-    status = "scanning…";
-    try {
-      await apiScan(dir.trim());
-      localStorage.setItem(LS_KEY, dir.trim());
-      refreshLibrary();
-      // The scanned folder is now indexed — reload the feed from the
-      // start so the newly-scanned photos appear (they may sort anywhere
-      // in the current grouping, not necessarily at the loaded window's
-      // edge, so a full reset is simpler and correct here).
-      await loadInitialFeed();
-    } catch (e) {
-      error = e.message;
-      status = "";
-    } finally {
-      scanning = false;
-    }
-  }
+function selectFromLibrary(entry) {
+  if (!entry.mounted) return;
+  dir = entry.path;
+  libraryOpen = false;
+  doScan();
+}
 
-  function selectFromLibrary(entry) {
-    if (!entry.mounted) return;
-    dir = entry.path;
-    libraryOpen = false;
+async function chooseFolder() {
+  const path = await window.autogallery?.pickFolder();
+  if (path) {
+    dir = path;
     doScan();
   }
-
-  async function chooseFolder() {
-    const path = await window.autogallery?.pickFolder();
-    if (path) {
-      dir = path;
-      doScan();
-    }
-  }
+}
 ```
 
 - [ ] **Step 4: Wire fetch-more into the existing scroll-driven recompute**
@@ -1274,30 +1299,30 @@ Modify `updateVisibleRange` (find the existing function definition) —
 replace it with:
 
 ```js
-  /** Recompute [renderStart, renderEnd] from the grid's current position,
-   * and trigger a fetch-more in either direction when the render window
-   * is near a loaded edge. */
-  function updateVisibleRange() {
-    if (!gridEl || !boxes) {
-      renderStart = 0;
-      renderEnd = -1;
-      return;
-    }
-    const rect = gridEl.getBoundingClientRect();
-    const range = visibleRange(boxes, {
-      scrollTop: -rect.top,
-      viewportHeight: window.innerHeight,
-    });
-    renderStart = range.start;
-    renderEnd = range.end;
-
-    if (renderEnd >= displayEntries.length - FETCH_THRESHOLD) {
-      loadMore("after");
-    }
-    if (renderStart <= FETCH_THRESHOLD) {
-      loadMore("before");
-    }
+/** Recompute [renderStart, renderEnd] from the grid's current position,
+ * and trigger a fetch-more in either direction when the render window
+ * is near a loaded edge. */
+function updateVisibleRange() {
+  if (!gridEl || !boxes) {
+    renderStart = 0;
+    renderEnd = -1;
+    return;
   }
+  const rect = gridEl.getBoundingClientRect();
+  const range = visibleRange(boxes, {
+    scrollTop: -rect.top,
+    viewportHeight: window.innerHeight,
+  });
+  renderStart = range.start;
+  renderEnd = range.end;
+
+  if (renderEnd >= displayEntries.length - FETCH_THRESHOLD) {
+    loadMore("after");
+  }
+  if (renderStart <= FETCH_THRESHOLD) {
+    loadMore("before");
+  }
+}
 ```
 
 - [ ] **Step 5: Remove the now-dead `LS_KEY` scan-epoch reference and update the empty-state condition**
@@ -1326,6 +1351,7 @@ Replace it with:
 Run: `npm run dev`
 
 Open `http://localhost:5173`. Expected:
+
 - The feed loads automatically on page load (no folder path needed first)
   if anything is already indexed (it is — see
   `docs/superpowers/plans/2026-07-06-persistent-multi-drive-index.md`'s
@@ -1356,10 +1382,12 @@ git commit -m "feat: replace scan-driven single-folder grid with a fetched feed 
 ## Task 7: Hierarchy selector + collapsible section headers
 
 **Files:**
+
 - Modify: `package.json` (add `multi-auto-select` + `sortablejs` dependencies)
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: `deriveSectionHeaders` (Task 4), `fetchFeed` (Task 5, already
   wired in Task 6 — this task changes what `groupBy`/`collapsed` values
   get passed to it).
@@ -1376,27 +1404,30 @@ Expected: `package.json`/`package-lock.json` updated, install completes
 In `ui/src/App.svelte`, replace this line (added in Task 6, Step 2):
 
 ```js
-  const groupBy = ["folder"]; // hardcoded here; Task 7 makes this user-configurable
+const groupBy = ["folder"]; // hardcoded here; Task 7 makes this user-configurable
 ```
 
 with:
 
 ```js
-  const LS_GROUP_BY = "autogallery.groupBy";
-  const ALL_DIMENSIONS = ["folder", "year", "month", "day"];
-  let groupBy = (() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(LS_GROUP_BY) ?? "null");
-      if (Array.isArray(stored) && stored.every((d) => ALL_DIMENSIONS.includes(d))) {
-        return stored;
-      }
-    } catch {
-      /* fall through to default */
+const LS_GROUP_BY = "autogallery.groupBy";
+const ALL_DIMENSIONS = ["folder", "year", "month", "day"];
+let groupBy = (() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(LS_GROUP_BY) ?? "null");
+    if (
+      Array.isArray(stored) &&
+      stored.every((d) => ALL_DIMENSIONS.includes(d))
+    ) {
+      return stored;
     }
-    return ["folder"];
-  })();
-  $: localStorage.setItem(LS_GROUP_BY, JSON.stringify(groupBy));
-  let collapsedPaths = []; // Array<Array<{dimension,value}>>, reset on hierarchy change
+  } catch {
+    /* fall through to default */
+  }
+  return ["folder"];
+})();
+$: localStorage.setItem(LS_GROUP_BY, JSON.stringify(groupBy));
+let collapsedPaths = []; // Array<Array<{dimension,value}>>, reset on hierarchy change
 ```
 
 - [ ] **Step 3: Add the hierarchy-change handler (re-center on the focused photo)**
@@ -1404,52 +1435,52 @@ with:
 Add this function near `loadInitialFeed` (Task 6):
 
 ```js
-  /** Rebuild the feed for a new grouping order, re-centering on whatever
-   * photo is currently selected so the user doesn't lose their place —
-   * falls back to the start of the feed if nothing resolves. */
-  async function onGroupByChange(newGroupBy) {
-    groupBy = newGroupBy;
-    collapsedPaths = [];
-    const focusEntry = displayEntries[selected];
-    const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
-    error = "";
-    status = "loading…";
-    const epoch = ++feedEpoch;
-    try {
-      const { items: beforePage } = focusId
-        ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0 })
-        : { items: [] };
-      const { items: afterPage } = await fetchFeed({
-        groupBy,
-        focusId,
-        before: 0,
-        after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
-      });
-      if (epoch !== feedEpoch) return;
-      const combined = focusId
-        ? [...beforePage, ...(await getFocusRow(focusId)), ...afterPage]
-        : afterPage;
-      items = combined;
-      hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
-      hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
-      selected = focusId ? beforePage.length : 0;
-      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-      enrichMeta(items.map((i) => i.id));
-    } catch (e) {
-      error = e.message;
-      status = "";
-    }
+/** Rebuild the feed for a new grouping order, re-centering on whatever
+ * photo is currently selected so the user doesn't lose their place —
+ * falls back to the start of the feed if nothing resolves. */
+async function onGroupByChange(newGroupBy) {
+  groupBy = newGroupBy;
+  collapsedPaths = [];
+  const focusEntry = displayEntries[selected];
+  const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
+  error = "";
+  status = "loading…";
+  const epoch = ++feedEpoch;
+  try {
+    const { items: beforePage } = focusId
+      ? await fetchFeed({ groupBy, focusId, before: PAGE_SIZE / 2, after: 0 })
+      : { items: [] };
+    const { items: afterPage } = await fetchFeed({
+      groupBy,
+      focusId,
+      before: 0,
+      after: focusId ? PAGE_SIZE / 2 : PAGE_SIZE,
+    });
+    if (epoch !== feedEpoch) return;
+    const combined = focusId
+      ? [...beforePage, ...(await getFocusRow(focusId)), ...afterPage]
+      : afterPage;
+    items = combined;
+    hasMoreBefore = focusId ? beforePage.length >= PAGE_SIZE / 2 : false;
+    hasMoreAfter = afterPage.length >= (focusId ? PAGE_SIZE / 2 : PAGE_SIZE);
+    selected = focusId ? beforePage.length : 0;
+    status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+    enrichMeta(items.map((i) => i.id));
+  } catch (e) {
+    error = e.message;
+    status = "";
   }
+}
 
-  /** The focus photo itself isn't returned by either before/after fetch
-   * (both are strictly-after/strictly-before), so fetch it directly by
-   * id via /api/meta's sibling lookup — reuse fetchFeed with before=1,
-   * after=0 centered one id past it is overkill; simplest is: it's
-   * already in `items` from before the hierarchy change, so just find it. */
-  async function getFocusRow(focusId) {
-    const existing = items.find((i) => i.id === focusId);
-    return existing ? [existing] : [];
-  }
+/** The focus photo itself isn't returned by either before/after fetch
+ * (both are strictly-after/strictly-before), so fetch it directly by
+ * id via /api/meta's sibling lookup — reuse fetchFeed with before=1,
+ * after=0 centered one id past it is overkill; simplest is: it's
+ * already in `items` from before the hierarchy change, so just find it. */
+async function getFocusRow(focusId) {
+  const existing = items.find((i) => i.id === focusId);
+  return existing ? [existing] : [];
+}
 ```
 
 - [ ] **Step 4: Add collapse/expand handlers**
@@ -1457,22 +1488,22 @@ Add this function near `loadInitialFeed` (Task 6):
 Add these functions near `onGroupByChange`:
 
 ```js
-  function pathKey(path) {
-    return path.map((p) => `${p.dimension}=${p.value}`).join(">");
-  }
+function pathKey(path) {
+  return path.map((p) => `${p.dimension}=${p.value}`).join(">");
+}
 
-  /** Toggle whether the section identified by `path` (an ordered prefix of
-   * `groupBy`) is collapsed. Collapsing removes its photos from `items`
-   * (they were fetched already) and refetches — a subsequent scroll won't
-   * re-request them, since the server excludes the collapsed path. */
-  async function toggleSectionCollapse(path) {
-    const key = pathKey(path);
-    const already = collapsedPaths.some((p) => pathKey(p) === key);
-    collapsedPaths = already
-      ? collapsedPaths.filter((p) => pathKey(p) !== key)
-      : [...collapsedPaths, path];
-    await loadInitialFeed();
-  }
+/** Toggle whether the section identified by `path` (an ordered prefix of
+ * `groupBy`) is collapsed. Collapsing removes its photos from `items`
+ * (they were fetched already) and refetches — a subsequent scroll won't
+ * re-request them, since the server excludes the collapsed path. */
+async function toggleSectionCollapse(path) {
+  const key = pathKey(path);
+  const already = collapsedPaths.some((p) => pathKey(p) === key);
+  collapsedPaths = already
+    ? collapsedPaths.filter((p) => pathKey(p) !== key)
+    : [...collapsedPaths, path];
+  await loadInitialFeed();
+}
 ```
 
 - [ ] **Step 5: Replace `loadInitialFeed`/`loadMore` calls to include `collapsedPaths`**
@@ -1480,40 +1511,40 @@ Add these functions near `onGroupByChange`:
 In `loadInitialFeed` (Task 6, Step 3), change the `fetchFeed` call from:
 
 ```js
-      const { items: page } = await fetchFeed({ groupBy, after: PAGE_SIZE });
+const { items: page } = await fetchFeed({ groupBy, after: PAGE_SIZE });
 ```
 
 to:
 
 ```js
-      const { items: page } = await fetchFeed({
-        groupBy,
-        collapsed: collapsedPaths,
-        after: PAGE_SIZE,
-      });
+const { items: page } = await fetchFeed({
+  groupBy,
+  collapsed: collapsedPaths,
+  after: PAGE_SIZE,
+});
 ```
 
 In `loadMore` (Task 6, Step 3), change the `fetchFeed` call from:
 
 ```js
-      const { items: page } = await fetchFeed({
-        groupBy,
-        focusId,
-        before: direction === "before" ? PAGE_SIZE : 0,
-        after: direction === "after" ? PAGE_SIZE : 0,
-      });
+const { items: page } = await fetchFeed({
+  groupBy,
+  focusId,
+  before: direction === "before" ? PAGE_SIZE : 0,
+  after: direction === "after" ? PAGE_SIZE : 0,
+});
 ```
 
 to:
 
 ```js
-      const { items: page } = await fetchFeed({
-        groupBy,
-        collapsed: collapsedPaths,
-        focusId,
-        before: direction === "before" ? PAGE_SIZE : 0,
-        after: direction === "after" ? PAGE_SIZE : 0,
-      });
+const { items: page } = await fetchFeed({
+  groupBy,
+  collapsed: collapsedPaths,
+  focusId,
+  before: direction === "before" ? PAGE_SIZE : 0,
+  after: direction === "after" ? PAGE_SIZE : 0,
+});
 ```
 
 - [ ] **Step 6: Derive and render section headers**
@@ -1522,22 +1553,22 @@ Add this reactive statement near the existing `$: displayEntries = ...`
 line:
 
 ```js
-  $: sectionHeaders = deriveSectionHeaders(items, groupBy);
-  $: sectionHeadersByIndex = (() => {
-    const map = new Map();
-    for (const h of sectionHeaders) {
-      if (!map.has(h.index)) map.set(h.index, []);
-      map.get(h.index).push(h);
-    }
-    return map;
-  })();
+$: sectionHeaders = deriveSectionHeaders(items, groupBy);
+$: sectionHeadersByIndex = (() => {
+  const map = new Map();
+  for (const h of sectionHeaders) {
+    if (!map.has(h.index)) map.set(h.index, []);
+    map.get(h.index).push(h);
+  }
+  return map;
+})();
 ```
 
 Add the import at the top of the `<script>` block (alongside the existing
 `feed.js` import from Task 6):
 
 ```js
-  import { mergeFeedPage, deriveSectionHeaders } from "./lib/feed.js";
+import { mergeFeedPage, deriveSectionHeaders } from "./lib/feed.js";
 ```
 
 (replacing the Task-6 single-name import line
@@ -1548,70 +1579,70 @@ block (find it in the `.grid` div), add section-header rendering right
 before the `<Thumb ...>` element:
 
 ```svelte
-        {#each visibleItems as { i, entry } (entryDomId(entry))}
-          {#if sectionHeadersByIndex.has(i)}
-            {#each sectionHeadersByIndex.get(i) as header (header.dimension + header.value)}
-              <div
-                class="section-header"
-                style="top:{header.depth * 32}px; z-index:{15 - header.depth};"
-              >
-                <button
-                  class="section-toggle"
-                  on:click={() =>
-                    toggleSectionCollapse(
-                      groupBy.slice(0, header.depth + 1).map((d) => ({
-                        dimension: d,
-                        value: resolvePhoto(entry).groupValues[d],
-                      }))
-                    )}
-                >
-                  ▾ {header.label}
-                </button>
-              </div>
-            {/each}
-          {/if}
-          <Thumb
-            item={resolvePhoto(entry)}
-            box={boxes[i]}
-            pad={PAD}
-            size={thumbSize}
-            selected={i === selected}
-            stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
-            stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
-            stackMarginPx={stackMarginPx(entry)}
-            inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
-            isCurrentCover={entry.kind === "photo" &&
-              entry.stackId !== null &&
-              stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
-            on:click={() =>
-              entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
-            on:attempt={handleThumbAttempt}
-            on:settled={handleThumbSettled}
-          />
-        {/each}
+{#each visibleItems as { i, entry } (entryDomId(entry))}
+  {#if sectionHeadersByIndex.has(i)}
+    {#each sectionHeadersByIndex.get(i) as header (header.dimension + header.value)}
+      <div
+        class="section-header"
+        style="top:{header.depth * 32}px; z-index:{15 - header.depth};"
+      >
+        <button
+          class="section-toggle"
+          on:click={() =>
+            toggleSectionCollapse(
+              groupBy.slice(0, header.depth + 1).map((d) => ({
+                dimension: d,
+                value: resolvePhoto(entry).groupValues[d],
+              }))
+            )}
+        >
+          ▾ {header.label}
+        </button>
+      </div>
+    {/each}
+  {/if}
+  <Thumb
+    item={resolvePhoto(entry)}
+    box={boxes[i]}
+    pad={PAD}
+    size={thumbSize}
+    selected={i === selected}
+    stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
+    stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
+    stackMarginPx={stackMarginPx(entry)}
+    inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
+    isCurrentCover={entry.kind === "photo" &&
+      entry.stackId !== null &&
+      stacks.find((s) => s.id === entry.stackId)?.coverId === entry.item.id}
+    on:click={() =>
+      entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
+    on:attempt={handleThumbAttempt}
+    on:settled={handleThumbSettled}
+  />
+{/each}
 ```
 
 Add this CSS to the `<style>` block (near `.grid`):
 
 ```css
-  .section-header {
-    position: sticky;
-    z-index: 15;
-    padding: 4px 8px;
-  }
-  .section-toggle {
-    background: none;
-    border: none;
-    color: inherit;
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
-  .section-toggle:hover {
-    background: #2a2a2a;
-  }
+.section-header {
+  position: sticky;
+  z-index: 15;
+  padding: 4px 8px;
+}
+.section-toggle {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.section-toggle:hover {
+  background: #2a2a2a;
+}
 ```
 
 (Rendering collapsed-section summary rows — e.g. "▸ 2015 (1,234 photos)"
@@ -1628,45 +1659,45 @@ Add this Svelte action near the top of the `<script>` block (after the
 constants, before the state declarations):
 
 ```js
-  import MultiAutoSelect from "multi-auto-select";
+import MultiAutoSelect from "multi-auto-select";
 
-  /** Svelte action: mounts the real MultiAutoSelect DOM widget into the
-   * node, keeps it in sync with `groupBy` via the `value` param, and
-   * calls `onGroupByChange` when the user reorders/adds/removes a pill. */
-  function groupBySelector(node, initialValue) {
-    const widget = MultiAutoSelect(ALL_DIMENSIONS, {
-      value: initialValue,
-      placeholder: "Add a grouping level…",
-      sortable: true,
-    });
-    widget.addEventListener("input", () => onGroupByChange(widget.value));
-    node.appendChild(widget);
-    return {
-      destroy() {
-        widget.remove();
-      },
-    };
-  }
+/** Svelte action: mounts the real MultiAutoSelect DOM widget into the
+ * node, keeps it in sync with `groupBy` via the `value` param, and
+ * calls `onGroupByChange` when the user reorders/adds/removes a pill. */
+function groupBySelector(node, initialValue) {
+  const widget = MultiAutoSelect(ALL_DIMENSIONS, {
+    value: initialValue,
+    placeholder: "Add a grouping level…",
+    sortable: true,
+  });
+  widget.addEventListener("input", () => onGroupByChange(widget.value));
+  node.appendChild(widget);
+  return {
+    destroy() {
+      widget.remove();
+    },
+  };
+}
 ```
 
 Add this to the template, inside `<header class="topbar">`, right after
 the `<h1>AutoGallery</h1>` line:
 
 ```svelte
-    <div class="group-by" use:groupBySelector={groupBy}></div>
+<div class="group-by" use:groupBySelector={groupBy}></div>
 ```
 
 Add this CSS to the `<style>` block:
 
 ```css
-  .group-by :global(.multi-auto-select) {
-    color: inherit;
-  }
-  .group-by :global(.pill) {
-    background: #2a2a2a !important;
-    color: #eee !important;
-    border-color: #444 !important;
-  }
+.group-by :global(.multi-auto-select) {
+  color: inherit;
+}
+.group-by :global(.pill) {
+  background: #2a2a2a !important;
+  color: #eee !important;
+  border-color: #444 !important;
+}
 ```
 
 - [ ] **Step 8: Manual verification**
@@ -1674,6 +1705,7 @@ Add this CSS to the `<style>` block:
 Run: `npm run dev`
 
 Open `http://localhost:5173`. Expected:
+
 - The "Add a grouping level…" widget appears in the topbar, pre-populated
   with "folder" (from `localStorage`, or the default).
 - Adding "year" and reordering (drag) to `["year", "folder"]` reloads the

@@ -22,10 +22,12 @@
 ### Task 1: `displayEntries.js` pure module
 
 **Files:**
+
 - Create: `ui/src/lib/displayEntries.js`
 - Test: `ui/src/lib/displayEntries.test.js`
 
 **Interfaces:**
+
 - Consumes: `detectBursts` output shape from Part 1 — `Array<{id: string, memberIds: Array<number|string>, coverId: number|string, count: number}>` (`ui/src/lib/bursts.js`).
 - Produces, all exported from `ui/src/lib/displayEntries.js`:
   - `buildDisplayEntries(items, stacks, expandedStackIds) → entries[]`, where each entry is `{kind: 'photo', item, stackId: string|null}` or `{kind: 'stack', stack, coverItem}`.
@@ -38,7 +40,11 @@ Create `ui/src/lib/displayEntries.test.js`:
 
 ```js
 import { describe, it, expect } from "vitest";
-import { buildDisplayEntries, entryDomId, resolvePhoto } from "./displayEntries.js";
+import {
+  buildDisplayEntries,
+  entryDomId,
+  resolvePhoto,
+} from "./displayEntries.js";
 
 const items = [
   { id: 1, name: "solo.jpg", mtimeMs: 0 },
@@ -69,7 +75,9 @@ describe("buildDisplayEntries", () => {
   it("expands every member of an expanded stack individually, tagged with stackId", () => {
     const entries = buildDisplayEntries(items, [stack], new Set(["burst-3"]));
     expect(entries).toHaveLength(4); // solo + 3 expanded members
-    const members = entries.filter((e) => e.kind === "photo" && e.stackId === "burst-3");
+    const members = entries.filter(
+      (e) => e.kind === "photo" && e.stackId === "burst-3"
+    );
     expect(members.map((e) => e.item.id)).toEqual([2, 3, 4]);
   });
 
@@ -82,21 +90,29 @@ describe("buildDisplayEntries", () => {
 
 describe("entryDomId", () => {
   it("returns the stack id for a collapsed stack entry", () => {
-    expect(entryDomId({ kind: "stack", stack, coverItem: items[2] })).toBe("burst-3");
+    expect(entryDomId({ kind: "stack", stack, coverItem: items[2] })).toBe(
+      "burst-3"
+    );
   });
 
   it("returns the photo id for a photo entry", () => {
-    expect(entryDomId({ kind: "photo", item: items[0], stackId: null })).toBe("1");
+    expect(entryDomId({ kind: "photo", item: items[0], stackId: null })).toBe(
+      "1"
+    );
   });
 });
 
 describe("resolvePhoto", () => {
   it("returns the cover item for a collapsed stack entry", () => {
-    expect(resolvePhoto({ kind: "stack", stack, coverItem: items[2] })).toBe(items[2]);
+    expect(resolvePhoto({ kind: "stack", stack, coverItem: items[2] })).toBe(
+      items[2]
+    );
   });
 
   it("returns the item itself for a photo entry", () => {
-    expect(resolvePhoto({ kind: "photo", item: items[0], stackId: null })).toBe(items[0]);
+    expect(resolvePhoto({ kind: "photo", item: items[0], stackId: null })).toBe(
+      items[0]
+    );
   });
 });
 ```
@@ -149,7 +165,11 @@ export function buildDisplayEntries(items, stacks, expandedStackIds) {
       entries.push({ kind: "photo", item, stackId: stack.id });
     } else if (!emittedStackIds.has(stack.id)) {
       emittedStackIds.add(stack.id);
-      entries.push({ kind: "stack", stack, coverItem: byId.get(stack.coverId) });
+      entries.push({
+        kind: "stack",
+        stack,
+        coverItem: byId.get(stack.coverId),
+      });
     }
     // else: a later member of an already-emitted collapsed stack — skip.
   }
@@ -200,9 +220,11 @@ EOF
 ### Task 2: Wire display entries into `App.svelte`'s data flow
 
 **Files:**
+
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: `detectBursts(items, {gapMs}) → stacks[]` (`ui/src/lib/bursts.js`, Part 1); `buildDisplayEntries(items, stacks, expandedStackIds) → entries[]`, `entryDomId(entry) → string`, `resolvePhoto(entry) → item` (Task 1, `ui/src/lib/displayEntries.js`).
 - Produces: `App.svelte`'s `boxes`, `visibleItems`, `selected`, and Loupe binding all now key off `displayEntries` instead of raw `items`. Later tasks (Task 3) consume the new `stackCount`/`inExpandedStack` values this task computes per entry.
 
@@ -213,38 +235,39 @@ This task is data-flow only — no visual change yet (no count badge, no expande
 In `ui/src/App.svelte`, add to the import block after the existing `visibleRange` import (currently line 4):
 
 ```js
-  import { detectBursts } from "./lib/bursts.js";
-  import {
-    buildDisplayEntries,
-    entryDomId,
-    resolvePhoto,
-  } from "./lib/displayEntries.js";
+import { detectBursts } from "./lib/bursts.js";
+import {
+  buildDisplayEntries,
+  entryDomId,
+  resolvePhoto,
+} from "./lib/displayEntries.js";
 ```
 
 Add new constants near the existing `LS_ZOOM` constant (currently line 14):
 
 ```js
-  const LS_BURST_GAP = "autogallery.burstGapMs";
-  const DEFAULT_BURST_GAP_MS = 3000;
+const LS_BURST_GAP = "autogallery.burstGapMs";
+const DEFAULT_BURST_GAP_MS = 3000;
 ```
 
 Add new persisted state right after the existing zoom-restoration block (currently ends at line 28, `$: rowHeight = ZOOM_LEVELS[zoom];`):
 
 ```js
-  const storedBurstGap = Number.parseInt(
-    localStorage.getItem(LS_BURST_GAP) ?? "",
-    10
-  );
-  let burstGapMs = Number.isFinite(storedBurstGap) && storedBurstGap >= 0
+const storedBurstGap = Number.parseInt(
+  localStorage.getItem(LS_BURST_GAP) ?? "",
+  10
+);
+let burstGapMs =
+  Number.isFinite(storedBurstGap) && storedBurstGap >= 0
     ? storedBurstGap
     : DEFAULT_BURST_GAP_MS;
-  $: localStorage.setItem(LS_BURST_GAP, String(burstGapMs));
+$: localStorage.setItem(LS_BURST_GAP, String(burstGapMs));
 ```
 
 Add new non-persisted state right after the existing `let focusPending = false;` line (currently line 55):
 
 ```js
-  let expandedStackIds = new Set(); // stack ids currently expanded inline in the grid
+let expandedStackIds = new Set(); // stack ids currently expanded inline in the grid
 ```
 
 - [ ] **Step 2: Add the stacks/displayEntries/resolvedPhotos reactive chain**
@@ -252,9 +275,9 @@ Add new non-persisted state right after the existing `let focusPending = false;`
 Immediately before the existing `$: boxes = ...` block (currently starting at line 107), add:
 
 ```js
-  $: stacks = detectBursts(items, { gapMs: burstGapMs });
-  $: displayEntries = buildDisplayEntries(items, stacks, expandedStackIds);
-  $: resolvedPhotos = displayEntries.map(resolvePhoto); // passed to Loupe
+$: stacks = detectBursts(items, { gapMs: burstGapMs });
+$: displayEntries = buildDisplayEntries(items, stacks, expandedStackIds);
+$: resolvedPhotos = displayEntries.map(resolvePhoto); // passed to Loupe
 ```
 
 - [ ] **Step 3: Change `boxes` to compute from `displayEntries`**
@@ -262,46 +285,46 @@ Immediately before the existing `$: boxes = ...` block (currently starting at li
 Replace the existing `$: boxes = ...` block (currently lines 107-121):
 
 ```js
-  $: boxes =
-    items.length && gridWidth > 2 * PAD
-      ? justifiedLayout(
-          items.map((it) => ({
-            id: it.id,
-            aspectRatio:
-              it.width && it.height ? it.width / it.height : DEFAULT_RATIO,
-          })),
-          {
-            containerWidth: gridWidth - 2 * PAD,
-            gap: 8,
-            targetRowHeight: rowHeight,
-          }
-        )
-      : null;
+$: boxes =
+  items.length && gridWidth > 2 * PAD
+    ? justifiedLayout(
+        items.map((it) => ({
+          id: it.id,
+          aspectRatio:
+            it.width && it.height ? it.width / it.height : DEFAULT_RATIO,
+        })),
+        {
+          containerWidth: gridWidth - 2 * PAD,
+          gap: 8,
+          targetRowHeight: rowHeight,
+        }
+      )
+    : null;
 ```
 
 with:
 
 ```js
-  $: boxes =
-    displayEntries.length && gridWidth > 2 * PAD
-      ? justifiedLayout(
-          displayEntries.map((e) => {
-            const photo = resolvePhoto(e);
-            return {
-              id: entryDomId(e),
-              aspectRatio:
-                photo.width && photo.height
-                  ? photo.width / photo.height
-                  : DEFAULT_RATIO,
-            };
-          }),
-          {
-            containerWidth: gridWidth - 2 * PAD,
-            gap: 8,
-            targetRowHeight: rowHeight,
-          }
-        )
-      : null;
+$: boxes =
+  displayEntries.length && gridWidth > 2 * PAD
+    ? justifiedLayout(
+        displayEntries.map((e) => {
+          const photo = resolvePhoto(e);
+          return {
+            id: entryDomId(e),
+            aspectRatio:
+              photo.width && photo.height
+                ? photo.width / photo.height
+                : DEFAULT_RATIO,
+          };
+        }),
+        {
+          containerWidth: gridWidth - 2 * PAD,
+          gap: 8,
+          targetRowHeight: rowHeight,
+        }
+      )
+    : null;
 ```
 
 - [ ] **Step 4: Change `visibleItems` to iterate `displayEntries`**
@@ -309,33 +332,38 @@ with:
 Replace the existing line (currently line 124):
 
 ```js
-  $: visibleItems = buildVisibleItems(items, renderStart, renderEnd, selected);
+$: visibleItems = buildVisibleItems(items, renderStart, renderEnd, selected);
 ```
 
 with:
 
 ```js
-  $: visibleItems = buildVisibleItems(displayEntries, renderStart, renderEnd, selected);
+$: visibleItems = buildVisibleItems(
+  displayEntries,
+  renderStart,
+  renderEnd,
+  selected
+);
 ```
 
 Update `buildVisibleItems`'s own definition (currently lines 190-199) to rename its parameter and returned key from `item` to `entry` (purely a naming change — the logic is unchanged):
 
 ```js
-  /**
-   * Indices to mount: the virtualized window, plus `selected` so keyboard
-   * jumps (Home/End, arrow past the window) mount their target and Thumb's
-   * own scrollIntoView reactive block (Thumb.svelte:42) brings it into view.
-   */
-  function buildVisibleItems(entries, start, end, selected) {
-    const indices = [];
-    for (let i = start; i <= end; i++) indices.push(i);
-    if (selected < entries.length && !indices.includes(selected)) {
-      const insertAt = indices.findIndex((i) => i > selected);
-      if (insertAt === -1) indices.push(selected);
-      else indices.splice(insertAt, 0, selected);
-    }
-    return indices.map((i) => ({ i, entry: entries[i] }));
+/**
+ * Indices to mount: the virtualized window, plus `selected` so keyboard
+ * jumps (Home/End, arrow past the window) mount their target and Thumb's
+ * own scrollIntoView reactive block (Thumb.svelte:42) brings it into view.
+ */
+function buildVisibleItems(entries, start, end, selected) {
+  const indices = [];
+  for (let i = start; i <= end; i++) indices.push(i);
+  if (selected < entries.length && !indices.includes(selected)) {
+    const insertAt = indices.findIndex((i) => i > selected);
+    if (insertAt === -1) indices.push(selected);
+    else indices.splice(insertAt, 0, selected);
   }
+  return indices.map((i) => ({ i, entry: entries[i] }));
+}
 ```
 
 - [ ] **Step 5: Update `rate`, `closeLoupe`, and the `focusPending` block to resolve through `displayEntries`**
@@ -343,73 +371,77 @@ Update `buildVisibleItems`'s own definition (currently lines 190-199) to rename 
 Replace the existing `rate` function (currently lines 139-145):
 
 ```js
-  function rate(index, rating) {
-    const it = items[index];
-    if (!it) return;
-    it.rating = rating;
-    items = items; // trigger reactivity
-    apiSetRating(it.id, rating).catch((e) => (error = e.message));
-  }
+function rate(index, rating) {
+  const it = items[index];
+  if (!it) return;
+  it.rating = rating;
+  items = items; // trigger reactivity
+  apiSetRating(it.id, rating).catch((e) => (error = e.message));
+}
 ```
 
 with:
 
 ```js
-  function rate(index, rating) {
-    const entry = displayEntries[index];
-    if (!entry) return;
-    const it = resolvePhoto(entry);
-    if (!it) return;
-    it.rating = rating;
-    items = items; // trigger reactivity
-    apiSetRating(it.id, rating).catch((e) => (error = e.message));
-  }
+function rate(index, rating) {
+  const entry = displayEntries[index];
+  if (!entry) return;
+  const it = resolvePhoto(entry);
+  if (!it) return;
+  it.rating = rating;
+  items = items; // trigger reactivity
+  apiSetRating(it.id, rating).catch((e) => (error = e.message));
+}
 ```
 
 Replace the existing `closeLoupe` function (currently lines 152-157):
 
 ```js
-  async function closeLoupe() {
-    loupeOpen = false;
-    await tick();
-    // Return focus to the grid, scrolled to the current item.
-    gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
-  }
+async function closeLoupe() {
+  loupeOpen = false;
+  await tick();
+  // Return focus to the grid, scrolled to the current item.
+  gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
+}
 ```
 
 with:
 
 ```js
-  async function closeLoupe() {
-    loupeOpen = false;
-    await tick();
-    // Return focus to the grid, scrolled to the current item.
-    const entry = displayEntries[selected];
-    gridEl?.querySelector(`[data-id="${entry ? entryDomId(entry) : ""}"]`)?.focus();
-  }
+async function closeLoupe() {
+  loupeOpen = false;
+  await tick();
+  // Return focus to the grid, scrolled to the current item.
+  const entry = displayEntries[selected];
+  gridEl
+    ?.querySelector(`[data-id="${entry ? entryDomId(entry) : ""}"]`)
+    ?.focus();
+}
 ```
 
 Replace the existing `focusPending` reactive block (currently lines 132-137):
 
 ```js
-  $: if (focusPending && boxes) {
-    focusPending = false;
-    tick().then(() => {
-      gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
-    });
-  }
+$: if (focusPending && boxes) {
+  focusPending = false;
+  tick().then(() => {
+    gridEl?.querySelector(`[data-id="${items[selected]?.id}"]`)?.focus();
+  });
+}
 ```
 
 with:
 
 ```js
-  $: if (focusPending && boxes) {
-    focusPending = false;
-    tick().then(() => {
-      const entry = displayEntries[selected];
-      gridEl?.querySelector(`[data-id="${entry ? entryDomId(entry) : ""}"]`)?.focus();
-    });
-  }
+$: if (focusPending && boxes) {
+  focusPending = false;
+  tick().then(() => {
+    const entry = displayEntries[selected];
+    gridEl
+      ?.querySelector(`[data-id="${entry ? entryDomId(entry) : ""}"]`)
+      ?.focus();
+  });
+}
 ```
 
 - [ ] **Step 6: Add `toggleExpand`/`collapseStack`, and update `onKeydown`**
@@ -417,132 +449,132 @@ with:
 Add two new functions right after `closeLoupe` (which now ends where Step 5 placed it, immediately before the `updateVisibleRange` function):
 
 ```js
-  /** Re-collapse a stack: remove it from expandedStackIds, then re-select
-   * and re-focus its now-collapsed tile once displayEntries recomputes. */
-  async function collapseStack(stackId) {
-    expandedStackIds.delete(stackId);
-    expandedStackIds = expandedStackIds; // trigger reactivity
+/** Re-collapse a stack: remove it from expandedStackIds, then re-select
+ * and re-focus its now-collapsed tile once displayEntries recomputes. */
+async function collapseStack(stackId) {
+  expandedStackIds.delete(stackId);
+  expandedStackIds = expandedStackIds; // trigger reactivity
+  await tick();
+  const newIndex = displayEntries.findIndex(
+    (e) => e.kind === "stack" && e.stack.id === stackId
+  );
+  if (newIndex !== -1) {
+    selected = newIndex;
     await tick();
-    const newIndex = displayEntries.findIndex(
-      (e) => e.kind === "stack" && e.stack.id === stackId
-    );
-    if (newIndex !== -1) {
-      selected = newIndex;
-      await tick();
-      gridEl
-        ?.querySelector(`[data-id="${stackId}"]`)
-        ?.focus({ preventScroll: true });
-    }
+    gridEl
+      ?.querySelector(`[data-id="${stackId}"]`)
+      ?.focus({ preventScroll: true });
   }
+}
 
-  /** Expand a stack: every member appears individually, tagged with the
-   * stack id, until collapseStack() is called (Escape, in onKeydown). */
-  async function toggleExpand(stack) {
-    if (expandedStackIds.has(stack.id)) {
-      await collapseStack(stack.id);
-      return;
-    }
-    expandedStackIds.add(stack.id);
-    expandedStackIds = expandedStackIds; // trigger reactivity
-    await tick();
-    const newIndex = displayEntries.findIndex(
-      (e) => e.kind === "photo" && e.item.id === stack.coverId
-    );
-    if (newIndex !== -1) {
-      selected = newIndex;
-      await tick();
-      gridEl
-        ?.querySelector(`[data-id="${stack.coverId}"]`)
-        ?.focus({ preventScroll: true });
-    }
+/** Expand a stack: every member appears individually, tagged with the
+ * stack id, until collapseStack() is called (Escape, in onKeydown). */
+async function toggleExpand(stack) {
+  if (expandedStackIds.has(stack.id)) {
+    await collapseStack(stack.id);
+    return;
   }
+  expandedStackIds.add(stack.id);
+  expandedStackIds = expandedStackIds; // trigger reactivity
+  await tick();
+  const newIndex = displayEntries.findIndex(
+    (e) => e.kind === "photo" && e.item.id === stack.coverId
+  );
+  if (newIndex !== -1) {
+    selected = newIndex;
+    await tick();
+    gridEl
+      ?.querySelector(`[data-id="${stack.coverId}"]`)
+      ?.focus({ preventScroll: true });
+  }
+}
 ```
 
 Now update `onKeydown` (currently lines 239-302). Change every `items.length` reference to `displayEntries.length` — this is the full function with all changes applied:
 
 ```js
-  async function onKeydown(e) {
-    // Never steal keystrokes from a focused input (e.g. typing a folder path
-    // with digits in it must not rate photos).
-    const tag = e.target?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)
-      return;
-    if (e.metaKey || e.ctrlKey || e.altKey) return; // browser shortcuts
+async function onKeydown(e) {
+  // Never steal keystrokes from a focused input (e.g. typing a folder path
+  // with digits in it must not rate photos).
+  const tag = e.target?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)
+    return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return; // browser shortcuts
 
-    if (!displayEntries.length) return;
-    const key = e.key;
+  if (!displayEntries.length) return;
+  const key = e.key;
 
-    // Grid zoom: +/- steps through the justified row heights.
-    if (!loupeOpen && (key === "+" || key === "=" || key === "-")) {
-      e.preventDefault();
-      zoom = Math.max(
-        0,
-        Math.min(ZOOM_LEVELS.length - 1, zoom + (key === "-" ? -1 : 1))
-      );
-      return;
-    }
-
-    // Star rating: 1-5 set stars, 0 clears. Works in both grid and loupe.
-    if (/^[0-5]$/.test(key)) {
-      e.preventDefault();
-      rate(selected, Number(key));
-      if (loupeOpen && selected < displayEntries.length - 1) selected += 1; // auto-advance
-      return;
-    }
-
-    if (loupeOpen) {
-      if (key === "Escape") {
-        e.preventDefault();
-        closeLoupe();
-      } else if (key === "ArrowRight" || key === "ArrowDown") {
-        e.preventDefault();
-        if (selected < displayEntries.length - 1) selected += 1;
-      } else if (key === "ArrowLeft" || key === "ArrowUp") {
-        e.preventDefault();
-        if (selected > 0) selected -= 1;
-      }
-      return;
-    }
-
-    // Escape in the grid: collapse an expanded stack if the selection is
-    // currently inside one.
-    if (key === "Escape") {
-      const entry = displayEntries[selected];
-      if (entry?.stackId) {
-        e.preventDefault();
-        await collapseStack(entry.stackId);
-      }
-      return;
-    }
-
-    // Grid navigation.
-    let next = selected;
-    if (key === "ArrowRight")
-      next = Math.min(displayEntries.length - 1, selected + 1);
-    else if (key === "ArrowLeft") next = Math.max(0, selected - 1);
-    else if (key === "ArrowDown") next = navVertical(1);
-    else if (key === "ArrowUp") next = navVertical(-1);
-    else if (key === "Enter" || key === " ") {
-      e.preventDefault();
-      const entry = displayEntries[selected];
-      if (entry?.kind === "stack") {
-        toggleExpand(entry.stack);
-      } else {
-        openLoupe(selected);
-      }
-      return;
-    } else if (key === "Home") next = 0;
-    else if (key === "End") next = displayEntries.length - 1;
-    else return;
-
+  // Grid zoom: +/- steps through the justified row heights.
+  if (!loupeOpen && (key === "+" || key === "=" || key === "-")) {
     e.preventDefault();
-    selected = next;
-    await tick();
-    const entry = displayEntries[selected];
-    gridEl
-      ?.querySelector(`[data-id="${entry ? entryDomId(entry) : ""}"]`)
-      ?.focus({ preventScroll: true });
+    zoom = Math.max(
+      0,
+      Math.min(ZOOM_LEVELS.length - 1, zoom + (key === "-" ? -1 : 1))
+    );
+    return;
   }
+
+  // Star rating: 1-5 set stars, 0 clears. Works in both grid and loupe.
+  if (/^[0-5]$/.test(key)) {
+    e.preventDefault();
+    rate(selected, Number(key));
+    if (loupeOpen && selected < displayEntries.length - 1) selected += 1; // auto-advance
+    return;
+  }
+
+  if (loupeOpen) {
+    if (key === "Escape") {
+      e.preventDefault();
+      closeLoupe();
+    } else if (key === "ArrowRight" || key === "ArrowDown") {
+      e.preventDefault();
+      if (selected < displayEntries.length - 1) selected += 1;
+    } else if (key === "ArrowLeft" || key === "ArrowUp") {
+      e.preventDefault();
+      if (selected > 0) selected -= 1;
+    }
+    return;
+  }
+
+  // Escape in the grid: collapse an expanded stack if the selection is
+  // currently inside one.
+  if (key === "Escape") {
+    const entry = displayEntries[selected];
+    if (entry?.stackId) {
+      e.preventDefault();
+      await collapseStack(entry.stackId);
+    }
+    return;
+  }
+
+  // Grid navigation.
+  let next = selected;
+  if (key === "ArrowRight")
+    next = Math.min(displayEntries.length - 1, selected + 1);
+  else if (key === "ArrowLeft") next = Math.max(0, selected - 1);
+  else if (key === "ArrowDown") next = navVertical(1);
+  else if (key === "ArrowUp") next = navVertical(-1);
+  else if (key === "Enter" || key === " ") {
+    e.preventDefault();
+    const entry = displayEntries[selected];
+    if (entry?.kind === "stack") {
+      toggleExpand(entry.stack);
+    } else {
+      openLoupe(selected);
+    }
+    return;
+  } else if (key === "Home") next = 0;
+  else if (key === "End") next = displayEntries.length - 1;
+  else return;
+
+  e.preventDefault();
+  selected = next;
+  await tick();
+  const entry = displayEntries[selected];
+  gridEl
+    ?.querySelector(`[data-id="${entry ? entryDomId(entry) : ""}"]`)
+    ?.focus({ preventScroll: true });
+}
 ```
 
 - [ ] **Step 7: Update the template's grid loop and Loupe binding**
@@ -550,48 +582,48 @@ Now update `onKeydown` (currently lines 239-302). Change every `items.length` re
 Replace the existing `{#each}` block (currently lines 348-359):
 
 ```svelte
-      {#if boxes}
-        {#each visibleItems as { i, item } (item.id)}
-          <Thumb
-            {item}
-            box={boxes[i]}
-            pad={PAD}
-            size={thumbSize}
-            selected={i === selected}
-            on:click={() => openLoupe(i)}
-          />
-        {/each}
-      {/if}
+{#if boxes}
+  {#each visibleItems as { i, item } (item.id)}
+    <Thumb
+      {item}
+      box={boxes[i]}
+      pad={PAD}
+      size={thumbSize}
+      selected={i === selected}
+      on:click={() => openLoupe(i)}
+    />
+  {/each}
+{/if}
 ```
 
 with:
 
 ```svelte
-      {#if boxes}
-        {#each visibleItems as { i, entry } (entryDomId(entry))}
-          <Thumb
-            item={resolvePhoto(entry)}
-            box={boxes[i]}
-            pad={PAD}
-            size={thumbSize}
-            selected={i === selected}
-            on:click={() =>
-              entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
-          />
-        {/each}
-      {/if}
+{#if boxes}
+  {#each visibleItems as { i, entry } (entryDomId(entry))}
+    <Thumb
+      item={resolvePhoto(entry)}
+      box={boxes[i]}
+      pad={PAD}
+      size={thumbSize}
+      selected={i === selected}
+      on:click={() =>
+        entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
+    />
+  {/each}
+{/if}
 ```
 
 Replace the existing Loupe binding (currently line 367):
 
 ```svelte
-  <Loupe {items} bind:index={selected} />
+<Loupe {items} bind:index={selected} />
 ```
 
 with:
 
 ```svelte
-  <Loupe items={resolvedPhotos} bind:index={selected} />
+<Loupe items={resolvedPhotos} bind:index={selected} />
 ```
 
 - [ ] **Step 8: Run the full test suite to check for regressions**
@@ -628,10 +660,12 @@ EOF
 ### Task 3: Stack visuals in `Thumb.svelte`, and the `gapMs` control
 
 **Files:**
+
 - Modify: `ui/src/lib/Thumb.svelte`
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: `entry.kind`, `entry.stack.count`, `entry.stackId` from Task 2's `displayEntries`/template loop.
 
 - [ ] **Step 1: Add the two new props and their markup to `Thumb.svelte`**
@@ -639,46 +673,48 @@ EOF
 In `ui/src/lib/Thumb.svelte`, add two new props after the existing `export let selected = false;` line:
 
 ```js
-  export let stackCount = undefined; // set when this tile is a collapsed stack's cover
-  export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
+export let stackCount = undefined; // set when this tile is a collapsed stack's cover
+export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
 ```
 
 Add the new badge/marker markup inside the `<button>`, after the existing rating badge block (`{#if item.rating > 0}...{/if}`):
 
 ```svelte
-  {#if stackCount}
-    <span class="stack-badge">×{stackCount}</span>
-  {/if}
-  {#if inExpandedStack}
-    <span class="stack-marker" title="Part of a burst — press Escape to collapse">⚏</span>
-  {/if}
+{#if stackCount}
+  <span class="stack-badge">×{stackCount}</span>
+{/if}
+{#if inExpandedStack}
+  <span class="stack-marker" title="Part of a burst — press Escape to collapse"
+    >⚏</span
+  >
+{/if}
 ```
 
 Add the corresponding CSS at the end of the `<style>` block (existing `.badge` rule stays; these are new, distinct corners so they don't overlap):
 
 ```css
-  .stack-badge {
-    position: absolute;
-    right: 5px;
-    bottom: 5px;
-    padding: 1px 5px;
-    background: rgba(0, 0, 0, 0.65);
-    color: #fff;
-    font-size: 0.7rem;
-    border-radius: 3px;
-    pointer-events: none;
-  }
-  .stack-marker {
-    position: absolute;
-    left: 5px;
-    top: 5px;
-    padding: 1px 4px;
-    background: rgba(76, 154, 255, 0.75);
-    color: #06121f;
-    font-size: 0.7rem;
-    border-radius: 3px;
-    pointer-events: none;
-  }
+.stack-badge {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 1px 5px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.7rem;
+  border-radius: 3px;
+  pointer-events: none;
+}
+.stack-marker {
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  padding: 1px 4px;
+  background: rgba(76, 154, 255, 0.75);
+  color: #06121f;
+  font-size: 0.7rem;
+  border-radius: 3px;
+  pointer-events: none;
+}
 ```
 
 - [ ] **Step 2: Pass the new props from `App.svelte`'s template**
@@ -686,21 +722,21 @@ Add the corresponding CSS at the end of the `<style>` block (existing `.badge` r
 In `ui/src/App.svelte`, update the `<Thumb>` invocation from Task 2's template loop to also pass the two new props:
 
 ```svelte
-      {#if boxes}
-        {#each visibleItems as { i, entry } (entryDomId(entry))}
-          <Thumb
-            item={resolvePhoto(entry)}
-            box={boxes[i]}
-            pad={PAD}
-            size={thumbSize}
-            selected={i === selected}
-            stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
-            inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
-            on:click={() =>
-              entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
-          />
-        {/each}
-      {/if}
+{#if boxes}
+  {#each visibleItems as { i, entry } (entryDomId(entry))}
+    <Thumb
+      item={resolvePhoto(entry)}
+      box={boxes[i]}
+      pad={PAD}
+      size={thumbSize}
+      selected={i === selected}
+      stackCount={entry.kind === "stack" ? entry.stack.count : undefined}
+      inExpandedStack={entry.kind === "photo" && entry.stackId !== null}
+      on:click={() =>
+        entry.kind === "stack" ? toggleExpand(entry.stack) : openLoupe(i)}
+    />
+  {/each}
+{/if}
 ```
 
 - [ ] **Step 3: Add the `burstGapMs` slider to the topbar**
@@ -708,37 +744,37 @@ In `ui/src/App.svelte`, update the `<Thumb>` invocation from Task 2's template l
 In `ui/src/App.svelte`, add a new control after the existing `.zoom` `<label>` block in the topbar (right before the `<span class="status" ...>` element):
 
 ```svelte
-    <label
-      class="burst-gap"
-      title="Group photos taken within this many seconds as a burst"
-    >
-      <span class="burst-gap-icon">⧉</span>
-      <input type="range" min="0" max="10000" step="500" bind:value={burstGapMs} />
-      <span class="burst-gap-value">{(burstGapMs / 1000).toFixed(1)}s</span>
-    </label>
+<label
+  class="burst-gap"
+  title="Group photos taken within this many seconds as a burst"
+>
+  <span class="burst-gap-icon">⧉</span>
+  <input type="range" min="0" max="10000" step="500" bind:value={burstGapMs} />
+  <span class="burst-gap-value">{(burstGapMs / 1000).toFixed(1)}s</span>
+</label>
 ```
 
 Add matching CSS after the existing `.zoom-icon.small` rule:
 
 ```css
-  .burst-gap {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: #777;
-  }
-  .burst-gap input[type="range"] {
-    width: 90px;
-    accent-color: #4c9aff;
-  }
-  .burst-gap-icon {
-    font-size: 1rem;
-    line-height: 1;
-  }
-  .burst-gap-value {
-    font-size: 0.75rem;
-    min-width: 2.5em;
-  }
+.burst-gap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #777;
+}
+.burst-gap input[type="range"] {
+  width: 90px;
+  accent-color: #4c9aff;
+}
+.burst-gap-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+.burst-gap-value {
+  font-size: 0.75rem;
+  min-width: 2.5em;
+}
 ```
 
 - [ ] **Step 4: Run the full test suite to check for regressions**

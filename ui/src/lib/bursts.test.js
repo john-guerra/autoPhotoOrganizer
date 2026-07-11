@@ -120,7 +120,12 @@ describe("detectBursts", () => {
   it("groups photos using takenAt even when it's an ISO-8601 string (the real app's shape)", () => {
     const items = [
       { id: 1, name: "a.jpg", mtimeMs: 0, takenAt: "2024-01-01T00:00:00.000Z" },
-      { id: 2, name: "b.jpg", mtimeMs: 50000, takenAt: "2024-01-01T00:00:00.200Z" },
+      {
+        id: 2,
+        name: "b.jpg",
+        mtimeMs: 50000,
+        takenAt: "2024-01-01T00:00:00.200Z",
+      },
     ];
     const stacks = detectBursts(items, { gapMs: 1000 });
     expect(stacks).toHaveLength(1);

@@ -93,7 +93,12 @@ export function deriveCheckpointDepth(leaves, groupBy) {
  * @param {{maxRows:number, vicinity:number}} opts
  * @returns {Array<{i:number, values:object, count:number, binCount:number, checkpointDepth:number|null}>}
  */
-export function sampleLeaves(leaves, checkpoints, focusI, { maxRows, vicinity }) {
+export function sampleLeaves(
+  leaves,
+  checkpoints,
+  focusI,
+  { maxRows, vicinity }
+) {
   const n = leaves.length;
   const mod = Math.max(1, Math.ceil(n / maxRows));
   const forced = (i) =>
@@ -151,7 +156,8 @@ function keptRankOf(kept, focusI) {
 export function layoutFisheye(leaves, groupBy, options) {
   const o = { ...FISHEYE_DEFAULTS, ...options };
   const { height } = o;
-  if (!leaves?.length || !height) return { rows: [], maxBinCount: 0, focusI: 0 };
+  if (!leaves?.length || !height)
+    return { rows: [], maxBinCount: 0, focusI: 0 };
 
   const n = leaves.length;
   const min = o.pad;

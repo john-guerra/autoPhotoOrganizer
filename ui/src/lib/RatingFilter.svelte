@@ -25,21 +25,44 @@
         on:mouseenter={() => (hover = k)}
         on:click={() => click(k)}
         aria-label={`filter: ${k} star${k > 1 ? "s" : ""} or more`}
-        aria-pressed={min >= k}
-      >★</button>
+        aria-pressed={min >= k}>★</button
+      >
     {/each}
   </div>
 </div>
 
 <style>
-  .rating { display: inline-flex; align-items: center; gap: 4px; }
-  .ge { font-size: 0.85rem; color: #6a6a6a; font-weight: 600; }
-  .ge.active { color: #ffc93c; }
-  .stars { display: inline-flex; gap: 1px; }
-  .star {
-    background: none; border: none; padding: 0 1px; cursor: pointer;
-    font-size: 1.15rem; line-height: 1; color: #4a4a4a; transition: color 0.08s;
+  .rating {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
   }
-  .star.on { color: #ffc93c; }
-  .star.preview { color: #7a6a2c; }
+  .ge {
+    font-size: 0.85rem;
+    color: #6a6a6a;
+    font-weight: 600;
+  }
+  .ge.active {
+    color: #ffc93c;
+  }
+  .stars {
+    display: inline-flex;
+    gap: 1px;
+  }
+  .star {
+    background: none;
+    border: none;
+    padding: 0 1px;
+    cursor: pointer;
+    font-size: 1.15rem;
+    line-height: 1;
+    color: #4a4a4a;
+    transition: color 0.08s;
+  }
+  .star.on {
+    color: #ffc93c;
+  }
+  .star.preview {
+    color: #7a6a2c;
+  }
 </style>

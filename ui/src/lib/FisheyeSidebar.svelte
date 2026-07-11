@@ -74,7 +74,7 @@
 
   // Reload the whole ordered leaf sequence whenever the hierarchy changes.
   // A leaf's position is only meaningful under the groupBy it was fetched with.
-  $: filter, sort, refreshToken, loadLeaves(groupBy);
+  $: (filter, sort, refreshToken, loadLeaves(groupBy));
   async function loadLeaves(gb) {
     const mine = ++epoch;
     loadError = "";
@@ -236,7 +236,8 @@
         />
         <span class="set-val">{settings.minRowPx}px</span>
       </label>
-      <button class="set-reset" on:click={resetSettings}>Reset to defaults</button
+      <button class="set-reset" on:click={resetSettings}
+        >Reset to defaults</button
       >
     </div>
   {/if}
@@ -254,41 +255,49 @@
         role="listbox"
         tabindex="-1"
       >
-      {#each layout.rows as row, j (row.i)}
-        {@const isCurrent = row.i === currentI}
-        {@const isChk = row.checkpointDepth != null}
-        {@const h = Math.max(1, row.thickness - 1.2)}
-        {@const showLabel = isChk || isCurrent || row.thickness >= LABEL_MIN_PX}
-        <g
-          class="row"
-          class:checkpoint={isChk}
-          class:current={isCurrent}
-          transform="translate(0,{row.y})"
-          on:click={() => onRowClick(row)}
-          role="option"
-          aria-selected={isCurrent}
-        >
-          <!-- row band: HEIGHT encodes the fisheye lens (tall at focus) -->
-          <rect class="band" x={TRACK_X} y={-h / 2} width={TRACK_W} height={h} rx="2" />
-          <!-- count fill: LENGTH encodes photo mass (histogram silhouette) -->
-          <rect
-            class="count"
-            x={TRACK_X}
-            y={-h / 2}
-            width={barScale(row.binCount)}
-            height={h}
-            rx="2"
-          />
-          {#if isCurrent}
-            <circle class="dot" cx="7" cy="0" r="4" />
-          {/if}
-          {#if showLabel}
-            <text class="lab" x={TRACK_X + 6} y="0">
-              {rowLabel(row, layout.rows[j - 1])}
-            </text>
-          {/if}
-        </g>
-      {/each}
+        {#each layout.rows as row, j (row.i)}
+          {@const isCurrent = row.i === currentI}
+          {@const isChk = row.checkpointDepth != null}
+          {@const h = Math.max(1, row.thickness - 1.2)}
+          {@const showLabel =
+            isChk || isCurrent || row.thickness >= LABEL_MIN_PX}
+          <g
+            class="row"
+            class:checkpoint={isChk}
+            class:current={isCurrent}
+            transform="translate(0,{row.y})"
+            on:click={() => onRowClick(row)}
+            role="option"
+            aria-selected={isCurrent}
+          >
+            <!-- row band: HEIGHT encodes the fisheye lens (tall at focus) -->
+            <rect
+              class="band"
+              x={TRACK_X}
+              y={-h / 2}
+              width={TRACK_W}
+              height={h}
+              rx="2"
+            />
+            <!-- count fill: LENGTH encodes photo mass (histogram silhouette) -->
+            <rect
+              class="count"
+              x={TRACK_X}
+              y={-h / 2}
+              width={barScale(row.binCount)}
+              height={h}
+              rx="2"
+            />
+            {#if isCurrent}
+              <circle class="dot" cx="7" cy="0" r="4" />
+            {/if}
+            {#if showLabel}
+              <text class="lab" x={TRACK_X + 6} y="0">
+                {rowLabel(row, layout.rows[j - 1])}
+              </text>
+            {/if}
+          </g>
+        {/each}
       </svg>
     </div>
   {/if}

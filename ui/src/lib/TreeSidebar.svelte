@@ -21,7 +21,12 @@
 
   async function loadRoot() {
     try {
-      const { total, nodes } = await fetchTreeNode({ groupBy, path: [], filter, sort });
+      const { total, nodes } = await fetchTreeNode({
+        groupBy,
+        path: [],
+        filter,
+        sort,
+      });
       rootTotal = total;
       rootNodes = nodes;
     } catch {
@@ -41,7 +46,7 @@
     highlightedKey = null;
     loadRoot();
   }
-  $: groupBy, filter, sort, refreshToken, resetAndLoad();
+  $: (groupBy, filter, sort, refreshToken, resetAndLoad());
 
   async function loadChildren(path) {
     const key = treeKey(path);

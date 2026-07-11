@@ -19,11 +19,11 @@ camera recorded:
 The original ask ("filtering + EXIF characteristics + grouping by camera etc.")
 is 2–3 separable pieces. This spec is **Slice 1** only:
 
-| Piece | This spec? | Why |
-|---|---|---|
-| A. Filter panel (rating ≥ N, orientation toggles) | ✅ | Query-layer WHERE + UI, no schema change |
-| B. Free grouping dims (camera, kind) | ✅ | Columns already exist; one registry entry each |
-| C. Rich EXIF dims (lens, ISO, focal length, aperture) | ❌ later | Needs schema migration + extract-during-scan + backfill of 10k photos + numeric bucketing |
+| Piece                                                 | This spec? | Why                                                                                       |
+| ----------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------- |
+| A. Filter panel (rating ≥ N, orientation toggles)     | ✅         | Query-layer WHERE + UI, no schema change                                                  |
+| B. Free grouping dims (camera, kind)                  | ✅         | Columns already exist; one registry entry each                                            |
+| C. Rich EXIF dims (lens, ISO, focal length, aperture) | ❌ later   | Needs schema migration + extract-during-scan + backfill of 10k photos + numeric bucketing |
 
 C gets its own spec after this, and benefits from the filter compiler built
 here (you'll want to filter by lens too).
@@ -146,7 +146,7 @@ hierarchy. The active filter **persists in localStorage** like `groupBy`/`zoom`.
 
 - **`filters.test.js`** — table-driven spec → `{sql, params}`, including all-off
   no-ops and the non-null guard.
-- **feed / tree tests** — `getFeedPage`, `findGroupBoundary`, tree counts *with*
+- **feed / tree tests** — `getFeedPage`, `findGroupBoundary`, tree counts _with_
   a filter, on the existing test-DB harness; assert filtered-out groups produce
   no rows and zero counts.
 - **`filterSpec.test.js`** — `isActive` / `toQueryParam` / default.

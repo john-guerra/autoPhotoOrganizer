@@ -173,7 +173,9 @@ describe("upsertScan — btime (creation date)", () => {
     upsertScan(db, "/photos/a", 1, [
       { name: "x.jpg", size: 10, mtimeMs: 200, btimeMs: 100, kind: "image" },
     ]);
-    const row = db.prepare(`SELECT btime FROM photos WHERE filename = 'x.jpg'`).get();
+    const row = db
+      .prepare(`SELECT btime FROM photos WHERE filename = 'x.jpg'`)
+      .get();
     expect(row.btime).toBe(100);
   });
 
@@ -188,7 +190,9 @@ describe("upsertScan — btime (creation date)", () => {
     upsertScan(db, "/photos/a", 1, [
       { name: "x.jpg", size: 10, mtimeMs: 200, btimeMs: 150, kind: "image" },
     ]);
-    const row = db.prepare(`SELECT btime FROM photos WHERE filename = 'x.jpg'`).get();
+    const row = db
+      .prepare(`SELECT btime FROM photos WHERE filename = 'x.jpg'`)
+      .get();
     expect(row.btime).toBe(150);
   });
 });
@@ -201,9 +205,7 @@ describe("repointPhoto", () => {
     repointPhoto(db, row.id, "/photos/album-2026-01-01/a-renamed.jpg");
 
     const photo = getPhotoById(db, row.id);
-    expect(photo.path).toBe(
-      join("/photos/album-2026-01-01", "a-renamed.jpg")
-    );
+    expect(photo.path).toBe(join("/photos/album-2026-01-01", "a-renamed.jpg"));
     expect(photo.filename).toBe("a-renamed.jpg");
 
     const newFolder = db

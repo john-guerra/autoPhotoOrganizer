@@ -14,7 +14,7 @@
 - Tests: vitest, colocated as `*.test.js` next to sources.
 - Prettier for formatting.
 - App.svelte scroll/selection behavior MUST be live-verified in the running app (not just unit tests) — project convention for anything touching feed-window/scroll state.
-- Never re-center: reveals bring a tile *just* into view, never to center.
+- Never re-center: reveals bring a tile _just_ into view, never to center.
 - Reveal is called ONLY from active-navigation code paths — never from reflow, `loadMore`'s re-anchor, `onGroupByChange`, or initial load.
 
 ---
@@ -22,10 +22,12 @@
 ### Task 1: Pure `revealScrollTop` geometry helper
 
 **Files:**
+
 - Create: `ui/src/lib/scroll.js`
 - Test: `ui/src/lib/scroll.test.js`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `revealScrollTop(box, viewTop, viewHeight, margin) → number|null`
   where `box` is `{top:number, height:number}` (position within the scroll
@@ -118,10 +120,12 @@ git commit -m "feat: add pure revealScrollTop scroll-geometry helper"
 ### Task 2: App-owned `revealSelected`; remove Thumb's reactive scroll
 
 **Files:**
+
 - Modify: `ui/src/App.svelte` (import; new `revealSelected`; call at nav choke point ~line 1207)
 - Modify: `ui/src/lib/Thumb.svelte` (remove reactive `scrollIntoView` block ~lines 135–144)
 
 **Interfaces:**
+
 - Consumes: `revealScrollTop` from Task 1; App globals `gridEl`, `mainColumnEl`,
   `boxes` (`= layoutResult.boxes`, one box per display entry — full layout, so
   `boxes[selected]` exists even for an unmounted tile), `selected`, `groupBy`,
@@ -136,7 +140,7 @@ top of the `<script>`. Add this line alongside the other `./lib/...` imports
 (e.g. right after the `windowing.js` import):
 
 ```js
-  import { revealScrollTop } from "./lib/scroll.js";
+import { revealScrollTop } from "./lib/scroll.js";
 ```
 
 - [ ] **Step 2: Add the `revealSelected` function**
@@ -147,30 +151,30 @@ content-offset math (`gridEl.getBoundingClientRect().top + mainColumnEl.scrollTo
 plus the `PAD` grid inset that `thumb-wrap` applies via `top:box.y+pad`):
 
 ```js
-  /** Scroll mainColumnEl the minimum needed so the currently-selected tile is
-   * visible — called ONLY from active navigation (keyboard, group-jump), never
-   * from a reflow or a programmatic re-anchor. Uses box geometry, so it works
-   * even when the target tile isn't mounted yet. No-op if the layout isn't
-   * ready or the tile is already fully visible. Never re-centers. */
-  function revealSelected() {
-    if (!gridEl || !mainColumnEl || !boxes) return;
-    const box = boxes[selected];
-    if (!box) return;
-    const gridTop = gridEl.getBoundingClientRect().top + mainColumnEl.scrollTop;
-    const boxTop = gridTop + box.y + PAD;
-    // Reserve the worst-case sticky-header stack (one band per grouping level)
-    // so a tile at a section boundary isn't revealed underneath the headers.
-    const margin = HEADER_HEIGHT * groupBy.length;
-    const target = revealScrollTop(
-      { top: boxTop, height: box.height },
-      mainColumnEl.scrollTop,
-      mainColumnEl.clientHeight,
-      margin
-    );
-    if (target != null) {
-      mainColumnEl.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-    }
+/** Scroll mainColumnEl the minimum needed so the currently-selected tile is
+ * visible — called ONLY from active navigation (keyboard, group-jump), never
+ * from a reflow or a programmatic re-anchor. Uses box geometry, so it works
+ * even when the target tile isn't mounted yet. No-op if the layout isn't
+ * ready or the tile is already fully visible. Never re-centers. */
+function revealSelected() {
+  if (!gridEl || !mainColumnEl || !boxes) return;
+  const box = boxes[selected];
+  if (!box) return;
+  const gridTop = gridEl.getBoundingClientRect().top + mainColumnEl.scrollTop;
+  const boxTop = gridTop + box.y + PAD;
+  // Reserve the worst-case sticky-header stack (one band per grouping level)
+  // so a tile at a section boundary isn't revealed underneath the headers.
+  const margin = HEADER_HEIGHT * groupBy.length;
+  const target = revealScrollTop(
+    { top: boxTop, height: box.height },
+    mainColumnEl.scrollTop,
+    mainColumnEl.clientHeight,
+    margin
+  );
+  if (target != null) {
+    mainColumnEl.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
   }
+}
 ```
 
 - [ ] **Step 3: Call `revealSelected` at the keyboard-nav choke point**
@@ -179,27 +183,27 @@ In `ui/src/App.svelte`, the arrow/Home/End branches all converge on one block
 (currently ~lines 1206–1213):
 
 ```js
-    e.preventDefault();
-    selected = next;
-    await tick();
-    const entry = displayEntries[selected];
-    gridEl
-      ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
-      ?.focus({ preventScroll: true });
+e.preventDefault();
+selected = next;
+await tick();
+const entry = displayEntries[selected];
+gridEl
+  ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
+  ?.focus({ preventScroll: true });
 ```
 
 Add a `revealSelected()` call immediately after the `.focus(...)` line, so it
 becomes:
 
 ```js
-    e.preventDefault();
-    selected = next;
-    await tick();
-    const entry = displayEntries[selected];
-    gridEl
-      ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
-      ?.focus({ preventScroll: true });
-    revealSelected();
+e.preventDefault();
+selected = next;
+await tick();
+const entry = displayEntries[selected];
+gridEl
+  ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
+  ?.focus({ preventScroll: true });
+revealSelected();
 ```
 
 Note: `.focus({ preventScroll: true })` already stops the browser's native
@@ -211,16 +215,16 @@ In `ui/src/lib/Thumb.svelte`, DELETE this entire block (the comment and the
 reactive statement, ~lines 135–144):
 
 ```js
-  // Keep the selected tile centered for roving keyboard focus — re-runs
-  // whenever this tile's own position changes too (not just when it first
-  // becomes selected), since a metadata-driven justified-layout reflow can
-  // move the selected tile after the initial scroll; referencing box.x/y
-  // here is what makes Svelte re-fire this block on that reflow.
-  $: if (selected && el) {
-    void box.x;
-    void box.y;
-    el.scrollIntoView({ block: "center" });
-  }
+// Keep the selected tile centered for roving keyboard focus — re-runs
+// whenever this tile's own position changes too (not just when it first
+// becomes selected), since a metadata-driven justified-layout reflow can
+// move the selected tile after the initial scroll; referencing box.x/y
+// here is what makes Svelte re-fire this block on that reflow.
+$: if (selected && el) {
+  void box.x;
+  void box.y;
+  el.scrollIntoView({ block: "center" });
+}
 ```
 
 Leave everything else (the `el` binding, the resize `observer.observe(el)`,
@@ -237,6 +241,7 @@ Expected: builds successfully (pre-existing a11y warnings in ManageLibrary.svelt
 - [ ] **Step 6: Live-verify the core behavior**
 
 With dev servers running (`:4321` API, `:5173` Vite), in the app:
+
 1. Select a tile, then scroll the grid away from it while thumbnails are still
    streaming in. **Expected:** the view stays where you scrolled; the selection
    is allowed to sit off-screen. (This is the bug being fixed — previously it
@@ -246,10 +251,14 @@ With dev servers running (`:4321` API, `:5173` Vite), in the app:
    enough to bring the newly-selected tile into view, not centered.
 
 Verify via DOM if helpful:
+
 ```js
 // selection index and whether its tile is within the scroll viewport
-const c = document.querySelector('[role="listbox"]')?.closest('[class*="column"]') || document.scrollingElement;
+const c =
+  document.querySelector('[role="listbox"]')?.closest('[class*="column"]') ||
+  document.scrollingElement;
 ```
+
 (Prefer the visual check; the three behaviors above are the acceptance criteria.)
 
 - [ ] **Step 7: Commit**
@@ -270,9 +279,11 @@ reflows no longer move the view."
 ### Task 3: One-shot re-reveal after a group-jump's metadata settles
 
 **Files:**
+
 - Modify: `ui/src/App.svelte` (the `enrichMeta(...)` call inside `jumpGroupBoundaryInner`, ~line 1327)
 
 **Interfaces:**
+
 - Consumes: `revealSelected` (Task 2); `enrichMeta(ids) → Promise` (resolves
   after the batch nearest the selection settles); the jump's `epoch` local
   (`const epoch = ++feedEpoch;`, ~line 1265) and the module `feedEpoch`.
@@ -284,20 +295,20 @@ reflows no longer move the view."
 In `ui/src/App.svelte`, inside `jumpGroupBoundaryInner`, find this line (~1327):
 
 ```js
-      enrichMeta(items.map((i) => i.id));
+enrichMeta(items.map((i) => i.id));
 ```
 
 Replace it with:
 
 ```js
-      // The near-selection metadata batch reflows the layout a beat after the
-      // jump's scrollToSection lands — which can drift the landing photo out
-      // of view. Re-reveal once when that batch settles (guarded so a newer
-      // jump/load that bumped feedEpoch doesn't yank the view). revealSelected
-      // is a no-op if the photo is still visible, so this only corrects drift.
-      enrichMeta(items.map((i) => i.id)).then(() => {
-        if (epoch === feedEpoch) revealSelected();
-      });
+// The near-selection metadata batch reflows the layout a beat after the
+// jump's scrollToSection lands — which can drift the landing photo out
+// of view. Re-reveal once when that batch settles (guarded so a newer
+// jump/load that bumped feedEpoch doesn't yank the view). revealSelected
+// is a no-op if the photo is still visible, so this only corrects drift.
+enrichMeta(items.map((i) => i.id)).then(() => {
+  if (epoch === feedEpoch) revealSelected();
+});
 ```
 
 - [ ] **Step 2: Verify unit tests and build still pass**
@@ -311,6 +322,7 @@ Expected: builds successfully.
 - [ ] **Step 3: Live-verify the jump behavior**
 
 In the running app:
+
 1. From the first photo of a group, press Option+Right to jump to the next
    group. **Expected:** the landing photo is in view immediately, AND remains
    in view after its thumbnails finish loading (no drift off-screen).
@@ -335,6 +347,7 @@ settles (epoch-guarded) so the landing photo can't drift out of view."
 ## Self-Review
 
 **Spec coverage:**
+
 - Pure `revealScrollTop` + tests → Task 1. ✓
 - App-owned `revealSelected`, geometry-based, called only from active nav → Task 2 (import, function, choke-point call). ✓
 - Remove Thumb reactive scroll → Task 2 Step 4. ✓

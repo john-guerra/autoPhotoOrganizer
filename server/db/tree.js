@@ -12,8 +12,14 @@ import { applySortToDims } from "./sort.js";
  * @param {{groupBy: string[], path?: Array<{dimension:string, value:string}>, filter?: Object}} opts
  * @returns {{total: number, nodes: Array<{value:string, label:string, count:number, hasChildren:boolean}>}}
  */
-export function getTreeNode(db, { groupBy, path = [], filter: filterSpec = {}, sort } = {}) {
-  const dims = applySortToDims(resolveDimensions(groupBy), sort ?? { by: "date_taken", dir: "desc" });
+export function getTreeNode(
+  db,
+  { groupBy, path = [], filter: filterSpec = {}, sort } = {}
+) {
+  const dims = applySortToDims(
+    resolveDimensions(groupBy),
+    sort ?? { by: "date_taken", dir: "desc" }
+  );
   if (path.length >= dims.length) {
     throw new Error("path is already at the deepest grouping level");
   }
@@ -21,7 +27,9 @@ export function getTreeNode(db, { groupBy, path = [], filter: filterSpec = {}, s
   const filter = buildFilter(filterSpec);
 
   const total = db
-    .prepare(`SELECT COUNT(*) AS count FROM photos WHERE stale = 0 AND (${filter.sql})`)
+    .prepare(
+      `SELECT COUNT(*) AS count FROM photos WHERE stale = 0 AND (${filter.sql})`
+    )
     .get(...filter.params).count;
 
   const prefixClauses = [];
@@ -38,7 +46,11 @@ export function getTreeNode(db, { groupBy, path = [], filter: filterSpec = {}, s
   });
 
   const nextDim = dims[path.length];
-  const whereSql = ["photos.stale = 0", `(${filter.sql})`, ...prefixClauses].join(" AND ");
+  const whereSql = [
+    "photos.stale = 0",
+    `(${filter.sql})`,
+    ...prefixClauses,
+  ].join(" AND ");
   const rows = db
     .prepare(
       `SELECT ${nextDim.expr} AS value, COUNT(*) AS count
@@ -94,13 +106,21 @@ function formatTreeLabel(dimension, value) {
  * @param {{groupBy: string[], filter?: Object}} opts
  * @returns {{total:number, leaves: Array<{values: Record<string,string>, count:number}>}}
  */
-export function getFlatTree(db, { groupBy, filter: filterSpec = {}, sort } = {}) {
-  const dims = applySortToDims(resolveDimensions(groupBy), sort ?? { by: "date_taken", dir: "desc" });
+export function getFlatTree(
+  db,
+  { groupBy, filter: filterSpec = {}, sort } = {}
+) {
+  const dims = applySortToDims(
+    resolveDimensions(groupBy),
+    sort ?? { by: "date_taken", dir: "desc" }
+  );
 
   const filter = buildFilter(filterSpec);
 
   const total = db
-    .prepare(`SELECT COUNT(*) AS count FROM photos WHERE stale = 0 AND (${filter.sql})`)
+    .prepare(
+      `SELECT COUNT(*) AS count FROM photos WHERE stale = 0 AND (${filter.sql})`
+    )
     .get(...filter.params).count;
 
   const selectCols = dims.map((dim, i) => `${dim.expr} AS d${i}`).join(", ");

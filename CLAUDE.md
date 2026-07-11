@@ -123,13 +123,13 @@ verification), and decisions already made.
   the wrong photo" bug spent most of its time on client-side theories
   (scroll-anchor, race conditions, burst-clustering) before `curl`ing the
   actual `/api/feed?before=N&focusId=X` response and discovering the server's
-  "before" seek was returning items *after* the focus point too — a bug no
+  "before" seek was returning items _after_ the focus point too — a bug no
   amount of client-side reasoning could have found. Check the lowest layer
   first, especially when the client is "correctly" rendering data it was
   handed.
 - **Verify a fix against the exact reported scenario, live, before claiming
-  it's fixed.** A fix that resolves a *similar* case (e.g. a rapid-fire
-  concurrency repro) is not the same as verifying the user's *actual* repro
+  it's fixed.** A fix that resolves a _similar_ case (e.g. a rapid-fire
+  concurrency repro) is not the same as verifying the user's _actual_ repro
   steps. This project's existing "manual browser verification for App.svelte"
   convention (see `docs/ROADMAP.md`) exists for this reason — a passing test
   suite plus a plausible-looking screenshot is not sufficient for anything

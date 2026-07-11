@@ -21,10 +21,12 @@
 ### Task 1: Server — `findGroupBoundary`
 
 **Files:**
+
 - Modify: `server/db/feed.js`
 - Modify: `server/db/feed.test.js`
 
 **Interfaces:**
+
 - Consumes: `resolveDimensions`, `seekCondition`, `exclusionClause`, `collapsedPathCondition` (all existing, module-private functions in this same file).
 - Produces: `findGroupBoundary(db, {groupBy, collapsed, focusId, direction})` → `{id: number} | null`. Task 2's route consumes this.
 
@@ -201,10 +203,7 @@ export function findGroupBoundary(
     .map((_, i) => focusRow[`dim${i}`])
     .concat(focusRow.id);
 
-  const { sql: exclSql, params: exclParams } = exclusionClause(
-    collapsed,
-    dims
-  );
+  const { sql: exclSql, params: exclParams } = exclusionClause(collapsed, dims);
   const { sql: seekSql, params: seekParams } = seekCondition(
     seekDims,
     focusValues,
@@ -268,10 +267,12 @@ git commit -m "feat: add findGroupBoundary for jumping to the next/previous sect
 ### Task 2: Server — `GET /api/feed/boundary` route
 
 **Files:**
+
 - Modify: `server/api.js`
 - Modify: `server/api.test.js`
 
 **Interfaces:**
+
 - Consumes: `findGroupBoundary` from Task 1.
 - Produces: `GET /api/feed/boundary?groupBy=...&collapsed=...&focusId=...&direction=next|prev` → `200 {id: number|null}` / `400` (missing/invalid `groupBy`, invalid `direction`, invalid `collapsed` JSON) / `404` (unknown `focusId`). Task 3's client helper consumes this.
 
@@ -344,54 +345,54 @@ import { getFeedPage, findGroupBoundary, DIMENSIONS } from "./db/feed.js";
 Add this route immediately after the existing `GET /api/feed` route's closing `});` (search for the end of that route — it's the block starting `app.get("/api/feed", (req, res) => {`):
 
 ```js
-  app.get("/api/feed/boundary", (req, res) => {
-    const groupBy = String(req.query.groupBy ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!groupBy.length) {
-      return res.status(400).json({ error: "groupBy is required" });
-    }
-    if (groupBy.some((d) => !DIMENSIONS[d])) {
-      return res.status(400).json({
-        error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
-      });
-    }
+app.get("/api/feed/boundary", (req, res) => {
+  const groupBy = String(req.query.groupBy ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!groupBy.length) {
+    return res.status(400).json({ error: "groupBy is required" });
+  }
+  if (groupBy.some((d) => !DIMENSIONS[d])) {
+    return res.status(400).json({
+      error: `unknown dimension in groupBy: ${groupBy.join(",")}`,
+    });
+  }
 
-    const direction = String(req.query.direction ?? "");
-    if (direction !== "next" && direction !== "prev") {
-      return res
-        .status(400)
-        .json({ error: `direction must be "next" or "prev"` });
-    }
+  const direction = String(req.query.direction ?? "");
+  if (direction !== "next" && direction !== "prev") {
+    return res
+      .status(400)
+      .json({ error: `direction must be "next" or "prev"` });
+  }
 
-    let collapsed = [];
-    if (req.query.collapsed) {
-      try {
-        collapsed = JSON.parse(String(req.query.collapsed));
-      } catch {
-        return res.status(400).json({ error: "collapsed must be JSON" });
-      }
-    }
-
-    const focusId = Number(req.query.focusId);
-    if (!Number.isInteger(focusId)) {
-      return res.status(400).json({ error: "focusId is required" });
-    }
-
+  let collapsed = [];
+  if (req.query.collapsed) {
     try {
-      const db = getDb();
-      const result = findGroupBoundary(db, {
-        groupBy,
-        collapsed,
-        focusId,
-        direction,
-      });
-      res.json(result ?? { id: null });
-    } catch (e) {
-      res.status(404).json({ error: e.message });
+      collapsed = JSON.parse(String(req.query.collapsed));
+    } catch {
+      return res.status(400).json({ error: "collapsed must be JSON" });
     }
-  });
+  }
+
+  const focusId = Number(req.query.focusId);
+  if (!Number.isInteger(focusId)) {
+    return res.status(400).json({ error: "focusId is required" });
+  }
+
+  try {
+    const db = getDb();
+    const result = findGroupBoundary(db, {
+      groupBy,
+      collapsed,
+      focusId,
+      direction,
+    });
+    res.json(result ?? { id: null });
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -416,9 +417,11 @@ git commit -m "feat: add GET /api/feed/boundary route"
 ### Task 3: Client — `fetchGroupBoundary` in `api.js`
 
 **Files:**
+
 - Modify: `ui/src/lib/api.js`
 
 **Interfaces:**
+
 - Consumes: the route from Task 2.
 - Produces: `fetchGroupBoundary({groupBy, collapsed, focusId, direction})` → `Promise<{id: number|null}>`. Task 4 consumes this.
 
@@ -471,9 +474,11 @@ git commit -m "feat: add fetchGroupBoundary client helper"
 ### Task 4: Client — Alt+Left/Right in `App.svelte`
 
 **Files:**
+
 - Modify: `ui/src/App.svelte`
 
 **Interfaces:**
+
 - Consumes: `fetchGroupBoundary` from Task 3; `onGroupByChange`'s existing "before+after centered on a known focusId" pattern (read, don't modify, that function — this task adds a new, separate handler alongside it, reusing the same shape of logic).
 - Produces: no new exports — this is the finished feature.
 
@@ -488,15 +493,15 @@ Read `ui/src/App.svelte` in full before editing (or at minimum the `onKeydown` f
 Change the import line (find `import { fetchFeed, setRating as apiSetRating, setCover as apiSetCover, fetchMeta, fetchLibrary, scan as apiScan } from "./lib/api.js";` — read the actual current import block, since it may span multiple lines) to include `fetchGroupBoundary`:
 
 ```js
-  import {
-    fetchFeed,
-    fetchGroupBoundary,
-    setRating as apiSetRating,
-    setCover as apiSetCover,
-    fetchMeta,
-    fetchLibrary,
-    scan as apiScan,
-  } from "./lib/api.js";
+import {
+  fetchFeed,
+  fetchGroupBoundary,
+  setRating as apiSetRating,
+  setCover as apiSetCover,
+  fetchMeta,
+  fetchLibrary,
+  scan as apiScan,
+} from "./lib/api.js";
 ```
 
 - [ ] **Step 3: Narrow the browser-shortcut guard**
@@ -504,18 +509,18 @@ Change the import line (find `import { fetchFeed, setRating as apiSetRating, set
 In `onKeydown`, find the line:
 
 ```js
-    if (e.metaKey || e.ctrlKey || e.altKey) return; // browser shortcuts
+if (e.metaKey || e.ctrlKey || e.altKey) return; // browser shortcuts
 ```
 
 Change it to:
 
 ```js
-    if (
-      e.metaKey ||
-      e.ctrlKey ||
-      (e.altKey && e.key !== "ArrowRight" && e.key !== "ArrowLeft")
-    )
-      return; // browser shortcuts, except Alt+Left/Right for group navigation
+if (
+  e.metaKey ||
+  e.ctrlKey ||
+  (e.altKey && e.key !== "ArrowRight" && e.key !== "ArrowLeft")
+)
+  return; // browser shortcuts, except Alt+Left/Right for group navigation
 ```
 
 - [ ] **Step 4: Add the Alt+Left/Right handler**
@@ -523,80 +528,74 @@ Change it to:
 Immediately after the line `const key = e.key;` (right after the guard changed in Step 3) and before the existing "Grid zoom" block (`if (!loupeOpen && (key === "+" ...`), add:
 
 ```js
-    // Alt+Left/Right: jump to the previous/next section-header boundary,
-    // at any depth — e.g. the next year within a folder, rolling up to
-    // the next folder once the last year in the current one is passed.
-    // Resolved server-side (findGroupBoundary) rather than by paging
-    // through intermediate photos client-side — a folder in this
-    // library can hold 10,000+ photos between here and the boundary.
-    if (e.altKey && (key === "ArrowRight" || key === "ArrowLeft")) {
-      e.preventDefault();
-      const focusEntry = displayEntries[selected];
-      const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
-      if (focusId == null) return;
-      const direction = key === "ArrowRight" ? "next" : "prev";
-      let boundary;
-      try {
-        boundary = await fetchGroupBoundary({
-          groupBy,
-          collapsed: collapsedPaths,
-          focusId,
-          direction,
-        });
-      } catch (err) {
-        error = err.message;
-        return;
-      }
-      if (boundary.id == null) return; // already at the first/last group
-      const targetId = boundary.id;
-      error = "";
-      status = "loading…";
-      const epoch = ++feedEpoch;
-      try {
-        const { items: beforePage } = await fetchFeed({
-          groupBy,
-          collapsed: collapsedPaths,
-          focusId: targetId,
-          before: PAGE_SIZE / 2,
-          after: 0,
-        });
-        const { items: afterPage, focusItem } = await fetchFeed({
-          groupBy,
-          collapsed: collapsedPaths,
-          focusId: targetId,
-          before: 0,
-          after: PAGE_SIZE / 2,
-        });
-        if (epoch !== feedEpoch) return;
-        items = [
-          ...beforePage,
-          ...(focusItem ? [focusItem] : []),
-          ...afterPage,
-        ];
-        hasMoreBefore = beforePage.length >= PAGE_SIZE / 2;
-        hasMoreAfter = afterPage.length >= PAGE_SIZE / 2;
-        await tick();
-        const targetIndex = displayEntries.findIndex(
-          (en) => resolvePhoto(en).id === targetId
-        );
-        const t =
-          targetIndex !== -1
-            ? nextSelectable(displayEntries, targetIndex, 1)
-            : null;
-        selected = t ?? nextSelectable(displayEntries, 0, 1) ?? 0;
-        status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
-        enrichMeta(items.map((i) => i.id));
-        await tick();
-        const targetHeader = layoutResult.headers.find(
-          (h) => h.index === selected
-        );
-        if (targetHeader) scrollToSection(targetHeader);
-      } catch (err) {
-        error = err.message;
-        status = "";
-      }
-      return;
-    }
+// Alt+Left/Right: jump to the previous/next section-header boundary,
+// at any depth — e.g. the next year within a folder, rolling up to
+// the next folder once the last year in the current one is passed.
+// Resolved server-side (findGroupBoundary) rather than by paging
+// through intermediate photos client-side — a folder in this
+// library can hold 10,000+ photos between here and the boundary.
+if (e.altKey && (key === "ArrowRight" || key === "ArrowLeft")) {
+  e.preventDefault();
+  const focusEntry = displayEntries[selected];
+  const focusId = focusEntry ? resolvePhoto(focusEntry).id : null;
+  if (focusId == null) return;
+  const direction = key === "ArrowRight" ? "next" : "prev";
+  let boundary;
+  try {
+    boundary = await fetchGroupBoundary({
+      groupBy,
+      collapsed: collapsedPaths,
+      focusId,
+      direction,
+    });
+  } catch (err) {
+    error = err.message;
+    return;
+  }
+  if (boundary.id == null) return; // already at the first/last group
+  const targetId = boundary.id;
+  error = "";
+  status = "loading…";
+  const epoch = ++feedEpoch;
+  try {
+    const { items: beforePage } = await fetchFeed({
+      groupBy,
+      collapsed: collapsedPaths,
+      focusId: targetId,
+      before: PAGE_SIZE / 2,
+      after: 0,
+    });
+    const { items: afterPage, focusItem } = await fetchFeed({
+      groupBy,
+      collapsed: collapsedPaths,
+      focusId: targetId,
+      before: 0,
+      after: PAGE_SIZE / 2,
+    });
+    if (epoch !== feedEpoch) return;
+    items = [...beforePage, ...(focusItem ? [focusItem] : []), ...afterPage];
+    hasMoreBefore = beforePage.length >= PAGE_SIZE / 2;
+    hasMoreAfter = afterPage.length >= PAGE_SIZE / 2;
+    await tick();
+    const targetIndex = displayEntries.findIndex(
+      (en) => resolvePhoto(en).id === targetId
+    );
+    const t =
+      targetIndex !== -1
+        ? nextSelectable(displayEntries, targetIndex, 1)
+        : null;
+    selected = t ?? nextSelectable(displayEntries, 0, 1) ?? 0;
+    status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+    enrichMeta(items.map((i) => i.id));
+    await tick();
+    const targetHeader = layoutResult.headers.find((h) => h.index === selected);
+    if (targetHeader) scrollToSection(targetHeader);
+  } catch (err) {
+    error = err.message;
+    status = "";
+  }
+  return;
+}
 ```
 
 - [ ] **Step 5: Run the full test suite and build**

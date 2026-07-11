@@ -358,36 +358,36 @@ onMount(refreshLibrary);
 In the template, add a dropdown toggle button and panel right after the existing `<button class="scan" ...>` button (inside `<header class="topbar">`):
 
 ```svelte
-    <div class="library">
-      <button
-        class="library-toggle"
-        on:click={() => (libraryOpen = !libraryOpen)}
-        title="Recently scanned folders"
-      >
-        Library ▾
-      </button>
-      {#if libraryOpen}
-        <ul class="library-panel">
-          {#if library.length === 0}
-            <li class="library-empty">No folders scanned yet.</li>
-          {/if}
-          {#each library as entry (entry.path)}
-            <li>
-              <button
-                class="library-entry"
-                class:offline={!entry.mounted}
-                disabled={!entry.mounted}
-                on:click={() => selectFromLibrary(entry)}
-                title={entry.path}
-              >
-                {entry.name}
-                {#if !entry.mounted}<span class="offline-badge">offline</span>{/if}
-              </button>
-            </li>
-          {/each}
-        </ul>
+<div class="library">
+  <button
+    class="library-toggle"
+    on:click={() => (libraryOpen = !libraryOpen)}
+    title="Recently scanned folders"
+  >
+    Library ▾
+  </button>
+  {#if libraryOpen}
+    <ul class="library-panel">
+      {#if library.length === 0}
+        <li class="library-empty">No folders scanned yet.</li>
       {/if}
-    </div>
+      {#each library as entry (entry.path)}
+        <li>
+          <button
+            class="library-entry"
+            class:offline={!entry.mounted}
+            disabled={!entry.mounted}
+            on:click={() => selectFromLibrary(entry)}
+            title={entry.path}
+          >
+            {entry.name}
+            {#if !entry.mounted}<span class="offline-badge">offline</span>{/if}
+          </button>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+</div>
 ```
 
 Add matching styles inside the existing `<style>` block:
@@ -654,11 +654,11 @@ async function chooseFolder() {
 In the template, add the button right after the existing `<button class="scan" ...>` element:
 
 ```svelte
-    {#if hasNativePicker}
-      <button class="choose-folder" on:click={chooseFolder} disabled={scanning}>
-        Choose Folder…
-      </button>
-    {/if}
+{#if hasNativePicker}
+  <button class="choose-folder" on:click={chooseFolder} disabled={scanning}>
+    Choose Folder…
+  </button>
+{/if}
 ```
 
 - [ ] **Step 4: Manual verification**

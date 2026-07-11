@@ -46,9 +46,7 @@
   // Mode 1: client-side sampling from an explicit ordered id list.
   $: if (ids) {
     const { offsets, gaps } =
-      slots > 0
-        ? sampleOffsets(ids.length, slots)
-        : { offsets: [], gaps: [] };
+      slots > 0 ? sampleOffsets(ids.length, slots) : { offsets: [], gaps: [] };
     shown = offsets.map((o, i) => ({ id: ids[o], gapAfter: gaps.includes(i) }));
     total = ids.length;
   }

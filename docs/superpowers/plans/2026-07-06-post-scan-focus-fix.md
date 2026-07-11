@@ -21,9 +21,11 @@
 ### Task 1: Focus the selected Thumb after a successful scan
 
 **Files:**
+
 - Modify: `ui/src/App.svelte:56-76` (the `doScan` function)
 
 **Interfaces:**
+
 - Uses existing: `tick` (already imported at the top of the file, used by `closeLoupe`), `gridEl`, `items`, `selected` — no new state or exports.
 
 - [ ] **Step 1: Add the focus call to `doScan`'s success path**
@@ -31,27 +33,27 @@
 In `ui/src/App.svelte`, the current `doScan` function reads:
 
 ```js
-  async function doScan() {
-    if (!dir.trim()) return;
-    error = "";
-    scanning = true;
-    status = "scanning…";
-    try {
-      const res = await apiScan(dir.trim());
-      items = res.items;
-      selected = 0;
-      loupeOpen = false;
-      localStorage.setItem(LS_KEY, res.root);
-      status = `${res.count} photos · scanned in ${res.elapsedMs} ms`;
-      enrichMeta(++scanEpoch);
-    } catch (e) {
-      error = e.message;
-      status = "";
-      items = [];
-    } finally {
-      scanning = false;
-    }
+async function doScan() {
+  if (!dir.trim()) return;
+  error = "";
+  scanning = true;
+  status = "scanning…";
+  try {
+    const res = await apiScan(dir.trim());
+    items = res.items;
+    selected = 0;
+    loupeOpen = false;
+    localStorage.setItem(LS_KEY, res.root);
+    status = `${res.count} photos · scanned in ${res.elapsedMs} ms`;
+    enrichMeta(++scanEpoch);
+  } catch (e) {
+    error = e.message;
+    status = "";
+    items = [];
+  } finally {
+    scanning = false;
   }
+}
 ```
 
 Change the `try` block to:
@@ -96,7 +98,7 @@ EOF
 
 - [ ] **Step 4: Stop for manual verification**
 
-Per the working agreement in `docs/ROADMAP.md`, do **not** run automated browser/Playwright verification. Report tersely that unit tests pass, and ask John to verify at `localhost:5173`: scan a folder, press Enter immediately without clicking anything else, and confirm the loupe opens on the first photo instead of re-scanning. Also worth a spot-check: scan an *invalid* path and confirm focus stays in the input (unchanged behavior — the `catch` block isn't touched by this fix).
+Per the working agreement in `docs/ROADMAP.md`, do **not** run automated browser/Playwright verification. Report tersely that unit tests pass, and ask John to verify at `localhost:5173`: scan a folder, press Enter immediately without clicking anything else, and confirm the loupe opens on the first photo instead of re-scanning. Also worth a spot-check: scan an _invalid_ path and confirm focus stays in the input (unchanged behavior — the `catch` block isn't touched by this fix).
 
 ---
 

@@ -72,10 +72,7 @@ export function findGroupBoundary(
     .map((_, i) => focusRow[`dim${i}`])
     .concat(focusRow.id);
 
-  const { sql: exclSql, params: exclParams } = exclusionClause(
-    collapsed,
-    dims
-  );
+  const { sql: exclSql, params: exclParams } = exclusionClause(collapsed, dims);
   const { sql: seekSql, params: seekParams } = seekCondition(
     seekDims,
     focusValues,
@@ -132,7 +129,9 @@ export function findGroupBoundary(
     .join(" AND ");
   const matchParams = targetGroupPath.map((p) => p.value);
   const forwardOrderCols = seekDims
-    .map((d, i) => `${i < dims.length ? `dim${i}` : "photos.id"} ${d.direction}`)
+    .map(
+      (d, i) => `${i < dims.length ? `dim${i}` : "photos.id"} ${d.direction}`
+    )
     .join(", ");
 
   const firstRow = db
@@ -148,7 +147,7 @@ export function findGroupBoundary(
 }
 ```
 
-(For "prev", this is a two-step query: step 1 above only identifies *which*
+(For "prev", this is a two-step query: step 1 above only identifies _which_
 group is the target by walking backward across the boundary — the row it
 returns is that group's last row in forward order, not its first. Step 2
 re-seeks within that exact group tuple in true forward order to find the

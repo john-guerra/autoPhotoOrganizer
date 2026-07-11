@@ -12,8 +12,12 @@
  * @returns {number} the number of ids stored
  */
 export function setKeepScope(db, ids) {
-  const clean = Array.isArray(ids) ? ids.filter((n) => Number.isInteger(n)) : [];
-  const insert = db.prepare(`INSERT OR IGNORE INTO keep_scope (photo_id) VALUES (?)`);
+  const clean = Array.isArray(ids)
+    ? ids.filter((n) => Number.isInteger(n))
+    : [];
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO keep_scope (photo_id) VALUES (?)`
+  );
   const swap = db.transaction((rows) => {
     db.prepare(`DELETE FROM keep_scope`).run();
     for (const id of rows) insert.run(id);

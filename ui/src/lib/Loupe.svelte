@@ -45,7 +45,8 @@
     try {
       const metas = await fetchMeta(ids);
       for (const m of metas) detailMeta.set(m.id, m);
-      if (item && item.id === id) currentMeta = detailMeta.get(id) ?? currentMeta;
+      if (item && item.id === id)
+        currentMeta = detailMeta.get(id) ?? currentMeta;
     } catch {
       /* metadata is an enhancement; the panel falls back to item fields */
     }
