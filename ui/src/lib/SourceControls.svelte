@@ -21,6 +21,14 @@
   export let dir = "";
   export let recursiveScan = true;
 
+  // The "open a folder to focus on it" popover (a text-input fallback shown
+  // when there's no native OS picker) lives here next to its "Open a folder…"
+  // trigger. App owns the open/close + field state (bound, like `dir`) and the
+  // actual open-folder logic (emitted as `openfolderfocus`) — same split as the
+  // scan form.
+  export let openFolderOpen = false;
+  export let openFolderDir = "";
+
   const dispatch = createEventDispatcher();
 </script>
 
@@ -63,6 +71,45 @@
           </button>
         </li>
       </ul>
+    {/if}
+    {#if openFolderOpen}
+      <div class="open-folder-popover">
+        <!-- svelte-ignore a11y-autofocus -->
+        <input
+          class="dir"
+          type="text"
+          placeholder="/path/to/folder"
+          bind:value={openFolderDir}
+          on:keydown={(e) => {
+            if (e.key === "Enter") {
+              openFolderOpen = false;
+              dispatch("openfolderfocus");
+            } else if (e.key === "Escape") {
+              openFolderOpen = false;
+            }
+          }}
+          spellcheck="false"
+          autofocus
+        />
+        <div class="open-folder-actions">
+          <button
+            class="open-folder-go"
+            on:click={() => {
+              openFolderOpen = false;
+              dispatch("openfolderfocus");
+            }}
+            disabled={scanning}
+          >
+            {scanning ? "Opening…" : "Open"}
+          </button>
+          <button
+            class="open-folder-cancel"
+            on:click={() => (openFolderOpen = false)}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     {/if}
   </div>
   <div
@@ -168,6 +215,47 @@
   }
   .library-entry:hover:not(:disabled) {
     background: #2a2a2a;
+  }
+  .open-folder-popover {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 300;
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px;
+    min-width: 300px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .open-folder-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .open-folder-go {
+    padding: 0.4rem 1rem;
+    background: #4c9aff;
+    color: #06121f;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .open-folder-go:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .open-folder-cancel {
+    padding: 0.4rem 1rem;
+    background: #101010;
+    border: 1px solid #333;
+    color: #cfcfcf;
+    border-radius: 6px;
+    cursor: pointer;
   }
   .add-folder {
     position: relative;

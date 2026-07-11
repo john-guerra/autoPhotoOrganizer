@@ -2754,49 +2754,13 @@
       bind:addFolderOpen
       bind:dir
       bind:recursiveScan
+      bind:openFolderOpen
+      bind:openFolderDir
       on:openfolder={requestOpenFolder}
       on:scan={doScan}
       on:choosefolder={chooseFolder}
+      on:openfolderfocus={() => openFolderFocus(openFolderDir)}
     />
-
-    {#if openFolderOpen}
-      <div class="open-folder-popover">
-        <input
-          class="dir"
-          type="text"
-          placeholder="/path/to/folder"
-          bind:value={openFolderDir}
-          on:keydown={(e) => {
-            if (e.key === "Enter") {
-              openFolderOpen = false;
-              openFolderFocus(openFolderDir);
-            } else if (e.key === "Escape") {
-              openFolderOpen = false;
-            }
-          }}
-          spellcheck="false"
-          autofocus
-        />
-        <div class="open-folder-actions">
-          <button
-            class="open-folder-go"
-            on:click={() => {
-              openFolderOpen = false;
-              openFolderFocus(openFolderDir);
-            }}
-            disabled={scanning}
-          >
-            {scanning ? "Opening…" : "Open"}
-          </button>
-          <button
-            class="open-folder-cancel"
-            on:click={() => (openFolderOpen = false)}
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    {/if}
 
     <div class="divider"></div>
 
@@ -3382,61 +3346,6 @@
   }
   .focus-chip:hover {
     background: #263562;
-  }
-  /* "Open a folder…" text-input popover (non-native picker fallback). Mirrors
-     the add-folder popover in SourceControls. */
-  .open-folder-popover {
-    position: absolute;
-    top: 3.2rem;
-    left: 1rem;
-    z-index: 300;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    background: #0d0d0d;
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 10px;
-    min-width: 300px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  }
-  .open-folder-popover .dir {
-    padding: 0.45rem 0.6rem;
-    background: #101010;
-    border: 1px solid #333;
-    border-radius: 6px;
-    color: #eee;
-    font-size: 0.9rem;
-    font-family: ui-monospace, monospace;
-  }
-  .open-folder-popover .dir:focus {
-    outline: none;
-    border-color: #4c9aff;
-  }
-  .open-folder-actions {
-    display: flex;
-    gap: 8px;
-  }
-  .open-folder-go {
-    padding: 0.4rem 1rem;
-    background: #4c9aff;
-    color: #06121f;
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .open-folder-go:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-  .open-folder-cancel {
-    padding: 0.4rem 1rem;
-    background: #101010;
-    border: 1px solid #333;
-    color: #cfcfcf;
-    border-radius: 6px;
-    cursor: pointer;
   }
   h1 {
     font-size: 1rem;
