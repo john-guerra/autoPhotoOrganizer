@@ -187,16 +187,22 @@
 <div class="albums-view">
   <div class="albums-bar">
     <strong>Auto-albums</strong>
-    <label class="thresh">
-      Split gap
-      <input
-        type="range"
-        min="0.5"
-        max="6"
-        step="0.25"
-        bind:value={k}
-        on:input={onSlider}
-      />
+    <div class="thresh">
+      <!-- Only the slider is wrapped by a <label>. The editable value MUST stay
+           outside it: a <label> forwards clicks to its first control (the
+           range), which stole focus from the just-opened text field and blurred
+           it shut before you could type — issue #70. -->
+      <label class="thresh-slider">
+        Split gap
+        <input
+          type="range"
+          min="0.5"
+          max="6"
+          step="0.25"
+          bind:value={k}
+          on:input={onSlider}
+        />
+      </label>
       {#if editingThresh}
         <!-- svelte-ignore a11y-autofocus -->
         <input
@@ -211,15 +217,22 @@
           autofocus
         />
       {:else}
+        <!-- mousedown+preventDefault (not a plain click): opening the editor
+             autofocuses the input, but a click's default focus handling would
+             immediately blur it back out (on:blur commits + closes), so the
+             field flashed and vanished. Preventing the mousedown default keeps
+             focus on the input the instant it mounts. on:click stays for
+             keyboard activation, where no mousedown precedes it. -->
         <button
           class="thresh-val"
           title="Click to type an exact split gap (e.g. 6h, 2d, 90m)"
+          on:mousedown|preventDefault={startEditThresh}
           on:click={startEditThresh}
         >
           {manualThresholdMs != null ? "manual" : `${k}×`} · {fmtDur(thresholdMs)}
         </button>
       {/if}
-    </label>
+    </div>
     <span class="albums-count">{albums.length} albums · {photos.length} photos</span>
     <label class="maxphotos" title="Max photos to analyze. Albums render as fisheye snapshot strips, so this stays cheap regardless of size (server caps at 200,000).">
       Max
@@ -331,6 +344,11 @@
     gap: 8px;
     font-size: 0.8rem;
     color: #bbb;
+  }
+  .thresh-slider {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
   }
   .thresh input[type="range"] {
     width: 160px;

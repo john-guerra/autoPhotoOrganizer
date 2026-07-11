@@ -5,6 +5,12 @@ Notable changes to AutoGallery, newest first. Versions follow the scheme in
 gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
 short and user-facing — what you can now do, not how it's built.
 
+## 2.4.2-alpha
+
+- **Fixed: couldn't type an exact split gap** in Auto-albums — clicking the gap
+  value now opens an editable field that keeps focus, so you can type e.g. `6h`,
+  `2d`, `90m` and press Enter (#70).
+
 ## 2.4.1-alpha
 
 - **Fixed: "Keep only" / "Select" on a group left earlier photos showing** when
