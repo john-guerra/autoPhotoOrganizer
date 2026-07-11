@@ -376,6 +376,15 @@
   // Cleared the instant the user takes over (a keypress or wheel/trackpad
   // scroll), so the re-assert never fights them. Not a timer.
   let jumpRevealPending = false;
+  // Expanding a collapsed group must not move its header on screen: the header
+  // holds the exact viewport offset it had at the click while the group's
+  // photos grow downward below it (issue #74). Set to {key, offset} at expand
+  // time and re-asserted on every layout recompute (like jumpRevealPending)
+  // until the user takes over, because the focusId-recenter that re-fetches the
+  // group replaces the whole feed window — so the header's grid Y is rebuilt
+  // and a one-shot scroll can't hold it. Cleared on the user's first keypress/
+  // wheel. Not a timer.
+  let expandPin = null; // { key: string, offset: number } | null
   // Per-group photo counts shown on each section header, so the user knows
   // how many photos a group holds before scrolling it (the loaded window is
   // only a slice; a group can hold thousands). Keyed by pathKey(group path).
@@ -1296,10 +1305,22 @@
   async function toggleSectionCollapse(path) {
     const key = pathKey(path);
     const collapsing = !collapsedPaths.some((p) => pathKey(p) === key);
+    // Expanding: remember where this group's header sits right now, and arm the
+    // pin BEFORE the refetch — recenterFeedOnId sets focusPending, whose focus()
+    // would otherwise scroll to `selected`; the pin's presence turns that scroll
+    // off (preventScroll) and holds the header in place instead (issue #74).
+    if (!collapsing) {
+      const offset = groupAnchorOffset(key);
+      expandPin = offset == null ? null : { key, offset };
+    }
     collapsedPaths = collapsing
       ? [...collapsedPaths, path]
       : collapsedPaths.filter((p) => pathKey(p) !== key);
     await recenterFeedOnId(safeFocusId(selected, collapsing ? path : null));
+    if (expandPin) {
+      await tick();
+      pinExpandNow();
+    }
   }
 
   /** Feed group tri-state: expanded → snapshot → collapsed → expanded.
@@ -1424,6 +1445,50 @@
   function scheduleJumpPin() {
     tick().then(() => {
       if (jumpRevealPending) pinNow();
+    });
+  }
+
+  /** The current viewport offset (px below the scroll container's top) of a
+   * group's on-screen anchor — its collapsed pill/snapshot row when folded, or
+   * its (non-sticky) `.section-wrapper` when expanded. Both carry the group's
+   * `pathKey` as `data-group-key`; whichever exists is the group's true start
+   * position (the sticky `.section-header` inside the wrapper is NOT it — it
+   * detaches and rides the top edge). Returns null if neither is mounted.
+   * getBoundingClientRect forces a synchronous layout, so this reads the real
+   * position even mid-reflow. Matching is done in JS, not a CSS selector, since
+   * pathKey is JSON (embedded quotes/brackets would break an attribute
+   * selector). */
+  function groupAnchorOffset(key) {
+    if (!gridEl || !mainColumnEl) return null;
+    const el = [...gridEl.querySelectorAll("[data-group-key]")].find(
+      (n) => n.dataset.groupKey === key
+    );
+    if (!el) return null;
+    return el.getBoundingClientRect().top - mainColumnEl.getBoundingClientRect().top;
+  }
+
+  /** Hold the just-expanded group's header at its captured pre-expand offset —
+   * the expand analogue of pinNow. Same reflow story as a group-jump: the
+   * refetch rebuilds the feed window and metadata then re-justifies the rows,
+   * so a single scroll can't hold the header; the `boxes` reactive re-asserts
+   * this until the user takes over. */
+  function pinExpandNow() {
+    if (!expandPin) return;
+    const current = groupAnchorOffset(expandPin.key);
+    if (current == null) return;
+    const delta = current - expandPin.offset;
+    if (Math.abs(delta) > 0.5) {
+      const max = mainColumnEl.scrollHeight - mainColumnEl.clientHeight;
+      mainColumnEl.scrollTop = Math.max(
+        0,
+        Math.min(max, mainColumnEl.scrollTop + delta)
+      );
+    }
+  }
+
+  function scheduleExpandPin() {
+    tick().then(() => {
+      if (expandPin) pinExpandNow();
     });
   }
 
@@ -1887,6 +1952,9 @@
   // unlike rAF) defers to just after Svelte patches the DOM, so pinNow reads
   // the tile's final position — and works even in a backgrounded tab.
   $: if (jumpRevealPending && boxes) scheduleJumpPin();
+  // Same re-pin story for an expanded group's header (see expandPin): the
+  // refetch + metadata reflow keep moving it until the layout settles.
+  $: if (expandPin && boxes) scheduleExpandPin();
   $: gridHeight = layoutResult ? layoutResult.totalHeight + 2 * PAD : 0;
   // The first time this fires (right when `boxes` first becomes non-null,
   // e.g. after the initial feed load), the grid's layout/paint may not have
@@ -1919,7 +1987,12 @@
       // entryDomId is the stack id for a collapsed stack and never appears
       // in the DOM as a data-id.
       const entry = displayEntries[selected];
-      gridEl?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)?.focus();
+      // preventScroll while a group is being expanded: focusing the selected
+      // tile must not yank the viewport off the header the expand pin is holding
+      // (issue #74). Normal scans/jumps (no pin) keep the focus-reveal scroll.
+      gridEl
+        ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
+        ?.focus({ preventScroll: !!expandPin });
     });
   }
 
@@ -2074,7 +2147,7 @@
     if (renderEnd >= displayEntries.length - FETCH_THRESHOLD) {
       loadMore("after");
     }
-    if (renderStart <= FETCH_THRESHOLD && !jumpRevealPending) {
+    if (renderStart <= FETCH_THRESHOLD && !jumpRevealPending && !expandPin) {
       // Don't prepend previous-group content while a group-jump landing is
       // still being pinned: the prepend shifts everything below it, and the
       // pin + loadMore's scroll compensation then fight over the landing
@@ -2128,8 +2201,10 @@
       return;
     }
     // The user is driving now — cancel any pending post-jump pin (a jump
-    // re-arms it at the end of jumpGroupBoundary, after this returns).
+    // re-arms it at the end of jumpGroupBoundary, after this returns) and any
+    // post-expand header pin (issue #74).
     jumpRevealPending = false;
+    expandPin = null;
 
     // Alt+Left/Right jumps groups regardless of what has focus: unlike a
     // bare digit (typing a folder path must not rate photos), Option/Alt
@@ -2635,7 +2710,7 @@
       class="main-column"
       bind:this={mainColumnEl}
       on:scroll={scheduleVisibleRangeUpdate}
-      on:wheel={() => (jumpRevealPending = false)}
+      on:wheel={() => ((jumpRevealPending = false), (expandPin = null))}
       style="--reveal-margin:{revealMargin}px"
     >
       {#if albumMode}
@@ -2668,6 +2743,7 @@
             {#each layoutResult.headers as header (header.dimension + header.value + header.index)}
               <div
                 class="section-wrapper"
+                data-group-key={header.path ? pathKey(header.path) : undefined}
                 style="top:{header.y}px; height:{header.endY - header.y}px;"
               >
                 <div
@@ -2754,6 +2830,7 @@
                 {#if snapshotGroupKeys.has(pathKey(entry.item.path))}
                   <div
                     class="snapshot-row"
+                    data-group-key={pathKey(entry.item.path)}
                     style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
                   >
                     <div class="snapshot-head">
@@ -2823,6 +2900,7 @@
                 {:else}
                   <div
                     class="placeholder-row"
+                    data-group-key={pathKey(entry.item.path)}
                     style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
                     role="button"
                     tabindex="0"
