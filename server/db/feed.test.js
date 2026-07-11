@@ -297,6 +297,49 @@ describe("findGroupBoundary", () => {
     expect(result).toEqual({ id: bbbPhotos[0].id });
   });
 
+  it("lands on the target group's FIRST photo in the current sort, not its lowest id (#77)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const aaa = upsertScan(db, "/photos/aaa", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    // Insert order fixes id order: 1.jpg < 2.jpg < 3.jpg. Taken order is
+    // shuffled so the sort-first photo is NOT the lowest id.
+    const bbb = upsertScan(db, "/photos/bbb", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" }, // lowest id
+      { name: "2.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "3.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(db, aaa[0].id, "2020-01-01");
+    setTakenAt(db, bbb[0].id, "2023-03-01"); // lowest id, but latest taken
+    setTakenAt(db, bbb[1].id, "2023-01-01"); // earliest taken → first shown
+    setTakenAt(db, bbb[2].id, "2023-02-01");
+
+    // Sorted by Taken ascending, bbb shows 2.jpg, 3.jpg, 1.jpg — so a jump into
+    // bbb must land on 2.jpg, not the lowest-id 1.jpg.
+    const next = findGroupBoundary(db, {
+      groupBy: ["folder"],
+      sort: { by: "date_taken", dir: "asc" },
+      focusId: aaa[0].id,
+      direction: "next",
+    });
+    expect(next).toEqual({ id: bbb[1].id });
+
+    // The mirror image: jumping "prev" from a later group lands on the same
+    // first-in-sort photo of bbb (the reseek path).
+    const ccc = upsertScan(db, "/photos/ccc", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setTakenAt(db, ccc[0].id, "2025-01-01");
+    const prev = findGroupBoundary(db, {
+      groupBy: ["folder"],
+      sort: { by: "date_taken", dir: "asc" },
+      focusId: ccc[0].id,
+      direction: "prev",
+    });
+    expect(prev).toEqual({ id: bbb[1].id });
+  });
+
   it("returns null at the true end of the library", () => {
     const db = getDb();
     seedVolume(db, 1);

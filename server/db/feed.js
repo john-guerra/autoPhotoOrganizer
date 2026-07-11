@@ -764,12 +764,25 @@ export function findGroupBoundary(
 ) {
   const dims = applySortToDims(resolveDimensions(groupBy), sort);
   const filter = buildFilter(filterSpec);
+  const sortDim = sortSeekDim(sort);
+  // The seek tuple MUST match getFeedPage's exactly: group dims, then the
+  // photo-level sort column, then id. Omitting sortDim (as this once did) picks
+  // the boundary photo by lowest id within the target group, but the feed
+  // orders each group by the sort column — so a jump landed on a mid-group
+  // photo instead of the one the user sees first (#77).
   const seekDims = [
     ...dims,
+    sortDim,
     { name: "__id", expr: "photos.id", direction: "ASC" },
   ];
   const wantAfter = direction === "next";
-  const selectDimCols = dims.map((d, i) => `${d.expr} AS dim${i}`).join(", ");
+  const selectDimCols = [
+    ...dims.map((d, i) => `${d.expr} AS dim${i}`),
+    `${sortDim.expr} AS sortval`,
+  ].join(", ");
+  // Map a seek-dim to the SELECT alias it orders by (dim<i> / sortval / id).
+  const seekCol = (d, i) =>
+    i < dims.length ? `dim${i}` : d.name === "__sort" ? "sortval" : "photos.id";
 
   const focusRow = db
     .prepare(
@@ -781,7 +794,7 @@ export function findGroupBoundary(
   if (!focusRow) throw new Error(`focusId ${focusId} not found`);
   const focusValues = dims
     .map((_, i) => focusRow[`dim${i}`])
-    .concat(focusRow.id);
+    .concat(focusRow.sortval, focusRow.id);
 
   const { sql: exclSql, params: exclParams } = exclusionClause(collapsed, dims);
   const { sql: seekSql, params: seekParams } = seekCondition(
@@ -802,13 +815,12 @@ export function findGroupBoundary(
 
   const orderCols = seekDims
     .map((d, i) => {
-      const col = i < dims.length ? `dim${i}` : "photos.id";
       const dir = wantAfter
         ? d.direction
         : d.direction === "ASC"
           ? "DESC"
           : "ASC";
-      return `${col} ${dir}`;
+      return `${seekCol(d, i)} ${dir}`;
     })
     .join(", ");
 
@@ -839,9 +851,7 @@ export function findGroupBoundary(
   );
   const matchSql = notMatchSql.replace(/^NOT /, "");
   const forwardOrderCols = seekDims
-    .map(
-      (d, i) => `${i < dims.length ? `dim${i}` : "photos.id"} ${d.direction}`
-    )
+    .map((d, i) => `${seekCol(d, i)} ${d.direction}`)
     .join(", ");
   const firstRow = db
     .prepare(
