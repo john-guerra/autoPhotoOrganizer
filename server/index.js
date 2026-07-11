@@ -29,7 +29,10 @@ const HOST = "127.0.0.1";
 
 export function createApp() {
   const app = express();
-  app.use(express.json());
+  // 50mb: materialize/undo POST an album's full photo-id list and the move
+  // manifest ({id,from,to} per file); a big album blows the default 100kb limit
+  // and the request 413s (undo silently failed — see #89).
+  app.use(express.json({ limit: "50mb" }));
 
   migrateLegacyJsonIfNeeded(getDb());
 

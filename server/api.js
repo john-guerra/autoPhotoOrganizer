@@ -225,6 +225,11 @@ export async function copyIdsIntoFolder(
     // 1200") — the registry update is in-memory and the client polls, so this
     // is cheap even on large jobs.
     onProgress?.(i + 1, total, move ? "moving" : "copying");
+    // Yield to the event loop so the client's progress poll (and a cancel) get
+    // served *during* the album, not just at album boundaries. A same-volume
+    // move is a synchronous renameSync, so without this the loop never lets the
+    // HTTP poll through and the count appears frozen until the album finishes.
+    if (i % 4 === 0) await new Promise((resolve) => setImmediate(resolve));
     i++;
   }
 
