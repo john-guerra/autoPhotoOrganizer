@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.16-alpha
+
+- **Timeline density reads truer to your shoots** — the date timeline now
+  smooths less by default (finer bandwidth, more detail points, honest curve),
+  so photo bursts and the quiet gaps between them stay visible instead of being
+  blurred together — making album boundaries easier to spot. You can still
+  retune it from the gear popover. (#82)
+
 ## 2.8.15-alpha
 
 - **Expanding a collapsed group no longer flickers** — re-expanding a section

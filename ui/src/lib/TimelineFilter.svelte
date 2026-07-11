@@ -23,10 +23,14 @@
   const KDE_PERSIST_KEY = "autogallery.timelineKde";
   const DEFAULT_KDE = {
     type: "area", // area | violin | histogram
-    curve: "basis", // curve name (widget resolves to a d3-shape factory)
-    adjust: 1, // smoothing: multiplier on the auto Scott bandwidth
+    curve: "monotoneX", // honest interpolation: passes through the density points
+    adjust: 0.5, // smoothing: multiplier on the auto Scott bandwidth. Photo
+    // times are spiky/multimodal (bursts separated by gaps), so the global
+    // Scott bandwidth over-smooths the very gaps this timeline exists to show;
+    // halving it keeps event/gap structure legible for album boundaries.
     pad: 0, // fast-kde domain padding (fraction)
-    bins: 30,
+    bins: 60, // evaluation points — raised so the narrower kernel resolves
+    // detail instead of aliasing into a jagged comb
     size: 30, // scent height (px)
   };
 
