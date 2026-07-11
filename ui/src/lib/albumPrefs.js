@@ -4,10 +4,11 @@
 const KEY = "autogallery.albumPrefs";
 
 export const DEFAULT_ALBUM_PREFS = {
-  // e.g. 2017/2017_01Jan_09_Diana_VR — nested year folder + a {prefix} that
-  // seeds from the source folder's name (editable). Empty prefix collapses the
-  // trailing "_" cleanly to 2017/2017_01Jan_09.
-  template: "%Y/%Y_%m%b_%d_{prefix}",
+  // Empty by default: an un-edited album's name then falls back to
+  // "<currentFolderName>_<n>" (see albums.js computeAlbumNames) rather than a
+  // strftime-derived name — the simplest first-run default. Set a strftime
+  // template (e.g. "%Y/%Y_%m%b_%d") to switch to date-based naming.
+  template: "",
   gapMode: "fixed", // "fixed" (a concrete gap) | "auto" (mean + k·stddev)
   fixedGapMs: 86400000, // 1 day
   k: 2, // stddev multiplier for auto mode

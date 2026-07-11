@@ -6,6 +6,23 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.11-alpha
+
+- **Album naming defaults to the folder you're in** — leave the naming
+  template empty and albums are named `<folder>_1`, `<folder>_2`… after the
+  folder you opened (or the one you're browsing); the `{prefix}` token is
+  gone, replaced by this automatic default.
+- **Move/Copy destination defaults to wherever you're looking** — even
+  without an explicitly focused folder, Auto Albums now defaults the
+  destination (and the naming above) to the folder implied by your current
+  view.
+- **The Auto Albums how-it-works modal only ever opens once** — previously it
+  reopened after every app reload; now it's remembered for good (the ⚙
+  Options button still opens it any time).
+- **Materializing albums returns you to the normal feed** — after Move/Copy
+  finishes and the destination is rescanned, Auto Albums closes automatically
+  so you land back in the regular grid with the new folders visible.
+
 ## 2.8.10-alpha
 
 - **Opening a photo from Auto Albums no longer loses your work** — clicking a

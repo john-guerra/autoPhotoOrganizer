@@ -272,10 +272,18 @@
   // in localStorage — see albumPrefs.js. AlbumsView owns the live working
   // copy; its `prefschange` just asks us to persist + re-seed it.
   let albumPrefs = loadAlbumPrefs();
-  // Open the Auto-albums setup/explainer modal automatically the first time the
-  // mode is entered in a session; later entries go straight to the review.
-  let albumSetupSeen = false;
+  // Open the Auto-albums setup/explainer modal automatically only the very
+  // FIRST time the mode is ever entered (persisted across reloads/sessions —
+  // see LS_ALBUM_SETUP_SEEN in detectAlbums); later entries go straight to the
+  // review. The ⚙ Options button still opens it on demand.
+  const LS_ALBUM_SETUP_SEEN = "autogallery.albumSetupSeen";
   let albumAutoOpenSetup = false;
+  // Fallback folder for Auto-Albums' destination/naming default when neither
+  // focusPath nor the current groupBy grouping yields a folder (e.g. grouped
+  // by year/camera/kind only) — resolved once per detectAlbums() call from
+  // the first album photo's own folder, since album-timeline photos
+  // (albumPhotos) carry no path of their own (see fetchAlbumTimeline).
+  let albumFirstPhotoFolder = null;
 
   // Filter mode: does the rating/orientation filter narrow what's DISPLAYED
   // (classic), or drive the SELECTION (the grid then shows everything and the
@@ -1075,9 +1083,23 @@
         albumLimit = resp.limit;
         localStorage.setItem("autogallery.albumLimit", String(albumLimit));
       }
-      // First entry this session opens the setup modal (explains how it works).
-      albumAutoOpenSetup = !albumSetupSeen;
-      albumSetupSeen = true;
+      // Resolve a folder fallback from the first album photo when neither
+      // focusPath nor the current groupBy grouping gives us one — album-
+      // timeline photos carry no path of their own, so this is a one-off
+      // lookup rather than something `currentFolder` can derive on its own.
+      albumFirstPhotoFolder = null;
+      if (!focusPath && !folderFromGroupPath(currentPath) && albumPhotos[0]) {
+        try {
+          const [meta] = await fetchMeta([albumPhotos[0].id]);
+          albumFirstPhotoFolder = meta?.folder ?? null;
+        } catch {
+          /* non-fatal: currentFolder simply stays null */
+        }
+      }
+      // Only the very first entry EVER (persisted) opens the setup modal
+      // (explains how it works); later entries go straight to the review.
+      albumAutoOpenSetup = localStorage.getItem(LS_ALBUM_SETUP_SEEN) !== "true";
+      localStorage.setItem(LS_ALBUM_SETUP_SEEN, "true");
       albumMode = true;
     } catch (e) {
       error = e.message;
@@ -1212,6 +1234,33 @@
   $: hereIndex =
     selected >= renderStart && selected <= renderEnd ? selected : renderStart;
   $: currentPath = deriveCurrentPath(hereIndex, displayEntries, groupBy);
+
+  /** The abs folder path carried by a group path's "folder" or "folderName"
+   * dimension, if present. Both dimensions carry the identical abs_path value
+   * server-side (see dimensions.js/server/db/feed.js's DIMENSIONS) —
+   * "folderName" only formats it down to a basename for display — so either
+   * one found in `path` gives us the real folder. */
+  function folderFromGroupPath(path) {
+    if (!path) return null;
+    const dim = path.find(
+      (p) => p.dimension === "folder" || p.dimension === "folderName"
+    );
+    return dim ? dim.value : null;
+  }
+  /** The folder Auto-Albums' destination/naming should default to: the
+   * focused folder if the user has one open, else the folder at the "you are
+   * here" feed position (only meaningful when groupBy includes "folder" or
+   * "folderName"), else the first album photo's own folder (resolved
+   * asynchronously in detectAlbums, since album-timeline photos carry no
+   * path). null when none of these resolve — never a stale remembered path. */
+  $: currentFolder =
+    focusPath ||
+    folderFromGroupPath(currentPath) ||
+    albumFirstPhotoFolder ||
+    null;
+  $: currentFolderName = currentFolder
+    ? currentFolder.split(/[/\\]/).filter(Boolean).pop()
+    : "";
 
   /** Epoch-ms at the "you are here" anchor (`hereIndex` — the focused photo, or
    * the first visible row when the focus is scrolled off), for the timeline's
@@ -1806,7 +1855,10 @@
   /** After AlbumsView materializes (move/copy) album folders to disk, scan
    * the destination so the newly-created nested folders index and show up
    * in the sidebar tree right away, instead of waiting for the user to
-   * manually rescan. */
+   * manually rescan. Exits Auto Albums back to the normal feed once the
+   * scan/refresh settles (success or failure) so the rescanned tree is
+   * visible — the album-review view has nothing left to show once its
+   * source photos have been moved/copied out. */
   async function onAlbumsMaterialized({ destParent }) {
     if (!destParent) return;
     try {
@@ -1828,6 +1880,8 @@
     } catch (e) {
       error = e.message;
       status = "";
+    } finally {
+      albumMode = false;
     }
   }
 
@@ -2878,8 +2932,8 @@
           photos={albumPhotos}
           truncated={albumTruncated}
           limit={albumLimit}
-          defaultDest={focusPath || ""}
-          defaultPrefix={focusName || ""}
+          defaultDest={currentFolder || ""}
+          {currentFolderName}
           {hasNativePicker}
           prefs={albumPrefs}
           autoOpenSetup={albumAutoOpenSetup}

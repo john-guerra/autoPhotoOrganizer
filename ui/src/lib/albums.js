@@ -84,30 +84,23 @@ export function defaultAlbumName(startAtMs) {
 
 /**
  * Render an album folder name from a strftime-style template. Date tokens are
- * delegated to d3.timeFormat; `%n` is the 1-based album index; `{prefix}` is
- * replaced with the (trimmed) `prefix` string — typically the source folder's
- * name — before either substitution runs. The result MAY contain "/" to
- * create nested folders (e.g. a year subfolder). Leading "/" and any ".."
- * path segments are stripped so the name is always a safe relative path (the
- * server's safeResolve also blocks traversal, but we keep it clean). Runs of
- * "_" left behind by an empty `{prefix}` (e.g. "2017__" or "_2017") collapse
- * to a single separator, and any leading/trailing "_" is trimmed off each
- * path segment. An empty render falls back to `Album {n}`.
- * @param {string} template e.g. "%Y/%Y_%m%b_%d" or "%Y_{prefix}"
+ * delegated to d3.timeFormat; `%n` is the 1-based album index. The result MAY
+ * contain "/" to create nested folders (e.g. a year subfolder). Leading "/"
+ * and any ".." path segments are stripped so the name is always a safe
+ * relative path (the server's safeResolve also blocks traversal, but we keep
+ * it clean). Runs of "_" collapse to a single separator, and any
+ * leading/trailing "_" is trimmed off each path segment. An empty render
+ * falls back to `Album {n}`.
+ * @param {string} template e.g. "%Y/%Y_%m%b_%d" or "Album %n"
  * @param {Date} date album start date
  * @param {number} n 1-based album index
- * @param {string} [prefix] replaces the literal `{prefix}` token, e.g. the
- *   source folder's name
  * @returns {string}
  */
-export function renderAlbumName(template, date, n, prefix = "") {
+export function renderAlbumName(template, date, n) {
   // %n isn't a d3 token — substitute it first, then delegate the rest to
   // d3.timeFormat. The try/catch below covers a template that d3 can't parse
   // (e.g. a stray trailing "%") by falling back to the literal string.
-  const cleanPrefix = String(prefix ?? "").trim();
-  const withIndex = String(template ?? "")
-    .replace(/\{prefix\}/g, cleanPrefix)
-    .replace(/%n/g, String(n));
+  const withIndex = String(template ?? "").replace(/%n/g, String(n));
   let rendered = "";
   try {
     rendered = d3.timeFormat(withIndex)(date);
@@ -120,7 +113,7 @@ export function renderAlbumName(template, date, n, prefix = "") {
       (seg) =>
         seg
           .trim()
-          .replace(/_+/g, "_") // collapse runs left by an empty {prefix}
+          .replace(/_+/g, "_") // collapse runs of "_" left by a sparse template
           .replace(/^_+|_+$/g, "") // trim dangling leading/trailing separators
     )
     .filter((seg) => seg.length > 0 && seg !== "..")
@@ -131,20 +124,31 @@ export function renderAlbumName(template, date, n, prefix = "") {
 /**
  * Display name for each album, keeping a user-typed name alive across
  * re-clustering as long as the album still starts with the same first photo.
+ * When `template` is empty/blank, an un-edited album's default name is simply
+ * `<folderName>_<n>` (falling back to `Album_<n>` when there's no folder name
+ * either) — a non-empty template always renders via `renderAlbumName` and
+ * never appends the folder name.
  * @param {Array<{startAt:number, ids:number[]}>} albums
  * @param {Map<number,string>} editedNames keyed by first-photo id
- * @param {string} template strftime template for un-edited albums
- * @param {string} [prefix] replaces `{prefix}` in the template, e.g. the
- *   source folder's name
+ * @param {string} template strftime template for un-edited albums; empty/blank
+ *   means "<folderName>_<n>"
+ * @param {string} [folderName] the current folder's basename, used only when
+ *   `template` is empty/blank
  * @returns {string[]}
  */
-export function computeAlbumNames(albums, editedNames, template, prefix = "") {
+export function computeAlbumNames(
+  albums,
+  editedNames,
+  template,
+  folderName = ""
+) {
+  const isBlank = !String(template ?? "").trim();
   return albums.map((a, i) => {
     const firstId = a.ids[0];
     const typed = editedNames.get(firstId);
-    return typed != null && typed !== ""
-      ? typed
-      : renderAlbumName(template, new Date(a.startAt), i + 1, prefix);
+    if (typed != null && typed !== "") return typed;
+    if (isBlank) return `${folderName || "Album"}_${i + 1}`;
+    return renderAlbumName(template, new Date(a.startAt), i + 1);
   });
 }
 

@@ -8,9 +8,12 @@
   export let sampleDate = new Date();
   export let dest = "";
   export let hasNativePicker = false;
-  // Seed for the Prefix field — normally the source folder's name (App passes
-  // `focusName`). Source-specific, so it is NOT part of the persisted `prefs`.
-  export let defaultPrefix = "";
+  // The current folder's basename (App passes `currentFolderName`, derived
+  // from focusPath / the current groupBy position / the first album photo's
+  // folder — see App.svelte's `currentFolder`). Used only to preview/describe
+  // the empty-template default "<folderName>_<n>". Source-specific, so it is
+  // NOT part of the persisted `prefs`.
+  export let currentFolderName = "";
 
   const dispatch = createEventDispatcher();
 
@@ -21,7 +24,6 @@
   let move = prefs.move;
   let localDest = dest;
   let gapInput = "";
-  let prefix = defaultPrefix;
   $: if (open) {
     // one-shot reseed guard
   }
@@ -33,12 +35,13 @@
     move = prefs.move;
     localDest = dest;
     gapInput = fmtDur(fixedGapMs);
-    prefix = defaultPrefix;
     lastOpen = true;
   }
   $: if (!open) lastOpen = false;
 
-  $: preview = renderAlbumName(template, sampleDate, 1, prefix);
+  $: preview = template.trim()
+    ? renderAlbumName(template, sampleDate, 1)
+    : `${currentFolderName || "Album"}_1`;
 
   const TOKENS = [
     ["%Y", "4-digit year", "2017"],
@@ -49,7 +52,6 @@
     ["%H", "hour (24h)", "14"],
     ["%M", "minute", "30"],
     ["%n", "album number", "1, 2, 3…"],
-    ["{prefix}", "folder-name prefix", "Diana"],
     ["/", "make a subfolder", "subfolder"],
   ];
   function insertToken(tok) {
@@ -83,7 +85,6 @@
       fixedGapMs,
       move,
       dest: localDest.trim(),
-      prefix,
     });
     open = false;
   }
@@ -143,7 +144,7 @@
       class="tpl"
       bind:value={template}
       spellcheck="false"
-      placeholder="%Y/%Y_%m%b_%d"
+      placeholder={`e.g. %Y/%Y_%m%b_%d — leave empty for ${currentFolderName || "<folder>"}_1, ${currentFolderName || "<folder>"}_2`}
     />
     <p class="hint">e.g. <code>Album %n</code> → Album 1, Album 2</p>
     <div class="tokens">
@@ -155,16 +156,6 @@
         >
       {/each}
     </div>
-    <label class="lbl prefix-lbl">Prefix</label>
-    <input
-      class="tpl"
-      bind:value={prefix}
-      spellcheck="false"
-      placeholder="Diana"
-    />
-    <p class="hint">
-      Prefix starts from the current folder's name — used by the {"{prefix}"} token.
-    </p>
     <p class="preview">
       Preview: <code>{localDest || "<destination>"}/{preview}</code>
     </p>
@@ -219,9 +210,6 @@
     font-size: 0.8rem;
     color: #9a9a9a;
     margin-bottom: 0.35rem;
-  }
-  .prefix-lbl {
-    margin-top: 0.6rem;
   }
   .gap-row,
   .move-row,

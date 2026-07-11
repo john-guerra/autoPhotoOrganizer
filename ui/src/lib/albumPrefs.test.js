@@ -24,4 +24,10 @@ describe("mergeAlbumPrefs", () => {
     expect(DEFAULT_ALBUM_PREFS.fixedGapMs).toBe(86400000);
     expect(DEFAULT_ALBUM_PREFS.gapMode).toBe("fixed");
   });
+
+  it("defaults the naming template to empty (falls back to <folderName>_<n>)", () => {
+    expect(DEFAULT_ALBUM_PREFS.template).toBe("");
+    expect(mergeAlbumPrefs(null).template).toBe("");
+    expect(mergeAlbumPrefs({ template: "" }).template).toBe("");
+  });
 });

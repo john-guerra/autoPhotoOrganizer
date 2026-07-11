@@ -27,22 +27,26 @@
   export let truncated = false;
   export let hasNativePicker = false;
   export let limit = 20000; // current working-set cap (server hard-caps at 200000)
-  // The folder you've opened (focusPath, #66). When set, materialize defaults
-  // to organizing in place — album subfolders created inside this folder.
+  // The folder you're currently working in — focusPath if focused, else
+  // derived from the current groupBy position, else the first album photo's
+  // own folder (see App.svelte's `currentFolder`, #66). When set, materialize
+  // defaults to organizing in place — album subfolders created inside this
+  // folder.
   export let defaultDest = "";
-  // Seed for the {prefix} naming token — normally the source folder's name
-  // (App passes `focusName`). Source-specific, so it is NOT persisted to the
-  // global album prefs (unlike `template`, which is).
-  export let defaultPrefix = "";
+  // The current folder's basename (App passes `currentFolderName`), used as
+  // the default "<folderName>_<n>" album name when the naming template is
+  // empty. Source-specific, so it is NOT persisted to the global album prefs
+  // (unlike `template`, which is).
+  export let currentFolderName = "";
   // Global album prefs (template/gapMode/fixedGapMs/k/move) — see albumPrefs.js.
   // AlbumsView owns the LIVE working copy (seeded here, tweaked by the slider,
   // the Auto button, the type-exact editor, and the Options modal); App
   // persists it back on `prefschange`.
   export let prefs;
-  // Open the setup/explainer modal automatically the first time Auto Albums is
-  // entered in a session (App tracks "first entry"); afterward it's reachable
-  // via the ⚙ Options button. Seeded at mount, so re-entering the mode with the
-  // flag set re-opens it.
+  // Open the setup/explainer modal automatically the very first time Auto
+  // Albums is EVER entered (App persists this to localStorage, so it never
+  // reopens automatically again after that one time); afterward it's only
+  // reachable via the ⚙ Options button. Seeded at mount from this prop.
   export let autoOpenSetup = false;
 
   const dispatch = createEventDispatcher();
@@ -58,9 +62,6 @@
   // Local mirror of the naming template, kept in sync via the Options modal's
   // `apply` (prefs.template itself only updates once App persists+re-passes).
   let template = prefs.template;
-  // Local mirror of the {prefix} token's value, seeded from the source
-  // folder's name. Source-specific — not part of the persisted prefs.
-  let prefix = defaultPrefix;
   let setupOpen = autoOpenSetup;
   // Destination: default to the opened folder (in-place) so Move creates album
   // subfolders directly inside the folder you're viewing. When you're not
@@ -139,7 +140,12 @@
   // as that photo still starts the album. Un-edited albums render from
   // `template`.
   let editedNames = new Map(); // firstPhotoId -> typed name
-  $: names = computeAlbumNames(albums, editedNames, template, prefix);
+  $: names = computeAlbumNames(
+    albums,
+    editedNames,
+    template,
+    currentFolderName
+  );
 
   function onNameInput(i, value) {
     const firstId = albums[i].ids[0];
@@ -190,9 +196,7 @@
     move = p.move;
     dest = p.dest || dest;
     template = p.template;
-    prefix = p.prefix ?? prefix;
-    // Persist globally (App writes to albumPrefs.js / localStorage). Prefix
-    // is source-specific and intentionally excluded from the persisted prefs.
+    // Persist globally (App writes to albumPrefs.js / localStorage).
     dispatch("prefschange", p);
     setupOpen = false;
   }
@@ -469,7 +473,7 @@
   sampleDate={new Date(albums[0]?.startAt ?? Date.now())}
   {dest}
   {hasNativePicker}
-  defaultPrefix={prefix}
+  {currentFolderName}
   on:apply={onSetupApply}
 />
 

@@ -110,23 +110,6 @@ describe("renderAlbumName", () => {
     expect(renderAlbumName("   ", d, 4)).toBe("Album 4");
     expect(renderAlbumName("/", d, 4)).toBe("Album 4");
   });
-
-  it("substitutes the {prefix} token with the (trimmed) prefix", () => {
-    expect(renderAlbumName("%Y_{prefix}", d, 1, "Diana")).toBe("2017_Diana");
-    expect(renderAlbumName("%Y_{prefix}", d, 1, "  Diana  ")).toBe(
-      "2017_Diana"
-    );
-  });
-
-  it("collapses a dangling separator when {prefix} is empty", () => {
-    expect(renderAlbumName("%Y_{prefix}", d, 1)).toBe("2017");
-    expect(renderAlbumName("%Y_{prefix}", d, 1, "")).toBe("2017");
-    expect(renderAlbumName("{prefix}_%Y", d, 1, "")).toBe("2017");
-  });
-
-  it("combines {prefix} with %n", () => {
-    expect(renderAlbumName("{prefix}_%n", d, 3, "Diana")).toBe("Diana_3");
-  });
 });
 
 describe("computeAlbumNames", () => {
@@ -158,10 +141,29 @@ describe("computeAlbumNames", () => {
     ]);
   });
 
-  it("threads prefix through to renderAlbumName for un-edited albums", () => {
-    expect(
-      computeAlbumNames([A, B], new Map(), "%Y_{prefix}", "Diana")
-    ).toEqual(["2017_Diana", "2017_Diana"]);
+  it("defaults un-edited names to <folderName>_<n> when template is empty", () => {
+    expect(computeAlbumNames([A, B], new Map(), "", "Trip")).toEqual([
+      "Trip_1",
+      "Trip_2",
+    ]);
+  });
+
+  it("falls back to Album_<n> when template and folderName are both empty", () => {
+    expect(computeAlbumNames([A, B], new Map(), "", "")).toEqual([
+      "Album_1",
+      "Album_2",
+    ]);
+    expect(computeAlbumNames([A, B], new Map(), "   ")).toEqual([
+      "Album_1",
+      "Album_2",
+    ]);
+  });
+
+  it("a non-empty template still renders and does not append the folder name", () => {
+    expect(computeAlbumNames([A, B], new Map(), "%Y-%m-%d", "Trip")).toEqual([
+      "2017-01-09",
+      "2017-01-11",
+    ]);
   });
 });
 
