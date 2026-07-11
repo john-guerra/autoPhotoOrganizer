@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.15-alpha
+
+- **Expanding a collapsed group no longer flickers** — re-expanding a section
+  you just collapsed now paints its already-loaded thumbnails instantly, instead
+  of blanking every tile to a spinner and reloading the whole group over a second
+  or two. The images were already in the browser cache the whole time; the tiles
+  just weren't reusing them on the re-mount (#41).
+
 ## 2.8.14-alpha
 
 - **The "Open a folder…" box now drops down from the Library menu** instead of

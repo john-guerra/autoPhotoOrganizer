@@ -24,11 +24,25 @@
   export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
   export let stackPeekItems = []; // this stack's other members (excludes the cover), for the peeking-photos visual
   export let stackMarginPx = 0; // horizontal margin reserved in the layout for this stack's peek layers (0 for non-stack tiles)
+  // App already loaded this id's thumbnail once (thumbStatus === 'ok', reset
+  // only on scan). True when a group is re-expanded after being collapsed: the
+  // bytes are in the browser cache, so skip the blank→observer→spinner→fade
+  // lifecycle a fresh mount would otherwise re-run and paint the cached image
+  // straight away (issue #41). Measured: the re-fetches on expand are ~80%
+  // cache hits (transferSize 0), yet the tiles still rebuilt from blank — this
+  // is the client-side lifecycle cost, not the network.
+  export let warm = false;
 
   let el;
-  let visible = false; // set true once the tile nears the viewport
+  // `warm` tiles skip the IntersectionObserver gate: set `src` at mount instead
+  // of waiting for the observer to re-confirm a visibility that hasn't changed.
+  let visible = warm;
   let loaded = false;
-  let cacheHit = false; // the <img> was already browser-cached at mount → skip the fade (issue #41)
+  // `warm` ⇒ the image is cache-warm, so drop the fade from the first paint
+  // (the `instant` class). detectCache may also set this for a cold-but-cached
+  // tile, but its synchronous `complete` check is unreliable right after `src`
+  // is assigned, so `warm` is the dependable signal for the re-expand case.
+  let cacheHit = warm; // the <img> is browser-cached → skip the fade (issue #41)
   let failed = false; // server 500'd, or the request stalled past STALL_MS
   let retryNonce = 0; // bumped by the retry click to force a fresh request past caches
   let observer;

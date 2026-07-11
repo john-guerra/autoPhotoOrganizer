@@ -3140,6 +3140,7 @@
                   box={boxes[i]}
                   pad={PAD}
                   size={thumbSize}
+                  warm={thumbStatus.get(resolvePhoto(entry).id) === "ok"}
                   selected={i === selected}
                   inSelection={selectedIds.has(resolvePhoto(entry).id)}
                   stackCount={entry.kind === "stack"
