@@ -2277,11 +2277,14 @@
   async function onKeydown(e) {
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
 
-    // The shortcuts-help overlay owns the keyboard while open: Esc or '?'
-    // closes it, everything else is swallowed so keys don't act on the grid
-    // behind it.
+    // The shortcuts-help overlay owns the keyboard while open: '?' toggles
+    // it closed, everything else is swallowed so keys don't act on the grid
+    // behind it. Escape is NOT handled here — the overlay's Modal (native
+    // <dialog>) owns Escape via its `cancel` event and dispatches `close`,
+    // which sets shortcutsHelpOpen=false above. Handling Escape in both
+    // places would double-toggle.
     if (shortcutsHelpOpen) {
-      if (e.key === "Escape" || e.key === "?") {
+      if (e.key === "?") {
         e.preventDefault();
         shortcutsHelpOpen = false;
       }

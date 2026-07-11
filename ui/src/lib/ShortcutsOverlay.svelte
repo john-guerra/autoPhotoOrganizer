@@ -1,9 +1,11 @@
 <script>
   // Keyboard shortcuts reference (issue #26). Presentational modal: a static,
   // context-grouped list of every shortcut, kept in sync by hand with
-  // App.svelte's onKeydown. Dismiss on backdrop click or the ✕; the `?`/Esc
-  // keys are owned by App.svelte's onKeydown (single keyboard owner) to avoid a
+  // App.svelte's onKeydown. Built on the shared Modal (native <dialog>), which
+  // owns Esc-to-close/backdrop/focus trap; the `?` key to open is owned by
+  // App.svelte's onKeydown (single keyboard owner) to avoid a
   // capture-vs-bubble double-toggle.
+  import Modal from "./Modal.svelte";
   import { createEventDispatcher } from "svelte";
 
   const dispatch = createEventDispatcher();
@@ -60,92 +62,36 @@
   ];
 </script>
 
-<div class="shortcuts-backdrop" on:click={close}>
-  <div
-    class="shortcuts-panel"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Keyboard shortcuts"
-    on:click|stopPropagation
-  >
-    <header>
-      <h2>Keyboard shortcuts</h2>
-      <button class="close-btn" title="Close (Esc)" on:click={close}>✕</button>
-    </header>
-
-    <div class="groups">
-      {#each groups as group}
-        <section>
-          <h3>{group.heading}</h3>
-          <dl>
-            {#each group.rows as row}
-              <div class="row">
-                <dt>
-                  {#each row.keys as k}
-                    {#if k === "+" || k === "arrow" || k === "–"}
-                      <span class="join">{k === "arrow" ? "arrow" : k}</span>
-                    {:else}
-                      <kbd>{k}</kbd>
-                    {/if}
-                  {/each}
-                </dt>
-                <dd>{row.label}</dd>
-              </div>
-            {/each}
-          </dl>
-        </section>
-      {/each}
-    </div>
-
-    <footer>
-      <span>Press <kbd>?</kbd> anytime to toggle this list.</span>
-    </footer>
+<Modal open={true} title="Keyboard shortcuts" size="lg" on:close={close}>
+  <div class="groups">
+    {#each groups as group}
+      <section>
+        <h3>{group.heading}</h3>
+        <dl>
+          {#each group.rows as row}
+            <div class="row">
+              <dt>
+                {#each row.keys as k}
+                  {#if k === "+" || k === "arrow" || k === "–"}
+                    <span class="join">{k === "arrow" ? "arrow" : k}</span>
+                  {:else}
+                    <kbd>{k}</kbd>
+                  {/if}
+                {/each}
+              </dt>
+              <dd>{row.label}</dd>
+            </div>
+          {/each}
+        </dl>
+      </section>
+    {/each}
   </div>
-</div>
+  <svelte:fragment slot="footer">
+    <span>Press <kbd>?</kbd> anytime to toggle this list.</span>
+  </svelte:fragment>
+</Modal>
 
 <style>
-  .shortcuts-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 600;
-    background: rgba(0, 0, 0, 0.55);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .shortcuts-panel {
-    background: #1e1e1e;
-    border: 1px solid #333;
-    border-radius: 8px;
-    width: min(720px, 92vw);
-    max-height: 85vh;
-    overflow-y: auto;
-    padding: 1rem 1.25rem 1.25rem;
-    color: #e8e8e8;
-  }
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 0.5rem;
-  }
-  header h2 {
-    margin: 0;
-    font-size: 1.05rem;
-  }
-  .close-btn {
-    background: none;
-    border: none;
-    color: #999;
-    font-size: 1rem;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 6px;
-  }
-  .close-btn:hover {
-    background: #2c2c2c;
-    color: #fff;
-  }
   .groups {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -202,15 +148,5 @@
     color: #777;
     font-size: 0.8rem;
     padding: 0 1px;
-  }
-  footer {
-    margin-top: 1rem;
-    padding-top: 0.6rem;
-    border-top: 1px solid #2c2c2c;
-    color: #888;
-    font-size: 0.8rem;
-  }
-  footer kbd {
-    font-size: 0.72rem;
   }
 </style>
