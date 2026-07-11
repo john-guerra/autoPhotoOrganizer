@@ -35,6 +35,11 @@
   // the Auto button, the type-exact editor, and the Options modal); App
   // persists it back on `prefschange`.
   export let prefs;
+  // Open the setup/explainer modal automatically the first time Auto Albums is
+  // entered in a session (App tracks "first entry"); afterward it's reachable
+  // via the ⚙ Options button. Seeded at mount, so re-entering the mode with the
+  // flag set re-opens it.
+  export let autoOpenSetup = false;
 
   const dispatch = createEventDispatcher();
 
@@ -49,7 +54,7 @@
   // Local mirror of the naming template, kept in sync via the Options modal's
   // `apply` (prefs.template itself only updates once App persists+re-passes).
   let template = prefs.template;
-  let setupOpen = false;
+  let setupOpen = autoOpenSetup;
   // Destination: prefer the opened folder (in-place), else the remembered dest.
   let dest =
     defaultDest || localStorage.getItem("autogallery.exportDest") || "";

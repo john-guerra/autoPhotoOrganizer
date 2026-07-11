@@ -272,6 +272,10 @@
   // in localStorage — see albumPrefs.js. AlbumsView owns the live working
   // copy; its `prefschange` just asks us to persist + re-seed it.
   let albumPrefs = loadAlbumPrefs();
+  // Open the Auto-albums setup/explainer modal automatically the first time the
+  // mode is entered in a session; later entries go straight to the review.
+  let albumSetupSeen = false;
+  let albumAutoOpenSetup = false;
 
   // Filter mode: does the rating/orientation filter narrow what's DISPLAYED
   // (classic), or drive the SELECTION (the grid then shows everything and the
@@ -1071,6 +1075,9 @@
         albumLimit = resp.limit;
         localStorage.setItem("autogallery.albumLimit", String(albumLimit));
       }
+      // First entry this session opens the setup modal (explains how it works).
+      albumAutoOpenSetup = !albumSetupSeen;
+      albumSetupSeen = true;
       albumMode = true;
     } catch (e) {
       error = e.message;
@@ -2869,6 +2876,7 @@
           defaultDest={focusPath || ""}
           {hasNativePicker}
           prefs={albumPrefs}
+          autoOpenSetup={albumAutoOpenSetup}
           on:relimit={(e) => onAlbumRelimit(e.detail)}
           on:close={() => (albumMode = false)}
           on:openphoto={(e) => openPhotoById(e.detail.id)}

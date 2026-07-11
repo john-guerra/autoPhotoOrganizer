@@ -6,6 +6,23 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.8-alpha
+
+- **Auto Albums, explained and configurable** — the old "Albums" button is now
+  "Auto Albums" with a clear tooltip, and entering it opens a friendly setup
+  dialog that explains how time-gap grouping works. The split gap now starts at
+  a concrete **1 minute** with an **Auto** button for the automatic
+  (statistical) gap.
+- **Custom folder naming for albums** — name albums from a template with date
+  tokens (e.g. `%Y/%Y_%m%b_%d` → `2017/2017_01Jan_09`), including nested year
+  folders, with a live preview of the resulting path.
+- **Album names you type are kept** when you re-adjust the split gap (they no
+  longer reset every time the boundaries move).
+- **Modals modernised** — Manage Library and the keyboard-shortcuts panel now
+  use the native dialog element, so `Esc` closes them, focus is trapped and
+  restored, and they can't render half-off-screen. The Library and Add-folder
+  menus now close when you click away or press `Esc`.
+
 ## 2.8.7-alpha
 
 - **Fixed: two same-named albums no longer merge into one folder on
@@ -14,19 +31,19 @@ user-facing — what you can now do, not how it's built.
   the server used to silently combine their photos into a single physical
   folder; it now disambiguates server-side (mirroring the Auto-albums
   panel's own collision handling) so each album always lands in its own
-  folder (Task 19).
+  folder.
 
 ## 2.8.6-alpha
 
 - **Materialized albums index automatically** — after Auto-albums moves or
   copies photos to disk, the destination is rescanned right away so the new
-  dated folders appear in the sidebar tree without a manual rescan (Task 17).
+  dated folders appear in the sidebar tree without a manual rescan.
 - **Smart materialize destination + cross-volume warning** — Move now
   defaults the destination to the opened folder (in-place) while Copy
   defaults to the Desktop, and switching Move/Copy updates the default until
   you hand-type a path; a warning appears if a Move destination is on a
   different volume, since that copies every file instead of an instant move
-  (Task 17).
+ .
 
 ## 2.8.5-alpha
 
@@ -39,7 +56,7 @@ user-facing — what you can now do, not how it's built.
 - **Backend groundwork for smart move/copy destination defaults** —
   `/api/system/paths` (home + Desktop) and `/api/system/same-volume` (cheap
   same-device check) are in place ahead of the setup-modal dest-picker wiring
-  (Task 16).
+ .
 
 ## 2.8.3-alpha
 
