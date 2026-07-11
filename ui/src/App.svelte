@@ -11,6 +11,7 @@
     buildStackMenuItems,
     createManualStackFromSelection,
     dissolveStackMembers,
+    selectedStackedMemberIds,
     targetStackMemberIds,
   } from "./lib/stackActions.js";
   import {
@@ -2371,16 +2372,24 @@
     }
 
     // Manual stacks (issue #24): 'G' groups the current selection into one stack
-    // (when it's a valid ≥2 single-group selection); 'Shift+G' dissolves the
-    // stack at the cursor. Enablement/logic live in the stack modules.
+    // (when it's a valid ≥2 single-group selection); 'Shift+G' dissolves bursts.
+    // With a selection, it breaks apart every stacked photo in it (surgical —
+    // loose photos are left alone so they can still auto-burst later); with no
+    // selection it falls back to dissolving the whole stack at the cursor.
+    // Enablement/logic live in the stack modules.
     if (key.toLowerCase() === "g") {
       e.preventDefault();
       if (e.shiftKey) {
-        const memberIds = targetStackMemberIds(
-          displayEntries[selected],
-          stacks
-        );
-        if (memberIds) onDissolveStack(memberIds);
+        const selectedMembers = selectedStackedMemberIds(selectedIds, stacks);
+        if (selectedMembers.length) {
+          onDissolveStack(selectedMembers);
+        } else {
+          const memberIds = targetStackMemberIds(
+            displayEntries[selected],
+            stacks
+          );
+          if (memberIds) onDissolveStack(memberIds);
+        }
       } else if (canCreateManualStack(items, selectedIds, groupBy)) {
         onCreateStack([...selectedIds]);
       }

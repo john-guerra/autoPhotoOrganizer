@@ -23,7 +23,8 @@
         { keys: ["G"], label: "Group the selected photos into one stack" },
         {
           keys: ["Shift", "+", "G"],
-          label: "Dissolve the stack at the cursor",
+          label:
+            "Dissolve bursts in the selection (or the stack at the cursor)",
         },
         { keys: ["Right-click"], label: "Reveal / stack actions menu" },
       ],

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyCreateToItems,
   applyDissolveToItems,
+  selectedStackedMemberIds,
   targetStackMemberIds,
   buildStackMenuItems,
 } from "./stackActions.js";
@@ -40,6 +41,39 @@ describe("applyDissolveToItems", () => {
     expect(next[0]).toMatchObject({ keepSeparate: true, manualStackId: null });
     expect(next[1]).toMatchObject({ keepSeparate: true, manualStackId: null });
     expect(next[2].manualStackId).toBeUndefined();
+  });
+});
+
+describe("selectedStackedMemberIds", () => {
+  const stacks = [
+    { id: "burst-1", memberIds: [1, 2, 3], coverId: 1, count: 3 },
+    { id: "burst-2", memberIds: [7, 8], coverId: 7, count: 2 },
+  ];
+
+  it("returns only the selected ids that belong to a stack (loose ones excluded)", () => {
+    // 2 is in burst-1, 8 is in burst-2, 5 is loose → 5 must be dropped.
+    expect(selectedStackedMemberIds(new Set([2, 5, 8]), stacks).sort()).toEqual(
+      [2, 8]
+    );
+  });
+
+  it("spans multiple stacks, de-duplicating", () => {
+    expect(
+      selectedStackedMemberIds(new Set([1, 2, 3, 7, 8]), stacks).sort()
+    ).toEqual([1, 2, 3, 7, 8]);
+  });
+
+  it("returns [] when the selection touches no stack", () => {
+    expect(selectedStackedMemberIds(new Set([5, 6]), stacks)).toEqual([]);
+  });
+
+  it("returns [] for an empty selection or empty stacks", () => {
+    expect(selectedStackedMemberIds(new Set(), stacks)).toEqual([]);
+    expect(selectedStackedMemberIds(new Set([1, 2]), [])).toEqual([]);
+  });
+
+  it("accepts any iterable of ids, not just a Set", () => {
+    expect(selectedStackedMemberIds([2, 3], stacks).sort()).toEqual([2, 3]);
   });
 });
 

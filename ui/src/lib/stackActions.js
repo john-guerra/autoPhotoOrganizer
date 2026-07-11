@@ -47,6 +47,29 @@ export async function dissolveStackMembers(items, memberIds) {
   return { nextItems: applyDissolveToItems(items, memberIds), count };
 }
 
+/**
+ * The selected photo ids that currently belong to some stack — the members a
+ * selection-scoped dissolve (Shift+G over a selection) should mark keep-separate.
+ *
+ * Deliberately returns ONLY ids that are stacked right now: a `keepSeparate`
+ * flag is persistent (it permanently stops a photo from auto-bursting), so
+ * flagging every selected photo — including loose ones — would let a habit of
+ * sweeping large ranges slowly disable auto-detection across the library. A
+ * loose selected photo is left untouched so it can still burst on a later scan.
+ * The result may span several stacks; the caller dissolves them in one call.
+ *
+ * @param {Set<number>|Iterable<number>} selectedIds
+ * @param {Array<{memberIds: Array<number|string>}>} stacks  current stacks
+ * @returns {Array<number|string>} de-duplicated stacked member ids from the selection
+ */
+export function selectedStackedMemberIds(selectedIds, stacks) {
+  const sel = selectedIds instanceof Set ? selectedIds : new Set(selectedIds);
+  const out = new Set();
+  for (const stack of stacks ?? [])
+    for (const id of stack.memberIds) if (sel.has(id)) out.add(id);
+  return [...out];
+}
+
 /** The member ids of the stack a context-menu target entry belongs to, or null
  * if the target isn't part of a stack. `stacks` is the current stacks array. */
 export function targetStackMemberIds(entry, stacks) {

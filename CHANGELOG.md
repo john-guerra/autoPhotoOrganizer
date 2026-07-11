@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.2-alpha
+
+- **Clear bursts across a whole selection** — with photos selected, `Shift`+`G`
+  now dissolves every burst among them at once, not just the stack under the
+  cursor. It's surgical: only the photos you selected leave their stacks (a
+  partly-selected burst just shrinks), and loose photos you swept over are left
+  alone so they can still auto-group on a later scan. With nothing selected it
+  still dissolves the single stack at the cursor.
+
 ## 2.8.1-alpha
 
 - **Loupe details panel & filmstrip** — the detail view now shows a right-hand
