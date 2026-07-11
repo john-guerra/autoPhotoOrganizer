@@ -1,3 +1,5 @@
+import { pickCoverId } from "./pickCover.js";
+
 /**
  * Groups a folder's photos into bursts by chronological proximity, with a
  * filename-based hard-link override for genuine Pixel burst-mode
@@ -116,7 +118,6 @@ function toMs(value) {
 }
 
 const BURST_FILENAME_RE = /^(.*)\.BURST-\d+(?:\.COVER)?\.[^.]+$/i;
-const COVER_FILENAME_RE = /\.COVER\.[^.]+$/i;
 
 /** Returns the shared prefix for same-burst files, or null if not a burst filename. */
 function burstFilenameKey(name) {
@@ -124,34 +125,8 @@ function burstFilenameKey(name) {
   return m ? m[1].toLowerCase() : null;
 }
 
-/**
- * Cover priority: a manually-chosen member (item.preferredCover === true),
- * else the highest-rated member, else the file marked `.COVER.`, else the
- * chronologically-first member. `cluster` is already sorted chronologically
- * (it's a run from the outer time-sorted walk), so cluster[0] is the
- * chronologically-first member. If more than one member somehow carries
- * `preferredCover`, the first in cluster order wins — the app's own UI
- * never lets that happen (see
- * docs/superpowers/specs/2026-07-06-burst-stack-visual-and-manual-cover-design.md),
- * this is just a deterministic fallback.
- */
+/** Cover priority for a time-sorted cluster — delegates to the shared canonical
+ * rule in pickCover.js (unwrapping the `{item}` walk wrappers first). */
 function pickCover(cluster) {
-  const manual = cluster.find((c) => c.item.preferredCover === true);
-  if (manual) return manual.item.id;
-
-  let bestRated = null;
-  for (const c of cluster) {
-    if (
-      c.item.rating > 0 &&
-      (bestRated === null || c.item.rating > bestRated.item.rating)
-    ) {
-      bestRated = c;
-    }
-  }
-  if (bestRated) return bestRated.item.id;
-
-  const coverMarked = cluster.find((c) => COVER_FILENAME_RE.test(c.item.name));
-  if (coverMarked) return coverMarked.item.id;
-
-  return cluster[0].item.id;
+  return pickCoverId(cluster.map((c) => c.item));
 }
