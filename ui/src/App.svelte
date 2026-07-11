@@ -66,6 +66,7 @@
   import UpdateBanner from "./lib/UpdateBanner.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
   import AlbumsView from "./lib/AlbumsView.svelte";
+  import { loadAlbumPrefs, saveAlbumPrefs } from "./lib/albumPrefs.js";
   import SnapshotStrip from "./lib/SnapshotStrip.svelte";
   import SourceControls from "./lib/SourceControls.svelte";
   import OrganizeControls from "./lib/OrganizeControls.svelte";
@@ -267,6 +268,10 @@
   // Max photos pulled into the album timeline (user-tunable; server hard-caps).
   let albumLimit =
     Number(localStorage.getItem("autogallery.albumLimit")) || 20000;
+  // Global Auto-Albums prefs (template/gapMode/fixedGapMs/k/move), persisted
+  // in localStorage — see albumPrefs.js. AlbumsView owns the live working
+  // copy; its `prefschange` just asks us to persist + re-seed it.
+  let albumPrefs = loadAlbumPrefs();
 
   // Filter mode: does the rating/orientation filter narrow what's DISPLAYED
   // (classic), or drive the SELECTION (the grid then shows everything and the
@@ -2835,9 +2840,11 @@
           limit={albumLimit}
           defaultDest={focusPath || ""}
           {hasNativePicker}
+          prefs={albumPrefs}
           on:relimit={(e) => onAlbumRelimit(e.detail)}
           on:close={() => (albumMode = false)}
           on:openphoto={(e) => openPhotoById(e.detail.id)}
+          on:prefschange={(e) => (albumPrefs = saveAlbumPrefs(e.detail))}
         />
       {:else if items.length}
         <div

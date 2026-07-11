@@ -11,11 +11,13 @@
     autoThresholdMs,
     clusterByGap,
     defaultAlbumName,
+    computeAlbumNames,
     parseDuration,
     fmtDur,
     threshAsInput,
   } from "./albums.js";
   import SnapshotStrip from "./SnapshotStrip.svelte";
+  import AlbumsSetupModal from "./AlbumsSetupModal.svelte";
 
   export let photos = []; // [{id,t,mtimeMs}] time-ordered working set
   export let truncated = false;
@@ -24,15 +26,26 @@
   // The folder you've opened (focusPath, #66). When set, materialize defaults
   // to organizing in place — album subfolders created inside this folder.
   export let defaultDest = "";
+  // Global album prefs (template/gapMode/fixedGapMs/k/move) — see albumPrefs.js.
+  // AlbumsView owns the LIVE working copy (seeded here, tweaked by the slider,
+  // the Auto button, the type-exact editor, and the Options modal); App
+  // persists it back on `prefschange`.
+  export let prefs;
 
   const dispatch = createEventDispatcher();
 
-  let k = 2; // threshold = mean + k·stddev (legacy default 2)
-  // When the user types an exact split gap, this overrides the k-derived auto
-  // threshold (null = follow the slider). Moving the slider clears it.
-  let manualThresholdMs = null;
+  // Single authoritative gap state — gapMode/fixedGapMs/k. Every control
+  // (slider, Auto button, type-exact editor, Options modal) reads/writes
+  // these same three fields; there is no parallel threshold path.
+  let gapMode = prefs.gapMode; // "fixed" | "auto"
+  let fixedGapMs = prefs.fixedGapMs;
+  let k = prefs.k; // auto-mode multiplier: threshold = mean + k·stddev
   let editingThresh = false;
   let threshInput = "";
+  // Local mirror of the naming template, kept in sync via the Options modal's
+  // `apply` (prefs.template itself only updates once App persists+re-passes).
+  let template = prefs.template;
+  let setupOpen = false;
   // Destination: prefer the opened folder (in-place), else the remembered dest.
   let dest =
     defaultDest || localStorage.getItem("autogallery.exportDest") || "";
@@ -45,7 +58,7 @@
   // Materialize defaults to MOVE (relocates originals out of the source
   // folders) — Copy is the safer opt-in. A completed/partially-canceled move
   // job can be undone from the JobsPanel via its result manifest.
-  let move = true;
+  let move = prefs.move;
   // Local mirror of the max-photos prop. Re-syncs whenever the prop changes
   // (i.e. after a re-fetch clamps it) but survives typing in between.
   let limitInput = limit;
@@ -53,28 +66,25 @@
 
   $: times = photos.map((p) => p.t);
   $: stats = computeGapStats(times);
-  $: thresholdMs =
-    manualThresholdMs != null ? manualThresholdMs : autoThresholdMs(stats, k);
+  $: thresholdMs = gapMode === "auto" ? autoThresholdMs(stats, k) : fixedGapMs;
   $: albums = clusterByGap(
     photos.map((p) => ({ id: p.id, t: p.t })),
     thresholdMs
   );
   $: mtimeById = new Map(photos.map((p) => [p.id, p.mtimeMs]));
 
-  // Editable album folder names, one per cluster. Seeded from the default date
-  // name and re-seeded ONLY when the cluster set structurally changes (e.g. the
-  // slider re-clusters), so a name you typed survives within one clustering but
-  // isn't stale after the boundaries move.
-  let names = [];
-  let lastAlbumSig = "";
-  $: {
-    const sig = albums
-      .map((a) => `${a.index}:${a.ids.length}:${a.startAt}`)
-      .join("|");
-    if (sig !== lastAlbumSig) {
-      lastAlbumSig = sig;
-      names = albums.map((a) => defaultAlbumName(a.startAt));
-    }
+  // Editable album folder names, keyed by each album's first-photo id so a
+  // typed name survives re-clustering (slider/Auto move boundaries) as long
+  // as that photo still starts the album. Un-edited albums render from
+  // `template`.
+  let editedNames = new Map(); // firstPhotoId -> typed name
+  $: names = computeAlbumNames(albums, editedNames, template);
+
+  function onNameInput(i, value) {
+    const firstId = albums[i].ids[0];
+    if (value == null || value === "") editedNames.delete(firstId);
+    else editedNames.set(firstId, value);
+    editedNames = editedNames; // trigger Svelte reactivity
   }
 
   function startEditThresh() {
@@ -83,12 +93,31 @@
   }
   function commitThresh() {
     const ms = parseDuration(threshInput);
-    if (ms != null) manualThresholdMs = ms;
+    if (ms != null) {
+      fixedGapMs = ms;
+      gapMode = "fixed";
+    }
     editingThresh = false;
   }
   function onSlider() {
-    // Slider is the "auto" control — dragging it drops any manual override.
-    manualThresholdMs = null;
+    // The k slider tunes the auto threshold (mean + k·stddev) — dragging it
+    // switches into auto mode.
+    gapMode = "auto";
+  }
+  function useAuto() {
+    gapMode = "auto";
+  }
+
+  function onSetupApply(e) {
+    const p = e.detail;
+    gapMode = p.gapMode;
+    fixedGapMs = p.fixedGapMs;
+    move = p.move;
+    dest = p.dest || dest;
+    template = p.template;
+    // Persist globally (App writes to albumPrefs.js / localStorage).
+    dispatch("prefschange", p);
+    setupOpen = false;
   }
   function commitLimit() {
     const v = Math.round(Number(limitInput));
@@ -183,6 +212,14 @@
           on:input={onSlider}
         />
       </label>
+      <button
+        class="mat-btn"
+        class:active={gapMode === "auto"}
+        on:click={useAuto}
+        title="Pick the split gap automatically (mean + k·stddev)"
+      >
+        Auto
+      </button>
       {#if editingThresh}
         <!-- svelte-ignore a11y-autofocus -->
         <input
@@ -209,9 +246,7 @@
           on:mousedown|preventDefault={startEditThresh}
           on:click={startEditThresh}
         >
-          {manualThresholdMs != null ? "manual" : `${k}×`} · {fmtDur(
-            thresholdMs
-          )}
+          {gapMode === "fixed" ? "fixed" : `${k}×`} · {fmtDur(thresholdMs)}
         </button>
       {/if}
     </div>
@@ -279,6 +314,13 @@
           : "Copying…"
         : `Materialize to folders (${move ? "move" : "copy"})`}
     </button>
+    <button
+      class="mat-btn"
+      on:click={() => (setupOpen = true)}
+      title="Naming & gap options"
+    >
+      ⚙ Options
+    </button>
     <button class="mat-btn" on:click={() => dispatch("close")}>Done</button>
   </div>
 
@@ -311,7 +353,8 @@
       <div class="album-divider">
         <input
           class="album-name-edit"
-          bind:value={names[i]}
+          value={names[i]}
+          on:input={(e) => onNameInput(i, e.target.value)}
           spellcheck="false"
           title="Album folder name (edit before materializing)"
           aria-label="Album folder name"
@@ -332,6 +375,15 @@
     {/each}
   </div>
 </div>
+
+<AlbumsSetupModal
+  bind:open={setupOpen}
+  {prefs}
+  sampleDate={new Date(albums[0]?.startAt ?? Date.now())}
+  {dest}
+  {hasNativePicker}
+  on:apply={onSetupApply}
+/>
 
 <style>
   .albums-view {
@@ -444,7 +496,8 @@
     font-size: 0.8rem;
     cursor: pointer;
   }
-  .mat-btn.primary {
+  .mat-btn.primary,
+  .mat-btn.active {
     background: #2e8b57;
     border-color: #2e8b57;
     color: #06121f;
