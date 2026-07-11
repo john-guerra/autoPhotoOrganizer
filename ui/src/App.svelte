@@ -655,7 +655,8 @@
     try {
       const ids = await fetchPhotoIds(
         filterIsActive(displayFilter) ? displayFilter : null,
-        path
+        path,
+        sort
       );
       selectedIds = new Set([...selectedIds, ...ids]);
     } catch (e) {
@@ -757,7 +758,7 @@
   async function keepOnlyGroup(path) {
     if (!path || !path.length) return;
     try {
-      const ids = await fetchPhotoIds(null, path);
+      const ids = await fetchPhotoIds(null, path, sort);
       if (!ids.length) return;
       applyKeepOnly(ids);
     } catch (e) {

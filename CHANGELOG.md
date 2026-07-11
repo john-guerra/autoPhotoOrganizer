@@ -5,6 +5,12 @@ Notable changes to AutoGallery, newest first. Versions follow the scheme in
 gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
 short and user-facing — what you can now do, not how it's built.
 
+## 2.4.1-alpha
+
+- **Fixed: "Keep only" / "Select" on a group left earlier photos showing** when
+  the feed was sorted by Created or Modified — the group scope now follows the
+  same date the feed grouped by, so it narrows to exactly that section (#71).
+
 ## 2.4.0-alpha
 
 - **Rename a folder from the feed** — double-click a folder's section header to

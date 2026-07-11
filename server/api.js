@@ -605,12 +605,10 @@ export function registerApi(app) {
     }
     const command = revealCommand(process.platform, it.path);
     if (!command) {
-      return res
-        .status(501)
-        .json({
-          ok: false,
-          error: `unsupported platform: ${process.platform}`,
-        });
+      return res.status(501).json({
+        ok: false,
+        error: `unsupported platform: ${process.platform}`,
+      });
     }
     try {
       await new Promise((resolveSpawn, reject) => {
@@ -720,20 +718,32 @@ export function registerApi(app) {
     }
     const name = newName.trim();
     // A bare folder name only — no separators, no traversal.
-    if (name.includes("/") || name.includes(sep) || name === "." || name === "..") {
+    if (
+      name.includes("/") ||
+      name.includes(sep) ||
+      name === "." ||
+      name === ".."
+    ) {
       return res.status(400).json({ error: "invalid folder name" });
     }
     const db = getDb();
-    const row = db.prepare(`SELECT id FROM folders WHERE abs_path = ?`).get(path);
+    const row = db
+      .prepare(`SELECT id FROM folders WHERE abs_path = ?`)
+      .get(path);
     if (!row) return res.status(404).json({ error: `not indexed: ${path}` });
     if (!existsSync(path)) {
-      return res.status(409).json({ error: "folder is not on disk (offline?)" });
+      return res
+        .status(409)
+        .json({ error: "folder is not on disk (offline?)" });
     }
     const newAbsPath = join(dirname(path), name);
     if (newAbsPath === path) {
       return res.json({ ok: true, oldPath: path, newPath: newAbsPath }); // no-op
     }
-    if (existsSync(newAbsPath) || db.prepare(`SELECT id FROM folders WHERE abs_path = ?`).get(newAbsPath)) {
+    if (
+      existsSync(newAbsPath) ||
+      db.prepare(`SELECT id FROM folders WHERE abs_path = ?`).get(newAbsPath)
+    ) {
       return res
         .status(409)
         .json({ error: "a folder with that name already exists" });
@@ -1037,9 +1047,12 @@ export function registerApi(app) {
         return res.status(400).json({ error: "path must be JSON" });
       }
     }
+    // The feed's sort drives date-dimension grouping, so the group scope must
+    // see it too (else keep-only/select disagree with the section — issue #71).
+    const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
     const db = getDb();
     try {
-      res.json({ ids: photoIdsMatchingFilter(db, filter, path) });
+      res.json({ ids: photoIdsMatchingFilter(db, filter, path, sort) });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }

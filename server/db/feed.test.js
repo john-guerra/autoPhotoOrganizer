@@ -973,6 +973,54 @@ describe("photoIdsMatchingFilter", () => {
       photoIdsMatchingFilter(db, {}, [{ dimension: "bogus", value: "x" }])
     ).toThrow();
   });
+
+  it("scopes a date group by the sort's date column, matching the feed (issue #71)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    // Both photos are CREATED (btime) in different years but carry no EXIF
+    // taken_at — exactly the shape of the SD-card-copy files that exposed the
+    // bug: the feed groups by created-year, keep-only scoped by taken_at.
+    const [a, b] = upsertScan(db, "/photos/trip", 1, [
+      {
+        name: "a.jpg",
+        size: 1,
+        mtimeMs: 1,
+        btimeMs: 1497484800000,
+        kind: "image",
+      }, // 2017
+      {
+        name: "b.jpg",
+        size: 1,
+        mtimeMs: 1,
+        btimeMs: 1592179200000,
+        kind: "image",
+      }, // 2020
+    ]);
+    const sort = { by: "date_created", dir: "desc" };
+    // Grouped by created-year the feed puts a in 2017; the id set must agree.
+    expect(
+      photoIdsMatchingFilter(
+        db,
+        {},
+        [{ dimension: "year", value: "2017" }],
+        sort
+      )
+    ).toEqual([a.id]);
+    // And it must exclude the other created-year, not leak b.
+    expect(
+      photoIdsMatchingFilter(
+        db,
+        {},
+        [{ dimension: "year", value: "2020" }],
+        sort
+      )
+    ).toEqual([b.id]);
+    // With no (or a taken-date) sort, taken_at is NULL → the '' Unknown bucket,
+    // so a created-year path correctly finds nothing (the two never mix).
+    expect(
+      photoIdsMatchingFilter(db, {}, [{ dimension: "year", value: "2017" }])
+    ).toEqual([]);
+  });
 });
 
 describe("photoCountMatchingFilter", () => {
