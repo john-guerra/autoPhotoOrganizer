@@ -127,6 +127,12 @@
     THUMB_BUCKETS.find(
       (b) => b >= Math.ceil(rowHeight * (window.devicePixelRatio || 1))
     ) ?? 1024;
+  // WIP (issue #90 — "collapse to snapshot → thumbs broken"). Snapshot strips
+  // reuse the grid's cached thumbnails instead of a unique cold size: follow the
+  // grid's current bucket, clamped to [320,640] so it never drops to the
+  // always-cold 160 and never over-fetches 1024 for a ~104px slot. Both
+  // endpoints are real buckets, so reuse holds at common zooms.
+  $: snapshotThumbSize = Math.min(640, Math.max(320, thumbSize));
 
   let dir = localStorage.getItem(LS_KEY) || "";
   // Recursive "soup folder" scan: pull in every subfolder. Default on — the
@@ -3093,6 +3099,7 @@
                         {sort}
                         {groupBy}
                         thumbPx={SNAPSHOT_ROW_HEIGHT - 44}
+                        size={snapshotThumbSize}
                         on:select={(e) =>
                           openPhotoById(e.detail.id, entry.item.path)}
                       />

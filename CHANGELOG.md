@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.15-alpha
+
+- **Snapshot-strip thumbnails no longer get stuck broken.** Collapsing groups to
+  snapshot strips used to sometimes leave broken-image tiles that stayed broken
+  until reload; strips now retry a failed thumbnail, fall back to the embedded
+  preview, and only ever show a clear "unavailable" marker instead of a silent
+  broken glyph. They also reuse the grid's already-cached thumbnails, so
+  collapsing is faster and far less likely to fail (issue #90).
+
 ## 2.8.14-alpha
 
 - **The "Open a folder…" box now drops down from the Library menu** instead of

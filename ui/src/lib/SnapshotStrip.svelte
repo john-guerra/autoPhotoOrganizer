@@ -7,8 +7,9 @@
   //   - `groupPath` (+ `groupBy`/`filter`/`sort`): a feed group — samples are
   //     fetched from GET /api/group/sample, which reuses the feed's ORDER BY.
   import { createEventDispatcher } from "svelte";
-  import { thumbUrl, fetchGroupSample } from "./api.js";
+  import { fetchGroupSample } from "./api.js";
   import { sampleOffsets, slotCount } from "./snapshot.js";
+  import SnapshotThumb from "./SnapshotThumb.svelte";
 
   /** @type {number[]|null} ordered id list — client-side sampling */
   export let ids = null;
@@ -22,6 +23,11 @@
   export let groupBy = [];
   export let thumbPx = 110;
   export let gapPx = 4;
+  // WIP (issue #90): the strip now renders resilient SnapshotThumb tiles at a
+  // shared cache bucket instead of a bare <img> at a unique cold size.
+  /** thumbnail longest edge — a shared bucket the grid also caches, so the strip
+   * reuses warm thumbnails instead of forcing a unique cold size (issue #90) */
+  export let size = 320;
   /** @type {Map<number, number>|null} optional id->mtimeMs for thumb cache-busting */
   export let mtimeById = null;
   /** When true, thumbnails are clickable buttons that dispatch `select`.
@@ -94,11 +100,7 @@
       style="width:{thumbPx}px; height:{thumbPx}px;"
       on:click={() => interactive && pick(item.id)}
     >
-      <img
-        src={thumbUrl(item.id, 160, mtimeById?.get(item.id))}
-        loading="lazy"
-        alt=""
-      />
+      <SnapshotThumb id={item.id} {size} v={mtimeById?.get(item.id)} />
     </svelte:element>
     {#if item.gapAfter}
       <span class="snap-gap">…</span>
@@ -130,12 +132,6 @@
   }
   .snap-thumb.static {
     cursor: default;
-  }
-  .snap-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
   }
   .snap-gap {
     flex: 0 0 auto;
