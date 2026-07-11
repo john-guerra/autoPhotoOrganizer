@@ -5,6 +5,13 @@ Notable changes to AutoGallery, newest first. Versions follow the scheme in
 gravity, keeping the `-alpha` suffix until a stable release is cut. Entries are
 short and user-facing — what you can now do, not how it's built.
 
+## 2.6.0-alpha
+
+- **Click to select, double-click to open** — a single click in the grid now
+  selects a photo instead of jumping into the loupe; the loupe opens on a
+  double-click or a second click on the already-selected photo, so you can click
+  through the grid to pick shots without it taking over (#72).
+
 ## 2.5.0-alpha
 
 - **Video support** — videos are scanned alongside photos, shown in the grid
