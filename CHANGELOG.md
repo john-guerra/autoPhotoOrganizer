@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.13-alpha
+
+- **Internal: unified the grid focus/reveal logic** (issue #42, Step 2) — the
+  seven near-identical `querySelector('[data-id=…]')` focus/scroll sites now go
+  through two small shared helpers, so the `preventScroll` and
+  not-yet-rendered-tile handling live in one place instead of being re-typed at
+  each call. No visible change; fewer places for a focus/scroll bug to hide.
+
 ## 2.8.12-alpha
 
 - **Windows installers build again** — the release workflow's electron-builder

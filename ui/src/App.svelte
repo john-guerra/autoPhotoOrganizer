@@ -1525,6 +1525,25 @@
     }
   }
 
+  /** The rendered grid tile for a photo id, or null when it isn't in the DOM
+   * (virtualized out, or not yet mounted). The single home for the
+   * `gridEl.querySelector('[data-id=...]')` lookup that reveal, the group-jump
+   * pin, and the focus helpers all shared verbatim (issue #42 Step 2). Callers
+   * pass `resolvePhoto(entry).id` — a collapsed stack's data-id is its cover
+   * photo's raw id, not the stack id, so entryDomId would miss. */
+  function tileEl(id) {
+    return id == null
+      ? null
+      : (gridEl?.querySelector(`[data-id="${id}"]`) ?? null);
+  }
+
+  /** Give roving keyboard focus to a photo id's grid tile, if it's rendered.
+   * `preventScroll` keeps the browser's native focus-scroll from fighting our
+   * own reveal/pin scrolling (issue #74); no-op when the tile isn't in the DOM. */
+  function focusTile(id, { preventScroll = false } = {}) {
+    tileEl(id)?.focus({ preventScroll });
+  }
+
   /** Bring the selected tile into view using the native scroll API — called
    * ONLY from active navigation (keyboard, group-jump). One-shot and
    * imperative: it never re-fires on reflow, so it can't hijack the user's
@@ -1538,8 +1557,7 @@
   function revealSelected({ block = "nearest" } = {}) {
     const entry = displayEntries[selected];
     const id = entry ? resolvePhoto(entry).id : null;
-    const tile = id != null && gridEl?.querySelector(`[data-id="${id}"]`);
-    tile?.scrollIntoView({ block, inline: "nearest" });
+    tileEl(id)?.scrollIntoView({ block, inline: "nearest" });
   }
 
   /** Hold a group-jump's landing at revealMargin below the viewport top until
@@ -1558,7 +1576,7 @@
     if (!mainColumnEl || !gridEl) return;
     const entry = displayEntries[selected];
     const id = entry ? resolvePhoto(entry).id : null;
-    const tile = id != null && gridEl.querySelector(`[data-id="${id}"]`);
+    const tile = tileEl(id);
     if (!tile) return;
     const t = tile.getBoundingClientRect();
     const c = mainColumnEl.getBoundingClientRect();
@@ -1634,9 +1652,7 @@
    * (preventScroll). Shared by keyboard nav and group-jump. */
   function focusSelectedTile() {
     const entry = displayEntries[selected];
-    gridEl
-      ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
-      ?.focus({ preventScroll: true });
+    focusTile(entry ? resolvePhoto(entry).id : null, { preventScroll: true });
   }
 
   /** Scroll so this section's header lands at its stuck (sticky) position
@@ -2170,9 +2186,9 @@
       // preventScroll while a group is being expanded: focusing the selected
       // tile must not yank the viewport off the header the expand pin is holding
       // (issue #74). Normal scans/jumps (no pin) keep the focus-reveal scroll.
-      gridEl
-        ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
-        ?.focus({ preventScroll: !!expandPin });
+      focusTile(entry ? resolvePhoto(entry).id : null, {
+        preventScroll: !!expandPin,
+      });
     });
   }
 
@@ -2257,9 +2273,7 @@
     // Return focus to the grid, scrolled to the current item. (Key on
     // resolvePhoto(entry).id, matching Thumb's data-id — see focusPending.)
     const entry = displayEntries[selected];
-    gridEl
-      ?.querySelector(`[data-id="${entry ? resolvePhoto(entry).id : ""}"]`)
-      ?.focus();
+    focusTile(entry ? resolvePhoto(entry).id : null);
   }
 
   /** Re-collapse a stack: remove it from expandedStackIds, then re-select
@@ -2277,9 +2291,7 @@
       // The re-collapsed tile resolves to its cover photo, so its data-id
       // is the cover's raw id, not stackId — see focusPending's comment.
       const entry = displayEntries[newIndex];
-      gridEl
-        ?.querySelector(`[data-id="${resolvePhoto(entry).id}"]`)
-        ?.focus({ preventScroll: true });
+      focusTile(resolvePhoto(entry).id, { preventScroll: true });
     }
   }
 
@@ -2299,9 +2311,7 @@
     if (newIndex !== -1) {
       selected = newIndex;
       await tick();
-      gridEl
-        ?.querySelector(`[data-id="${stack.coverId}"]`)
-        ?.focus({ preventScroll: true });
+      focusTile(stack.coverId, { preventScroll: true });
     }
   }
 
