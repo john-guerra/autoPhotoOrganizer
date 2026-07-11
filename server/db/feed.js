@@ -170,6 +170,10 @@ function rowToItem(r, dims) {
     // when sorting by date_created; kept numeric (the marker reads it directly).
     createdAt: r.btime ?? null,
     kind: r.kind,
+    // Manual burst-stack overrides (issue #24): the stack this photo is forced
+    // into (null = none), and whether it's been dissolved out of auto-stacking.
+    manualStackId: r.manualStackId ?? null,
+    keepSeparate: r.keepSeparate === 1,
     groupValues,
   };
 }
@@ -366,6 +370,8 @@ export function getFeedPage(
         `SELECT photos.id, photos.filename AS name, photos.size,
                 photos.mtime AS mtimeMs, photos.rating,
                 photos.preferred_cover AS preferredCover,
+                photos.no_auto_stack AS keepSeparate,
+                (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
                 photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
                 ${selectDimAndSortCols}
          FROM photos JOIN folders ON folders.id = photos.folder_id
@@ -428,6 +434,8 @@ export function getFeedPage(
         `SELECT photos.id, photos.filename AS name, photos.size,
                 photos.mtime AS mtimeMs, photos.rating,
                 photos.preferred_cover AS preferredCover,
+                photos.no_auto_stack AS keepSeparate,
+                (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
                 photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
                 ${selectDimAndSortCols}
          FROM photos
@@ -546,6 +554,8 @@ export function fetchGroupRowsAtOffsets(
     `SELECT photos.id, photos.filename AS name, photos.size,
             photos.mtime AS mtimeMs, photos.rating,
             photos.preferred_cover AS preferredCover,
+            photos.no_auto_stack AS keepSeparate,
+            (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
             photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
             ${selectDimAndSortCols}
      FROM photos

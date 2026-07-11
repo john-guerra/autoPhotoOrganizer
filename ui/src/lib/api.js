@@ -62,6 +62,36 @@ export async function setCover(id, isCover) {
   return res.json();
 }
 
+/** Force a set of photo ids into one manual burst stack (issue #24).
+ * @param {number[]} ids @returns {Promise<{groupId:number, count:number}>} */
+export async function createStack(ids) {
+  const res = await fetch("/api/stacks", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `create stack failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Dissolve a stack: mark these photos "keep separate" so they don't auto-stack.
+ * @param {number[]} ids @returns {Promise<{count:number}>} */
+export async function dissolveStackApi(ids) {
+  const res = await fetch("/api/stacks/dissolve", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `dissolve stack failed (${res.status})`);
+  }
+  return res.json();
+}
+
 /**
  * Ask the server to reveal a photo's real file in the OS file browser
  * (Finder/Explorer/file manager) — read-only, no file operations. Resolves to

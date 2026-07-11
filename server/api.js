@@ -59,6 +59,7 @@ import { ALLOWED_ORIENTATIONS } from "./db/filters.js";
 import { parseSort, DATE_SORTS } from "./db/sort.js";
 import { sampleOffsets } from "./db/sampleGroup.js";
 import { setKeepScope } from "./db/keepScope.js";
+import { createManualStack, dissolveStack } from "./db/manualStacks.js";
 import { registry } from "./jobs/registry.js";
 
 /**
@@ -438,6 +439,8 @@ export function registerApi(app) {
       mtimeMs: r.mtimeMs,
       rating: r.rating,
       preferredCover: r.preferredCover === 1,
+      manualStackId: r.manualStackId ?? null,
+      keepSeparate: r.keepSeparate === 1,
     }));
     res.json({ root: dir, count: items.length, folders: 1, elapsedMs, items });
   });
@@ -1075,6 +1078,34 @@ export function registerApi(app) {
     }
     const db = getDb();
     const count = setKeepScope(db, ids ?? []);
+    res.json({ count });
+  });
+
+  // --- Manual burst stacks (issue #24) -------------------------------------
+  // Force a selection into one stack, or dissolve a mis-detected stack so its
+  // photos stay separate. Both key on photo id and persist across rescans.
+  app.post("/api/stacks", (req, res) => {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids)) {
+      return res.status(400).json({ error: "ids must be an array" });
+    }
+    if (ids.filter((n) => Number.isInteger(n)).length < 2) {
+      return res
+        .status(400)
+        .json({ error: "a manual stack needs at least 2 photos" });
+    }
+    const db = getDb();
+    const { groupId, count } = createManualStack(db, ids);
+    res.json({ groupId, count });
+  });
+
+  app.post("/api/stacks/dissolve", (req, res) => {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || !ids.length) {
+      return res.status(400).json({ error: "ids must be a non-empty array" });
+    }
+    const db = getDb();
+    const { count } = dissolveStack(db, ids);
     res.json({ count });
   });
 

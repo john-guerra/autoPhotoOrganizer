@@ -722,7 +722,12 @@ describe("POST /api/folders/rename", () => {
     folderDir = join(base, "OldName");
     await mkdir(folderDir);
     await sharp({
-      create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } },
+      create: {
+        width: 8,
+        height: 8,
+        channels: 3,
+        background: { r: 1, g: 2, b: 3 },
+      },
     })
       .jpeg()
       .toFile(join(folderDir, "p.jpg"));
@@ -759,7 +764,12 @@ describe("POST /api/folders/rename", () => {
     const sub = join(folderDir, "sub");
     await mkdir(sub);
     await sharp({
-      create: { width: 8, height: 8, channels: 3, background: { r: 9, g: 9, b: 9 } },
+      create: {
+        width: 8,
+        height: 8,
+        channels: 3,
+        background: { r: 9, g: 9, b: 9 },
+      },
     })
       .jpeg()
       .toFile(join(sub, "q.jpg"));
@@ -2169,5 +2179,62 @@ describe("jobs endpoints", () => {
       method: "POST",
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("manual burst stacks (issue #24)", () => {
+  async function feedItems() {
+    const res = await fetch(`${srv.base}/api/feed?groupBy=folder&after=100`);
+    const { items } = await res.json();
+    return items.filter((i) => typeof i.id === "number");
+  }
+
+  beforeEach(async () => {
+    const db = getDb();
+    db.prepare("DELETE FROM manual_stacks").run();
+    db.prepare("UPDATE photos SET no_auto_stack = 0").run();
+  });
+
+  it("creates a manual stack and exposes manualStackId on the feed", async () => {
+    await scan(srv.base, photosDir);
+    const ids = (await feedItems()).map((i) => i.id).slice(0, 2);
+    const res = await fetch(`${srv.base}/api/stacks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    expect(res.status).toBe(200);
+    const { groupId, count } = await res.json();
+    expect(count).toBe(2);
+
+    const after = await feedItems();
+    const grouped = after.filter((i) => ids.includes(i.id));
+    expect(grouped.every((i) => i.manualStackId === groupId)).toBe(true);
+  });
+
+  it("dissolve sets keepSeparate on the feed", async () => {
+    await scan(srv.base, photosDir);
+    const ids = (await feedItems()).map((i) => i.id).slice(0, 2);
+    const res = await fetch(`${srv.base}/api/stacks/dissolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    expect((await res.json()).count).toBe(2);
+    const after = await feedItems();
+    expect(
+      after.filter((i) => ids.includes(i.id)).every((i) => i.keepSeparate)
+    ).toBe(true);
+  });
+
+  it("rejects a manual stack of fewer than 2 photos", async () => {
+    await scan(srv.base, photosDir);
+    const ids = (await feedItems()).map((i) => i.id).slice(0, 1);
+    const res = await fetch(`${srv.base}/api/stacks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    expect(res.status).toBe(400);
   });
 });
