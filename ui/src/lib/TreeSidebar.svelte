@@ -146,7 +146,9 @@
 
   function handleToggleCollapse({ detail: { path, event } }) {
     event.stopPropagation();
-    dispatch("toggle", path);
+    // Forward the event too: App needs the shiftKey to decide "fold this group"
+    // vs "fold all of its leaves" (VS Code-style folding).
+    dispatch("toggle", { path, event });
   }
 
   function handleJump({ detail: path }) {

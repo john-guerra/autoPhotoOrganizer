@@ -1724,6 +1724,15 @@
     const isCollapsed = collapsedPaths.some((p) => pathKey(p) === key);
     const isSnapshot = snapshotGroupKeys.has(key);
     if (!isCollapsed) {
+      // Aggregating a parent SUPERSEDES whatever its descendants were doing.
+      // Without this, a leaf that was already snapshotted kept its own entry and
+      // the feed drew a second strip inside the parent's one.
+      collapsedPaths = collapsedPaths.filter(
+        (p) => !isPathUnder(p, path) || pathKey(p) === key
+      );
+      snapshotGroupKeys = new Set(
+        [...snapshotGroupKeys].filter((k) => !isKeyUnder(k, path) || k === key)
+      );
       snapshotGroupKeys.add(key);
       snapshotGroupKeys = snapshotGroupKeys; // reassign → reactivity
       await toggleSectionCollapse(path); // server-collapse
@@ -1733,6 +1742,110 @@
     } else {
       await toggleSectionCollapse(path); // server-expand
     }
+  }
+
+  // --- Shift+click a parent = fold its LEAVES (VS Code function folding) -----
+  // Plain click on a parent aggregates it (collapse/snapshot the parent as one
+  // block). Shift+click instead applies the state to every LEAF underneath, so
+  // the parent stays open and you see its subgroups as folded rows.
+  const MAX_FOLD_LEAVES = 400;
+
+  /** Is `p` (an Array<{dimension,value}>) at or beneath `parent`? */
+  function isPathUnder(p, parent) {
+    if (!Array.isArray(p) || p.length < parent.length) return false;
+    return parent.every(
+      (seg, i) => p[i]?.dimension === seg.dimension && p[i]?.value === seg.value
+    );
+  }
+  /** Same test, but for a snapshotGroupKeys entry (a pathKey string: [[dim,val],…]). */
+  function isKeyUnder(key, parent) {
+    let pairs;
+    try {
+      pairs = JSON.parse(key);
+    } catch {
+      return false;
+    }
+    if (!Array.isArray(pairs) || pairs.length < parent.length) return false;
+    return parent.every(
+      (seg, i) => pairs[i]?.[0] === seg.dimension && pairs[i]?.[1] === seg.value
+    );
+  }
+
+  /** Every LEAF group path under `parent` (a path of full groupBy depth). */
+  async function collectLeafPaths(parent) {
+    let frontier = [parent];
+    for (let depth = parent.length; depth < groupBy.length; depth++) {
+      const next = [];
+      for (const p of frontier) {
+        const { nodes } = await fetchTreeNode({
+          groupBy,
+          path: p,
+          filter: displayFilter,
+          sort,
+        });
+        for (const n of nodes) {
+          next.push([...p, { dimension: groupBy[depth], value: n.value }]);
+        }
+        if (next.length > MAX_FOLD_LEAVES) return next; // bail early, caller checks
+      }
+      frontier = next;
+      if (!frontier.length) break;
+    }
+    return frontier;
+  }
+
+  /** Shift+click on a group with subgroups: cycle ALL of its leaves together. */
+  async function cycleGroupLeaves(path) {
+    if (path.length >= groupBy.length) return cycleGroupState(path); // already a leaf
+    let leaves;
+    try {
+      leaves = await collectLeafPaths(path);
+    } catch (e) {
+      error = `Couldn't fold the subgroups: ${e.message}`;
+      return;
+    }
+    if (!leaves.length) return cycleGroupState(path); // nothing beneath → aggregate
+    if (leaves.length > MAX_FOLD_LEAVES) {
+      error = `That group has more than ${MAX_FOLD_LEAVES} subgroups — too many to fold at once. Collapse it as a whole instead (click without Shift).`;
+      return;
+    }
+
+    // Next state, from where the leaves collectively are now (all-expanded →
+    // snapshot → collapsed → expanded). A mixed set resets to expanded.
+    const states = leaves.map((lp) =>
+      feedGroupState(lp, collapsedPaths, snapshotGroupKeys)
+    );
+    const next = states.every((s) => s === "expanded")
+      ? "snapshot"
+      : states.every((s) => s === "snapshot")
+        ? "collapsed"
+        : "expanded";
+
+    // Drop any existing state inside this subtree (including the parent's own
+    // aggregate collapse), then apply the new state to the leaves.
+    const nextCollapsed = collapsedPaths.filter((p) => !isPathUnder(p, path));
+    const nextSnaps = new Set(
+      [...snapshotGroupKeys].filter((k) => !isKeyUnder(k, path))
+    );
+    if (next !== "expanded") {
+      for (const lp of leaves) {
+        nextCollapsed.push(lp);
+        if (next === "snapshot") nextSnaps.add(pathKey(lp));
+      }
+    }
+    collapsedPaths = nextCollapsed;
+    snapshotGroupKeys = nextSnaps;
+    try {
+      await loadInitialFeed();
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  /** Entry point for every group toggle (feed header + tree icon): Shift folds
+   * the leaves, a plain click aggregates the group itself. */
+  function onGroupToggle(path, event) {
+    return event?.shiftKey ? cycleGroupLeaves(path) : cycleGroupState(path);
   }
 
   /** Set collapsedPaths / snapshotGroupKeys so EVERY current top-level group
@@ -3184,7 +3297,7 @@
           {sort}
           filter={displayFilter}
           refreshToken={libraryVersion}
-          on:toggle={(e) => cycleGroupState(e.detail)}
+          on:toggle={(e) => onGroupToggle(e.detail.path, e.detail.event)}
           on:jump={(e) => jumpToPath(e.detail)}
         />
       {:else}
@@ -3279,13 +3392,14 @@
                         : "expanded"
                     ]}
                     aria-label="Cycle this group: full grid → snapshot strip → collapsed"
-                    on:click={() =>
-                      cycleGroupState(
+                    on:click={(e) =>
+                      onGroupToggle(
                         header.path ??
                           groupBy.slice(0, header.depth + 1).map((d) => ({
                             dimension: d,
                             value: resolvedPhotos[header.index]?.groupValues[d],
-                          }))
+                          })),
+                        e
                       )}
                   >
                     <GroupStateIcon
@@ -3360,8 +3474,8 @@
                         class="snap-cycle snapshot"
                         title={GROUP_STATE_TITLE.snapshot}
                         aria-label="Cycle this group: full grid → snapshot strip → collapsed"
-                        on:click|stopPropagation={() =>
-                          cycleGroupState(entry.item.path)}
+                        on:click|stopPropagation={(e) =>
+                          onGroupToggle(entry.item.path, e)}
                       >
                         <GroupStateIcon state="snapshot" />
                       </button>
@@ -3419,9 +3533,9 @@
                     style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
                     role="button"
                     tabindex="0"
-                    on:click={() => cycleGroupState(entry.item.path)}
+                    on:click={(e) => onGroupToggle(entry.item.path, e)}
                     on:keydown={(e) =>
-                      e.key === "Enter" && cycleGroupState(entry.item.path)}
+                      e.key === "Enter" && onGroupToggle(entry.item.path, e)}
                   >
                     <span
                       class="placeholder-icon"

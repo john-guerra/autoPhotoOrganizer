@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.14
+
+- **Shift+click a group to fold its subgroups** — like function folding in VS
+  Code. A plain click collapses the group as one block; Shift+click leaves the
+  group open and folds every subgroup underneath it instead. Works from the feed
+  headers and the tree sidebar. (usability testing)
+- **Fixed: collapsing a parent no longer leaves its children collapsed too.**
+  Snapshotting (or collapsing) a group whose child was already snapshotted used
+  to draw two strips; the parent's state now supersedes its children's.
+  (usability testing)
+
 ## 2.9.13
 
 - **Fixed: collapsing a nested group crashed the feed.** With two grouping levels
