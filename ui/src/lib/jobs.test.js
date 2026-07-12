@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { get } from "svelte/store";
-import { jobs, connectJobsStream, waitForJob } from "./jobs.js";
+import {
+  jobs,
+  connectJobsStream,
+  waitForJob,
+  takeNewlyFinished,
+} from "./jobs.js";
 
 /** Minimal fake EventSource — enough for the store reducer + waitForJob. */
 class FakeEventSource {
@@ -85,5 +90,44 @@ describe("waitForJob", () => {
       ])
     ).not.toThrow();
     expect(get(jobs)).toHaveLength(2);
+  });
+});
+
+describe("takeNewlyFinished", () => {
+  it("returns a job that just reached a terminal state, once", () => {
+    const handled = new Set();
+    const list = [{ id: "u1", type: "undo-move", status: "done" }];
+    expect(
+      takeNewlyFinished(list, "undo-move", handled).map((j) => j.id)
+    ).toEqual(["u1"]);
+    // A second snapshot with the same terminal job must not re-fire.
+    expect(takeNewlyFinished(list, "undo-move", handled)).toEqual([]);
+  });
+
+  it("ignores still-running jobs until they finish", () => {
+    const handled = new Set();
+    const running = [{ id: "u1", type: "undo-move", status: "running" }];
+    expect(takeNewlyFinished(running, "undo-move", handled)).toEqual([]);
+    const done = [{ id: "u1", type: "undo-move", status: "done" }];
+    expect(
+      takeNewlyFinished(done, "undo-move", handled).map((j) => j.id)
+    ).toEqual(["u1"]);
+  });
+
+  it("ignores jobs of a different type", () => {
+    const handled = new Set();
+    const list = [{ id: "m1", type: "materialize", status: "done" }];
+    expect(takeNewlyFinished(list, "undo-move", handled)).toEqual([]);
+  });
+
+  it("fires for canceled and failed terminals too (partial restores leave stale UI)", () => {
+    const handled = new Set();
+    const list = [
+      { id: "u1", type: "undo-move", status: "canceled" },
+      { id: "u2", type: "undo-move", status: "failed" },
+    ];
+    expect(
+      takeNewlyFinished(list, "undo-move", handled).map((j) => j.id)
+    ).toEqual(["u1", "u2"]);
   });
 });

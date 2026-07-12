@@ -55,7 +55,7 @@
     renameFolder,
     revealInFinder,
   } from "./lib/api.js";
-  import { waitForJob } from "./lib/jobs.js";
+  import { jobs, waitForJob, takeNewlyFinished } from "./lib/jobs.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
   import ContextMenu from "./lib/ContextMenu.svelte";
@@ -820,7 +820,10 @@
       collapsedPaths = collapsedPaths.filter((p) => pathKey(p) !== key);
       snapshotGroupKeys.delete(key);
       snapshotGroupKeys = snapshotGroupKeys;
-      await loadInitialFeed();
+      // Full refresh (feed + sidebar tree + counts) — same as the Manage
+      // Library remove path. `loadInitialFeed()` alone left the removed
+      // folder lingering in the sidebar (it only refetches on libraryVersion).
+      await onFolderRemoved();
     } catch (e) {
       error = e.message;
     }
@@ -1941,6 +1944,18 @@
     await loadInitialFeed();
     refreshCounts();
     libraryVersion++;
+  }
+
+  // An undo-move (from the JobsPanel Undo button) is a fire-and-forget
+  // background job with no completion callback: the server moves the files
+  // back and repoints the index, but the client only learns it finished via
+  // the SSE-backed `jobs` store. Watch that store and run the full refresh
+  // (sidebar tree + feed + counts) once per undo-move job as it reaches a
+  // terminal state — otherwise the sidebar keeps showing the moved-away
+  // folders. Edge-detected via `handledUndoJobs` so it fires exactly once.
+  let handledUndoJobs = new Set();
+  $: if (takeNewlyFinished($jobs, "undo-move", handledUndoJobs).length) {
+    onFolderRemoved();
   }
 
   /** After AlbumsView materializes (move/copy) album folders to disk, scan
