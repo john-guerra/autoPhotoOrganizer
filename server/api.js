@@ -15,7 +15,7 @@ import { writeFile, rename, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { extname, join, basename, dirname, resolve, sep } from "node:path";
 import { homedir } from "node:os";
-import { revealCommand } from "./lib/revealCommand.js";
+import { revealCommand, revealManyCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { thumbsDir, cacheRoot } from "./lib/cachePaths.js";
 import {
@@ -765,6 +765,65 @@ export function registerApi(app) {
         });
       });
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: String(err?.message ?? err) });
+    }
+  });
+
+  // Reveal a whole selection at once (issue #18, multi-select). Best-effort per
+  // OS: macOS highlights all of them in Finder (AppleScript), Windows highlights
+  // the first (explorer /select is single-only), Linux opens the containing
+  // folder. Read-only — only shows where the files already live.
+  app.post("/api/reveal-selection", async (req, res) => {
+    const ids = Array.isArray(req.body?.ids)
+      ? req.body.ids.filter((n) => Number.isInteger(n))
+      : [];
+    if (!ids.length) {
+      return res.status(400).json({
+        ok: false,
+        error: "ids must be a non-empty array of integers",
+      });
+    }
+    // Revealing thousands of files in a file manager isn't useful and can hang
+    // it — cap and tell the user rather than firing a giant command.
+    if (ids.length > 500) {
+      return res.status(413).json({
+        ok: false,
+        error: `too many files to reveal at once (${ids.length}; max 500) — narrow the selection first`,
+      });
+    }
+    const db = getDb();
+    const paths = [];
+    for (const id of ids) {
+      const it = getPhotoById(db, id);
+      if (!it) continue;
+      try {
+        await stat(it.path);
+        paths.push(it.path);
+      } catch {
+        // Skip files gone offline/moved since the last scan.
+      }
+    }
+    if (!paths.length) {
+      return res
+        .status(404)
+        .json({ ok: false, error: "none of the selected files were found" });
+    }
+    const command = revealManyCommand(process.platform, paths);
+    if (!command) {
+      return res.status(501).json({
+        ok: false,
+        error: `unsupported platform: ${process.platform}`,
+      });
+    }
+    try {
+      await new Promise((resolveSpawn, reject) => {
+        execFile(command.cmd, command.args, (err) => {
+          if (err && process.platform !== "win32") reject(err);
+          else resolveSpawn();
+        });
+      });
+      res.json({ ok: true, revealed: paths.length });
     } catch (err) {
       res.status(500).json({ ok: false, error: String(err?.message ?? err) });
     }

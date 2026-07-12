@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.8
+
+- **Reveal a whole selection in Finder/Explorer.** Right-clicking a selected
+  photo now offers "Reveal N photos in Finder" — on macOS it highlights all of
+  them, on Windows the first (Explorer can't multi-select), on Linux it opens the
+  containing folder. Single-photo reveal is unchanged. (usability testing)
+
 ## 2.9.7
 
 - **Time now sorts oldest-first by default**, so a freshly-scanned trip reads in

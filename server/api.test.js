@@ -535,6 +535,68 @@ describe("POST /api/reveal/:id", () => {
   });
 });
 
+describe("POST /api/reveal-selection", () => {
+  const realPlatform = process.platform;
+
+  beforeEach(() => {
+    vi.mocked(execFile).mockClear();
+  });
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: realPlatform });
+  });
+
+  function post(ids) {
+    return fetch(`${srv.base}/api/reveal-selection`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+  }
+
+  it("400s for an empty or non-array ids", async () => {
+    expect((await post([])).status).toBe(400);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("413s when more than 500 ids are sent", async () => {
+    const many = Array.from({ length: 501 }, (_, i) => i + 1);
+    const res = await post(many);
+    expect(res.status).toBe(413);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("404s when none of the ids resolve to a file", async () => {
+    expect((await post([99999998, 99999999])).status).toBe(404);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("selects all files via AppleScript on macOS", async () => {
+    const body = await scan(srv.base, photosDir);
+    const ids = body.items.slice(0, 2).map((i) => i.id);
+    const paths = ids.map((id) => getPhotoById(getDb(), id).path);
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const res = await post(ids);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, revealed: ids.length });
+    const [cmd, args] = vi.mocked(execFile).mock.calls[0];
+    expect(cmd).toBe("osascript");
+    expect(args[0]).toBe("-e");
+    for (const p of paths) expect(args[1]).toContain(`POSIX file "${p}"`);
+  });
+
+  it("highlights the first file on Windows", async () => {
+    const body = await scan(srv.base, photosDir);
+    const ids = body.items.slice(0, 2).map((i) => i.id);
+    const first = getPhotoById(getDb(), ids[0]).path;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const res = await post(ids);
+    expect(res.status).toBe(200);
+    const [cmd, args] = vi.mocked(execFile).mock.calls[0];
+    expect(cmd).toBe("explorer");
+    expect(args).toEqual(["/select,", first]);
+  });
+});
+
 describe("GET /api/library", () => {
   it("records the scanned folder and reports it as mounted", async () => {
     await scan(srv.base, photosDir);

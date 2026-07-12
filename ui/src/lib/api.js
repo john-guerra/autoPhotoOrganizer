@@ -116,6 +116,28 @@ export async function revealInFinder(id) {
   }
 }
 
+/** Reveal a whole selection in the OS file browser (best-effort per platform;
+ * macOS highlights all, Windows the first, Linux opens the folder). */
+export async function revealSelection(ids) {
+  try {
+    const res = await fetch(`/api/reveal-selection`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: body.error || `reveal failed (${res.status})`,
+      };
+    }
+    return body;
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+}
+
 // Image URLs carry a `v` version token (the file's mtimeMs). A numeric id is
 // only meaningful within the current scan session — after rescanning a
 // different folder, id 0 points to a different file. Without a version the

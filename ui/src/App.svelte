@@ -54,6 +54,7 @@
     removeFolderByPath,
     renameFolder,
     revealInFinder,
+    revealSelection,
   } from "./lib/api.js";
   import { jobs, waitForJob, takeNewlyFinished } from "./lib/jobs.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
@@ -1021,6 +1022,18 @@
     }
   }
 
+  /** Reveal the whole current selection in the OS file browser (best-effort per
+   * platform — see /api/reveal-selection). */
+  async function revealSelectionInFinder() {
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+    const res = await revealSelection(ids);
+    if (!res.ok) {
+      status = `Couldn't reveal selection: ${res.error ?? "unknown error"}`;
+      console.warn("[reveal-selection]", res.error);
+    }
+  }
+
   // Manual burst-stack actions (issue #24). All logic lives in
   // lib/stackActions.js + lib/stackOverrides.js; these two handlers just do the
   // toggleCover-style local-mutation-then-persist (no feed reload).
@@ -1043,11 +1056,23 @@
 
   // Menu items for the current target. Kept as data so actions can be appended
   // without reworking the menu component; the stack items are built by the module.
+  $: revealTargetId = resolvedPhotos[contextMenu.targetIndex]?.id;
+  // Reveal the whole selection when the right-clicked photo is part of a
+  // multi-selection (like a file manager); otherwise reveal just that photo.
+  $: revealWholeSelection =
+    selectedIds.size > 1 &&
+    typeof revealTargetId === "number" &&
+    selectedIds.has(revealTargetId);
   $: contextMenuItems = [
     {
-      label: "Reveal in Finder",
-      action: () => reveal(contextMenu.targetIndex),
-      enabled: typeof resolvedPhotos[contextMenu.targetIndex]?.id === "number",
+      label: revealWholeSelection
+        ? `Reveal ${selectedIds.size} photos in Finder`
+        : "Reveal in Finder",
+      action: () =>
+        revealWholeSelection
+          ? revealSelectionInFinder()
+          : reveal(contextMenu.targetIndex),
+      enabled: typeof revealTargetId === "number",
     },
     ...buildStackMenuItems({
       items,
