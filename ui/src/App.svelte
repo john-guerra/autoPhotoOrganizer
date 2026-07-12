@@ -440,6 +440,12 @@
     localStorage.getItem(LS_SIDEBAR_MODE) === "fisheye" ? "fisheye" : "tree";
   $: localStorage.setItem(LS_SIDEBAR_MODE, sidebarMode);
   let collapsedPaths = []; // Array<Array<{dimension,value}>>, reset on hierarchy change
+  // rendererIdFor() is called ~3x per header per render (class, title, icon) plus
+  // once per placeholder in the layout. Scanning collapsedPaths with a
+  // JSON.stringify compare each time was O(headers x collapsedPaths) stringifies
+  // per render — brutal after Collapse-all or a 400-leaf shift-fold, on top of
+  // the known large-selection stall (#97). Derive the key set ONCE.
+  $: collapsedKeys = new Set(collapsedPaths.map(pathKey));
   // Groups rendered as a one-line SnapshotStrip instead of the collapsed
   // pill. A group in this set is ALSO server-collapsed (its path lives in
   // collapsedPaths, per the tri-state design in
@@ -1361,7 +1367,7 @@
       // nothing. Land on the group's own row instead.
       const targetKey = pathKey(path);
       const folded = isServerCollapsed(
-        rendererIdFor(path, collapsedPaths, snapshotGroupKeys)
+        rendererIdFor(path, collapsedKeys, snapshotGroupKeys)
       );
       if (folded) {
         await tick();
@@ -1756,9 +1762,9 @@
    * re-runs this in the template when either changes.
    * @returns {string} a GROUP_RENDERERS id
    */
-  function rendererIdFor(path, _collapsed, _snapshots) {
+  function rendererIdFor(path, _collapsedKeys, _snapshots) {
     const key = pathKey(path);
-    if (!_collapsed.some((p) => pathKey(p) === key)) return "grid";
+    if (!_collapsedKeys.has(key)) return "grid";
     return _snapshots.has(key) ? "snapshot" : "collapsed";
   }
 
@@ -1875,7 +1881,7 @@
     // Next state, from where the leaves collectively are now (all-expanded →
     // snapshot → collapsed → expanded). A mixed set resets to expanded.
     const states = leaves.map((lp) =>
-      rendererIdFor(lp, collapsedPaths, snapshotGroupKeys)
+      rendererIdFor(lp, collapsedKeys, snapshotGroupKeys)
     );
     const next = states.every((s) => s === "grid")
       ? "snapshot"
@@ -2550,7 +2556,7 @@
               // The band under the header is the RENDERER's, and its height must
               // be known before anything mounts (the feed is virtualized).
               const r = getRenderer(
-                rendererIdFor(e.item.path, collapsedPaths, snapshotGroupKeys)
+                rendererIdFor(e.item.path, collapsedKeys, snapshotGroupKeys)
               );
               return {
                 id: entryDomId(e),
@@ -3448,7 +3454,7 @@
                 class="section-wrapper"
                 class:nested={header.depth > 0}
                 data-group-key={header.path ? pathKey(header.path) : undefined}
-                style="--depth:{header.depth}; top:{header.y}px; height:{header.endY -
+                style="--depth:{header.depth}; --ind:{GROUP_INDENT}px; top:{header.y}px; height:{header.endY -
                   header.y}px;"
               >
                 <div
@@ -3461,14 +3467,14 @@
                     class:not-grid={header.path &&
                       rendererIdFor(
                         header.path,
-                        collapsedPaths,
+                        collapsedKeys,
                         snapshotGroupKeys
                       ) !== "grid"}
                     title={GROUP_STATE_TITLE[
                       header.path
                         ? rendererIdFor(
                             header.path,
-                            collapsedPaths,
+                            collapsedKeys,
                             snapshotGroupKeys
                           )
                         : "grid"
@@ -3489,7 +3495,7 @@
                         header.path
                           ? rendererIdFor(
                               header.path,
-                              collapsedPaths,
+                              collapsedKeys,
                               snapshotGroupKeys
                             )
                           : "grid"
@@ -3893,6 +3899,9 @@
     overflow: hidden;
   }
   .section-wrapper {
+    /* --ind is set inline from GROUP_INDENT (the same constant the LAYOUT uses to
+       inset a nested group's photos) so the dendrogram and the photos can never
+       drift apart. The fallback only matters if the attr is ever dropped. */
     --ind: 18px;
     --trunk: calc(15px + (var(--depth, 0) - 1) * var(--ind));
     position: absolute;

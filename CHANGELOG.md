@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.21
+
+- **Faster feed rendering with many collapsed groups.** Working out how each group
+  is drawn was re-scanning the whole collapsed list (with a JSON compare) several
+  times per header on every render — noticeable after Collapse-all or folding a
+  big tree. It's now a single lookup.
+
 ## 2.9.20
 
 - **Fixed: "Remove" did nothing on folder-name groups.** The button was offered
