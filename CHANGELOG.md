@@ -6,11 +6,27 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
-## 2.8.24-alpha
+## 2.8.26-alpha
 
 - **The loupe filmstrip now shows star ratings** — each thumbnail carries its
   ★-rating badge (bottom-right), alongside the existing ✓ selection mark, so you
   can see how your neighbours are rated without leaving the current photo.
+
+## 2.8.25-alpha
+
+- **A failed Undo now tells you what happened instead of silently doing
+  nothing.** If undoing a move can't even reach the server (e.g. the move
+  record is too large, or the connection drops), the jobs strip shows a
+  specific message — "the move record was too large to send (N files) — retry
+  from the jobs panel" — rather than failing only in the console (#89).
+
+## 2.8.24-alpha
+
+- **The sidebar now refreshes after Undo and after removing a folder from the
+  feed.** Undoing a move-materialize (from the jobs strip) puts the folders
+  back in the tree, and removing a folder group from the feed drops it from the
+  tree right away — previously both left the sidebar showing stale folders until
+  the next rescan.
 
 ## 2.8.23-alpha
 

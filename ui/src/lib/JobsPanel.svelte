@@ -3,8 +3,26 @@
   // undo-move) — fed live by the SSE-backed `jobs` store. Renders nothing
   // when there are no jobs; each row lets a running job be canceled, and a
   // terminal job be dismissed (or, for a move-materialize, undone).
-  import { jobs } from "./jobs.js";
+  import { jobs, undoFailureMessage } from "./jobs.js";
   import { cancelJob, dismissJob, undoMove } from "./api.js";
+
+  // Per-row undo error, keyed by job id. `undoMove()` throws on a *synchronous*
+  // failure (a 413 before the undo job exists, a network drop, a server
+  // reject); firing it bare left that rejection console-only — the silent
+  // failure issue #89 is about. Await it and surface the message inline.
+  let undoErrors = {};
+
+  async function handleUndo(job) {
+    undoErrors = { ...undoErrors, [job.id]: null };
+    try {
+      await undoMove(job.result.manifest);
+    } catch (e) {
+      undoErrors = {
+        ...undoErrors,
+        [job.id]: undoFailureMessage(e, job.result.manifest.length),
+      };
+    }
+  }
 
   /** Sum per-album {moved,copied,skipped} for a materialize job's result. */
   function materializeTotals(result) {
@@ -87,9 +105,13 @@
           <span class="job-icon ok" aria-hidden="true">✓</span>
           <span class="job-summary">{summarize(job)}</span>
           {#if canUndo(job)}
-            <button
-              class="job-btn"
-              on:click={() => undoMove(job.result.manifest)}>Undo</button
+            <button class="job-btn" on:click={() => handleUndo(job)}
+              >Undo</button
+            >
+          {/if}
+          {#if undoErrors[job.id]}
+            <span class="job-summary err" role="alert"
+              >{undoErrors[job.id]}</span
             >
           {/if}
           <button
@@ -101,9 +123,13 @@
           <span class="job-icon err" aria-hidden="true">✗</span>
           <span class="job-summary">{job.error}</span>
           {#if canUndo(job)}
-            <button
-              class="job-btn"
-              on:click={() => undoMove(job.result.manifest)}>Undo</button
+            <button class="job-btn" on:click={() => handleUndo(job)}
+              >Undo</button
+            >
+          {/if}
+          {#if undoErrors[job.id]}
+            <span class="job-summary err" role="alert"
+              >{undoErrors[job.id]}</span
             >
           {/if}
           <button
@@ -177,6 +203,12 @@
   .job-row.failed .job-summary,
   .job-row.canceled .job-summary {
     color: #ff8a80;
+  }
+  /* An undo error can appear on an otherwise-"done" row (the row itself isn't
+     failed/canceled), so colour the message red on its own. */
+  .job-summary.err {
+    color: #ff8a80;
+    white-space: normal;
   }
   .job-icon.ok {
     color: #8fd18f;
