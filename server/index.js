@@ -36,9 +36,15 @@ export function createApp() {
 
   migrateLegacyJsonIfNeeded(getDb());
 
-  // Health check — proves the dev loop end to end.
+  // Health check — proves the dev loop end to end, AND is the liveness probe the
+  // UI's connection watchdog polls (ui/src/lib/serverHealth.js). Deliberately
+  // trivial (no DB work) so it still answers while a scan is hammering the index.
+  // `pid` is the restart signal: if it changes between two successful polls the
+  // server was replaced under us (crash, or `node --watch` reloading a server
+  // edit) and the client must refetch. no-store so a cache can't fake liveness.
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", version });
+    res.set("Cache-Control", "no-store");
+    res.json({ status: "ok", version, pid: process.pid });
   });
 
   // v0.1 culling API: scan, thumbnails, full images, ratings.

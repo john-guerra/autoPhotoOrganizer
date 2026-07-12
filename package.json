@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.9.14",
+  "version": "2.9.15",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:server": "node server/index.js",
+    "dev:server": "node --watch --watch-path=server server/index.js",
     "dev:ui": "vite ui",
     "electron:dev": "node scripts/dev.mjs --electron",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3",

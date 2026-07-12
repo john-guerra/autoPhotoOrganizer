@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.15
+
+- **The app now tells you when the server is gone.** If the backend crashes or
+  restarts, a banner says so ("what's on screen may be out of date"), the app
+  keeps retrying with backoff, and it reloads itself automatically as soon as the
+  server is back — instead of silently showing stale data while fetches failed in
+  the console. There's a "Retry now" button too. (usability testing)
+- **Server code now hot-restarts in development** (`node --watch`), so backend
+  edits no longer need a manual restart.
+
 ## 2.9.14
 
 - **Shift+click a group to fold its subgroups** — like function folding in VS

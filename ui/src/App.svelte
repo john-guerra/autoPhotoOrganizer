@@ -63,6 +63,8 @@
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import JobsPanel from "./lib/JobsPanel.svelte";
   import GroupStateIcon from "./lib/GroupStateIcon.svelte";
+  import ServerBanner from "./lib/ServerBanner.svelte";
+  import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import UpdateBanner from "./lib/UpdateBanner.svelte";
@@ -1653,6 +1655,26 @@
     return REMOVABLE_FOLDER_DIMS.has(path?.at(-1)?.dimension);
   }
 
+  // Watch the backend. If it dies or restarts (a crash, or `node --watch`
+  // reloading it after a server edit), ServerBanner says so and we refetch once
+  // it's back — instead of silently sitting on data from a server that's gone.
+  let seenRestart = 0;
+  startServerWatchdog();
+  $: if ($serverRestarted > seenRestart) {
+    seenRestart = $serverRestarted;
+    onServerBack();
+  }
+  async function onServerBack() {
+    try {
+      libraryVersion++; // sidebars refetch
+      await refreshCounts();
+      await loadInitialFeed();
+      status = "Reconnected to the server — reloaded.";
+    } catch (e) {
+      error = `Reconnected, but reloading failed: ${e.message}`;
+    }
+  }
+
   /** The catch-all the UI never had: anything that escapes a try/catch — an
    * uncaught error while rendering, or a rejected promise nobody awaited — gets
    * SHOWN, not just logged. Keeps the "a console error is not user feedback"
@@ -3172,6 +3194,8 @@
 />
 
 <UpdateBanner />
+
+<ServerBanner />
 
 <div class="app">
   <header class="topbar">
