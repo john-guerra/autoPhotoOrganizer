@@ -92,6 +92,7 @@
       class="snap-thumb"
       class:static={!interactive}
       style="width:{thumbPx}px; height:{thumbPx}px;"
+      role={interactive ? undefined : "presentation"}
       on:click={() => interactive && pick(item.id)}
     >
       <img

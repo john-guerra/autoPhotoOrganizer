@@ -42,6 +42,9 @@
   }
 </script>
 
+<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
+<!-- on:click only detects clicks on the ::backdrop (target === the <dialog>)
+     to close; the keyboard close path is the native Esc → on:cancel below. -->
 <dialog
   bind:this={dialogEl}
   class="modal size-{size}"

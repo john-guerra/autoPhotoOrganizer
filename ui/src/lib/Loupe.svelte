@@ -74,6 +74,10 @@
 
 <div class="loupe" role="dialog" aria-modal="true">
   <div class="body">
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <!-- contextmenu is a right-click affordance on the media stage; no ARIA
+         role describes a bare image/video canvas, and keyboard users reach the
+         same actions elsewhere. -->
     <div class="stage" on:contextmenu={onContextMenu}>
       {#if item}
         {#key item.id}

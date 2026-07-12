@@ -13,9 +13,17 @@
   }
 </script>
 
-<div class="rating" role="group" aria-label="Filter by minimum rating">
+<!-- mouseleave (reset hover preview) lives on the group wrapper, which already
+     carries role="group" — a static inner <div> with the handler would need a
+     role of its own. -->
+<div
+  class="rating"
+  role="group"
+  aria-label="Filter by minimum rating"
+  on:mouseleave={() => (hover = 0)}
+>
   <span class="ge" class:active={min > 0} aria-hidden="true">≥</span>
-  <div class="stars" on:mouseleave={() => (hover = 0)}>
+  <div class="stars">
     {#each STARS as k}
       <button
         type="button"
