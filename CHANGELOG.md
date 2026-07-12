@@ -6,23 +6,31 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
-## 2.8.19-alpha
+## 2.8.20-alpha
 
 - Cleaned up accessibility warnings across the modals, loupe, sidebars, and
   filters (keyboard/screen-reader affordances; no visible change).
 
-## 2.8.18-alpha
+## 2.8.19-alpha
 
 - Timeline capture-time filter upgraded to the latest zoomable-axis widget.
 
-## 2.8.17-alpha
+## 2.8.18-alpha
 
 - Compact single-row group-by control keeps the top toolbar to one row (#82).
 
-## 2.8.16-alpha
+## 2.8.17-alpha
 
 - New bottom status bar shows library/showing/selected counts, scan status,
   zoom, burst, and sort — freeing the top toolbar for actions (#82).
+
+## 2.8.16-alpha
+
+- **Timeline density reads truer to your shoots** — the date timeline now
+  smooths less by default (finer bandwidth, more detail points, honest curve),
+  so photo bursts and the quiet gaps between them stay visible instead of being
+  blurred together — making album boundaries easier to spot. You can still
+  retune it from the gear popover. (#82)
 
 ## 2.8.15-alpha
 
