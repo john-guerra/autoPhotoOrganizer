@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.24-alpha
+
+- **The sidebar now refreshes after Undo and after removing a folder from the
+  feed.** Undoing a move-materialize (from the jobs strip) puts the folders
+  back in the tree, and removing a folder group from the feed drops it from the
+  tree right away — previously both left the sidebar showing stale folders until
+  the next rescan.
+
 ## 2.8.23-alpha
 
 - **Dropped the redundant per-group "Select" button** — the new select-all

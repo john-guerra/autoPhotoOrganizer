@@ -32,6 +32,37 @@ export function connectJobsStream(
 
 connectJobsStream();
 
+/** Statuses that mean a job has stopped for good and won't change again. */
+const TERMINAL_STATUSES = new Set(["done", "canceled", "failed"]);
+
+/**
+ * One-shot edge detector for finished background jobs. Returns the jobs of
+ * `type` in `list` that have just reached a terminal state and hadn't been
+ * seen before, marking each id in `handled` so a later snapshot won't return
+ * it again. Lets a caller fire a single refresh when e.g. an `undo-move` job
+ * completes, instead of re-firing on every subsequent SSE store snapshot.
+ * Canceled/failed count as terminal too — a partially-completed undo still
+ * moved some files, so the UI is stale and must refresh either way.
+ * @param {Array<object>} list current jobs snapshot
+ * @param {string} type job type to watch (e.g. "undo-move")
+ * @param {Set<string>} handled ids already acted on (mutated in place)
+ * @returns {Array<object>} the newly-finished jobs of that type
+ */
+export function takeNewlyFinished(list, type, handled) {
+  const fresh = [];
+  for (const job of list) {
+    if (
+      job.type === type &&
+      TERMINAL_STATUSES.has(job.status) &&
+      !handled.has(job.id)
+    ) {
+      handled.add(job.id);
+      fresh.push(job);
+    }
+  }
+  return fresh;
+}
+
 /**
  * Resolve once the given job id leaves "running" (done/canceled/failed).
  * Resolves immediately if the job is already terminal by the time this is
