@@ -1360,7 +1360,12 @@ export function registerApi(app) {
 
   // --- Export selected photos into a new folder -----------------------------
   app.post("/api/export", (req, res) => {
-    const { photoIds, destParent, folderName } = req.body ?? {};
+    // `move` MOVES the originals out of the source folder. It goes through the
+    // same audited path materialize uses (copyIdsIntoFolder -> moveFile:
+    // rename, or copy -> fsync -> verify size -> unlink; the source is removed
+    // only after the destination is confirmed). It returns a manifest so the
+    // move is UNDOABLE — never a one-way door on someone's photos.
+    const { photoIds, destParent, folderName, move } = req.body ?? {};
     if (!Array.isArray(photoIds) || photoIds.length === 0) {
       return res
         .status(400)
@@ -1385,12 +1390,13 @@ export function registerApi(app) {
 
     (async () => {
       try {
-        const { copied, skipped, moved } = await copyIdsIntoFolder(
+        const { copied, skipped, moved, manifest } = await copyIdsIntoFolder(
           db,
           resolved.target,
           photoIds,
           {
             signal: job.controller.signal,
+            move: move === true,
             onProgress: (done, total, phase) =>
               registry.update(job.id, { done, total, phase }),
           }
@@ -1399,6 +1405,11 @@ export function registerApi(app) {
           target: resolved.target,
           copied: copied + moved,
           skipped,
+          // Carry the move flag + manifest so the jobs panel can offer Undo —
+          // same contract as materialize. A move without an undo would be a
+          // one-way door on the user's originals.
+          move: move === true,
+          ...(move === true ? { manifest } : {}),
         });
       } catch (e) {
         registry.fail(job.id, e);

@@ -383,6 +383,10 @@
   let exportOpen = false;
   let exportDest = localStorage.getItem(LS_EXPORT_DEST) || "";
   let exportName = defaultExportName();
+  // MOVE the originals instead of copying. Off by default and never remembered:
+  // a destructive default is how people lose photos. It is undoable (the job
+  // carries a manifest), and the UI says so before you commit.
+  let exportMove = false;
   let exporting = false;
   let exportResult = null;
 
@@ -1251,6 +1255,7 @@
         photoIds: [...selectedIds],
         destParent: exportDest.trim(),
         folderName: exportName.trim(),
+        move: exportMove,
       });
       localStorage.setItem(LS_EXPORT_DEST, exportDest.trim());
       const job = await waitForJob(jobId);
@@ -3390,22 +3395,6 @@
       </button>
     {/if}
 
-    <SelectionBar
-      {selectedCount}
-      {lastClearedSelection}
-      {hasNativePicker}
-      {exporting}
-      {exportResult}
-      bind:exportOpen
-      bind:exportDest
-      bind:exportName
-      on:clear={clearSelection}
-      on:keeponly={keepOnlySelection}
-      on:undoclear={undoClearSelection}
-      on:choosedest={chooseExportDest}
-      on:export={doExport}
-    />
-
     <button
       class="help-btn"
       title="Keyboard shortcuts (?)"
@@ -3726,7 +3715,28 @@
     bind:burstGapMs
     {sort}
     on:sortchange={(e) => onSortChange(e.detail)}
-  />
+  >
+    <!-- Clear / Keep only / Export live next to the selected count now: that is
+         what makes "Clear" read as "clear the selection" rather than "clear
+         something, somewhere". -->
+    <SelectionBar
+      slot="selection"
+      {selectedCount}
+      {lastClearedSelection}
+      {hasNativePicker}
+      {exporting}
+      {exportResult}
+      bind:exportOpen
+      bind:exportDest
+      bind:exportName
+      bind:exportMove
+      on:clear={clearSelection}
+      on:keeponly={keepOnlySelection}
+      on:undoclear={undoClearSelection}
+      on:choosedest={chooseExportDest}
+      on:export={doExport}
+    />
+  </StatusBar>
 </div>
 
 {#if loupeOpen}

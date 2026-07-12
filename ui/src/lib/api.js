@@ -564,11 +564,16 @@ export async function startScan(dir, { recursive = true } = {}) {
  * @param {{photoIds:number[], destParent:string, folderName:string}} opts
  * @returns {Promise<{jobId: string}>}
  */
-export async function startExport({ photoIds, destParent, folderName }) {
+export async function startExport({
+  photoIds,
+  destParent,
+  folderName,
+  move = false, // MOVE the originals out of their source folder (undoable)
+}) {
   const res = await fetch("/api/export", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ photoIds, destParent, folderName }),
+    body: JSON.stringify({ photoIds, destParent, folderName, move }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

@@ -17,6 +17,7 @@
   export let exportOpen = false;
   export let exportDest = "";
   export let exportName = "";
+  export let exportMove = false;
 
   const dispatch = createEventDispatcher();
 </script>
@@ -89,15 +90,31 @@
               spellcheck="false"
             />
           </label>
+          <label
+            class="export-move"
+            title="Move the originals out of their current folder instead of copying them"
+          >
+            <input type="checkbox" bind:checked={exportMove} />
+            <span>Move the files instead of copying</span>
+          </label>
+          {#if exportMove}
+            <p class="export-warn" role="note">
+              The originals will be <strong>moved out</strong> of their current folders.
+              You can undo this from the jobs panel afterwards.
+            </p>
+          {/if}
           <div class="export-actions">
             <button
               class="scan"
+              class:danger={exportMove}
               on:click={() => dispatch("export")}
               disabled={exporting || !exportDest.trim() || !exportName.trim()}
             >
               {exporting
-                ? "Copying…"
-                : `Copy ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
+                ? exportMove
+                  ? "Moving…"
+                  : "Copying…"
+                : `${exportMove ? "Move" : "Copy"} ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
             </button>
           </div>
           {#if exportResult}
@@ -194,6 +211,24 @@
   }
   .export-actions {
     display: flex;
+  }
+  .export-move {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: #cfcfcf;
+    cursor: pointer;
+  }
+  .export-warn {
+    margin: 0;
+    font-size: 0.75rem;
+    color: #ffd24c;
+    line-height: 1.35;
+  }
+  .scan.danger {
+    background: #b3541e;
+    color: #fff;
   }
   .export-result {
     margin: 0;
