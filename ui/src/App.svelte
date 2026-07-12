@@ -3976,13 +3976,16 @@
     /* Matches the collapsed-section placeholder's own count (.placeholder-count)
        so a section reads the same expanded or collapsed. */
   }
-  /* The group actions (Select/Keep only/Remove) live in GroupLabelActions
+  /* The group actions (jump / Keep only / Remove) live in GroupLabelActions
      (issue #88); its select icon is always visible, but its action buttons
-     (.gla-buttons) reveal only on hover of the surrounding header row. The
-     reveal target crosses the component boundary, so it's a :global rule keyed
-     on each of the three header states. */
+     (.gla-buttons) reveal only on hover of the header row. The reveal target
+     crosses the component boundary, so it's a :global rule. There is now ONE
+     header per group (see the group-renderers contract), so this is one rule —
+     it used to be repeated for the snapshot head and the collapsed pill. */
   .section-header:hover :global(.gla-buttons),
-  .section-header:focus-within :global(.gla-buttons),
+  .section-header:focus-within :global(.gla-buttons) {
+    opacity: 1;
+  }
   .empty {
     padding: 4rem 1rem;
     text-align: center;

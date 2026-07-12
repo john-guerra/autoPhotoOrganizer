@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.19
+
+- **Fixed: hovering a group title blew the header up.** Hovering a section header
+  made it grow to five times its height, shoving the photos down and clipping the
+  first row. A CSS cleanup in 2.9.18 had accidentally eaten the `opacity: 1`
+  hover rule for the header's action buttons, so they inherited the empty-state's
+  `padding: 4rem` instead. (usability testing)
+
 ## 2.9.18
 
 - **A group now always has exactly one label.** Collapsing or snapshotting a group
