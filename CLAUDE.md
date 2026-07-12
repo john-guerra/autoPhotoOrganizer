@@ -117,10 +117,13 @@ is **not** user feedback.
     (cut a packaged/distributable build — e.g. an `electron:build:mac` /
     release artifact). Rolls the patch number back to `0`.
   - **Major** (`X+1.0.0`) — breaking changes or removed capabilities.
-- Keep the current pre-release suffix (`-alpha`) until a stable release is cut,
-  so e.g. a change at `2.7.0-alpha` bumps to `2.7.1-alpha`, and the next
-  packaged build cuts `2.8.0-alpha`. Bump in the **same commit/PR that closes
-  the issue**, not as a separate housekeeping commit.
+- **Stable releases carry no pre-release suffix.** As of `2.9.0` the app is out
+  of alpha: ongoing work bumps the patch on a plain `x.y.z` version (e.g.
+  `2.9.0` → `2.9.1`), and the next packaged build cuts the next minor
+  (`2.10.0`). Only add a `-alpha`/`-beta` suffix when deliberately cutting a
+  pre-release for testing (electron-updater keeps stable and pre-release users
+  on separate tracks). Bump in the **same commit/PR that closes the issue**,
+  not as a separate housekeeping commit.
 - **Update `CHANGELOG.md` in that same commit.** Add a new `## <version>` entry
   (newest first) with a clean, short, user-facing line per feature/fix — what
   the user can now do, not how it's implemented — most notable first, with the

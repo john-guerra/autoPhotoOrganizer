@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.0
+
+- **First stable release — the `-alpha` pre-release tag is dropped.** AutoGallery
+  is out of alpha. This packaged build bundles the recent round of work: dual
+  "you are here" timeline markers, star ratings in the loupe filmstrip, undo
+  failures now surfaced in the UI (never console-only), the sidebar refreshing
+  after undo and after removing a folder, consistent group-label actions with a
+  tri-state select-all, and sturdier snapshot-strip thumbnails.
+
 ## 2.8.27-alpha
 
 - **The timeline now shows two "you are here" markers instead of one that
