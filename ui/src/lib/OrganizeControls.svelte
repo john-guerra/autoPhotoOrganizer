@@ -34,9 +34,10 @@
   function groupBySelector(node, initialValue) {
     const widget = MultiAutoSelect(ALL_DIMENSIONS, {
       value: initialValue,
-      placeholder: "Add a grouping level…",
+      title: "Group by",
+      placeholder: "Add…",
       sortable: true,
-      layout: "inline",
+      layout: "compact",
     });
     widget.addEventListener("input", () =>
       dispatch("groupbychange", widget.value)
@@ -51,9 +52,6 @@
 </script>
 
 <div class="cluster organize">
-  <span class="group-label" title="Choose how photos are grouped into sections"
-    >Group by</span
-  >
   <div class="group-by" use:groupBySelector={groupBy}></div>
   <div class="divider"></div>
   <div class="seg-toggle icons" role="group" aria-label="Filter mode">
@@ -223,13 +221,18 @@
     font-size: 0.7rem;
     cursor: pointer;
   }
-  .group-label {
-    font-size: 0.8rem;
-    color: #9a9a9a;
-    white-space: nowrap;
-  }
   .group-by :global(.multi-auto-select) {
     color: inherit;
+  }
+  /* Compact layout: keep the "Group by" title small and the whole widget
+     vertically tight so it fits the toolbar row. */
+  .group-by :global(.multi-auto-select.compact .title) {
+    font-size: 0.7rem;
+    color: #9a9a9a;
+    margin-bottom: 1px;
+  }
+  .group-by :global(.multi-auto-select.compact) {
+    min-height: 0 !important;
   }
   .group-by :global(.pill) {
     background: #2a2a2a !important;

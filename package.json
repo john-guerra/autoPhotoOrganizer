@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.9.9",
+  "version": "2.9.10",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
@@ -31,7 +31,7 @@
     "express": "^4.19.2",
     "ffmpeg-static": "^5.3.0",
     "ffprobe-static": "^3.1.0",
-    "multi-auto-select": "^0.0.12",
+    "multi-auto-select": "^0.0.13",
     "reactive-widget-helper": "^0.0.3",
     "sharp": "^0.35.3",
     "sortablejs": "^1.15.7"

@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.10
+
+- **The "Group by" control is far more compact.** Its title now sits on top, the
+  current grouping levels come first, the add-a-level autocomplete is short, and
+  "Clear All" is now a small ✕ — reclaiming a lot of toolbar width. (usability
+  testing; needs multi-auto-select 0.0.13)
+
 ## 2.9.9
 
 - **Media-type filter now uses icons + a "Type" legend** — a photo icon, a RAW
