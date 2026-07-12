@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.24-alpha
+
+- **The loupe filmstrip now shows star ratings** — each thumbnail carries its
+  ★-rating badge (bottom-right), alongside the existing ✓ selection mark, so you
+  can see how your neighbours are rated without leaving the current photo.
+
 ## 2.8.23-alpha
 
 - **Dropped the redundant per-group "Select" button** — the new select-all
