@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.11
+
+- **The sidebar is resizable** — drag its right edge (double-click to reset, or
+  focus it and use ←/→). The width is remembered. (usability testing)
+- **Long folder names are readable again.** Hovering a truncated name in the tree
+  slides it across so you can read the whole thing. (usability testing)
+- **Expand all / Collapse all** buttons in the tree sidebar. (usability testing)
+- **The tree's two toggles no longer look alike.** The ▸/▾ triangle folds
+  sub-folders in the tree; a separate photo-grid icon controls whether that
+  group's photos show in the feed (and turns amber when hidden). (usability
+  testing)
+
 ## 2.9.10
 
 - **The "Group by" control is far more compact.** Its title now sits on top, the

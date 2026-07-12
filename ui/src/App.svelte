@@ -378,6 +378,60 @@
   let exportResult = null;
 
   // Sidebar view: classic "tree" or focus+context "fisheye" (toggle, persisted).
+  // --- Resizable sidebar (drag its right edge; width persisted) -------------
+  const DEFAULT_SIDEBAR_WIDTH = 260;
+  const MIN_SIDEBAR_WIDTH = 150;
+  const MAX_SIDEBAR_WIDTH = 640;
+  const LS_SIDEBAR_WIDTH = "autogallery.sidebarWidth";
+  const clampSidebar = (w) =>
+    Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, Math.round(w)));
+  let sidebarWidth = (() => {
+    const stored = Number(localStorage.getItem(LS_SIDEBAR_WIDTH));
+    return Number.isFinite(stored) && stored > 0
+      ? clampSidebar(stored)
+      : DEFAULT_SIDEBAR_WIDTH;
+  })();
+  $: localStorage.setItem(LS_SIDEBAR_WIDTH, String(sidebarWidth));
+  let resizingSidebar = false;
+
+  /** Pointer-capture drag so the resize keeps tracking even when the cursor
+   * outruns the 5px handle (a plain mousemove-on-handle loses it instantly). */
+  function startSidebarResize(e) {
+    e.preventDefault();
+    resizingSidebar = true;
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    const handle = e.currentTarget;
+    handle.setPointerCapture?.(e.pointerId);
+    const onMove = (ev) =>
+      (sidebarWidth = clampSidebar(startW + ev.clientX - startX));
+    const onUp = (ev) => {
+      resizingSidebar = false;
+      handle.releasePointerCapture?.(ev.pointerId);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  }
+
+  /** Keyboard-resizable too — the handle is focusable, so arrows nudge it. */
+  function onSidebarResizeKey(e) {
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      sidebarWidth = clampSidebar(sidebarWidth - step);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      sidebarWidth = clampSidebar(sidebarWidth + step);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+    }
+  }
+
   const LS_SIDEBAR_MODE = "autogallery.sidebarMode";
   let sidebarMode =
     localStorage.getItem(LS_SIDEBAR_MODE) === "fisheye" ? "fisheye" : "tree";
@@ -3005,27 +3059,44 @@
   </header>
 
   <div class="app-body">
-    {#if sidebarMode === "tree"}
-      <TreeSidebar
-        bind:this={treeSidebarRef}
-        {groupBy}
-        {collapsedPaths}
-        {sort}
-        filter={displayFilter}
-        refreshToken={libraryVersion}
-        on:toggle={(e) => toggleSectionCollapse(e.detail)}
-        on:jump={(e) => jumpToPath(e.detail)}
-      />
-    {:else}
-      <FisheyeSidebar
-        {groupBy}
-        {currentPath}
-        {sort}
-        filter={displayFilter}
-        refreshToken={libraryVersion}
-        on:jump={(e) => jumpToPath(e.detail)}
-      />
-    {/if}
+    <!-- Resizable sidebar pane: owns the width (persisted) for BOTH sidebar
+         modes, so the tree/fisheye components just fill it. -->
+    <div class="sidebar-pane" style="width:{sidebarWidth}px">
+      {#if sidebarMode === "tree"}
+        <TreeSidebar
+          bind:this={treeSidebarRef}
+          {groupBy}
+          {collapsedPaths}
+          {sort}
+          filter={displayFilter}
+          refreshToken={libraryVersion}
+          on:toggle={(e) => toggleSectionCollapse(e.detail)}
+          on:jump={(e) => jumpToPath(e.detail)}
+        />
+      {:else}
+        <FisheyeSidebar
+          {groupBy}
+          {currentPath}
+          {sort}
+          filter={displayFilter}
+          refreshToken={libraryVersion}
+          on:jump={(e) => jumpToPath(e.detail)}
+        />
+      {/if}
+    </div>
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+    <div
+      class="sidebar-resizer"
+      class:dragging={resizingSidebar}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar (double-click to reset)"
+      tabindex="0"
+      title="Drag to resize the sidebar (double-click to reset)"
+      on:pointerdown={startSidebarResize}
+      on:dblclick={() => (sidebarWidth = DEFAULT_SIDEBAR_WIDTH)}
+      on:keydown={onSidebarResizeKey}
+    ></div>
     <div
       class="main-column"
       bind:this={mainColumnEl}
@@ -3384,6 +3455,30 @@
     display: flex;
     flex: 1;
     min-height: 0;
+  }
+  /* The sidebar pane owns the (persisted, draggable) width; the tree/fisheye
+     components inside just fill it. flex-shrink:0 so the grid can't squeeze it. */
+  .sidebar-pane {
+    flex: 0 0 auto;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+  }
+  /* A slim grab strip between the sidebar and the grid. Widened hit area via
+     padding-box trickery isn't needed — 6px + a hover tint reads fine. */
+  .sidebar-resizer {
+    flex: 0 0 6px;
+    cursor: col-resize;
+    background: #2a2a2a;
+    border: none;
+    padding: 0;
+    transition: background 0.12s;
+  }
+  .sidebar-resizer:hover,
+  .sidebar-resizer:focus-visible,
+  .sidebar-resizer.dragging {
+    background: #4c9aff;
+    outline: none;
   }
   .main-column {
     flex: 1;

@@ -308,10 +308,9 @@
 </nav>
 
 <style>
+  /* Fills the resizable sidebar pane owned by App.svelte (which sets the width). */
   .fisheye {
-    width: 240px;
-    flex: 0 0 240px;
-    border-right: 1px solid #2a2a2a;
+    width: 100%;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
