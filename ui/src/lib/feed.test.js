@@ -3,7 +3,6 @@ import {
   formatGroupValue,
   mergeFeedPage,
   deriveSectionHeaders,
-  suppressPlaceholderHeaders,
   nearestRealItemId,
   computeHeaderPaths,
   pathKey,
@@ -239,44 +238,6 @@ describe("headerParentPaths", () => {
 
   it("returns nothing for no headers", () => {
     expect(headerParentPaths([])).toEqual([]);
-  });
-});
-
-describe("suppressPlaceholderHeaders", () => {
-  const displayEntries = [
-    { kind: "photo", item: { id: 1 } },
-    {
-      kind: "placeholder",
-      item: {
-        id: "collapsed:folder=/a>year=2019",
-        path: [
-          { dimension: "folder", value: "/a" },
-          { dimension: "year", value: "2019" },
-        ],
-      },
-    },
-    { kind: "photo", item: { id: 2 } },
-  ];
-
-  it("drops a header at or below a placeholder's own collapse depth", () => {
-    const headers = [
-      { index: 1, depth: 0, dimension: "folder", value: "/a", label: "/a" },
-      { index: 1, depth: 1, dimension: "year", value: "2019", label: "2019" },
-    ];
-    const kept = suppressPlaceholderHeaders(headers, displayEntries);
-    expect(kept).toEqual([
-      { index: 1, depth: 0, dimension: "folder", value: "/a", label: "/a" },
-    ]);
-  });
-
-  it("keeps headers on real photo entries untouched", () => {
-    const headers = [
-      { index: 0, depth: 0, dimension: "folder", value: "/a", label: "/a" },
-      { index: 2, depth: 0, dimension: "folder", value: "/b", label: "/b" },
-    ];
-    expect(suppressPlaceholderHeaders(headers, displayEntries)).toEqual(
-      headers
-    );
   });
 });
 

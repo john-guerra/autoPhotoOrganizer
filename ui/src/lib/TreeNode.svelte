@@ -4,6 +4,7 @@
   import { pathKey } from "./feed.js";
   import { shortLeafLabel } from "./labels.js";
   import GroupStateIcon from "./GroupStateIcon.svelte";
+  import { getRenderer } from "./groupRenderers.js";
 
   export let groupBy; // string[]
   export let path; // Array<{dimension,value}> — this node's own path
@@ -35,13 +36,15 @@
   // by this file's `treeKey` (delimiter-joined) — they are different strings, so
   // checking it with treeKey silently never matches and every snapshot group
   // rendered as "collapsed" here. Use pathKey for that Set specifically.
-  $: feedState = !collapsedInFeed
-    ? "expanded"
+  // Which widget draws this group's photos in the feed — same registry the feed
+  // uses, so the sidebar icon can never disagree with the header's.
+  $: rendererId = !collapsedInFeed
+    ? "grid"
     : snapshotKeys.has(pathKey(path))
       ? "snapshot"
       : "collapsed";
   const FEED_STATE_TITLE = {
-    expanded: "Photos showing in full — click for a snapshot strip",
+    grid: "Photos showing in full — click for a snapshot strip",
     snapshot: "Showing a snapshot strip — click to collapse",
     collapsed: "Collapsed — click to show the photos again",
   };
@@ -100,12 +103,13 @@
          mistaken for the tree's disclosure control above. Clicking cycles the
          group exactly like clicking its header in the feed does. -->
     <button
-      class="tree-collapse-icon {feedState}"
-      title={FEED_STATE_TITLE[feedState]}
+      class="tree-collapse-icon"
+      class:not-grid={rendererId !== "grid"}
+      title={FEED_STATE_TITLE[rendererId]}
       aria-label="Cycle this group in the feed: full grid → snapshot strip → collapsed"
       on:click={(e) => dispatch("toggleCollapse", { path, event: e })}
     >
-      <GroupStateIcon state={feedState} />
+      <GroupStateIcon state={getRenderer(rendererId).icon} />
     </button>
     <button
       class="tree-label"
@@ -179,8 +183,7 @@
     color: #cfcfcf;
   }
   /* Amber once the group is not showing in full — matches the feed header. */
-  .tree-collapse-icon.snapshot,
-  .tree-collapse-icon.collapsed {
+  .tree-collapse-icon.not-grid {
     color: #ffd24c;
   }
   .tree-fold-spacer {

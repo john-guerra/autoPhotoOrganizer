@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.18
+
+- **A group now always has exactly one label.** Collapsing or snapshotting a group
+  used to replace its header with a different row that drew its own duplicate
+  label — which is why a snapshot ignored the group's indentation. Now the header
+  stays put and only its icon changes; the snapshot strip is just content beneath
+  it, indented under its own group like the photos are. (usability testing)
+- **How a group's photos are drawn is now pluggable** — grid, snapshot strip and
+  collapsed are entries in a registry, so new photo widgets can be added without
+  touching the header, the cycle, the sidebar or the layout. See
+  `docs/superpowers/specs/2026-07-12-group-photo-renderers.md`.
+
 ## 2.9.17
 
 - **Nested groups now really look nested.** The dendrogram lines actually connect

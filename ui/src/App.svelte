@@ -28,7 +28,6 @@
   import {
     mergeFeedPage,
     deriveSectionHeaders,
-    suppressPlaceholderHeaders,
     nearestRealItemId,
     formatGroupValue,
     computeHeaderPaths,
@@ -63,6 +62,7 @@
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import JobsPanel from "./lib/JobsPanel.svelte";
   import GroupStateIcon from "./lib/GroupStateIcon.svelte";
+  import { getRenderer, nextRendererId } from "./lib/groupRenderers.js";
   import ServerBanner from "./lib/ServerBanner.svelte";
   import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
@@ -1711,19 +1711,27 @@
     await jumpGroupBoundary(direction, anchor);
   }
 
-  /** A group's current FEED state, for the shared GroupStateIcon. `_collapsed`
-   * and `_snapshots` are taken as ARGS (not closed over) so Svelte's dependency
-   * tracking — which reads the expression's source text — actually re-runs this
-   * in the template when either changes. Same reasoning as TreeNode's
-   * collapsedInFeed. @returns {"expanded"|"snapshot"|"collapsed"} */
-  function feedGroupState(path, _collapsed, _snapshots) {
+  /**
+   * THE single place that answers "which widget draws this group's photos?".
+   * Every read — the header icon, the layout's band height, the band's component,
+   * the tree sidebar — goes through here, so the two legacy structures behind it
+   * (collapsedPaths + snapshotGroupKeys) can be collapsed into one Map without
+   * touching any caller. See docs/superpowers/specs/2026-07-12-group-photo-renderers.md
+   * and issue #100.
+   *
+   * `_collapsed`/`_snapshots` are taken as ARGS (not closed over) so Svelte's
+   * dependency tracking — which reads the expression's source text — actually
+   * re-runs this in the template when either changes.
+   * @returns {string} a GROUP_RENDERERS id
+   */
+  function rendererIdFor(path, _collapsed, _snapshots) {
     const key = pathKey(path);
-    if (!_collapsed.some((p) => pathKey(p) === key)) return "expanded";
+    if (!_collapsed.some((p) => pathKey(p) === key)) return "grid";
     return _snapshots.has(key) ? "snapshot" : "collapsed";
   }
 
   const GROUP_STATE_TITLE = {
-    expanded: "Photos showing in full — click for a snapshot strip",
+    grid: "Photos showing in full — click for a snapshot strip",
     snapshot: "Showing a snapshot strip — click to collapse",
     collapsed: "Collapsed — click to show the photos again",
   };
@@ -1835,13 +1843,13 @@
     // Next state, from where the leaves collectively are now (all-expanded →
     // snapshot → collapsed → expanded). A mixed set resets to expanded.
     const states = leaves.map((lp) =>
-      feedGroupState(lp, collapsedPaths, snapshotGroupKeys)
+      rendererIdFor(lp, collapsedPaths, snapshotGroupKeys)
     );
-    const next = states.every((s) => s === "expanded")
+    const next = states.every((s) => s === "grid")
       ? "snapshot"
       : states.every((s) => s === "snapshot")
         ? "collapsed"
-        : "expanded";
+        : "grid";
 
     // Drop any existing state inside this subtree (including the parent's own
     // aggregate collapse), then apply the new state to the leaves.
@@ -1849,7 +1857,7 @@
     const nextSnaps = new Set(
       [...snapshotGroupKeys].filter((k) => !isKeyUnder(k, path))
     );
-    if (next !== "expanded") {
+    if (next !== "grid") {
       for (const lp of leaves) {
         nextCollapsed.push(lp);
         if (next === "snapshot") nextSnaps.add(pathKey(lp));
@@ -2457,9 +2465,13 @@
   // ancestor, so every surviving header's path stays intact. The path both
   // keys the count cache (see loadHeaderCounts) and, spread through the
   // layout, is read by the header template to look up its own count.
-  $: sectionHeaders = suppressPlaceholderHeaders(
-    computeHeaderPaths(deriveSectionHeaders(resolvedPhotos, groupBy)),
-    displayEntries
+  // Every group ALWAYS gets exactly one header — even when a non-grid renderer
+  // draws its photos. suppressPlaceholderHeaders() used to delete a collapsed
+  // group's own header so the pill/strip could show a duplicate label of its own;
+  // that's what made the snapshot ignore the header's indentation. See
+  // docs/superpowers/specs/2026-07-12-group-photo-renderers.md (invariant 1).
+  $: sectionHeaders = computeHeaderPaths(
+    deriveSectionHeaders(resolvedPhotos, groupBy)
   );
   // Fetch each visible group's total photo count, one query per *parent*
   // path (the tree API returns every sibling's count in a single GROUP BY),
@@ -2503,13 +2515,18 @@
       ? sectionedJustifiedLayout(
           displayEntries.map((e) => {
             if (e.kind === "placeholder") {
-              return snapshotGroupKeys.has(pathKey(e.item.path))
-                ? {
-                    id: entryDomId(e),
-                    placeholder: true,
-                    height: SNAPSHOT_ROW_HEIGHT,
-                  }
-                : { id: entryDomId(e), placeholder: true };
+              // The band under the header is the RENDERER's, and its height must
+              // be known before anything mounts (the feed is virtualized).
+              const r = getRenderer(
+                rendererIdFor(e.item.path, collapsedPaths, snapshotGroupKeys)
+              );
+              return {
+                id: entryDomId(e),
+                placeholder: true,
+                height: r.bandHeight({
+                  snapshotRowHeight: SNAPSHOT_ROW_HEIGHT,
+                }),
+              };
             }
             const photo = resolvePhoto(e);
             const baseRatio =
@@ -3408,21 +3425,21 @@
                     header.depth};"
                 >
                   <button
-                    class="section-toggle-icon {header.path
-                      ? feedGroupState(
-                          header.path,
-                          collapsedPaths,
-                          snapshotGroupKeys
-                        )
-                      : 'expanded'}"
+                    class="section-toggle-icon"
+                    class:not-grid={header.path &&
+                      rendererIdFor(
+                        header.path,
+                        collapsedPaths,
+                        snapshotGroupKeys
+                      ) !== "grid"}
                     title={GROUP_STATE_TITLE[
                       header.path
-                        ? feedGroupState(
+                        ? rendererIdFor(
                             header.path,
                             collapsedPaths,
                             snapshotGroupKeys
                           )
-                        : "expanded"
+                        : "grid"
                     ]}
                     aria-label="Cycle this group: full grid → snapshot strip → collapsed"
                     on:click={(e) =>
@@ -3436,13 +3453,15 @@
                       )}
                   >
                     <GroupStateIcon
-                      state={header.path
-                        ? feedGroupState(
-                            header.path,
-                            collapsedPaths,
-                            snapshotGroupKeys
-                          )
-                        : "expanded"}
+                      state={getRenderer(
+                        header.path
+                          ? rendererIdFor(
+                              header.path,
+                              collapsedPaths,
+                              snapshotGroupKeys
+                            )
+                          : "grid"
+                      ).icon}
                     />
                   </button>
                   {#if header.path && renamingKey === pathKey(header.path)}
@@ -3496,112 +3515,39 @@
             {/each}
             {#each visibleItems as { i, entry } (entryDomId(entry))}
               {#if entry.kind === "placeholder"}
-                {#if snapshotGroupKeys.has(pathKey(entry.item.path))}
+                <!-- The group's own section header (above) owns the label, icon,
+                     count and actions. This band is ONLY the renderer's photo
+                     widget, drawn inside the layout's content rect — which is why
+                     it inherits the group's nesting indent. A renderer with no
+                     component (e.g. "collapsed") reserves no band at all: the
+                     header alone represents the group. See
+                     docs/superpowers/specs/2026-07-12-group-photo-renderers.md -->
+                {@const renderer = getRenderer(
+                  rendererIdFor(
+                    entry.item.path,
+                    collapsedPaths,
+                    snapshotGroupKeys
+                  )
+                )}
+                {#if renderer.component && boxes[i].height > 0}
                   <div
-                    class="snapshot-row"
+                    class="group-band"
                     data-group-key={pathKey(entry.item.path)}
                     style="top:{boxes[i].y}px; left:{boxes[i]
                       .x}px; width:{boxes[i].width}px; height:{boxes[i]
                       .height}px;"
                   >
-                    <div class="snapshot-head">
-                      <button
-                        class="snap-cycle snapshot"
-                        title={GROUP_STATE_TITLE.snapshot}
-                        aria-label="Cycle this group: full grid → snapshot strip → collapsed"
-                        on:click|stopPropagation={(e) =>
-                          onGroupToggle(entry.item.path, e)}
-                      >
-                        <GroupStateIcon state="snapshot" />
-                      </button>
-                      <span
-                        class="snapshot-label"
-                        title={entry.item.path
-                          .map((p) => formatGroupValue(p.dimension, p.value))
-                          .join(" / ")}
-                      >
-                        {entry.item.path
-                          .map((p) => formatGroupValue(p.dimension, p.value))
-                          .join(" / ")}
-                      </span>
-                      <span class="section-count">
-                        {entry.item.count.toLocaleString()} items
-                      </span>
-                      <GroupLabelActions
-                        selectState={groupSelectState(
-                          entry.item.path,
-                          selectedIds,
-                          groupIdCacheVersion,
-                          groupSelSig
-                        )}
-                        isFolder={isRemovableFolder(entry.item.path)}
-                        removeArmed={removeArmedKey ===
-                          pathKey(entry.item.path)}
-                        on:toggleselect={() =>
-                          toggleGroupSelectAll(entry.item.path)}
-                        on:keeponly={() => keepOnlyGroup(entry.item.path)}
-                        on:jumpprev={() =>
-                          jumpFromGroup(entry.item.path, "prev")}
-                        on:jumpnext={() =>
-                          jumpFromGroup(entry.item.path, "next")}
-                        on:remove={() => removeAlbum(entry.item.path)}
-                      />
-                    </div>
-                    <div class="snap-wrap">
-                      <SnapshotStrip
-                        groupPath={entry.item.path}
-                        count={entry.item.count}
-                        filter={displayFilter}
-                        {sort}
-                        {groupBy}
-                        thumbPx={SNAPSHOT_ROW_HEIGHT - 44}
-                        size={snapshotThumbSize}
-                        on:select={(e) =>
-                          openPhotoById(e.detail.id, entry.item.path)}
-                      />
-                    </div>
-                  </div>
-                {:else}
-                  <div
-                    class="placeholder-row"
-                    data-group-key={pathKey(entry.item.path)}
-                    style="top:{boxes[i].y}px; left:{boxes[i]
-                      .x}px; width:{boxes[i].width}px; height:{boxes[i]
-                      .height}px;"
-                    role="button"
-                    tabindex="0"
-                    on:click={(e) => onGroupToggle(entry.item.path, e)}
-                    on:keydown={(e) =>
-                      e.key === "Enter" && onGroupToggle(entry.item.path, e)}
-                  >
-                    <span
-                      class="placeholder-icon"
-                      title={GROUP_STATE_TITLE.collapsed}
-                      ><GroupStateIcon state="collapsed" /></span
-                    >
-                    <span class="placeholder-label">
-                      {entry.item.path
-                        .map((p) => formatGroupValue(p.dimension, p.value))
-                        .join(" / ")}
-                    </span>
-                    <span class="placeholder-count">
-                      {entry.item.count.toLocaleString()} items
-                    </span>
-                    <GroupLabelActions
-                      selectState={groupSelectState(
-                        entry.item.path,
-                        selectedIds,
-                        groupIdCacheVersion,
-                        groupSelSig
-                      )}
-                      isFolder={isRemovableFolder(entry.item.path)}
-                      removeArmed={removeArmedKey === pathKey(entry.item.path)}
-                      on:toggleselect={() =>
-                        toggleGroupSelectAll(entry.item.path)}
-                      on:keeponly={() => keepOnlyGroup(entry.item.path)}
-                      on:jumpprev={() => jumpFromGroup(entry.item.path, "prev")}
-                      on:jumpnext={() => jumpFromGroup(entry.item.path, "next")}
-                      on:remove={() => removeAlbum(entry.item.path)}
+                    <svelte:component
+                      this={renderer.component}
+                      groupPath={entry.item.path}
+                      count={entry.item.count}
+                      filter={displayFilter}
+                      {sort}
+                      {groupBy}
+                      thumbPx={boxes[i].height - 12}
+                      size={snapshotThumbSize}
+                      on:select={(e) =>
+                        openPhotoById(e.detail.id, entry.item.path)}
                     />
                   </div>
                 {/if}
@@ -3907,6 +3853,13 @@
      — so a sub-group visibly belongs to the group above instead of floating as
      just another header. `--depth` is set on the wrapper; custom properties
      inherit, so the header reads it from there. */
+  /* The renderer's band: just a positioned rect. The group's label/icon/actions
+     live in its section header above — a renderer never draws chrome. */
+  .group-band {
+    position: absolute;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
   .section-wrapper {
     --ind: 18px;
     --trunk: calc(15px + (var(--depth, 0) - 1) * var(--ind));
@@ -3969,8 +3922,10 @@
   .section-toggle-icon:hover {
     color: #e8e8e8;
   }
-  .section-toggle-icon.snapshot,
-  .section-toggle-icon.collapsed {
+  /* Amber whenever the group isn't showing its photos in full. One modifier —
+     NEVER interpolate a renderer id into the class list: "grid" collides with
+     the photo-grid container's own .grid rule. */
+  .section-toggle-icon.not-grid {
     color: #ffd24c;
   }
   .section-toggle-icon:hover {
@@ -3986,6 +3941,17 @@
     padding: 2px 6px;
     border-radius: 4px;
     text-align: left;
+    /* A long group name used to WRAP, growing the sticky header band and letting
+       it cover the rows beneath it. Keep it to one line and ellipsize; the full
+       value is on the title attribute. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    max-width: 46ch;
+  }
+  .section-header {
+    min-width: 0;
   }
   .section-label:hover {
     background: #2a2a2a;
@@ -4017,86 +3983,6 @@
      on each of the three header states. */
   .section-header:hover :global(.gla-buttons),
   .section-header:focus-within :global(.gla-buttons),
-  .snapshot-head:hover :global(.gla-buttons),
-  .snapshot-head:focus-within :global(.gla-buttons),
-  .placeholder-row:hover :global(.gla-buttons),
-  .placeholder-row:focus-within :global(.gla-buttons) {
-    opacity: 1;
-  }
-  /* left/width come from the layout's content rect (boxes[i]), so a nested
-     group's row is inset under its header like its photos are. */
-  .snapshot-row {
-    position: absolute;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    box-sizing: border-box;
-  }
-  .snapshot-head {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-  .snapshot-label {
-    flex: 1 1 auto;
-    color: #cfcfcf;
-    font-size: 0.82rem;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .snap-wrap {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .snap-cycle {
-    flex: 0 0 auto;
-    background: #222;
-    border: 1px solid #3a3a3a;
-    color: #ccc;
-    border-radius: 6px;
-    cursor: pointer;
-    padding: 3px 8px;
-    display: inline-flex;
-    align-items: center;
-  }
-  .snap-cycle.snapshot {
-    color: #ffd24c;
-  }
-  /* The collapsed pill's leading glyph is the same shared state icon. */
-  .placeholder-icon {
-    display: inline-flex;
-    align-items: center;
-    color: #ffd24c;
-    flex: 0 0 auto;
-  }
-  /* left/width come from the layout's content rect (boxes[i]) — see .snapshot-row. */
-  .placeholder-row {
-    position: absolute;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 12px;
-    box-sizing: border-box;
-    background: #1a1a1a;
-    border: 1px solid #2a2a2a;
-    border-radius: 4px;
-    cursor: pointer;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-  }
-  .placeholder-row:hover {
-    background: #2a2a2a;
-  }
-  .placeholder-count {
-    margin-left: auto;
-    color: #888;
-    font-size: 0.85em;
-  }
   .empty {
     padding: 4rem 1rem;
     text-align: center;

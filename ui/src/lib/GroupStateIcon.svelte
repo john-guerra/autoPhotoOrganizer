@@ -10,14 +10,15 @@
    *   snapshot  → one strip   (a single row of frames)
    *   collapsed → nothing     (a single bar / pill)
    */
-  export let state = "expanded"; // "expanded" | "snapshot" | "collapsed"
+  /** A GroupRenderer's `icon` field — see lib/groupRenderers.js. */
+  export let state = "grid"; // "grid" | "strip" | "bar"
 </script>
 
-{#if state === "collapsed"}
+{#if state === "bar"}
   <svg viewBox="0 0 12 12" aria-hidden="true">
     <rect x="1" y="5" width="10" height="2.4" rx="0.6" fill="currentColor" />
   </svg>
-{:else if state === "snapshot"}
+{:else if state === "strip"}
   <svg viewBox="0 0 12 12" aria-hidden="true">
     <rect x="1" y="4" width="2.9" height="4" rx="0.6" fill="currentColor" />
     <rect x="4.55" y="4" width="2.9" height="4" rx="0.6" fill="currentColor" />
