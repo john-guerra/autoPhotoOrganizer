@@ -50,6 +50,9 @@
 </script>
 
 <div class="cluster organize">
+  <span class="group-label" title="Choose how photos are grouped into sections"
+    >Group by</span
+  >
   <div class="group-by" use:groupBySelector={groupBy}></div>
   <div class="divider"></div>
   <div class="seg-toggle icons" role="group" aria-label="Filter mode">
@@ -217,6 +220,11 @@
     line-height: 1;
     font-size: 0.7rem;
     cursor: pointer;
+  }
+  .group-label {
+    font-size: 0.8rem;
+    color: #9a9a9a;
+    white-space: nowrap;
   }
   .group-by :global(.multi-auto-select) {
     color: inherit;

@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.1
+
+- **Clearer first-run and folder controls.** An empty library now shows an
+  "Add folder…" button instead of just a hint. The add-folder popover leads with
+  a one-click "Choose folder to add…" picker and its manual-path button is now
+  labelled "Add & scan". The toolbar "Library" button is now "Folders", and the
+  grouping control has a visible "Group by" label. (usability testing)
+
 ## 2.9.0
 
 - **First stable release — the `-alpha` pre-release tag is dropped.** AutoGallery

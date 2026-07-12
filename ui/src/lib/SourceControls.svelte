@@ -41,9 +41,9 @@
     <button
       class="library-toggle"
       on:click={() => (libraryOpen = !libraryOpen)}
-      title="Recently scanned folders"
+      title="Your scanned folders — manage them or focus on one"
     >
-      Library ▾
+      Folders ▾
     </button>
     {#if libraryOpen}
       <ul class="library-panel">
@@ -55,7 +55,7 @@
               manageLibraryOpen = true;
             }}
           >
-            Manage library…
+            Manage folders…
           </button>
         </li>
         <li>
@@ -127,14 +127,35 @@
     </button>
     {#if addFolderOpen}
       <div class="add-panel">
-        <input
-          class="dir"
-          type="text"
-          placeholder="/path/to/photos"
-          bind:value={dir}
-          on:keydown={(e) => e.key === "Enter" && dispatch("scan")}
-          spellcheck="false"
-        />
+        {#if hasNativePicker}
+          <!-- Primary path: one click → OS picker → scan. Leads the panel so the
+               common case doesn't require typing a raw filesystem path. -->
+          <button
+            class="choose-folder primary"
+            on:click={() => dispatch("choosefolder")}
+            disabled={scanning}
+          >
+            {scanning ? "Scanning…" : "Choose folder to add…"}
+          </button>
+          <div class="add-or">or type a path</div>
+        {/if}
+        <div class="add-row">
+          <input
+            class="dir"
+            type="text"
+            placeholder="/path/to/photos"
+            bind:value={dir}
+            on:keydown={(e) => e.key === "Enter" && dispatch("scan")}
+            spellcheck="false"
+          />
+          <button
+            class="scan"
+            on:click={() => dispatch("scan")}
+            disabled={scanning || !dir.trim()}
+          >
+            {scanning ? "Scanning…" : "Add & scan"}
+          </button>
+        </div>
         <label
           class="recursive-opt"
           title="Scan this folder and all folders inside it"
@@ -142,24 +163,6 @@
           <input type="checkbox" bind:checked={recursiveScan} />
           <span>Include subfolders</span>
         </label>
-        <div class="add-actions">
-          <button
-            class="scan"
-            on:click={() => dispatch("scan")}
-            disabled={scanning}
-          >
-            {scanning ? "Scanning…" : "Scan"}
-          </button>
-          {#if hasNativePicker}
-            <button
-              class="choose-folder"
-              on:click={() => dispatch("choosefolder")}
-              disabled={scanning}
-            >
-              Choose Folder…
-            </button>
-          {/if}
-        </div>
       </div>
     {/if}
   </div>
@@ -285,9 +288,20 @@
     min-width: 260px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   }
-  .add-actions {
+  .add-row {
     display: flex;
     gap: 8px;
+  }
+  .choose-folder.primary {
+    width: 100%;
+    padding: 0.5rem 1rem;
+  }
+  .add-or {
+    font-size: 0.72rem;
+    color: #8a8a8a;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
   .recursive-opt {
     display: flex;

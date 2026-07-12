@@ -3205,7 +3205,17 @@
       {:else if !scanning && status !== "loading…"}
         {#if libraryTotal === 0}
           <div class="empty">
-            Nothing indexed yet — scan a folder to get started.
+            <p class="empty-title">Nothing indexed yet</p>
+            <p class="empty-hint">
+              Add a folder of photos or videos to get started.
+            </p>
+            <button
+              class="empty-action"
+              on:click={() =>
+                hasNativePicker ? chooseFolder() : (addFolderOpen = true)}
+            >
+              Add folder…
+            </button>
           </div>
         {:else if filterIsActive(filter) || keepIds}
           <div class="empty">
