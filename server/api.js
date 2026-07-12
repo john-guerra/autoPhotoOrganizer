@@ -774,9 +774,12 @@ export function registerApi(app) {
   // OS: macOS highlights all of them in Finder (AppleScript), Windows highlights
   // the first (explorer /select is single-only), Linux opens the containing
   // folder. Read-only — only shows where the files already live.
+  // One Finder/Explorer window opens per distinct parent folder.
+  const MAX_REVEAL_FOLDERS = 12;
+
   app.post("/api/reveal-selection", async (req, res) => {
     const ids = Array.isArray(req.body?.ids)
-      ? req.body.ids.filter((n) => Number.isInteger(n))
+      ? [...new Set(req.body.ids.filter((n) => Number.isInteger(n)))]
       : [];
     if (!ids.length) {
       return res.status(400).json({
@@ -808,6 +811,16 @@ export function registerApi(app) {
       return res
         .status(404)
         .json({ ok: false, error: "none of the selected files were found" });
+    }
+    // The 500-file cap protects the command line; THIS protects the user. macOS
+    // opens one Finder window per distinct parent folder, so revealing files
+    // spread across dozens of folders buries the desktop.
+    const folders = new Set(paths.map((p) => dirname(p)));
+    if (folders.size > MAX_REVEAL_FOLDERS) {
+      return res.status(413).json({
+        ok: false,
+        error: `those photos live in ${folders.size} different folders (max ${MAX_REVEAL_FOLDERS}) — revealing them would open a window for each. Narrow the selection first.`,
+      });
     }
     const command = revealManyCommand(process.platform, paths);
     if (!command) {
@@ -1263,9 +1276,20 @@ export function registerApi(app) {
     // The feed's sort drives date-dimension grouping, so the group scope must
     // see it too (else keep-only/select disagree with the section — issue #71).
     const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
+    // `edge=first|last` returns only the group's boundary photo. The jump
+    // controls (the ‹ › buttons and the Option+arrow edge fallback) need exactly
+    // one id; shipping every id of a 10,000-photo folder to read one of them was
+    // pure waste on every click.
+    const edge = req.query.edge ? String(req.query.edge) : null;
+    if (edge && edge !== "first" && edge !== "last") {
+      return res.status(400).json({ error: "edge must be 'first' or 'last'" });
+    }
     const db = getDb();
     try {
-      res.json({ ids: photoIdsMatchingFilter(db, filter, path, sort) });
+      const ids = photoIdsMatchingFilter(db, filter, path, sort);
+      if (!edge) return res.json({ ids });
+      const one = edge === "last" ? ids[ids.length - 1] : ids[0];
+      res.json({ ids: one == null ? [] : [one] });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }

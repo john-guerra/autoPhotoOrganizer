@@ -31,6 +31,9 @@ const MAX_BACKOFF_MS = 10000;
 let lastPid = null;
 let timer = null;
 let stopped = false;
+// "Retry now" could fire while a tick was already awaiting ping(), so both would
+// land and double-count the attempt counter. One at a time.
+let ticking = false;
 
 async function ping(timeoutMs = 4000) {
   const ctrl = new AbortController();
@@ -56,6 +59,16 @@ function schedule(ms) {
 }
 
 async function tick() {
+  if (ticking) return;
+  ticking = true;
+  try {
+    await tickOnce();
+  } finally {
+    ticking = false;
+  }
+}
+
+async function tickOnce() {
   const health = await ping();
   // The endpoint (server/index.js) answers {status:"ok", version, pid}.
   if (health?.status === "ok") {

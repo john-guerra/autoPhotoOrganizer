@@ -383,12 +383,18 @@ export async function fetchTreeNode({
  * @param {{by:string,dir:string}|null} [sort=null]
  * @returns {Promise<number[]>}
  */
-export async function fetchPhotoIds(filter = null, path = null, sort = null) {
+export async function fetchPhotoIds(
+  filter = null,
+  path = null,
+  sort = null,
+  edge = null // "first" | "last" — ask the server for ONE id, not all of them
+) {
   const params = new URLSearchParams();
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
   if (path && path.length) params.set("path", JSON.stringify(path));
   if (sort) params.set("sort", `${sort.by}:${sort.dir}`);
+  if (edge) params.set("edge", edge);
   const res = await fetch(`/api/photos/ids?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

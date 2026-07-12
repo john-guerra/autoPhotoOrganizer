@@ -1743,11 +1743,18 @@
    * SHOWN, not just logged. Keeps the "a console error is not user feedback"
    * rule true even for bugs we didn't anticipate. Deduped so a render loop can't
    * spam the status line. */
+  // Dedupe only within a short window: keyed forever, a recurring error the user
+  // had already dismissed could never be surfaced again (L6).
   let lastUncaught = "";
+  let lastUncaughtAt = 0;
+  const UNCAUGHT_DEDUPE_MS = 4000;
   function reportUncaught(kind, err) {
     const msg = err?.message ?? String(err ?? "unknown error");
-    if (msg === lastUncaught) return;
+    const now = performance.now();
+    if (msg === lastUncaught && now - lastUncaughtAt < UNCAUGHT_DEDUPE_MS)
+      return;
     lastUncaught = msg;
+    lastUncaughtAt = now;
     error = `Something broke while ${kind === "display" ? "drawing the view" : "finishing a background task"}: ${msg} — reload the window, or undo the last change (grouping / collapse / filter).`;
     console.error(`[uncaught:${kind}]`, err);
   }
@@ -1760,18 +1767,20 @@
     if (jumpingGroup) return;
     let ids;
     try {
+      // Only the boundary photo is needed — don't drag every id of a 10k folder
+      // across the wire to read one of them.
       ids = await fetchPhotoIds(
         filterIsActive(displayFilter) ? displayFilter : null,
         path,
-        sort
+        sort,
+        direction === "next" ? "last" : "first"
       );
     } catch (e) {
       error = `Couldn't jump: ${e.message}`;
       return;
     }
     if (!ids.length) return;
-    const anchor = direction === "next" ? ids.at(-1) : ids[0];
-    await jumpGroupBoundary(direction, anchor);
+    await jumpGroupBoundary(direction, ids[0]);
   }
 
   /**
@@ -3194,13 +3203,14 @@
         ids = await fetchPhotoIds(
           filterIsActive(displayFilter) ? displayFilter : null,
           path,
-          sort
+          sort,
+          direction === "next" ? "last" : "first"
         );
       } catch (err) {
         error = err.message;
         return;
       }
-      const edgeId = direction === "next" ? ids.at(-1) : ids[0];
+      const edgeId = ids[0];
       // Already sitting on that edge → genuinely nothing to do.
       if (edgeId == null || edgeId === focusId) return;
       targetId = edgeId;
@@ -3508,41 +3518,28 @@
                 >
                   <button
                     class="section-toggle-icon"
-                    class:not-grid={header.path &&
+                    class:not-grid={rendererIdFor(
+                      header.path,
+                      collapsedKeys,
+                      snapshotGroupKeys
+                    ) !== DEFAULT_RENDERER_ID}
+                    title={groupToggleTitle(
                       rendererIdFor(
                         header.path,
                         collapsedKeys,
                         snapshotGroupKeys
-                      ) !== "grid"}
-                    title={groupToggleTitle(
-                      header.path
-                        ? rendererIdFor(
-                            header.path,
-                            collapsedKeys,
-                            snapshotGroupKeys
-                          )
-                        : DEFAULT_RENDERER_ID
+                      )
                     )}
                     aria-label="Cycle this group: full grid → snapshot strip → collapsed"
-                    on:click={(e) =>
-                      onGroupToggle(
-                        header.path ??
-                          groupBy.slice(0, header.depth + 1).map((d) => ({
-                            dimension: d,
-                            value: resolvedPhotos[header.index]?.groupValues[d],
-                          })),
-                        e
-                      )}
+                    on:click={(e) => onGroupToggle(header.path, e)}
                   >
                     <GroupStateIcon
                       state={getRenderer(
-                        header.path
-                          ? rendererIdFor(
-                              header.path,
-                              collapsedKeys,
-                              snapshotGroupKeys
-                            )
-                          : "grid"
+                        rendererIdFor(
+                          header.path,
+                          collapsedKeys,
+                          snapshotGroupKeys
+                        )
                       ).icon}
                     />
                   </button>
@@ -3562,9 +3559,11 @@
                   {:else}
                     <button
                       class="section-label"
-                      title={header.path?.at(-1)?.dimension === "folder"
-                        ? "Double-click to rename this folder on disk"
-                        : ""}
+                      title={`${header.label}${
+                        header.path?.at(-1)?.dimension === "folder"
+                          ? " — double-click to rename this folder on disk"
+                          : ""
+                      }`}
                       on:dblclick={() => startRename(header.path)}
                     >
                       {header.label}
@@ -4028,7 +4027,7 @@
     text-align: left;
     /* A long group name used to WRAP, growing the sticky header band and letting
        it cover the rows beneath it. Keep it to one line and ellipsize; the full
-       value is on the title attribute. */
+       value is on the button's title attribute (see the markup). */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

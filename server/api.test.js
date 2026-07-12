@@ -584,6 +584,45 @@ describe("POST /api/reveal-selection", () => {
     for (const p of paths) expect(args[1]).toContain(`POSIX file "${p}"`);
   });
 
+  it("caps the number of distinct FOLDERS (one window each) with a 413", async () => {
+    // The 500-file cap protects the command line; this protects the desktop.
+    const dirs = [];
+    const ids = [];
+    for (let d = 0; d < 14; d++) {
+      const dir = await mkdtemp(join(tmpdir(), "ag-revealmany-"));
+      dirs.push(dir);
+      await sharp({
+        create: {
+          width: 8,
+          height: 8,
+          channels: 3,
+          background: { r: 1, g: 2, b: 3 },
+        },
+      })
+        .jpeg()
+        .toFile(join(dir, "a.jpg"));
+      const body = await scan(srv.base, dir);
+      ids.push(body.items[0].id);
+    }
+    const res = await post(ids);
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toMatch(/different folders/i);
+    expect(execFile).not.toHaveBeenCalled();
+    for (const d of dirs) await rm(d, { recursive: true, force: true });
+  });
+
+  it("de-duplicates repeated ids", async () => {
+    const body = await scan(srv.base, photosDir);
+    const id = body.items[0].id;
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const res = await post([id, id, id]);
+    expect(res.status).toBe(200);
+    // one id -> the SINGLE-file reveal, not an AppleScript list
+    const [cmd] = vi.mocked(execFile).mock.calls[0];
+    expect(cmd).toBe("open");
+    expect(await res.json()).toEqual({ ok: true, revealed: 1 });
+  });
+
   it("highlights the first file on Windows", async () => {
     const body = await scan(srv.base, photosDir);
     const ids = body.items.slice(0, 2).map((i) => i.id);
