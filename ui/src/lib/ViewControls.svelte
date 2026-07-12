@@ -1,10 +1,10 @@
 <script>
   /**
    * Toolbar cluster ③: sidebar view toggle (Tree/Fisheye), "Locate current",
-   * the global cycle-all-groups control, the Albums toggle, and the zoom +
-   * burst sliders. Presentational — sidebarMode/zoom/burst state is two-way
-   * bound (App reads them to drive the sidebar, grid row height, and burst
-   * clustering); Locate / cycle-all / detect-albums are emitted as events.
+   * the global cycle-all-groups control, and the Albums toggle.
+   * Presentational — sidebarMode state is two-way bound (App reads it to
+   * drive the sidebar); Locate / cycle-all / detect-albums are emitted as
+   * events.
    */
   import { createEventDispatcher } from "svelte";
 
@@ -13,10 +13,6 @@
   export let globalViewMode = "full";
   export let albumMode = false;
   export let detectingAlbums = false;
-  export let zoom = 2;
-  export let zoomMax = 4;
-  export let burstEnabled = true;
-  export let burstGapMs = 3000;
 
   const dispatch = createEventDispatcher();
 </script>
@@ -84,28 +80,6 @@
         ? "✕ Auto Albums"
         : "▤ Auto Albums"}
   </button>
-  <div class="view-cell">
-    <label class="zoom" title="Grid zoom (also + / - keys)">
-      <span class="zoom-icon small">▦</span>
-      <input type="range" min="0" max={zoomMax} step="1" bind:value={zoom} />
-      <span class="zoom-icon">▦</span>
-    </label>
-    <label class="burst" title="Group photos taken close in time as a burst">
-      <input type="checkbox" bind:checked={burstEnabled} />
-      <span class="burst-label">Burst</span>
-      <input
-        type="range"
-        min="0"
-        max="10000"
-        step="500"
-        bind:value={burstGapMs}
-        disabled={!burstEnabled}
-      />
-      <span class="burst-value" class:off={!burstEnabled}
-        >{(burstGapMs / 1000).toFixed(1)}s</span
-      >
-    </label>
-  </div>
 </div>
 
 <style>
@@ -137,48 +111,5 @@
   .reveal-btn:disabled {
     opacity: 0.6;
     cursor: default;
-  }
-  .view-cell {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #141414;
-    border: 1px solid #2f2f2f;
-    border-radius: 6px;
-    padding: 3px 8px;
-  }
-  .zoom {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: #777;
-  }
-  .zoom input[type="range"] {
-    width: 90px;
-    accent-color: #4c9aff;
-  }
-  .zoom-icon {
-    font-size: 1rem;
-    line-height: 1;
-  }
-  .zoom-icon.small {
-    font-size: 0.7rem;
-  }
-  .burst {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.78rem;
-    color: #9a9a9a;
-  }
-  .burst input[type="range"] {
-    width: 90px;
-    accent-color: #4c9aff;
-  }
-  .burst input[type="range"]:disabled {
-    opacity: 0.4;
-  }
-  .burst-value.off {
-    opacity: 0.4;
   }
 </style>

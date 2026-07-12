@@ -112,7 +112,7 @@
   </section>
 
   <section class="field">
-    <label class="lbl">Split gap</label>
+    <span class="lbl">Split gap</span>
     <div class="gap-row">
       <button class:active={gapMode === "fixed"} on:click={useFixed}
         >Fixed</button
@@ -139,7 +139,7 @@
   </section>
 
   <section class="field">
-    <label class="lbl">Folder naming</label>
+    <span class="lbl">Folder naming</span>
     <input
       class="tpl"
       bind:value={template}
@@ -162,7 +162,7 @@
   </section>
 
   <section class="field">
-    <label class="lbl">Save by</label>
+    <span class="lbl">Save by</span>
     <div class="move-row">
       <label><input type="radio" value={true} bind:group={move} /> Move</label>
       <label><input type="radio" value={false} bind:group={move} /> Copy</label>

@@ -1,21 +1,20 @@
 <script>
   /**
-   * Toolbar cluster ②: grouping (the MultiAutoSelect pill widget), feed sort
-   * (attribute + direction), the Display/Select filter-mode toggle, and the
-   * rating/orientation filters. Presentational — it renders the current
-   * groupBy/sort/filter/filterMode and emits an event for every change; App
-   * owns the state and the feed rebuild.
+   * Toolbar cluster ②: grouping (the MultiAutoSelect pill widget), the
+   * Display/Select filter-mode toggle, and the rating/orientation filters.
+   * Presentational — it renders the current groupBy/filter/filterMode and
+   * emits an event for every change; App owns the state and the feed
+   * rebuild.
    */
   import { createEventDispatcher } from "svelte";
   import RatingFilter from "./RatingFilter.svelte";
   import OrientationFilter from "./OrientationFilter.svelte";
   import TimelineFilter from "./TimelineFilter.svelte";
   import { DEFAULT_FILTER, isActive as filterIsActive } from "./filterSpec.js";
-  import { ALL_DIMENSIONS, SORT_ATTRS, SORT_LABELS } from "./dimensions.js";
+  import { ALL_DIMENSIONS } from "./dimensions.js";
   import MultiAutoSelect from "multi-auto-select";
 
   export let groupBy = ["folder"];
-  export let sort = { by: "date_taken", dir: "asc" };
   export let filter = { ...DEFAULT_FILTER };
   export let filterMode = "display";
   // Time-range filter facet (a compact sparkline that sits with stars/orientation).
@@ -35,6 +34,7 @@
       value: initialValue,
       placeholder: "Add a grouping level…",
       sortable: true,
+      layout: "inline",
     });
     widget.addEventListener("input", () =>
       dispatch("groupbychange", widget.value)
@@ -50,29 +50,6 @@
 
 <div class="cluster organize">
   <div class="group-by" use:groupBySelector={groupBy}></div>
-  <div class="sort-control" title="Sort photos">
-    <select
-      class="sort-by"
-      value={sort.by}
-      on:change={(e) => dispatch("sortchange", { ...sort, by: e.target.value })}
-    >
-      {#each SORT_ATTRS as key}
-        <option value={key}>{SORT_LABELS[key]}</option>
-      {/each}
-    </select>
-    <button
-      class="sort-dir"
-      title="Toggle ascending / descending"
-      aria-label="Toggle sort direction"
-      on:click={() =>
-        dispatch("sortchange", {
-          ...sort,
-          dir: sort.dir === "asc" ? "desc" : "asc",
-        })}
-    >
-      {sort.dir === "asc" ? "↑" : "↓"}
-    </button>
-  </div>
   <div class="divider"></div>
   <div class="seg-toggle icons" role="group" aria-label="Filter mode">
     <button
@@ -179,37 +156,6 @@
   .cluster.organize {
     flex-wrap: wrap;
   } /* pills wrap WITHIN the cluster, not pushing siblings */
-  .sort-control {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    background: #101010;
-    border: 1px solid #333;
-    border-radius: 6px;
-    padding: 2px;
-  }
-  .sort-by {
-    background: transparent;
-    border: none;
-    color: #cfcfcf;
-    font-size: 0.8rem;
-    padding: 3px 4px;
-    cursor: pointer;
-  }
-  .sort-dir {
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: #9a9a9a;
-    font-size: 0.9rem;
-    line-height: 1;
-    padding: 3px 7px;
-    cursor: pointer;
-  }
-  .sort-dir:hover {
-    background: #222;
-    color: #e8e8e8;
-  }
   .seg-toggle {
     display: flex;
     gap: 2px;
@@ -244,7 +190,7 @@
     height: 15px;
     display: block;
   }
-  /* Group boundary between the organize controls (group-by/sort/mode) and the
+  /* Group boundary between the organize controls (group-by/mode) and the
      filter widgets (stars / orientation / time), matching the toolbar dividers. */
   .divider {
     width: 1px;

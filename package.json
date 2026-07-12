@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.8.17-alpha",
+  "version": "2.8.23-alpha",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
@@ -31,14 +31,14 @@
     "express": "^4.19.2",
     "ffmpeg-static": "^5.3.0",
     "ffprobe-static": "^3.1.0",
-    "multi-auto-select": "^0.0.11",
+    "multi-auto-select": "^0.0.12",
     "reactive-widget-helper": "^0.0.3",
     "sharp": "^0.35.3",
     "sortablejs": "^1.15.7"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.1",
-    "@john-guerra/d3-zoomable-axis": "^0.0.3",
+    "@john-guerra/d3-zoomable-axis": "^0.0.5",
     "@sveltejs/vite-plugin-svelte": "^3.1.2",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",

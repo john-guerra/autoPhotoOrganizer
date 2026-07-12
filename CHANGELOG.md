@@ -6,13 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
-## 2.8.17-alpha
+## 2.8.23-alpha
 
 - **Dropped the redundant per-group "Select" button** — the new select-all
   checkbox on each group label already selects (and deselects) the whole group,
   so the label now shows just the checkbox, Keep only, and Remove (issue #88).
 
-## 2.8.16-alpha
+## 2.8.22-alpha
 
 - **Every group label now offers the same actions and a select-all checkbox,
   whether the group is expanded, shown as a snapshot strip, or collapsed.**
@@ -21,7 +21,7 @@ user-facing — what you can now do, not how it's built.
   the group's photos are selected, or filled when all are — and clicking it
   selects or deselects the whole group at once (issue #88).
 
-## 2.8.15-alpha
+## 2.8.21-alpha
 
 - **Snapshot-strip thumbnails no longer get stuck broken.** Collapsing groups to
   snapshot strips used to sometimes leave broken-image tiles that stayed broken
@@ -29,6 +29,40 @@ user-facing — what you can now do, not how it's built.
   preview, and only ever show a clear "unavailable" marker instead of a silent
   broken glyph. They also reuse the grid's already-cached thumbnails, so
   collapsing is faster and far less likely to fail (issue #90).
+
+## 2.8.20-alpha
+
+- Cleaned up accessibility warnings across the modals, loupe, sidebars, and
+  filters (keyboard/screen-reader affordances; no visible change).
+
+## 2.8.19-alpha
+
+- Timeline capture-time filter upgraded to the latest zoomable-axis widget.
+
+## 2.8.18-alpha
+
+- Compact single-row group-by control keeps the top toolbar to one row (#82).
+
+## 2.8.17-alpha
+
+- New bottom status bar shows library/showing/selected counts, scan status,
+  zoom, burst, and sort — freeing the top toolbar for actions (#82).
+
+## 2.8.16-alpha
+
+- **Timeline density reads truer to your shoots** — the date timeline now
+  smooths less by default (finer bandwidth, more detail points, honest curve),
+  so photo bursts and the quiet gaps between them stay visible instead of being
+  blurred together — making album boundaries easier to spot. You can still
+  retune it from the gear popover. (#82)
+
+## 2.8.15-alpha
+
+- **Expanding a collapsed group no longer flickers** — re-expanding a section
+  you just collapsed now paints its already-loaded thumbnails instantly, instead
+  of blanking every tile to a spinner and reloading the whole group over a second
+  or two. The images were already in the browser cache the whole time; the tiles
+  just weren't reusing them on the re-mount (#41).
 
 ## 2.8.14-alpha
 

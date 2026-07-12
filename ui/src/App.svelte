@@ -74,6 +74,7 @@
   import SelectionBar from "./lib/SelectionBar.svelte";
   import GroupLabelActions from "./lib/GroupLabelActions.svelte";
   import { selectState, intersectionCount } from "./lib/groupSelection.js";
+  import StatusBar from "./lib/StatusBar.svelte";
   import {
     DEFAULT_FILTER,
     isActive as filterIsActive,
@@ -2841,7 +2842,6 @@
     <!-- ② ORGANIZE & FILTER -->
     <OrganizeControls
       {groupBy}
-      {sort}
       {filter}
       {filterMode}
       {timeMin}
@@ -2849,7 +2849,6 @@
       {timeTimes}
       currentTime={markerTime}
       on:groupbychange={(e) => onGroupByChange(e.detail)}
-      on:sortchange={(e) => onSortChange(e.detail)}
       on:filtermodechange={(e) => onFilterModeChange(e.detail)}
       on:filterchange={(e) => onFilterChange(e.detail)}
     />
@@ -2863,25 +2862,10 @@
       {globalViewMode}
       bind:albumMode
       {detectingAlbums}
-      bind:zoom
-      zoomMax={ZOOM_LEVELS.length - 1}
-      bind:burstEnabled
-      bind:burstGapMs
       on:revealcurrent={revealCurrentLocation}
       on:cycleall={cycleAllGroups}
       on:detectalbums={detectAlbums}
     />
-
-    <div
-      class="counts"
-      title="Photos in the whole library · shown under the current filter/focus · currently selected"
-    >
-      <span>{libraryTotal.toLocaleString()} <em>library</em></span>
-      <span>{showingCount.toLocaleString()} <em>showing</em></span>
-      <span class:has-sel={selectedCount > 0}
-        >{selectedCount.toLocaleString()} <em>selected</em></span
-      >
-    </div>
 
     {#if keepIds}
       <button
@@ -2920,13 +2904,6 @@
       on:choosedest={chooseExportDest}
       on:export={doExport}
     />
-
-    <span class="status" class:err={!!error}>{error || status}</span>
-    {#if thumbProgress}
-      <span class="thumb-progress" class:err={thumbCounts.error > 0}>
-        {thumbProgress}
-      </span>
-    {/if}
 
     <button
       class="help-btn"
@@ -3181,6 +3158,7 @@
                   box={boxes[i]}
                   pad={PAD}
                   size={thumbSize}
+                  warm={thumbStatus.get(resolvePhoto(entry).id) === "ok"}
                   selected={i === selected}
                   inSelection={selectedIds.has(resolvePhoto(entry).id)}
                   stackCount={entry.kind === "stack"
@@ -3235,6 +3213,22 @@
       {/if}
     </div>
   </div>
+
+  <StatusBar
+    {libraryTotal}
+    {showingCount}
+    {selectedCount}
+    {status}
+    {error}
+    {thumbProgress}
+    {thumbCounts}
+    bind:zoom
+    zoomMax={ZOOM_LEVELS.length - 1}
+    bind:burstEnabled
+    bind:burstGapMs
+    {sort}
+    on:sortchange={(e) => onSortChange(e.detail)}
+  />
 </div>
 
 <JobsPanel />
@@ -3331,26 +3325,6 @@
     margin-left: auto;
   }
 
-  /* Three-level counts: library / showing / selected. */
-  .counts {
-    display: flex;
-    gap: 10px;
-    font-size: 0.8rem;
-    color: #cfcfcf;
-    white-space: nowrap;
-  }
-  .counts em {
-    font-style: normal;
-    color: #808080;
-  }
-  .counts .has-sel {
-    color: #ffd24c;
-    font-weight: 600;
-  }
-  .counts .has-sel em {
-    color: #b9932f;
-  }
-
   .keep-chip {
     display: inline-flex;
     align-items: center;
@@ -3422,24 +3396,6 @@
     background: #333;
     color: #fff;
     border-color: #555;
-  }
-  .status {
-    color: #9a9a9a;
-    font-size: 0.85rem;
-    white-space: nowrap;
-    flex-shrink: 0;
-    margin-left: 0.25rem;
-  }
-  .status.err {
-    color: #ff6b6b;
-  }
-  .thumb-progress {
-    color: #9a9a9a;
-    font-size: 0.8rem;
-    white-space: nowrap;
-  }
-  .thumb-progress.err {
-    color: #ff8a80;
   }
   .grid {
     /* Justified layout: children are absolutely positioned by computed boxes;

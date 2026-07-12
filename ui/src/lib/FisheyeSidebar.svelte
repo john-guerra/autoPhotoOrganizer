@@ -267,7 +267,11 @@
             class:current={isCurrent}
             transform="translate(0,{row.y})"
             on:click={() => onRowClick(row)}
+            on:keydown={(e) =>
+              (e.key === "Enter" || e.key === " ") &&
+              (e.preventDefault(), onRowClick(row))}
             role="option"
+            tabindex="-1"
             aria-selected={isCurrent}
           >
             <!-- row band: HEIGHT encodes the fisheye lens (tall at focus) -->
