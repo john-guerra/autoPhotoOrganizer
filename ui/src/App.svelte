@@ -3390,8 +3390,10 @@
             {#each layoutResult.headers as header (header.dimension + header.value + header.index)}
               <div
                 class="section-wrapper"
+                class:nested={header.depth > 0}
                 data-group-key={header.path ? pathKey(header.path) : undefined}
-                style="top:{header.y}px; height:{header.endY - header.y}px;"
+                style="--depth:{header.depth}; top:{header.y}px; height:{header.endY -
+                  header.y}px;"
               >
                 <div
                   class="section-header"
@@ -3889,10 +3891,28 @@
   .grid:focus {
     outline: none;
   }
+  /* Nesting is drawn as a dendrogram: each level is indented, a dotted trunk runs
+     down the sub-group's spine, and a dotted elbow joins each child header to it
+     — so a sub-group visibly belongs to the group above instead of floating as
+     just another header. `--depth` is set on the wrapper; custom properties
+     inherit, so the header reads it from there. */
   .section-wrapper {
+    --ind: 18px;
+    --trunk: calc(15px + (var(--depth, 0) - 1) * var(--ind));
     position: absolute;
     left: 0;
     width: 100%;
+    pointer-events: none;
+  }
+  /* Vertical trunk spanning this sub-group's whole extent — consecutive siblings
+     stack their segments into one continuous line. */
+  .section-wrapper.nested::before {
+    content: "";
+    position: absolute;
+    left: var(--trunk);
+    top: 0;
+    bottom: 0;
+    border-left: 1px dotted #454545;
     pointer-events: none;
   }
   .section-header {
@@ -3901,9 +3921,19 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 8px;
+    padding: 4px 8px 4px calc(8px + var(--depth, 0) * var(--ind));
     background: #141414;
     pointer-events: auto;
+  }
+  /* The elbow from the trunk into this header. */
+  .section-wrapper.nested > .section-header::before {
+    content: "";
+    position: absolute;
+    left: var(--trunk);
+    width: calc(var(--ind) - 4px);
+    top: 50%;
+    border-top: 1px dotted #454545;
+    pointer-events: none;
   }
   /* Same tri-state icon (and same colour language) as the tree sidebar's
      feed-visibility control, so one group state always reads the same way:

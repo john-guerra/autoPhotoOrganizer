@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.16
+
+- **Nested groups now look nested.** With more than one grouping level, each
+  sub-group is indented under its parent and joined to it by dotted dendrogram
+  lines, so you can see the hierarchy at a glance instead of a flat stack of
+  headers. (usability testing)
+
 ## 2.9.15
 
 - **The app now tells you when the server is gone.** If the backend crashes or
