@@ -3279,6 +3279,12 @@
     </div>
   </div>
 
+  <!-- In the app's flex column, directly above the status bar: the jobs strip
+       takes its own space (up to 40vh) and the grid shrinks to fit, so an
+       active job never paints over the status bar (it used to be fixed at
+       bottom:0 and cover it). -->
+  <JobsPanel />
+
   <StatusBar
     {libraryTotal}
     {showingCount}
@@ -3295,8 +3301,6 @@
     on:sortchange={(e) => onSortChange(e.detail)}
   />
 </div>
-
-<JobsPanel />
 
 {#if loupeOpen}
   <Loupe

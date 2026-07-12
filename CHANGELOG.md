@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.5
+
+- **The status bar is no longer hidden by background jobs.** The jobs strip
+  (scan/export/undo progress) now sits directly above the status bar instead of
+  painting over it, so counts, sort, and zoom stay visible while a job runs.
+  (usability testing)
+
 ## 2.9.4
 
 - **Select all with ⌘A / Ctrl+A.** Pressing ⌘A (Ctrl+A on Windows/Linux) now

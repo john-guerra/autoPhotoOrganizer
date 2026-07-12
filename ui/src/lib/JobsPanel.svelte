@@ -145,11 +145,10 @@
 
 <style>
   .jobs-panel {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 500;
+    /* In-flow strip in the app's flex column (was position:fixed bottom:0,
+       which painted over the status bar). flex-shrink:0 so it keeps its
+       height and the grid above shrinks instead. */
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
     background: #101010;
