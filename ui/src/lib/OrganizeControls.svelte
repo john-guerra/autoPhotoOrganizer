@@ -21,7 +21,8 @@
   export let timeMin = null; // epoch ms domain start (null = no time data yet)
   export let timeMax = null; // epoch ms domain end
   export let timeTimes = []; // sampled timestamps for the density sparkline
-  export let currentTime = null; // "you are here" marker (epoch ms)
+  export let viewTime = null; // "current view" marker — first row on screen (epoch ms)
+  export let focusTime = null; // "focused photo" marker — the selected photo (epoch ms)
 
   const dispatch = createEventDispatcher();
 
@@ -116,7 +117,8 @@
         min={timeMin}
         max={timeMax}
         times={timeTimes}
-        {currentTime}
+        {viewTime}
+        {focusTime}
         value={[filter.dateFrom ?? null, filter.dateTo ?? null]}
         on:range={(e) =>
           dispatch("filterchange", {

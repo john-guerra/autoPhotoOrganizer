@@ -38,7 +38,8 @@
   export let max = null; // epoch ms, domain end
   export let times = []; // sampled timestamps (ms) for the KDE
   export let value = null; // [fromMs|null, toMs|null] current brush, or null
-  export let currentTime = null; // epoch ms of the first photo in view ("you are here")
+  export let viewTime = null; // epoch ms of the first photo on screen ("current view")
+  export let focusTime = null; // epoch ms of the focused/selected photo ("focused photo")
 
   const dispatch = createEventDispatcher();
   const AXIS_MARGIN = 22; // zoomableAxisInput's default side margin (px each side)
@@ -46,20 +47,42 @@
 
   let width = 0; // measured via bind:clientWidth (SnapshotStrip lesson)
 
-  // "You are here": pixel x of the current photo's time along the axis. Uses the
-  // same geometry the widget mounts with (AXIS_MARGIN + length), so the marker
-  // lines up with the axis by construction. The axis is always full-domain (the
-  // brush is an overlay band, not a re-zoom), so this mapping is stable.
-  $: markerPx =
-    currentTime == null ||
-    min == null ||
-    max == null ||
-    max <= min ||
-    !(width > 0)
-      ? null
-      : AXIS_MARGIN +
-        Math.max(0, Math.min(1, (currentTime - min) / (max - min))) *
-          Math.max(60, width - AXIS_MARGIN * 2);
+  // Map a data-space time to the axis pixel x. Uses the same geometry the widget
+  // mounts with (AXIS_MARGIN + length), so markers line up with the axis by
+  // construction. The axis is always full-domain (the brush is an overlay band, not
+  // a re-zoom), so this mapping is stable.
+  function pxForTime(t) {
+    if (t == null || min == null || max == null || max <= min || !(width > 0))
+      return null;
+    return (
+      AXIS_MARGIN +
+      Math.max(0, Math.min(1, (t - min) / (max - min))) *
+        Math.max(60, width - AXIS_MARGIN * 2)
+    );
+  }
+  $: viewPx = pxForTime(viewTime);
+  $: focusPx = pxForTime(focusTime);
+
+  // When the focused photo IS the top of the viewport the two anchors sit on top of
+  // each other; collapse to just the amber focus marker so the caps don't overlap
+  // into mush. As you scroll away, `viewPx` diverges and the eye marker reappears —
+  // which is exactly the "two markers" the split is for.
+  // TUNABLE: the coincidence threshold (px) and which marker wins on overlap.
+  $: markersCoincide =
+    viewPx != null && focusPx != null && Math.abs(viewPx - focusPx) < 7;
+  $: showViewMarker = viewPx != null && !markersCoincide;
+  $: showFocusMarker = focusPx != null;
+
+  // Tooltips carry the anchor's date so hovering a marker says both what it is and
+  // when it points to.
+  $: viewLabel =
+    viewTime == null
+      ? "Current view"
+      : `Current view — ${fmt(new Date(viewTime))}`;
+  $: focusLabel =
+    focusTime == null
+      ? "Focused photo"
+      : `Focused photo — ${fmt(new Date(focusTime))}`;
 
   // Resolve the brush endpoints from `value`, filling open bounds with the
   // domain edges. A null/empty value means "no time filter" → full span.
@@ -167,14 +190,28 @@
   <!-- The density settings ⚙ gear + popover now live inside the widget itself
        (scent.controls), which also persists the tuned params (scent.persistKey). -->
   <div class="timeline-axis" use:timeline={{ min, max, times, value, width }}>
-    {#if markerPx != null}
+    {#if showViewMarker}
+      <div class="marker view-marker" style="left:{viewPx}px" title={viewLabel}>
+        <span class="cap eye-cap">
+          <svg viewBox="0 0 12 9" width="12" height="9" aria-hidden="true">
+            <path
+              d="M1 4.5C3 1 9 1 11 4.5 9 8 3 8 1 4.5Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.3"
+            />
+            <circle cx="6" cy="4.5" r="1.7" fill="currentColor" />
+          </svg>
+        </span>
+      </div>
+    {/if}
+    {#if showFocusMarker}
       <div
-        class="you-are-here"
-        style="left:{markerPx}px"
-        title="Current view"
-        aria-hidden="true"
+        class="marker focus-marker"
+        style="left:{focusPx}px"
+        title={focusLabel}
       >
-        <span class="yah-cap"></span>
+        <span class="cap tri-cap" aria-hidden="true"></span>
       </div>
     {/if}
   </div>
@@ -208,27 +245,45 @@
     padding: 1px 6px;
     letter-spacing: -0.2px;
   }
-  /* "You are here": a thin amber marker at the current view's time — read-only,
-     distinct from the blue brush band. Sits above the axis; never intercepts
-     clicks so the handles/brush stay usable underneath it. */
-  /* Short amber tick spanning just the density band down to the axis line
-     (thickness 30 → axis at ~37px), so it marks the spot without adding height. */
-  .you-are-here {
+  /* Two read-only "you are here" ticks over the density band, distinct from the
+     blue brush. The FOCUS tick (amber) marks the photo you're working on; the VIEW
+     tick (cool grey, eye cap) marks the top of what's on screen and moves as you
+     scroll. Short ticks span just the band down to the axis line (thickness 30 →
+     axis at ~37px), so they mark the spot without adding toolbar height. The line
+     never intercepts clicks (handles/brush stay usable underneath); only the small
+     cap above the band is hoverable, so its `title` tooltip is reachable. */
+  .marker {
     position: absolute;
     top: 7px;
     height: 30px;
     width: 2px;
-    background: #ffd24c;
     transform: translateX(-1px);
     pointer-events: none;
-    z-index: 5;
     transition: left 90ms linear;
   }
-  .yah-cap {
+  .view-marker {
+    background: #b9c2cc;
+    z-index: 5;
+  }
+  .focus-marker {
+    background: #ffd24c;
+    z-index: 6; /* the working photo wins if the two ticks are near each other */
+  }
+  .cap {
     position: absolute;
-    top: -4px;
     left: 50%;
     transform: translateX(-50%);
+    line-height: 0;
+    pointer-events: auto; /* hoverable so the tooltip shows, without blocking the band */
+  }
+  .eye-cap {
+    top: -11px;
+    color: #b9c2cc;
+  }
+  .tri-cap {
+    top: -4px;
+    width: 0;
+    height: 0;
     border-left: 3px solid transparent;
     border-right: 3px solid transparent;
     border-top: 4px solid #ffd24c;

@@ -1355,29 +1355,34 @@
     }
     return null;
   }
-  // Pass dateAttr so the marker recomputes when the sort date changes, not just
-  // on scroll (Svelte only tracks deps named in the reactive expression).
-  $: currentTime = deriveCurrentTime(
-    hereIndex,
-    displayEntries,
-    filter.dateAttr
-  );
-  // The marker follows the loaded feed window (`displayEntries`), which is rebuilt
+  // Two distinct timeline anchors, kept SEPARATE on purpose. The single merged
+  // "you are here" tick used to wander on scroll because it conflated two ideas:
+  //   • FOCUS — the photo you're working on (`selected`). Stays put as you scroll.
+  //   • VIEW  — the first row currently on screen (`renderStart`). Moves on scroll.
+  // The timeline now draws both (an eye tick for view, an amber tick for focus), so
+  // scrolling the feed never makes your focused photo's marker drift. Pass dateAttr
+  // so both recompute when the sort date changes, not just on scroll (Svelte only
+  // tracks deps named in the reactive expression).
+  $: focusTime = deriveCurrentTime(selected, displayEntries, filter.dateAttr);
+  $: viewTime = deriveCurrentTime(renderStart, displayEntries, filter.dateAttr);
+  // The markers follow the loaded feed window (`displayEntries`), which is rebuilt
   // asynchronously on each filter change, while the selection band follows `filter`
   // synchronously. During rapid brushing the window lags the band, which would
-  // paint the "you are here" marker OUTSIDE the selection until the feed catches up.
-  // In display mode the feed is narrowed to the range, so a marker outside it is a
-  // stale-window artifact — suppress it until the feed reconciles (state-driven, no
-  // settle timer). In select mode the grid spans the whole library, so a marker
-  // outside the (sub-range) selection is legitimate and stays visible.
-  $: markerTime = (() => {
-    if (currentTime == null) return null;
-    if (filterMode === "select") return currentTime;
-    const { dateFrom, dateTo } = filter;
-    if (dateFrom != null && currentTime < dateFrom) return null;
-    if (dateTo != null && currentTime > dateTo) return null;
-    return currentTime;
-  })();
+  // paint a marker OUTSIDE the selection until the feed catches up. In display mode
+  // the feed is narrowed to the range, so a marker outside it is a stale-window
+  // artifact — suppress it until the feed reconciles (state-driven, no settle
+  // timer). In select mode the grid spans the whole library, so a marker outside
+  // the (sub-range) selection is legitimate and stays visible. `mode`/`f` are named
+  // params so Svelte re-clamps when filterMode/filter change, not just the time.
+  function clampMarker(t, mode, f) {
+    if (t == null) return null;
+    if (mode === "select") return t;
+    if (f.dateFrom != null && t < f.dateFrom) return null;
+    if (f.dateTo != null && t > f.dateTo) return null;
+    return t;
+  }
+  $: focusMarkerTime = clampMarker(focusTime, filterMode, filter);
+  $: viewMarkerTime = clampMarker(viewTime, filterMode, filter);
 
   /** Keeps the first occurrence of each id, dropping later repeats. Guards
    * against a real, observed case: fetching "before" and "after" a focusId
@@ -2862,7 +2867,8 @@
       {timeMin}
       {timeMax}
       {timeTimes}
-      currentTime={markerTime}
+      viewTime={viewMarkerTime}
+      focusTime={focusMarkerTime}
       on:groupbychange={(e) => onGroupByChange(e.detail)}
       on:filtermodechange={(e) => onFilterModeChange(e.detail)}
       on:filterchange={(e) => onFilterChange(e.detail)}

@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.8.27-alpha
+
+- **The timeline now shows two "you are here" markers instead of one that
+  wandered.** An amber marker pins to the photo you're focused on and stays put
+  as you scroll; a separate grey eye marker tracks the top of what's currently on
+  screen. When they line up they merge into one; scroll away and the eye marker
+  splits off. Hover either for its date.
+
 ## 2.8.26-alpha
 
 - **The loupe filmstrip now shows star ratings** — each thumbnail carries its
