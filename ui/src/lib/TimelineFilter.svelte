@@ -14,7 +14,7 @@
    */
   import { createEventDispatcher } from "svelte";
   import { scaleTime, timeFormat } from "d3";
-  import { zoomableAxisInput } from "@john-guerra/d3-zoomable-axis";
+  import { zoomableAxisInput } from "@john-guerra/d3-zoomable-axis/input";
 
   // Density (KDE/scent) look. The widget owns the live settings popover + its
   // persistence now (scent.controls + scent.persistKey), so these are just the
