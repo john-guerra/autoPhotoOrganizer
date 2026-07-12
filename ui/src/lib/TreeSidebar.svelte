@@ -54,9 +54,26 @@
   }
   $: (groupBy, filter, sort, refreshToken, resetAndLoad());
 
+  // Track the in-flight PROMISE, not just a "loading" flag: expandAll awaits
+  // loadChildren and then reads childrenByKey, so bailing out early on a
+  // concurrent fetch made it silently see an empty child list and stop
+  // descending that subtree.
+  const inflight = new Map(); // treeKey -> Promise
+
   async function loadChildren(path) {
     const key = treeKey(path);
-    if (childrenByKey.has(key) || loadingKeys.has(key)) return;
+    if (childrenByKey.has(key)) return;
+    if (inflight.has(key)) return inflight.get(key);
+    const p = loadChildrenNow(path, key);
+    inflight.set(key, p);
+    try {
+      await p;
+    } finally {
+      inflight.delete(key);
+    }
+  }
+
+  async function loadChildrenNow(path, key) {
     loadingKeys = new Set(loadingKeys).add(key);
     try {
       const { nodes } = await fetchTreeNode({ groupBy, path, filter, sort });

@@ -1879,15 +1879,26 @@
     return frontier;
   }
 
+  // A shift-fold walks the hierarchy with one tree fetch per internal node. That
+  // can take seconds on a deep/large library, and a second click mid-traversal
+  // would interleave two of them. Guard it, and SAY it's working (CLAUDE.md: a
+  // long operation must show progress, not a frozen control).
+  let foldingLeaves = false;
+
   /** Shift+click on a group with subgroups: cycle ALL of its leaves together. */
   async function cycleGroupLeaves(path) {
     if (path.length >= groupBy.length) return cycleGroupState(path); // already a leaf
+    if (foldingLeaves) return;
+    foldingLeaves = true;
+    status = "Folding subgroups…";
     let leaves;
     try {
       leaves = await collectLeafPaths(path);
     } catch (e) {
       error = `Couldn't fold the subgroups: ${e.message}`;
       return;
+    } finally {
+      foldingLeaves = false;
     }
     if (!leaves.length) return cycleGroupState(path); // nothing beneath → aggregate
     if (leaves.length > MAX_FOLD_LEAVES) {

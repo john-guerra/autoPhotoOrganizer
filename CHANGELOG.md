@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.23
+
+- **Shift-folding a big group now says it's working** instead of looking frozen,
+  and a second click can't start a competing fold.
+- **Fixed: expanding the tree could silently stop part-way** if a folder's
+  children were already being fetched.
+
 ## 2.9.22
 
 - **Reconnecting no longer sends you back to the top.** After the server restarts,
