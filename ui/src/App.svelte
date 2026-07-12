@@ -3591,7 +3591,7 @@
                 {@const renderer = getRenderer(
                   rendererIdFor(
                     entry.item.path,
-                    collapsedPaths,
+                    collapsedKeys,
                     snapshotGroupKeys
                   )
                 )}

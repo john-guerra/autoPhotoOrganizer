@@ -6,6 +6,11 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.24
+
+- **Fixed: collapsing a group in the feed threw an error** (a regression
+  introduced by the 2.9.21 performance change).
+
 ## 2.9.23
 
 - **Shift-folding a big group now says it's working** instead of looking frozen,
