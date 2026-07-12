@@ -62,7 +62,7 @@
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import JobsPanel from "./lib/JobsPanel.svelte";
   import GroupStateIcon from "./lib/GroupStateIcon.svelte";
-  import { getRenderer, nextRendererId } from "./lib/groupRenderers.js";
+  import { getRenderer, isServerCollapsed } from "./lib/groupRenderers.js";
   import ServerBanner from "./lib/ServerBanner.svelte";
   import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
@@ -888,8 +888,15 @@
    * SQLite (files on disk are untouched; a rescan re-adds the photos, unrated).
    * Only meaningful for a folder group; the button is gated on a folder leaf. */
   async function removeAlbum(path) {
-    const folderPath = path?.find((p) => p.dimension === "folder")?.value;
-    if (!folderPath) return;
+    // Accept BOTH folder dims. isRemovableFolder() offers Remove for `folder`
+    // AND `folderName` groups (they carry the same abs path server-side), but
+    // this only looked for `folder` — so on a folderName group the button
+    // rendered and did nothing at all. A silent no-op is exactly what we forbid.
+    const folderPath = folderFromGroupPath(path);
+    if (!folderPath) {
+      error = "Can't remove this group — it isn't a folder.";
+      return;
+    }
     const key = pathKey(path);
     if (removeArmedKey !== key) {
       removeArmedKey = key; // first click arms the confirm
@@ -1346,10 +1353,35 @@
       // See loadInitialFeed: displayEntries needs a tick to reflect the
       // `items` assignment above before it can be used to pick `selected`.
       await tick();
-      selected = nextSelectable(displayEntries, 0, 1) ?? 0;
       loupeOpen = false;
-      focusPending = true;
-      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+
+      // A FOLDED target (snapshot/collapsed) has no photos in the feed — it is a
+      // single placeholder row. nextSelectable() skips placeholders, so it used
+      // to silently focus the NEXT group's photos and the jump appeared to do
+      // nothing. Land on the group's own row instead.
+      const targetKey = pathKey(path);
+      const folded = isServerCollapsed(
+        rendererIdFor(path, collapsedPaths, snapshotGroupKeys)
+      );
+      if (folded) {
+        await tick();
+        const el = [
+          ...(mainColumnEl?.querySelectorAll("[data-group-key]") ?? []),
+        ].find((n) => n.dataset.groupKey === targetKey);
+        if (el) {
+          el.scrollIntoView({ block: "start" });
+          status =
+            "Jumped to the group (it's folded — click its icon to open).";
+        } else {
+          // Never fail silently: the group didn't make it into the window.
+          error =
+            "Couldn't jump to that group — it isn't in the loaded range. Open it (click its icon) and try again.";
+        }
+      } else {
+        selected = nextSelectable(displayEntries, 0, 1) ?? 0;
+        focusPending = true;
+        status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+      }
       enrichMeta(page.map((i) => i.id));
     });
   }

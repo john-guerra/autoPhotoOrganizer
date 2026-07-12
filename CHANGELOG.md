@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.20
+
+- **Fixed: "Remove" did nothing on folder-name groups.** The button was offered
+  (2.9.13) but the handler only accepted full-path folder groups, so clicking it
+  silently did nothing. It now works — and says so if a group isn't a folder.
+- **Fixed: clicking a folded group in the tree jumped to the wrong place.** If the
+  group was showing a snapshot (or collapsed), the feed skipped it and landed on
+  the next group's photos. It now lands on the group itself.
+- **The tree sidebar starts fully expanded**, so the library map is visible
+  without unfolding it node by node.
+
 ## 2.9.19
 
 - **Fixed: hovering a group title blew the header up.** Hovering a section header

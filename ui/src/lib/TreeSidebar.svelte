@@ -40,12 +40,17 @@
   // with, so the whole tree resets whenever the hierarchy order changes —
   // matches the same reasoning collapsedPaths already resets on hierarchy
   // change in App.svelte.
-  function resetAndLoad() {
+  async function resetAndLoad() {
     childrenByKey = new Map();
     expandedKeys = new Set();
     loadingKeys = new Set();
     highlightedKey = null;
-    loadRoot();
+    await loadRoot();
+    // Open by default: the tree is a map of the library, and a map you have to
+    // unfold one node at a time isn't much of a map. expandAll() is capped
+    // (MAX_EXPAND_NODES) and reports when it stops, so a huge library degrades
+    // to "expanded as far as is sane" rather than a fetch storm.
+    if (groupBy.length > 1) expandAll();
   }
   $: (groupBy, filter, sort, refreshToken, resetAndLoad());
 
