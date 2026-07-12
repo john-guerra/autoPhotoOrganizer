@@ -773,6 +773,27 @@
     return selectState(intersectionCount(entry.ids, _sel), entry.ids.length);
   }
 
+  /** Cmd/Ctrl+A: add every photo matching the current filter/sort to the
+   * selection (path=null → the whole working set, not just one group). Reuses
+   * the same server select-all query as group select-all and export. */
+  async function selectAllInView() {
+    if (!displayEntries.length) return;
+    try {
+      const ids = await fetchPhotoIds(
+        filterIsActive(displayFilter) ? displayFilter : null,
+        null,
+        sort
+      );
+      if (!ids.length) return;
+      selectedIds = new Set([...selectedIds, ...ids]);
+      status = `Selected ${selectedIds.size.toLocaleString()} photo${
+        selectedIds.size === 1 ? "" : "s"
+      }`;
+    } catch (e) {
+      error = `Select all failed: ${e.message}`;
+    }
+  }
+
   /** Click the group's select icon: select-all, or deselect-all if already all. */
   async function toggleGroupSelectAll(path) {
     const key = pathKey(path);
@@ -2479,6 +2500,18 @@
   }
 
   async function onKeydown(e) {
+    // Cmd/Ctrl+A selects every photo in the current working set (the same
+    // whole-set query the group select-all and export use). Handled before the
+    // blanket meta/ctrl bail below, but only when focus isn't in a text field —
+    // there, Cmd/Ctrl+A must still select the field's text.
+    if ((e.metaKey || e.ctrlKey) && (e.key === "a" || e.key === "A")) {
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)
+        return;
+      e.preventDefault();
+      await selectAllInView();
+      return;
+    }
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
 
     // The shortcuts-help overlay owns the keyboard while open: '?' toggles

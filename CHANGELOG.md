@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.4
+
+- **Select all with ⌘A / Ctrl+A.** Pressing ⌘A (Ctrl+A on Windows/Linux) now
+  selects every photo in the current view — the whole filtered working set, not
+  just the loaded window — unless you're typing in a text field. (usability
+  testing)
+
 ## 2.9.3
 
 - **Click to select, click to rate.** Every grid tile and the loupe now have a
