@@ -9,3 +9,8 @@ release/
 .worktrees/
 .superpowers/
 docs/TEST_FOLDERS.local.md
+
+# e2e fixture library + temp index (generated)
+e2e/.tmp/
+test-results/
+playwright-report/

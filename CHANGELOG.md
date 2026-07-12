@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.25
+
+- **Automated UI testing (developer-facing).** The project now has a second test
+  tier: real browser, real clicks (Playwright), on a throwaway library of its own.
+  `npm run test:unit` (fast) / `npm run test:e2e` (UI) / `npm run test:all`. The
+  first six tests each lock in a bug that actually shipped during this batch.
+
 ## 2.9.24
 
 - **Fixed: collapsing a group in the feed threw an error** (a regression

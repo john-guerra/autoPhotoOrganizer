@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.9.24",
+  "version": "2.9.25",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
@@ -21,7 +21,11 @@
     "build": "vite build ui",
     "test": "vitest run",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:unit": "vitest run",
+    "test:all": "npm run test:unit && npm run test:e2e"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
@@ -39,6 +43,7 @@
   "devDependencies": {
     "@electron/rebuild": "^3.6.1",
     "@john-guerra/d3-zoomable-axis": "^0.0.5",
+    "@playwright/test": "^1.61.1",
     "@sveltejs/vite-plugin-svelte": "^3.1.2",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
