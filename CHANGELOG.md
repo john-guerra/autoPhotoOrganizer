@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.7
+
+- **Time now sorts oldest-first by default**, so a freshly-scanned trip reads in
+  the order it was shot. (Your existing sort preference is kept.) (usability
+  testing)
+- **File sizes on the thumbnails when sorting by size.** Sorting by Size now
+  shows each photo's size in the bottom-right of its tile (tucked above the
+  burst-count badge on stacks). (usability testing)
+
 ## 2.9.6
 
 - **Filter by media type.** New Photos / RAW / Videos toggles in the toolbar

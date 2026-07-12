@@ -185,7 +185,9 @@
     } catch {
       /* fall through to default */
     }
-    return { by: "date_taken", dir: "desc" };
+    // Ascending (oldest first) by default — culling a trip reads best in the
+    // order it was shot. Existing users keep their persisted sort (above).
+    return { by: "date_taken", dir: "asc" };
   })();
   $: localStorage.setItem(LS_SORT, JSON.stringify(sort));
 
@@ -3215,6 +3217,7 @@
                   warm={thumbStatus.get(resolvePhoto(entry).id) === "ok"}
                   selected={i === selected}
                   inSelection={selectedIds.has(resolvePhoto(entry).id)}
+                  showSize={sort.by === "size"}
                   stackCount={entry.kind === "stack"
                     ? entry.stack.count
                     : undefined}

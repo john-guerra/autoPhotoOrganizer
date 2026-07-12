@@ -9,6 +9,7 @@
 <script>
   import { onMount, onDestroy, createEventDispatcher } from "svelte";
   import { thumbUrl, previewUrl, formatDuration } from "./api.js";
+  import { formatSize } from "./exifFormat.js";
   import Stars from "./Stars.svelte";
 
   const dispatch = createEventDispatcher();
@@ -19,6 +20,7 @@
   export let size = 640; // thumb longest edge; higher zoom requests sharper
   export let selected = false;
   export let inSelection = false; // member of the multi-select set (batch export)
+  export let showSize = false; // show the file-size pill (when sorting by size)
   export let stackCount = undefined; // set when this tile is a collapsed stack's cover
   export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
   export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
@@ -269,6 +271,13 @@
     {#if stackCount}
       <span class="stack-badge">×{stackCount}</span>
     {/if}
+    {#if showSize && item.size != null}
+      <!-- Size pill: bottom-right (as requested when sorting by size); shifts
+           up above the ×N stack badge on a cover so they don't overlap. -->
+      <span class="size-badge" class:with-stack={stackCount}
+        >{formatSize(item.size)}</span
+      >
+    {/if}
     {#if inExpandedStack}
       <span
         class="stack-marker"
@@ -422,6 +431,22 @@
     font-size: 0.7rem;
     border-radius: 3px;
     pointer-events: none;
+  }
+  .size-badge {
+    position: absolute;
+    right: 5px;
+    bottom: 5px;
+    padding: 1px 5px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+    border-radius: 3px;
+    pointer-events: none;
+    z-index: 100;
+  }
+  .size-badge.with-stack {
+    bottom: 26px; /* sit just above the ×N stack badge on a cover */
   }
   /* Centered play glyph marking a video tile (the still is its poster frame). */
   .play-badge {
