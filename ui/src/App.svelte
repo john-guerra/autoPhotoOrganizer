@@ -62,7 +62,13 @@
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import JobsPanel from "./lib/JobsPanel.svelte";
   import GroupStateIcon from "./lib/GroupStateIcon.svelte";
-  import { getRenderer, isServerCollapsed } from "./lib/groupRenderers.js";
+  import {
+    getRenderer,
+    isServerCollapsed,
+    nextRendererId,
+    DEFAULT_RENDERER_ID,
+    SNAPSHOT_ID,
+  } from "./lib/groupRenderers.js";
   import ServerBanner from "./lib/ServerBanner.svelte";
   import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
@@ -457,7 +463,9 @@
   // Last global view action (the top-of-toolbar "cycle all" control); the
   // per-group toggles may diverge from it, but the button just applies the
   // next whole-view state each click: full view → snapshot all → collapse all.
-  let globalViewMode = "expanded"; // "expanded" | "snapshot" | "collapsed"
+  // A GROUP_RENDERERS id — the whole-view control cycles the same registry order
+  // the per-group toggle does.
+  let globalViewMode = DEFAULT_RENDERER_ID;
   let cyclingAll = false;
   // Two-click confirm for "remove album from library" (drops the folder's rows
   // + ratings from the index; files on disk are untouched). Holds the pathKey
@@ -751,7 +759,7 @@
    * groups that (re)appear inherit it, rather than snapping back to expanded. In
    * expanded mode this is the plain reset-and-recenter path. */
   async function rebuildFeedForFilterOrSort() {
-    if (globalViewMode === "expanded") {
+    if (!isServerCollapsed(globalViewMode)) {
       await onGroupByChange(groupBy);
     } else {
       await applyViewModeToGroups(globalViewMode);
@@ -1785,11 +1793,13 @@
     return _snapshots.has(key) ? "snapshot" : "collapsed";
   }
 
-  const GROUP_STATE_TITLE = {
-    grid: "Photos showing in full — click for a snapshot strip",
-    snapshot: "Showing a snapshot strip — click to collapse",
-    collapsed: "Collapsed — click to show the photos again",
-  };
+  /** Tooltip for the group toggle, from the registry (no parallel string table:
+   *  a new renderer must not need a second edit somewhere else). */
+  function groupToggleTitle(rendererId) {
+    const now = getRenderer(rendererId);
+    const then = getRenderer(nextRendererId(rendererId));
+    return `${now.label} — click for ${then.label.toLowerCase()}`;
+  }
 
   /** Feed group tri-state: expanded → snapshot → collapsed → expanded.
    * snapshot is a server-collapsed group the client renders as a strip. */
@@ -1805,28 +1815,40 @@
         "Couldn't collapse that group — its grouping values are incomplete. Try a different grouping.";
       return;
     }
+    const current = rendererIdFor(path, collapsedKeys, snapshotGroupKeys);
+    await setGroupRenderer(path, nextRendererId(current));
+  }
+
+  /**
+   * THE single writer of a group's renderer — the counterpart to rendererIdFor().
+   *
+   * Everything derives from the registry descriptor: whether the group must be
+   * collapsed SERVER-side comes from `needsFeedPhotos`, never from a hand-kept
+   * list. collapsedPaths + snapshotGroupKeys are now an implementation detail of
+   * this one function, which is what makes the Map migration in issue #100 a
+   * local change rather than a 24-site rewrite.
+   */
+  async function setGroupRenderer(path, rendererId) {
     const key = pathKey(path);
-    const isCollapsed = collapsedPaths.some((p) => pathKey(p) === key);
-    const isSnapshot = snapshotGroupKeys.has(key);
-    if (!isCollapsed) {
-      // Aggregating a parent SUPERSEDES whatever its descendants were doing.
-      // Without this, a leaf that was already snapshotted kept its own entry and
-      // the feed drew a second strip inside the parent's one.
-      collapsedPaths = collapsedPaths.filter(
-        (p) => !isPathUnder(p, path) || pathKey(p) === key
-      );
-      snapshotGroupKeys = new Set(
-        [...snapshotGroupKeys].filter((k) => !isKeyUnder(k, path) || k === key)
-      );
-      snapshotGroupKeys.add(key);
-      snapshotGroupKeys = snapshotGroupKeys; // reassign → reactivity
-      await toggleSectionCollapse(path); // server-collapse
-    } else if (isSnapshot) {
-      snapshotGroupKeys.delete(key);
-      snapshotGroupKeys = snapshotGroupKeys; // snapshot → pill, no refetch
-    } else {
-      await toggleSectionCollapse(path); // server-expand
-    }
+    const wasCollapsed = collapsedKeys.has(key);
+    const nowCollapsed = isServerCollapsed(rendererId);
+
+    // A parent's renderer SUPERSEDES its descendants' — otherwise a leaf that was
+    // already snapshotted keeps its own entry and the feed draws a second strip
+    // inside the parent's one.
+    collapsedPaths = collapsedPaths.filter(
+      (p) => !isPathUnder(p, path) || pathKey(p) === key
+    );
+    const snaps = new Set(
+      [...snapshotGroupKeys].filter((k) => !isKeyUnder(k, path) || k === key)
+    );
+    if (rendererId === SNAPSHOT_ID) snaps.add(key);
+    else snaps.delete(key);
+    snapshotGroupKeys = snaps;
+
+    // Only touch the server when the group's "does the feed stream its photos"
+    // answer actually flips; a snapshot→collapsed change is client-side only.
+    if (nowCollapsed !== wasCollapsed) await toggleSectionCollapse(path);
   }
 
   // --- Shift+click a parent = fold its LEAVES (VS Code function folding) -----
@@ -1911,11 +1933,10 @@
     const states = leaves.map((lp) =>
       rendererIdFor(lp, collapsedKeys, snapshotGroupKeys)
     );
-    const next = states.every((s) => s === "grid")
-      ? "snapshot"
-      : states.every((s) => s === "snapshot")
-        ? "collapsed"
-        : "grid";
+    // Uniform leaves advance together through the registry's cycle; a mixed set
+    // resets to the default. Works for any number of renderers.
+    const uniform = states.every((x) => x === states[0]);
+    const next = uniform ? nextRendererId(states[0]) : DEFAULT_RENDERER_ID;
 
     // Drop any existing state inside this subtree (including the parent's own
     // aggregate collapse), then apply the new state to the leaves.
@@ -1923,10 +1944,10 @@
     const nextSnaps = new Set(
       [...snapshotGroupKeys].filter((k) => !isKeyUnder(k, path))
     );
-    if (next !== "grid") {
+    if (isServerCollapsed(next)) {
       for (const lp of leaves) {
         nextCollapsed.push(lp);
-        if (next === "snapshot") nextSnaps.add(pathKey(lp));
+        if (next === SNAPSHOT_ID) nextSnaps.add(pathKey(lp));
       }
     }
     collapsedPaths = nextCollapsed;
@@ -1951,7 +1972,7 @@
    * caller reloads after. Reused by the cycle-all control AND by filter/sort
    * rebuilds so a global view mode survives those changes (new groups inherit it). */
   async function applyViewModeToGroups(mode) {
-    if (mode === "expanded") {
+    if (!isServerCollapsed(mode)) {
       collapsedPaths = [];
       snapshotGroupKeys = new Set();
       return;
@@ -1967,7 +1988,7 @@
     ]);
     collapsedPaths = allPaths;
     snapshotGroupKeys =
-      mode === "snapshot" ? new Set(allPaths.map(pathKey)) : new Set();
+      mode === SNAPSHOT_ID ? new Set(allPaths.map(pathKey)) : new Set();
   }
 
   /** The top-of-toolbar "cycle all" control: flip EVERY top-level group at
@@ -1975,12 +1996,7 @@
    * collapsedPaths / snapshotGroupKeys wholesale and rebuilds the feed from the top. */
   async function cycleAllGroups() {
     if (cyclingAll) return;
-    const next =
-      globalViewMode === "expanded"
-        ? "snapshot"
-        : globalViewMode === "snapshot"
-          ? "collapsed"
-          : "expanded";
+    const next = nextRendererId(globalViewMode);
     cyclingAll = true;
     try {
       await applyViewModeToGroups(next);
@@ -3498,15 +3514,15 @@
                         collapsedKeys,
                         snapshotGroupKeys
                       ) !== "grid"}
-                    title={GROUP_STATE_TITLE[
+                    title={groupToggleTitle(
                       header.path
                         ? rendererIdFor(
                             header.path,
                             collapsedKeys,
                             snapshotGroupKeys
                           )
-                        : "grid"
-                    ]}
+                        : DEFAULT_RENDERER_ID
+                    )}
                     aria-label="Cycle this group: full grid → snapshot strip → collapsed"
                     on:click={(e) =>
                       onGroupToggle(

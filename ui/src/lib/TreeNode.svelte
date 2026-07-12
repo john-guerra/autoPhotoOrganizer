@@ -4,7 +4,7 @@
   import { pathKey } from "./feed.js";
   import { shortLeafLabel } from "./labels.js";
   import GroupStateIcon from "./GroupStateIcon.svelte";
-  import { getRenderer } from "./groupRenderers.js";
+  import { getRenderer, nextRendererId } from "./groupRenderers.js";
 
   export let groupBy; // string[]
   export let path; // Array<{dimension,value}> — this node's own path
@@ -43,11 +43,11 @@
     : snapshotKeys.has(pathKey(path))
       ? "snapshot"
       : "collapsed";
-  const FEED_STATE_TITLE = {
-    grid: "Photos showing in full — click for a snapshot strip",
-    snapshot: "Showing a snapshot strip — click to collapse",
-    collapsed: "Collapsed — click to show the photos again",
-  };
+  // Tooltip from the registry — the feed header derives its own the same way, so
+  // a new renderer needs no second edit here.
+  $: toggleTitle = `${getRenderer(rendererId).label} — click for ${getRenderer(
+    nextRendererId(rendererId)
+  ).label.toLowerCase()}`;
 
   /** Svelte action: when a truncated label is hovered, slide it left so the
    * whole name can be read, then slide back. Measures the real overflow (CSS
@@ -105,7 +105,7 @@
     <button
       class="tree-collapse-icon"
       class:not-grid={rendererId !== "grid"}
-      title={FEED_STATE_TITLE[rendererId]}
+      title={toggleTitle}
       aria-label="Cycle this group in the feed: full grid → snapshot strip → collapsed"
       on:click={(e) => dispatch("toggleCollapse", { path, event: e })}
     >

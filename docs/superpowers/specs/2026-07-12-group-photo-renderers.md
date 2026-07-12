@@ -1,6 +1,7 @@
 # Group photo renderers — design contract
 
-**Status:** contract agreed; registry landed, migration in progress (issue #100).
+**Status:** contract agreed; registry landed and OWNS the cycle. The single
+remaining gap is internal state shape — see "Not done yet" at the bottom (issue #100).
 **Applies to:** how a group's PHOTOS are drawn in the feed.
 
 ## The idea
@@ -125,9 +126,26 @@ summary rather than every photo.
 3. If it needs a new icon, add a variant to `GroupStateIcon.svelte` and reference
    it via `icon`.
 
-That's all. The header, the cycle, the tree sidebar, Shift+fold-the-leaves, the
-layout and the indentation all pick it up for free — because they only ever talk
-to the registry.
+That's all. The header, the cycle (per-group AND the whole-view control), the tree
+sidebar, Shift+fold-the-leaves, the tooltips, the layout and the indentation all
+pick it up for free — they only ever talk to the registry, via exactly two
+functions in App.svelte:
+
+- `rendererIdFor(path, …)` — the single READER ("which widget draws this group?")
+- `setGroupRenderer(path, id)` — the single WRITER (derives the server-collapse
+  state from `needsFeedPhotos`; nothing else may hand-set it)
+
+## Not done yet (issue #100)
+
+`setGroupRenderer` still stores the answer in TWO legacy structures —
+`collapsedPaths` (an array, and also the server's contract) and
+`snapshotGroupKeys` (a Set). That is now an implementation detail of the one
+writer and the one reader, so collapsing them into
+
+    groupRendererIds: Map<pathKey, {path, rendererId}>
+
+is a local change to those two functions rather than a 24-site rewrite. Until it
+lands, `setGroupRenderer` is the ONLY place allowed to touch either structure.
 
 ## Invariants (do not break)
 

@@ -64,6 +64,9 @@ export const COLLAPSED = {
 export const GROUP_RENDERERS = [GRID, SNAPSHOT, COLLAPSED];
 
 export const DEFAULT_RENDERER_ID = GRID.id;
+/** The one renderer whose "collapsed" groups still draw a strip. Exported so
+ *  callers name it via the registry instead of a bare "snapshot" literal. */
+export const SNAPSHOT_ID = SNAPSHOT.id;
 
 /** @param {string|undefined} id @returns {GroupRenderer} */
 export function getRenderer(id) {
