@@ -32,7 +32,7 @@ alongside filter (both are "organize the view" controls); only ambient state mov
 
 ## Non-goals
 
-- No change to grouping/sort/filter *behavior* — controls only relocate; their events and
+- No change to grouping/sort/filter _behavior_ — controls only relocate; their events and
   the state they drive stay in `App.svelte`.
 - Not touching #88 (consistent group-label actions + tri-state selection icon) — that is a
   separate branch/worktree.
@@ -41,16 +41,16 @@ alongside filter (both are "organize the view" controls); only ambient state mov
 
 ## Current state (what moves)
 
-| Element | Today (in `App.svelte` topbar) | After |
-| --- | --- | --- |
-| `library / showing / selected` counts | `.counts` block (~L2801) | Status bar, left |
-| status / error text | `.status` span (~L2850) | Status bar, left (after counts) |
-| thumb-progress counter | `.thumb-progress` span (~L2851) | Status bar, left (after status) |
-| zoom | `ViewControls` | Status bar, right |
-| burst toggle + gap | `ViewControls` | Status bar, right |
-| sort (attr + direction) | `OrganizeControls` | Status bar, right (rightmost) |
-| group-by widget | `OrganizeControls` | **Stays** in top toolbar, compact layout |
-| source, filter, view actions, selection/materialize, keep/focus chips, `?` help | topbar | **Stay** in top toolbar |
+| Element                                                                         | Today (in `App.svelte` topbar)  | After                                    |
+| ------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------- |
+| `library / showing / selected` counts                                           | `.counts` block (~L2801)        | Status bar, left                         |
+| status / error text                                                             | `.status` span (~L2850)         | Status bar, left (after counts)          |
+| thumb-progress counter                                                          | `.thumb-progress` span (~L2851) | Status bar, left (after status)          |
+| zoom                                                                            | `ViewControls`                  | Status bar, right                        |
+| burst toggle + gap                                                              | `ViewControls`                  | Status bar, right                        |
+| sort (attr + direction)                                                         | `OrganizeControls`              | Status bar, right (rightmost)            |
+| group-by widget                                                                 | `OrganizeControls`              | **Stays** in top toolbar, compact layout |
+| source, filter, view actions, selection/materialize, keep/focus chips, `?` help | topbar                          | **Stay** in top toolbar                  |
 
 ## Design
 
@@ -97,7 +97,7 @@ current behavior) — to `src/index.js`:
 
 - **Inline layout:** render the text input and the pills output (`fmOutput`) on **one flex
   row** — e.g. wrap `fmInput` + `.options` in a single `display:flex; flex-wrap:wrap;
-  align-items:center` container so pills sit *beside* the input, growing the row's height only
+align-items:center` container so pills sit _beside_ the input, growing the row's height only
   when they truly overflow. (Today `.options` is a separate block below the input.)
 - **Omit empty chrome:** when `title` / `description` are falsy, don't render the `.title` /
   `.description` divs (they currently reserve vertical space).
