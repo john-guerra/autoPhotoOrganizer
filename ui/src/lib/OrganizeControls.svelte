@@ -9,6 +9,7 @@
   import { createEventDispatcher } from "svelte";
   import RatingFilter from "./RatingFilter.svelte";
   import OrientationFilter from "./OrientationFilter.svelte";
+  import KindFilter from "./KindFilter.svelte";
   import TimelineFilter from "./TimelineFilter.svelte";
   import { DEFAULT_FILTER, isActive as filterIsActive } from "./filterSpec.js";
   import { ALL_DIMENSIONS } from "./dimensions.js";
@@ -114,6 +115,7 @@
     {filter}
     on:change={(e) => dispatch("filterchange", e.detail)}
   />
+  <KindFilter {filter} on:change={(e) => dispatch("filterchange", e.detail)} />
   {#if timeMin != null && timeMax != null && timeMax > timeMin}
     <div class="time-filter" title="Filter by capture time — drag the handles">
       <TimelineFilter

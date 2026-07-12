@@ -57,7 +57,7 @@ import {
   DIMENSIONS,
 } from "./db/feed.js";
 import { getTreeNode, getFlatTree } from "./db/tree.js";
-import { ALLOWED_ORIENTATIONS } from "./db/filters.js";
+import { ALLOWED_ORIENTATIONS, ALLOWED_KINDS } from "./db/filters.js";
 import { parseSort, DATE_SORTS } from "./db/sort.js";
 import { sampleOffsets } from "./db/sampleGroup.js";
 import { setKeepScope } from "./db/keepScope.js";
@@ -331,6 +331,18 @@ function parseFilterParam(req) {
       };
     }
     spec.orientations = raw.orientations;
+  }
+  if (raw.kinds !== undefined) {
+    if (
+      !Array.isArray(raw.kinds) ||
+      !raw.kinds.every((k) => ALLOWED_KINDS.includes(k))
+    ) {
+      return {
+        spec: {},
+        error: "kinds must be a subset of " + ALLOWED_KINDS.join("/"),
+      };
+    }
+    spec.kinds = raw.kinds;
   }
   if (raw.scopeIds !== undefined) {
     if (

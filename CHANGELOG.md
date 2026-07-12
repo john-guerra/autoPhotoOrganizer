@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.6
+
+- **Filter by media type.** New Photos / RAW / Videos toggles in the toolbar
+  narrow the view to just the kinds you want (e.g. show only videos). Combines
+  with the rating, orientation, and time filters. (usability testing)
+
 ## 2.9.5
 
 - **The status bar is no longer hidden by background jobs.** The jobs strip

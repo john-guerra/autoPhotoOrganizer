@@ -4,8 +4,10 @@ import {
   isActive,
   toQueryParam,
   ORIENTATIONS,
+  KINDS,
   applyRatingClick,
   toggleOrientation,
+  toggleKind,
 } from "./filterSpec.js";
 
 describe("filterSpec", () => {
@@ -27,6 +29,22 @@ describe("filterSpec", () => {
     ).toEqual({
       orientations: ["portrait"],
     });
+  });
+  it("a strict kind subset activates; full set does not", () => {
+    expect(isActive({ ...DEFAULT_FILTER, kinds: ["video"] })).toBe(true);
+    expect(isActive({ ...DEFAULT_FILTER, kinds: KINDS })).toBe(false);
+    expect(isActive({ ...DEFAULT_FILTER, kinds: [] })).toBe(false);
+    expect(
+      JSON.parse(toQueryParam({ ...DEFAULT_FILTER, kinds: ["video"] }))
+    ).toEqual({ kinds: ["video"] });
+  });
+  it("toggleKind adds/removes a kind in canonical order", () => {
+    const off = toggleKind({ ...DEFAULT_FILTER, kinds: [] }, "video");
+    expect(off.kinds).toEqual(["video"]);
+    const two = toggleKind({ ...DEFAULT_FILTER, kinds: ["video"] }, "image");
+    expect(two.kinds).toEqual(["image", "video"]);
+    const back = toggleKind(two, "video");
+    expect(back.kinds).toEqual(["image"]);
   });
   it("a folderPath focus activates and round-trips through toQueryParam", () => {
     expect(isActive({ ...DEFAULT_FILTER, folderPath: "/photos/trip" })).toBe(
