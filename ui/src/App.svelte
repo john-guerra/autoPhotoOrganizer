@@ -1087,7 +1087,7 @@
     if (!it || typeof it.id !== "number") return;
     const res = await revealInFinder(it.id);
     if (!res.ok) {
-      status = `Couldn't reveal file: ${res.error ?? "unknown error"}`;
+      error = `Couldn't reveal file: ${res.error ?? "unknown error"}`;
       console.warn("[reveal]", res.error);
     }
   }
@@ -1099,8 +1099,18 @@
     if (!ids.length) return;
     const res = await revealSelection(ids);
     if (!res.ok) {
-      status = `Couldn't reveal selection: ${res.error ?? "unknown error"}`;
+      // `error`, not `status`: the next feed operation overwrites `status`, and
+      // the server's 413 ("too many files… narrow the selection first") exists
+      // precisely to be read and acted on.
+      error = `Couldn't reveal selection: ${res.error ?? "unknown error"}`;
       console.warn("[reveal-selection]", res.error);
+      return;
+    }
+    // Windows' Explorer can only highlight ONE file; the server says so rather
+    // than pretending it revealed them all. Don't leave the user believing a
+    // 30-file selection is sitting highlighted in Explorer.
+    if (res.partial) {
+      status = `Revealed 1 of ${ids.length} — ${res.partial}`;
     }
   }
 
@@ -1706,7 +1716,14 @@
     try {
       libraryVersion++; // sidebars refetch
       await refreshCounts();
-      await loadInitialFeed();
+      // Reload AROUND the photo you were on, not from the top. loadInitialFeed()
+      // resets `selected` to the first item — and with `node --watch` the server
+      // now restarts on every backend edit, so that teleported you out of
+      // whatever you were culling. Every other rebuild path (sort/filter/groupBy)
+      // uses recenterFeedOnId for exactly this reason.
+      const focusId = safeFocusId(selected);
+      if (focusId != null) await recenterFeedOnId(focusId);
+      else await loadInitialFeed();
       status = "Reconnected to the server — reloaded.";
     } catch (e) {
       error = `Reconnected, but reloading failed: ${e.message}`;

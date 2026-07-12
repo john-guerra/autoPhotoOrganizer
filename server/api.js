@@ -823,7 +823,18 @@ export function registerApi(app) {
           else resolveSpawn();
         });
       });
-      res.json({ ok: true, revealed: paths.length });
+      // Explorer's /select, highlights ONE file — saying "revealed: N" here would
+      // be a lie the UI then repeats to the user. Report the limitation so the
+      // caller can surface it (see revealManyCommand's win32 branch).
+      const partial =
+        process.platform === "win32" && paths.length > 1
+          ? "Windows Explorer can only highlight one file at a time."
+          : null;
+      res.json({
+        ok: true,
+        revealed: partial ? 1 : paths.length,
+        ...(partial ? { partial } : {}),
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: String(err?.message ?? err) });
     }

@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.22
+
+- **Reconnecting no longer sends you back to the top.** After the server restarts,
+  the app reloads around the photo you were on instead of jumping to the start of
+  the library.
+- **Reveal failures are now shown as errors**, not as a status message that the
+  next action wipes out — including "too many files to reveal at once".
+- **Windows: revealing several files now admits it only highlights one** (Explorer
+  can't select more), instead of reporting that it revealed them all.
+
 ## 2.9.21
 
 - **Faster feed rendering with many collapsed groups.** Working out how each group
