@@ -2,6 +2,7 @@
   import { createEventDispatcher, tick } from "svelte";
   import { thumbUrl } from "./api.js";
   import { filmstripWindow } from "./filmstrip.js";
+  import Stars from "./Stars.svelte";
 
   const dispatch = createEventDispatcher();
 
@@ -46,6 +47,9 @@
         <img src={thumbUrl(item.id, THUMB, item.mtimeMs)} alt={item.name} />
         {#if item.kind === "video"}<span class="badge">▶</span>{/if}
         {#if selectedIds.has(item.id)}<span class="sel">✓</span>{/if}
+        {#if item.rating > 0}<span class="rating"
+            ><Stars rating={item.rating} /></span
+          >{/if}
       </button>
     {:else}
       <div class="gap" style="width:{THUMB / 3}px;height:{THUMB}px;" />
@@ -104,6 +108,14 @@
     background: #ffd24c;
     color: #1a1400;
     font-weight: 700;
+  }
+  /* Rating pill: bottom-right, out of the way of the ✓ (top-right) and the
+     ▶ video badge (bottom-left). Stars.svelte brings its own dark pill. */
+  .rating {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    line-height: 1;
   }
   .gap {
     flex: 0 0 auto;
