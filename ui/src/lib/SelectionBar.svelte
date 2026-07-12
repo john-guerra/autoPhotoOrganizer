@@ -6,6 +6,7 @@
    * action and two-way binds the export popover's open state + form fields.
    */
   import { createEventDispatcher } from "svelte";
+  import { clickOutside, onEscape, clampToViewport } from "./actions.js";
 
   export let selectedCount = 0;
   export let lastClearedSelection = null;
@@ -40,14 +41,24 @@
         title="Restore the selection you just cleared">Undo</button
       >
     {/if}
-    <div class="export-wrap">
+    <div
+      class="export-wrap"
+      use:clickOutside={() => (exportOpen = false)}
+      use:onEscape={() => (exportOpen = false)}
+    >
       <button
         class="sel-btn export"
         on:click={() => (exportOpen = !exportOpen)}
         title="Copy the selected photos into a new folder">Export…</button
       >
       {#if exportOpen}
-        <div class="export-panel">
+        <div class="export-panel" use:clampToViewport>
+          <button
+            class="export-close"
+            title="Close"
+            aria-label="Close export"
+            on:click={() => (exportOpen = false)}>✕</button
+          >
           <label class="export-field">
             <span>Destination folder</span>
             <div class="export-row">
@@ -151,6 +162,24 @@
     gap: 10px;
     min-width: 300px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .export-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    line-height: 1;
+    background: transparent;
+    border: 1px solid #444;
+    color: #cfcfcf;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .export-close:hover {
+    background: #2c2c2c;
   }
   .export-field {
     display: flex;

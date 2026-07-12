@@ -127,6 +127,12 @@
     </button>
     {#if addFolderOpen}
       <div class="add-panel">
+        <button
+          class="popover-close"
+          title="Close"
+          aria-label="Close add folder"
+          on:click={() => (addFolderOpen = false)}>✕</button
+        >
         {#if hasNativePicker}
           <!-- Primary path: one click → OS picker → scan. Leads the panel so the
                common case doesn't require typing a raw filesystem path. -->
@@ -281,12 +287,30 @@
     background: #0d0d0d;
     border: 1px solid #333;
     border-radius: 8px;
-    padding: 10px;
+    padding: 30px 10px 10px;
     display: flex;
     flex-direction: column;
     gap: 8px;
     min-width: 260px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .popover-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    line-height: 1;
+    background: transparent;
+    border: 1px solid #444;
+    color: #cfcfcf;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .popover-close:hover {
+    background: #2c2c2c;
   }
   .add-row {
     display: flex;

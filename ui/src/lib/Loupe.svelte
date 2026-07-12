@@ -73,6 +73,12 @@
 </script>
 
 <div class="loupe" role="dialog" aria-modal="true">
+  <button
+    class="loupe-close"
+    title="Close (Esc)"
+    aria-label="Close"
+    on:click={() => dispatch("close")}>✕</button
+  >
   <div class="body">
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <!-- contextmenu is a right-click affordance on the media stage; no ARIA
@@ -123,6 +129,25 @@
     display: flex;
     flex-direction: column;
     z-index: 100;
+  }
+  .loupe-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 10;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    line-height: 1;
+    background: rgba(20, 20, 20, 0.7);
+    border: 1px solid #444;
+    color: #e8e8e8;
+    border-radius: 50%;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  .loupe-close:hover {
+    background: rgba(50, 50, 50, 0.9);
   }
   .body {
     flex: 1;

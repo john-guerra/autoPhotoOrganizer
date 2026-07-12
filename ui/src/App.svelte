@@ -3275,6 +3275,7 @@
     showDetails={showLoupeDetails}
     showFilmstrip={showLoupeFilmstrip}
     on:contextmenu={(e) => openContextMenu(e.detail.x, e.detail.y, selected)}
+    on:close={closeLoupe}
   />
 {/if}
 

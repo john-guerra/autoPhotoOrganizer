@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.2
+
+- **Popups now close like popups.** The Loupe (full-photo view) has a visible ✕
+  close button, and the Export panel can be dismissed with Escape, a click
+  outside, or its own ✕ — it no longer stays stuck open. The Export panel and
+  add-folder popover also stay on-screen when their button sits near a screen
+  edge instead of spilling off. (usability testing)
+
 ## 2.9.1
 
 - **Clearer first-run and folder controls.** An empty library now shows an
