@@ -64,6 +64,24 @@ export function takeNewlyFinished(list, type, handled) {
 }
 
 /**
+ * Build a specific, actionable message for a *synchronous* undo failure — the
+ * POST rejecting before an undo-move job is ever created (a 413 when the
+ * manifest is too big, a network drop, a server reject). A background-job
+ * failure surfaces via the job's own `error`; this covers the fire-and-forget
+ * gap where the rejection would otherwise be console-only (issue #89).
+ * @param {(Error & {status?: number}) | undefined} err the thrown error
+ * @param {number} fileCount manifest length, for the size-specific 413 message
+ * @returns {string} a user-facing message ending in what to do next
+ */
+export function undoFailureMessage(err, fileCount) {
+  if (err?.status === 413) {
+    return `Undo failed: the move record was too large to send (${fileCount} files) — retry from the jobs panel.`;
+  }
+  const reason = err?.message || "unknown error";
+  return `Undo failed: ${reason} — retry from the jobs panel.`;
+}
+
+/**
  * Resolve once the given job id leaves "running" (done/canceled/failed).
  * Resolves immediately if the job is already terminal by the time this is
  * called (or once the next snapshot after subscribing already shows it

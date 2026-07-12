@@ -583,7 +583,11 @@ export async function undoMove(manifest) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `undo failed (${res.status})`);
+    // Attach the HTTP status so callers can tailor the message (e.g. a 413
+    // "manifest too large" vs a generic reject) — see undoFailureMessage.
+    const err = new Error(body.error || `undo failed (${res.status})`);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }

@@ -5,6 +5,7 @@ import {
   connectJobsStream,
   waitForJob,
   takeNewlyFinished,
+  undoFailureMessage,
 } from "./jobs.js";
 
 /** Minimal fake EventSource — enough for the store reducer + waitForJob. */
@@ -129,5 +130,26 @@ describe("takeNewlyFinished", () => {
     expect(
       takeNewlyFinished(list, "undo-move", handled).map((j) => j.id)
     ).toEqual(["u1", "u2"]);
+  });
+});
+
+describe("undoFailureMessage", () => {
+  it("gives a size-specific, actionable message for a 413", () => {
+    const err = Object.assign(new Error("undo failed (413)"), { status: 413 });
+    const msg = undoFailureMessage(err, 4200);
+    expect(msg).toContain("too large to send");
+    expect(msg).toContain("4200 files");
+    expect(msg).toContain("retry from the jobs panel");
+  });
+
+  it("falls back to the thrown error's message for other failures", () => {
+    const err = new Error("network down");
+    const msg = undoFailureMessage(err, 3);
+    expect(msg).toContain("network down");
+    expect(msg).toContain("retry from the jobs panel");
+  });
+
+  it("never produces 'undefined' when the error has no message", () => {
+    expect(undoFailureMessage(undefined, 1)).not.toMatch(/undefined/);
   });
 });
