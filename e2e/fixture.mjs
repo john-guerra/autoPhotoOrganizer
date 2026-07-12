@@ -16,12 +16,29 @@ export const E2E_ROOT = join(process.cwd(), "e2e", ".tmp");
 export const PHOTOS_DIR = join(E2E_ROOT, "photos");
 export const HOME_DIR = join(E2E_ROOT, "home");
 
+// Each folder spans TWO days, so `folder > day` produces a genuinely nested
+// feed (two children per parent) instead of one degenerate child.
 const FOLDERS = [
-  { name: "2024_01Jan_10 Trip", count: 6, date: "2024:01:10 09:00:00" },
-  { name: "2024_02Feb_20 Party", count: 5, date: "2024:02:20 18:30:00" },
+  {
+    name: "2024_01Jan_10 Trip",
+    count: 6,
+    days: ["2024:01:10", "2024:01:11"],
+  },
+  {
+    name: "2024_02Feb_20 Party",
+    count: 5,
+    days: ["2024:02:20", "2024:02:21"],
+  },
 ];
 
-/** Deterministic, tiny, EXIF-dated JPEGs. */
+/**
+ * Deterministic, tiny, EXIF-dated JPEGs.
+ *
+ * DateTimeOriginal MUST go in `IFD2` (the Exif IFD). Writing it to `IFD0` is
+ * silently useless: sharp accepts it, exifr never finds it, every photo scans
+ * with no capture date, and every date-based group renders as "Unknown" — which
+ * is exactly the bug this fixture shipped with.
+ */
 export async function buildFixture() {
   rmSync(E2E_ROOT, { recursive: true, force: true });
   mkdirSync(PHOTOS_DIR, { recursive: true });
@@ -34,6 +51,10 @@ export async function buildFixture() {
       // Vary the aspect ratio so the justified layout has real work to do.
       const w = 120 + (i % 3) * 40;
       const h = 90 + (i % 2) * 30;
+      // First half of the folder on day 1, the rest on day 2; the minute ticks
+      // up so capture order is stable and total (no ties to sort around).
+      const day = folder.days[i < Math.ceil(folder.count / 2) ? 0 : 1];
+      const date = `${day} 09:${String(i).padStart(2, "0")}:00`;
       await sharp({
         create: {
           width: w,
@@ -42,7 +63,7 @@ export async function buildFixture() {
           background: { r: 40 + i * 20, g: 90, b: 160 },
         },
       })
-        .withMetadata({ exif: { IFD0: { DateTimeOriginal: folder.date } } })
+        .withMetadata({ exif: { IFD2: { DateTimeOriginal: date } } })
         .jpeg()
         .toFile(join(dir, `img_${String(i).padStart(2, "0")}.jpg`));
     }

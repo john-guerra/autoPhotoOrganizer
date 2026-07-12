@@ -6,6 +6,31 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.1
+
+- **Critical-path UI tests.** Rating a photo — the thing the app is for — is now
+  covered end to end: 1–5 and 0 survive a reload, loupe stars survive a reload, a
+  rating lands on the photo you meant and not its neighbour, and typing digits in
+  a text box can't silently re-rate. Nested groups are covered too: folding a
+  child, folding a parent, and snapshotting a parent are each a crash that shipped
+  during 2.9.x, and each is now a test (#101).
+- **Every keyboard shortcut is in the help menu.** ⌘/Ctrl+A (select everything
+  shown) was missing from `?`, and Alt+←/→ now says what it really does — jumps to
+  the previous/next group, and at the edges to the first/last photo.
+- **Docs:** `docs/TESTING.md` — the two test tiers, what belongs in each, and how
+  to write a spec that fails for the right reason.
+
+## 2.10.0
+
+- First packaged build of the usability round: selection circles, clickable
+  stars, ⌘A, a media-type filter, reveal a whole selection, a resizable tree
+  sidebar that starts expanded, VS Code-style group folding, dendrogram nesting,
+  a compact Group by, selection actions in the status bar, and an export that can
+  **move** files instead of copying (undoable).
+- **Reliability:** a loud banner when the backend dies, with auto-reconnect that
+  puts you back where you were; uncaught errors now surface in the app instead of
+  only the console; fixed the crash when collapsing a nested group.
+
 ## 2.9.25
 
 - **Automated UI testing (developer-facing).** The project now has a second test

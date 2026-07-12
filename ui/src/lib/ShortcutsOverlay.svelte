@@ -21,6 +21,10 @@
         { keys: ["1", "–", "5"], label: "Set star rating" },
         { keys: ["0"], label: "Clear rating" },
         { keys: ["X"], label: "Toggle selection (auto-advances in loupe)" },
+        {
+          keys: ["⌘", "/", "Ctrl", "+", "A"],
+          label: "Select every photo currently shown",
+        },
         { keys: ["C"], label: "Set / unset this photo as its stack's cover" },
         { keys: ["G"], label: "Group the selected photos into one stack" },
         {
@@ -46,7 +50,11 @@
         { keys: ["Enter"], label: "Open in loupe (or expand a stack)" },
         { keys: ["Space"], label: "Open in loupe (or expand a stack)" },
         { keys: ["Esc"], label: "Collapse the current stack" },
-        { keys: ["Alt", "+", "←", "→"], label: "Jump to prev / next section" },
+        {
+          keys: ["Alt", "+", "←", "→"],
+          label:
+            "Jump to prev / next group (at the edges, to the first / last photo)",
+        },
       ],
     },
     {
