@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.12
+
+- **One icon for a group's state, everywhere.** The tree sidebar, the feed's
+  section headers, the snapshot strip and the collapsed pill now all show the
+  same tri-state icon — a full grid, a snapshot strip, or a collapsed bar (amber
+  once it isn't showing in full) — and clicking it cycles the group the same way
+  from either place. The sidebar previously only knew "collapsed" and missed the
+  snapshot state entirely. (usability testing)
+
 ## 2.9.11
 
 - **The sidebar is resizable** — drag its right edge (double-click to reset, or

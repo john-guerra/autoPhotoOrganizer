@@ -62,6 +62,7 @@
   import ContextMenu from "./lib/ContextMenu.svelte";
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import JobsPanel from "./lib/JobsPanel.svelte";
+  import GroupStateIcon from "./lib/GroupStateIcon.svelte";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import UpdateBanner from "./lib/UpdateBanner.svelte";
@@ -1643,6 +1644,23 @@
     }
   }
 
+  /** A group's current FEED state, for the shared GroupStateIcon. `_collapsed`
+   * and `_snapshots` are taken as ARGS (not closed over) so Svelte's dependency
+   * tracking — which reads the expression's source text — actually re-runs this
+   * in the template when either changes. Same reasoning as TreeNode's
+   * collapsedInFeed. @returns {"expanded"|"snapshot"|"collapsed"} */
+  function feedGroupState(path, _collapsed, _snapshots) {
+    const key = pathKey(path);
+    if (!_collapsed.some((p) => pathKey(p) === key)) return "expanded";
+    return _snapshots.has(key) ? "snapshot" : "collapsed";
+  }
+
+  const GROUP_STATE_TITLE = {
+    expanded: "Photos showing in full — click for a snapshot strip",
+    snapshot: "Showing a snapshot strip — click to collapse",
+    collapsed: "Collapsed — click to show the photos again",
+  };
+
   /** Feed group tri-state: expanded → snapshot → collapsed → expanded.
    * snapshot is a server-collapsed group the client renders as a strip. */
   async function cycleGroupState(path) {
@@ -3067,10 +3085,11 @@
           bind:this={treeSidebarRef}
           {groupBy}
           {collapsedPaths}
+          snapshotKeys={snapshotGroupKeys}
           {sort}
           filter={displayFilter}
           refreshToken={libraryVersion}
-          on:toggle={(e) => toggleSectionCollapse(e.detail)}
+          on:toggle={(e) => cycleGroupState(e.detail)}
           on:jump={(e) => jumpToPath(e.detail)}
         />
       {:else}
@@ -3148,8 +3167,23 @@
                     header.depth};"
                 >
                   <button
-                    class="section-toggle-icon"
-                    title="Cycle: expanded → snapshot → collapsed"
+                    class="section-toggle-icon {header.path
+                      ? feedGroupState(
+                          header.path,
+                          collapsedPaths,
+                          snapshotGroupKeys
+                        )
+                      : 'expanded'}"
+                    title={GROUP_STATE_TITLE[
+                      header.path
+                        ? feedGroupState(
+                            header.path,
+                            collapsedPaths,
+                            snapshotGroupKeys
+                          )
+                        : "expanded"
+                    ]}
+                    aria-label="Cycle this group: full grid → snapshot strip → collapsed"
                     on:click={() =>
                       cycleGroupState(
                         groupBy.slice(0, header.depth + 1).map((d) => ({
@@ -3158,7 +3192,15 @@
                         }))
                       )}
                   >
-                    ▾
+                    <GroupStateIcon
+                      state={header.path
+                        ? feedGroupState(
+                            header.path,
+                            collapsedPaths,
+                            snapshotGroupKeys
+                          )
+                        : "expanded"}
+                    />
                   </button>
                   {#if header.path && renamingKey === pathKey(header.path)}
                     <!-- svelte-ignore a11y-autofocus -->
@@ -3217,12 +3259,13 @@
                   >
                     <div class="snapshot-head">
                       <button
-                        class="snap-cycle"
-                        title="Cycle: expanded → snapshot → collapsed"
+                        class="snap-cycle snapshot"
+                        title={GROUP_STATE_TITLE.snapshot}
+                        aria-label="Cycle this group: full grid → snapshot strip → collapsed"
                         on:click|stopPropagation={() =>
                           cycleGroupState(entry.item.path)}
                       >
-                        ◐
+                        <GroupStateIcon state="snapshot" />
                       </button>
                       <span
                         class="snapshot-label"
@@ -3279,7 +3322,11 @@
                     on:keydown={(e) =>
                       e.key === "Enter" && cycleGroupState(entry.item.path)}
                   >
-                    <span class="placeholder-icon">▸</span>
+                    <span
+                      class="placeholder-icon"
+                      title={GROUP_STATE_TITLE.collapsed}
+                      ><GroupStateIcon state="collapsed" /></span
+                    >
                     <span class="placeholder-label">
                       {entry.item.path
                         .map((p) => formatGroupValue(p.dimension, p.value))
@@ -3617,14 +3664,26 @@
     background: #141414;
     pointer-events: auto;
   }
+  /* Same tri-state icon (and same colour language) as the tree sidebar's
+     feed-visibility control, so one group state always reads the same way:
+     grid = full, strip = snapshot, bar = collapsed (amber once it's not full). */
   .section-toggle-icon {
     background: none;
     border: none;
-    color: inherit;
+    color: #8a8a8a;
     font: inherit;
     cursor: pointer;
     padding: 2px 4px;
     border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .section-toggle-icon:hover {
+    color: #e8e8e8;
+  }
+  .section-toggle-icon.snapshot,
+  .section-toggle-icon.collapsed {
+    color: #ffd24c;
   }
   .section-toggle-icon:hover {
     background: #2a2a2a;
@@ -3712,7 +3771,19 @@
     color: #ccc;
     border-radius: 6px;
     cursor: pointer;
-    padding: 2px 8px;
+    padding: 3px 8px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .snap-cycle.snapshot {
+    color: #ffd24c;
+  }
+  /* The collapsed pill's leading glyph is the same shared state icon. */
+  .placeholder-icon {
+    display: inline-flex;
+    align-items: center;
+    color: #ffd24c;
+    flex: 0 0 auto;
   }
   .placeholder-row {
     position: absolute;

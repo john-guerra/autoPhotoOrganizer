@@ -6,6 +6,7 @@
 
   export let groupBy; // string[]
   export let collapsedPaths; // Array<Array<{dimension,value}>>
+  export let snapshotKeys = new Set(); // pathKeys rendered as a snapshot strip
   export let filter = null;
   export let sort = null; // feed sort — date sorts change the date-group order
   export let refreshToken = 0; // bump to force a reload when the index changes
@@ -206,6 +207,7 @@
         {loadingKeys}
         {highlightedKey}
         {collapsedPaths}
+        {snapshotKeys}
         on:toggleExpand={handleToggleExpand}
         on:toggleCollapse={handleToggleCollapse}
         on:jump={handleJump}

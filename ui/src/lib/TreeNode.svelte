@@ -1,7 +1,9 @@
 <script>
   import { createEventDispatcher } from "svelte";
   import { treeKey } from "./treeState.js";
+  import { pathKey } from "./feed.js";
   import { shortLeafLabel } from "./labels.js";
+  import GroupStateIcon from "./GroupStateIcon.svelte";
 
   export let groupBy; // string[]
   export let path; // Array<{dimension,value}> — this node's own path
@@ -11,6 +13,7 @@
   export let loadingKeys; // Set<string>
   export let highlightedKey; // string|null
   export let collapsedPaths; // Array<Array<{dimension,value}>>
+  export let snapshotKeys = new Set(); // pathKeys rendered as a snapshot strip
 
   const dispatch = createEventDispatcher();
 
@@ -25,6 +28,23 @@
   // source text, not what a called function closes over — actually re-runs
   // this when collapsedPaths changes.
   $: collapsedInFeed = collapsedPaths.some((p) => treeKey(p) === key);
+  // The group's FEED state — same tri-state (and same icon) the feed's section
+  // headers show, so the sidebar and the feed never disagree about a group.
+  //
+  // NOTE: snapshotGroupKeys is keyed by feed.js's `pathKey` (JSON-encoded), NOT
+  // by this file's `treeKey` (delimiter-joined) — they are different strings, so
+  // checking it with treeKey silently never matches and every snapshot group
+  // rendered as "collapsed" here. Use pathKey for that Set specifically.
+  $: feedState = !collapsedInFeed
+    ? "expanded"
+    : snapshotKeys.has(pathKey(path))
+      ? "snapshot"
+      : "collapsed";
+  const FEED_STATE_TITLE = {
+    expanded: "Photos showing in full — click for a snapshot strip",
+    snapshot: "Showing a snapshot strip — click to collapse",
+    collapsed: "Collapsed — click to show the photos again",
+  };
 
   /** Svelte action: when a truncated label is hovered, slide it left so the
    * whole name can be read, then slide back. Measures the real overflow (CSS
@@ -75,68 +95,17 @@
     {:else}
       <span class="tree-fold-spacer"></span>
     {/if}
-    <!-- FEED visibility: a photo-grid glyph — deliberately NOT a triangle, so
-         it can't be mistaken for the tree's disclosure control above. Filled
-         grid = this group's photos show in the feed; single bar = collapsed. -->
+    <!-- FEED state: the SAME tri-state icon the feed's section headers use
+         (grid → strip → bar), deliberately not a triangle so it can't be
+         mistaken for the tree's disclosure control above. Clicking cycles the
+         group exactly like clicking its header in the feed does. -->
     <button
-      class="tree-collapse-icon"
-      class:collapsed={collapsedInFeed}
-      title={collapsedInFeed
-        ? "Photos hidden in the feed — click to show this group"
-        : "Photos showing in the feed — click to collapse this group"}
-      aria-label={collapsedInFeed
-        ? "Show group in feed"
-        : "Collapse group in feed"}
-      aria-pressed={collapsedInFeed}
+      class="tree-collapse-icon {feedState}"
+      title={FEED_STATE_TITLE[feedState]}
+      aria-label="Cycle this group in the feed: full grid → snapshot strip → collapsed"
       on:click={(e) => dispatch("toggleCollapse", { path, event: e })}
     >
-      {#if collapsedInFeed}
-        <svg viewBox="0 0 12 12" aria-hidden="true">
-          <rect
-            x="1"
-            y="5"
-            width="10"
-            height="2.4"
-            rx="0.6"
-            fill="currentColor"
-          />
-        </svg>
-      {:else}
-        <svg viewBox="0 0 12 12" aria-hidden="true">
-          <rect
-            x="1"
-            y="1"
-            width="4.4"
-            height="4.4"
-            rx="0.6"
-            fill="currentColor"
-          />
-          <rect
-            x="6.6"
-            y="1"
-            width="4.4"
-            height="4.4"
-            rx="0.6"
-            fill="currentColor"
-          />
-          <rect
-            x="1"
-            y="6.6"
-            width="4.4"
-            height="4.4"
-            rx="0.6"
-            fill="currentColor"
-          />
-          <rect
-            x="6.6"
-            y="6.6"
-            width="4.4"
-            height="4.4"
-            rx="0.6"
-            fill="currentColor"
-          />
-        </svg>
-      {/if}
+      <GroupStateIcon state={feedState} />
     </button>
     <button
       class="tree-label"
@@ -169,6 +138,7 @@
             {loadingKeys}
             {highlightedKey}
             {collapsedPaths}
+            {snapshotKeys}
             on:toggleExpand
             on:toggleCollapse
             on:jump
@@ -205,14 +175,11 @@
     justify-content: center;
     color: #6f6f6f;
   }
-  .tree-collapse-icon svg {
-    width: 12px;
-    height: 12px;
-    display: block;
-  }
   .tree-collapse-icon:hover {
     color: #cfcfcf;
   }
+  /* Amber once the group is not showing in full — matches the feed header. */
+  .tree-collapse-icon.snapshot,
   .tree-collapse-icon.collapsed {
     color: #ffd24c;
   }
