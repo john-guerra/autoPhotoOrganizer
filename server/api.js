@@ -15,7 +15,7 @@ import { writeFile, rename, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { extname, join, basename, dirname, resolve, sep } from "node:path";
 import { homedir } from "node:os";
-import { revealCommand } from "./lib/revealCommand.js";
+import { revealCommand, revealManyCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { thumbsDir, cacheRoot } from "./lib/cachePaths.js";
 import {
@@ -57,7 +57,7 @@ import {
   DIMENSIONS,
 } from "./db/feed.js";
 import { getTreeNode, getFlatTree } from "./db/tree.js";
-import { ALLOWED_ORIENTATIONS } from "./db/filters.js";
+import { ALLOWED_ORIENTATIONS, ALLOWED_KINDS } from "./db/filters.js";
 import { parseSort, DATE_SORTS } from "./db/sort.js";
 import { sampleOffsets } from "./db/sampleGroup.js";
 import { setKeepScope } from "./db/keepScope.js";
@@ -331,6 +331,18 @@ function parseFilterParam(req) {
       };
     }
     spec.orientations = raw.orientations;
+  }
+  if (raw.kinds !== undefined) {
+    if (
+      !Array.isArray(raw.kinds) ||
+      !raw.kinds.every((k) => ALLOWED_KINDS.includes(k))
+    ) {
+      return {
+        spec: {},
+        error: "kinds must be a subset of " + ALLOWED_KINDS.join("/"),
+      };
+    }
+    spec.kinds = raw.kinds;
   }
   if (raw.scopeIds !== undefined) {
     if (
@@ -753,6 +765,89 @@ export function registerApi(app) {
         });
       });
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: String(err?.message ?? err) });
+    }
+  });
+
+  // Reveal a whole selection at once (issue #18, multi-select). Best-effort per
+  // OS: macOS highlights all of them in Finder (AppleScript), Windows highlights
+  // the first (explorer /select is single-only), Linux opens the containing
+  // folder. Read-only — only shows where the files already live.
+  // One Finder/Explorer window opens per distinct parent folder.
+  const MAX_REVEAL_FOLDERS = 12;
+
+  app.post("/api/reveal-selection", async (req, res) => {
+    const ids = Array.isArray(req.body?.ids)
+      ? [...new Set(req.body.ids.filter((n) => Number.isInteger(n)))]
+      : [];
+    if (!ids.length) {
+      return res.status(400).json({
+        ok: false,
+        error: "ids must be a non-empty array of integers",
+      });
+    }
+    // Revealing thousands of files in a file manager isn't useful and can hang
+    // it — cap and tell the user rather than firing a giant command.
+    if (ids.length > 500) {
+      return res.status(413).json({
+        ok: false,
+        error: `too many files to reveal at once (${ids.length}; max 500) — narrow the selection first`,
+      });
+    }
+    const db = getDb();
+    const paths = [];
+    for (const id of ids) {
+      const it = getPhotoById(db, id);
+      if (!it) continue;
+      try {
+        await stat(it.path);
+        paths.push(it.path);
+      } catch {
+        // Skip files gone offline/moved since the last scan.
+      }
+    }
+    if (!paths.length) {
+      return res
+        .status(404)
+        .json({ ok: false, error: "none of the selected files were found" });
+    }
+    // The 500-file cap protects the command line; THIS protects the user. macOS
+    // opens one Finder window per distinct parent folder, so revealing files
+    // spread across dozens of folders buries the desktop.
+    const folders = new Set(paths.map((p) => dirname(p)));
+    if (folders.size > MAX_REVEAL_FOLDERS) {
+      return res.status(413).json({
+        ok: false,
+        error: `those photos live in ${folders.size} different folders (max ${MAX_REVEAL_FOLDERS}) — revealing them would open a window for each. Narrow the selection first.`,
+      });
+    }
+    const command = revealManyCommand(process.platform, paths);
+    if (!command) {
+      return res.status(501).json({
+        ok: false,
+        error: `unsupported platform: ${process.platform}`,
+      });
+    }
+    try {
+      await new Promise((resolveSpawn, reject) => {
+        execFile(command.cmd, command.args, (err) => {
+          if (err && process.platform !== "win32") reject(err);
+          else resolveSpawn();
+        });
+      });
+      // Explorer's /select, highlights ONE file — saying "revealed: N" here would
+      // be a lie the UI then repeats to the user. Report the limitation so the
+      // caller can surface it (see revealManyCommand's win32 branch).
+      const partial =
+        process.platform === "win32" && paths.length > 1
+          ? "Windows Explorer can only highlight one file at a time."
+          : null;
+      res.json({
+        ok: true,
+        revealed: partial ? 1 : paths.length,
+        ...(partial ? { partial } : {}),
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: String(err?.message ?? err) });
     }
@@ -1181,9 +1276,20 @@ export function registerApi(app) {
     // The feed's sort drives date-dimension grouping, so the group scope must
     // see it too (else keep-only/select disagree with the section — issue #71).
     const sort = parseSort(req.query.sort ? String(req.query.sort) : undefined);
+    // `edge=first|last` returns only the group's boundary photo. The jump
+    // controls (the ‹ › buttons and the Option+arrow edge fallback) need exactly
+    // one id; shipping every id of a 10,000-photo folder to read one of them was
+    // pure waste on every click.
+    const edge = req.query.edge ? String(req.query.edge) : null;
+    if (edge && edge !== "first" && edge !== "last") {
+      return res.status(400).json({ error: "edge must be 'first' or 'last'" });
+    }
     const db = getDb();
     try {
-      res.json({ ids: photoIdsMatchingFilter(db, filter, path, sort) });
+      const ids = photoIdsMatchingFilter(db, filter, path, sort);
+      if (!edge) return res.json({ ids });
+      const one = edge === "last" ? ids[ids.length - 1] : ids[0];
+      res.json({ ids: one == null ? [] : [one] });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
@@ -1254,7 +1360,12 @@ export function registerApi(app) {
 
   // --- Export selected photos into a new folder -----------------------------
   app.post("/api/export", (req, res) => {
-    const { photoIds, destParent, folderName } = req.body ?? {};
+    // `move` MOVES the originals out of the source folder. It goes through the
+    // same audited path materialize uses (copyIdsIntoFolder -> moveFile:
+    // rename, or copy -> fsync -> verify size -> unlink; the source is removed
+    // only after the destination is confirmed). It returns a manifest so the
+    // move is UNDOABLE — never a one-way door on someone's photos.
+    const { photoIds, destParent, folderName, move } = req.body ?? {};
     if (!Array.isArray(photoIds) || photoIds.length === 0) {
       return res
         .status(400)
@@ -1279,12 +1390,13 @@ export function registerApi(app) {
 
     (async () => {
       try {
-        const { copied, skipped, moved } = await copyIdsIntoFolder(
+        const { copied, skipped, moved, manifest } = await copyIdsIntoFolder(
           db,
           resolved.target,
           photoIds,
           {
             signal: job.controller.signal,
+            move: move === true,
             onProgress: (done, total, phase) =>
               registry.update(job.id, { done, total, phase }),
           }
@@ -1293,6 +1405,11 @@ export function registerApi(app) {
           target: resolved.target,
           copied: copied + moved,
           skipped,
+          // Carry the move flag + manifest so the jobs panel can offer Undo —
+          // same contract as materialize. A move without an undo would be a
+          // one-way door on the user's originals.
+          move: move === true,
+          ...(move === true ? { manifest } : {}),
         });
       } catch (e) {
         registry.fail(job.id, e);

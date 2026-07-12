@@ -48,7 +48,7 @@ export function dateAttrExpr(attr) {
   return SORT_ATTRS[isDateSort(attr) ? attr : "date_taken"].expr;
 }
 
-const DEFAULT_SORT = { by: "date_taken", dir: "desc" };
+const DEFAULT_SORT = { by: "date_taken", dir: "asc" };
 
 /** @param {string|undefined} raw "by:dir" @returns {{by:string,dir:"asc"|"desc"}} */
 export function parseSort(raw) {

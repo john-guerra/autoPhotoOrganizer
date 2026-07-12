@@ -10,7 +10,7 @@ import { dateAttrExpr } from "./sort.js";
  * Injection-safe: orientation names index a hardcoded fragment table; the
  * rating threshold is a bound param. User-supplied strings never reach SQL.
  *
- * @param {{minRating?: number, orientations?: string[], scopeIds?: number[], keepScope?: boolean, folderPath?: string, dateAttr?: string}} [spec]
+ * @param {{minRating?: number, orientations?: string[], kinds?: string[], scopeIds?: number[], keepScope?: boolean, folderPath?: string, dateAttr?: string}} [spec]
  * @returns {{sql: string, params: any[]}}
  */
 export function buildFilter(spec = {}) {
@@ -38,6 +38,17 @@ export function buildFilter(spec = {}) {
   ) {
     const ors = orientations.map((o) => ORIENTATION_FRAGMENTS[o]).join(" OR ");
     clauses.push(`photos.width > 0 AND photos.height > 0 AND (${ors})`);
+  }
+
+  // Media-kind facet (image / raw / video). Mirrors the orientation pass: a
+  // strict, non-empty subset constrains via `photos.kind IN (...)`; all kinds
+  // (or none) shows everything. Injection-safe — requested names are filtered
+  // against the hardcoded ALLOWED_KINDS list and bound as params.
+  const requestedKinds = new Set(Array.isArray(spec?.kinds) ? spec.kinds : []);
+  const kinds = ALLOWED_KINDS.filter((k) => requestedKinds.has(k));
+  if (kinds.length > 0 && kinds.length < ALLOWED_KINDS.length) {
+    clauses.push(`photos.kind IN (${kinds.map(() => "?").join(",")})`);
+    params.push(...kinds);
   }
 
   // Working-set scope ("keep only"): restrict to an explicit id set. Injection-
@@ -110,3 +121,4 @@ const ORIENTATION_FRAGMENTS = {
 };
 
 export const ALLOWED_ORIENTATIONS = ["landscape", "portrait", "square"];
+export const ALLOWED_KINDS = ["image", "raw", "video"];

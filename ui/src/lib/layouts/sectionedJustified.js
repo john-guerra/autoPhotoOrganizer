@@ -25,7 +25,14 @@ import { justifiedLayout, layoutHeight } from "./justified.js";
  * @param {Array<{id: number|string, aspectRatio: number} | {id: number|string, placeholder: true, height?: number}>} items
  * @param {Array<{index: number, depth: number, dimension: string, value: string, label: string}>} headers
  *   from deriveSectionHeaders, indices into `items`, ascending order.
- * @param {{ targetRowHeight?: number, containerWidth: number, gap?: number, headerHeight?: number, placeholderHeight?: number }} opts
+ * `indentPerDepth` nests the CONTENT under its section, not just the header:
+ * a chunk of photos (and a placeholder band) is inset by
+ * `innermostHeaderDepth * indentPerDepth`, and packed into the correspondingly
+ * narrower width, so the photos line up beneath the header they belong to
+ * instead of all starting at the left margin. 0 (the default) reproduces the
+ * previous flush-left behavior exactly.
+ *
+ * @param {{ targetRowHeight?: number, containerWidth: number, gap?: number, headerHeight?: number, placeholderHeight?: number, indentPerDepth?: number }} opts
  * @returns {{
  *   boxes: Array<{id: number|string, x: number, y: number, width: number, height: number, placeholder?: true}>,
  *   headers: Array<{index: number, depth: number, dimension: string, value: string, label: string, y: number, endY: number}>,
@@ -41,6 +48,7 @@ export function sectionedJustifiedLayout(
     gap = 8,
     headerHeight = 32,
     placeholderHeight = 32,
+    indentPerDepth = 0,
   }
 ) {
   const headersByIndex = new Map();
@@ -55,6 +63,13 @@ export function sectionedJustifiedLayout(
   let yOffset = 0;
   let chunkStart = 0;
 
+  /** How far the CURRENT section's content is inset: the innermost open
+   * header's depth, so photos sit under their own header. */
+  function currentIndent() {
+    if (!indentPerDepth || !openHeaders.length) return 0;
+    return openHeaders[openHeaders.length - 1].depth * indentPerDepth;
+  }
+
   function flushChunk(end) {
     if (end <= chunkStart) {
       chunkStart = end;
@@ -67,12 +82,15 @@ export function sectionedJustifiedLayout(
     const chunkItems = items
       .slice(chunkStart, end)
       .filter((it) => !it.placeholder);
+    const indent = currentIndent();
     const chunkBoxes = justifiedLayout(chunkItems, {
       targetRowHeight,
-      containerWidth,
+      containerWidth: Math.max(1, containerWidth - indent),
       gap,
     });
-    for (const b of chunkBoxes) boxes.push({ ...b, y: b.y + yOffset });
+    for (const b of chunkBoxes) {
+      boxes.push({ ...b, x: b.x + indent, y: b.y + yOffset });
+    }
     yOffset += chunkBoxes.length ? layoutHeight(chunkBoxes) + gap : 0;
     chunkStart = end;
   }
@@ -108,11 +126,12 @@ export function sectionedJustifiedLayout(
       // these undefined would silently produce NaN and desync arrow-key
       // navigation around a placeholder row.
       const height = items[i].height ?? placeholderHeight;
+      const pIndent = currentIndent();
       boxes.push({
         id: items[i].id,
-        x: 0,
+        x: pIndent,
         y: yOffset,
-        width: containerWidth,
+        width: Math.max(1, containerWidth - pIndent),
         height,
         placeholder: true,
       });

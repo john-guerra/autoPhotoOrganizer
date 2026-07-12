@@ -2,10 +2,13 @@
  * minRating 0 = off; orientations of length 0 or 3 = off. Pure + DOM-free. */
 
 export const ORIENTATIONS = ["landscape", "portrait", "square"];
+/** Media kinds, matching photos.kind. Subset of length 0 or 3 = off. */
+export const KINDS = ["image", "raw", "video"];
 
 export const DEFAULT_FILTER = {
   minRating: 0,
   orientations: [...ORIENTATIONS],
+  kinds: [...KINDS],
   // Time-range facet (epoch ms), driven by the timeline filter. null = open.
   dateFrom: null,
   dateTo: null,
@@ -18,6 +21,7 @@ export const DEFAULT_FILTER = {
 export function isActive(spec) {
   const minRating = spec?.minRating ?? 0;
   const o = spec?.orientations ?? [];
+  const k = spec?.kinds ?? [];
   const scoped = Array.isArray(spec?.scopeIds) && spec.scopeIds.length > 0;
   const focused =
     typeof spec?.folderPath === "string" && spec.folderPath.length > 0;
@@ -25,6 +29,7 @@ export function isActive(spec) {
   return (
     minRating > 0 ||
     (o.length > 0 && o.length < ORIENTATIONS.length) ||
+    (k.length > 0 && k.length < KINDS.length) ||
     scoped ||
     Boolean(spec?.keepScope) ||
     focused ||
@@ -41,6 +46,8 @@ export function toQueryParam(spec) {
   if ((spec?.minRating ?? 0) > 0) out.minRating = spec.minRating;
   const o = spec?.orientations ?? [];
   if (o.length > 0 && o.length < ORIENTATIONS.length) out.orientations = o;
+  const k = spec?.kinds ?? [];
+  if (k.length > 0 && k.length < KINDS.length) out.kinds = k;
   if (Array.isArray(spec?.scopeIds) && spec.scopeIds.length) {
     out.scopeIds = spec.scopeIds;
   }
@@ -68,4 +75,12 @@ export function toggleOrientation(spec, o) {
   const set = new Set(spec?.orientations ?? []);
   set.has(o) ? set.delete(o) : set.add(o);
   return { ...spec, orientations: ORIENTATIONS.filter((x) => set.has(x)) };
+}
+
+/** Toggle media kind `k` in/out of the included set, result in canonical
+ * KINDS order. @returns a new spec. */
+export function toggleKind(spec, k) {
+  const set = new Set(spec?.kinds ?? []);
+  set.has(k) ? set.delete(k) : set.add(k);
+  return { ...spec, kinds: KINDS.filter((x) => set.has(x)) };
 }

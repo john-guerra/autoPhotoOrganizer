@@ -535,6 +535,107 @@ describe("POST /api/reveal/:id", () => {
   });
 });
 
+describe("POST /api/reveal-selection", () => {
+  const realPlatform = process.platform;
+
+  beforeEach(() => {
+    vi.mocked(execFile).mockClear();
+  });
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: realPlatform });
+  });
+
+  function post(ids) {
+    return fetch(`${srv.base}/api/reveal-selection`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+  }
+
+  it("400s for an empty or non-array ids", async () => {
+    expect((await post([])).status).toBe(400);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("413s when more than 500 ids are sent", async () => {
+    const many = Array.from({ length: 501 }, (_, i) => i + 1);
+    const res = await post(many);
+    expect(res.status).toBe(413);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("404s when none of the ids resolve to a file", async () => {
+    expect((await post([99999998, 99999999])).status).toBe(404);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("selects all files via AppleScript on macOS", async () => {
+    const body = await scan(srv.base, photosDir);
+    const ids = body.items.slice(0, 2).map((i) => i.id);
+    const paths = ids.map((id) => getPhotoById(getDb(), id).path);
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const res = await post(ids);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, revealed: ids.length });
+    const [cmd, args] = vi.mocked(execFile).mock.calls[0];
+    expect(cmd).toBe("osascript");
+    expect(args[0]).toBe("-e");
+    for (const p of paths) expect(args[1]).toContain(`POSIX file "${p}"`);
+  });
+
+  it("caps the number of distinct FOLDERS (one window each) with a 413", async () => {
+    // The 500-file cap protects the command line; this protects the desktop.
+    const dirs = [];
+    const ids = [];
+    for (let d = 0; d < 14; d++) {
+      const dir = await mkdtemp(join(tmpdir(), "ag-revealmany-"));
+      dirs.push(dir);
+      await sharp({
+        create: {
+          width: 8,
+          height: 8,
+          channels: 3,
+          background: { r: 1, g: 2, b: 3 },
+        },
+      })
+        .jpeg()
+        .toFile(join(dir, "a.jpg"));
+      const body = await scan(srv.base, dir);
+      ids.push(body.items[0].id);
+    }
+    const res = await post(ids);
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toMatch(/different folders/i);
+    expect(execFile).not.toHaveBeenCalled();
+    for (const d of dirs) await rm(d, { recursive: true, force: true });
+  });
+
+  it("de-duplicates repeated ids", async () => {
+    const body = await scan(srv.base, photosDir);
+    const id = body.items[0].id;
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const res = await post([id, id, id]);
+    expect(res.status).toBe(200);
+    // one id -> the SINGLE-file reveal, not an AppleScript list
+    const [cmd] = vi.mocked(execFile).mock.calls[0];
+    expect(cmd).toBe("open");
+    expect(await res.json()).toEqual({ ok: true, revealed: 1 });
+  });
+
+  it("highlights the first file on Windows", async () => {
+    const body = await scan(srv.base, photosDir);
+    const ids = body.items.slice(0, 2).map((i) => i.id);
+    const first = getPhotoById(getDb(), ids[0]).path;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const res = await post(ids);
+    expect(res.status).toBe(200);
+    const [cmd, args] = vi.mocked(execFile).mock.calls[0];
+    expect(cmd).toBe("explorer");
+    expect(args).toEqual(["/select,", first]);
+  });
+});
+
 describe("GET /api/library", () => {
   it("records the scanned folder and reports it as mounted", async () => {
     await scan(srv.base, photosDir);

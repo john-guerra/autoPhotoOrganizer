@@ -6,6 +6,7 @@
    * action and two-way binds the export popover's open state + form fields.
    */
   import { createEventDispatcher } from "svelte";
+  import { clickOutside, onEscape, clampToViewport } from "./actions.js";
 
   export let selectedCount = 0;
   export let lastClearedSelection = null;
@@ -16,6 +17,7 @@
   export let exportOpen = false;
   export let exportDest = "";
   export let exportName = "";
+  export let exportMove = false;
 
   const dispatch = createEventDispatcher();
 </script>
@@ -40,14 +42,24 @@
         title="Restore the selection you just cleared">Undo</button
       >
     {/if}
-    <div class="export-wrap">
+    <div
+      class="export-wrap"
+      use:clickOutside={() => (exportOpen = false)}
+      use:onEscape={() => (exportOpen = false)}
+    >
       <button
         class="sel-btn export"
         on:click={() => (exportOpen = !exportOpen)}
         title="Copy the selected photos into a new folder">Export…</button
       >
       {#if exportOpen}
-        <div class="export-panel">
+        <div class="export-panel" use:clampToViewport>
+          <button
+            class="export-close"
+            title="Close"
+            aria-label="Close export"
+            on:click={() => (exportOpen = false)}>✕</button
+          >
           <label class="export-field">
             <span>Destination folder</span>
             <div class="export-row">
@@ -78,15 +90,31 @@
               spellcheck="false"
             />
           </label>
+          <label
+            class="export-move"
+            title="Move the originals out of their current folder instead of copying them"
+          >
+            <input type="checkbox" bind:checked={exportMove} />
+            <span>Move the files instead of copying</span>
+          </label>
+          {#if exportMove}
+            <p class="export-warn" role="note">
+              The originals will be <strong>moved out</strong> of their current folders.
+              You can undo this from the jobs panel afterwards.
+            </p>
+          {/if}
           <div class="export-actions">
             <button
               class="scan"
+              class:danger={exportMove}
               on:click={() => dispatch("export")}
               disabled={exporting || !exportDest.trim() || !exportName.trim()}
             >
               {exporting
-                ? "Copying…"
-                : `Copy ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
+                ? exportMove
+                  ? "Moving…"
+                  : "Copying…"
+                : `${exportMove ? "Move" : "Copy"} ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
             </button>
           </div>
           {#if exportResult}
@@ -152,6 +180,24 @@
     min-width: 300px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   }
+  .export-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    line-height: 1;
+    background: transparent;
+    border: 1px solid #444;
+    color: #cfcfcf;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .export-close:hover {
+    background: #2c2c2c;
+  }
   .export-field {
     display: flex;
     flex-direction: column;
@@ -165,6 +211,24 @@
   }
   .export-actions {
     display: flex;
+  }
+  .export-move {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: #cfcfcf;
+    cursor: pointer;
+  }
+  .export-warn {
+    margin: 0;
+    font-size: 0.75rem;
+    color: #ffd24c;
+    line-height: 1.35;
+  }
+  .scan.danger {
+    background: #b3541e;
+    color: #fff;
   }
   .export-result {
     margin: 0;

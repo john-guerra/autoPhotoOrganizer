@@ -36,6 +36,13 @@
         >{selectedCount.toLocaleString()} <em>selected</em></span
       >
     </div>
+    <!-- Selection actions (Clear / Keep only / Export) sit RIGHT NEXT TO the
+         selected count — that's what makes "Clear" mean "clear the selection".
+         Passed as a slot so App keeps ownership of the selection + export state
+         instead of drilling a dozen props through here. -->
+    <slot name="selection" />
+    <!-- The transient message comes AFTER the actions: "N photos loaded" is a
+         separate thought and used to wedge itself between the count and Clear. -->
     {#if error || status}
       <span class="status" class:err={!!error}>{error || status}</span>
     {/if}

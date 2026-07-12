@@ -73,6 +73,24 @@
 </script>
 
 <div class="loupe" role="dialog" aria-modal="true">
+  <button
+    class="loupe-close"
+    title="Close (Esc)"
+    aria-label="Close"
+    on:click={() => dispatch("close")}>✕</button
+  >
+  {#if item}
+    <button
+      class="loupe-select"
+      class:on={inSelection}
+      title={inSelection ? "Deselect (X)" : "Select (X)"}
+      aria-label={inSelection ? "Deselect photo" : "Select photo"}
+      aria-pressed={inSelection}
+      on:click={() => dispatch("toggleselect")}
+    >
+      {#if inSelection}✓{/if}
+    </button>
+  {/if}
   <div class="body">
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <!-- contextmenu is a right-click affordance on the media stage; no ARIA
@@ -102,7 +120,13 @@
       {/if}
     </div>
     {#if showDetails}
-      <LoupeDetails {item} meta={currentMeta} {inSelection} {selectedCount} />
+      <LoupeDetails
+        {item}
+        meta={currentMeta}
+        {inSelection}
+        {selectedCount}
+        on:rate
+      />
     {/if}
   </div>
   {#if showFilmstrip}
@@ -123,6 +147,52 @@
     display: flex;
     flex-direction: column;
     z-index: 100;
+  }
+  .loupe-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 10;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    line-height: 1;
+    background: rgba(20, 20, 20, 0.7);
+    border: 1px solid #444;
+    color: #e8e8e8;
+    border-radius: 50%;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  .loupe-close:hover {
+    background: rgba(50, 50, 50, 0.9);
+  }
+  .loupe-select {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(20, 20, 20, 0.7);
+    border: 1.5px solid rgba(255, 255, 255, 0.85);
+    color: #1a1400;
+    border-radius: 50%;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .loupe-select:hover {
+    border-color: #fff;
+  }
+  .loupe-select.on {
+    background: #ffd24c;
+    border-color: #ffd24c;
   }
   .body {
     flex: 1;

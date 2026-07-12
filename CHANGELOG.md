@@ -6,6 +6,220 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.25
+
+- **Automated UI testing (developer-facing).** The project now has a second test
+  tier: real browser, real clicks (Playwright), on a throwaway library of its own.
+  `npm run test:unit` (fast) / `npm run test:e2e` (UI) / `npm run test:all`. The
+  first six tests each lock in a bug that actually shipped during this batch.
+
+## 2.9.24
+
+- **Fixed: collapsing a group in the feed threw an error** (a regression
+  introduced by the 2.9.21 performance change).
+
+## 2.9.23
+
+- **Shift-folding a big group now says it's working** instead of looking frozen,
+  and a second click can't start a competing fold.
+- **Fixed: expanding the tree could silently stop part-way** if a folder's
+  children were already being fetched.
+
+## 2.9.22
+
+- **Reconnecting no longer sends you back to the top.** After the server restarts,
+  the app reloads around the photo you were on instead of jumping to the start of
+  the library.
+- **Reveal failures are now shown as errors**, not as a status message that the
+  next action wipes out — including "too many files to reveal at once".
+- **Windows: revealing several files now admits it only highlights one** (Explorer
+  can't select more), instead of reporting that it revealed them all.
+
+## 2.9.21
+
+- **Faster feed rendering with many collapsed groups.** Working out how each group
+  is drawn was re-scanning the whole collapsed list (with a JSON compare) several
+  times per header on every render — noticeable after Collapse-all or folding a
+  big tree. It's now a single lookup.
+
+## 2.9.20
+
+- **Fixed: "Remove" did nothing on folder-name groups.** The button was offered
+  (2.9.13) but the handler only accepted full-path folder groups, so clicking it
+  silently did nothing. It now works — and says so if a group isn't a folder.
+- **Fixed: clicking a folded group in the tree jumped to the wrong place.** If the
+  group was showing a snapshot (or collapsed), the feed skipped it and landed on
+  the next group's photos. It now lands on the group itself.
+- **The tree sidebar starts fully expanded**, so the library map is visible
+  without unfolding it node by node.
+
+## 2.9.19
+
+- **Fixed: hovering a group title blew the header up.** Hovering a section header
+  made it grow to five times its height, shoving the photos down and clipping the
+  first row. A CSS cleanup in 2.9.18 had accidentally eaten the `opacity: 1`
+  hover rule for the header's action buttons, so they inherited the empty-state's
+  `padding: 4rem` instead. (usability testing)
+
+## 2.9.18
+
+- **A group now always has exactly one label.** Collapsing or snapshotting a group
+  used to replace its header with a different row that drew its own duplicate
+  label — which is why a snapshot ignored the group's indentation. Now the header
+  stays put and only its icon changes; the snapshot strip is just content beneath
+  it, indented under its own group like the photos are. (usability testing)
+- **How a group's photos are drawn is now pluggable** — grid, snapshot strip and
+  collapsed are entries in a registry, so new photo widgets can be added without
+  touching the header, the cycle, the sidebar or the layout. See
+  `docs/superpowers/specs/2026-07-12-group-photo-renderers.md`.
+
+## 2.9.17
+
+- **Nested groups now really look nested.** The dendrogram lines actually connect
+  (they were being painted over by the sticky headers), and a sub-group's
+  **photos are indented under their own header** too — along with its snapshot
+  strip and collapsed pill — instead of every row starting at the left margin.
+  (usability testing)
+
+## 2.9.16
+
+- **Nested groups now look nested.** With more than one grouping level, each
+  sub-group is indented under its parent and joined to it by dotted dendrogram
+  lines, so you can see the hierarchy at a glance instead of a flat stack of
+  headers. (usability testing)
+
+## 2.9.15
+
+- **The app now tells you when the server is gone.** If the backend crashes or
+  restarts, a banner says so ("what's on screen may be out of date"), the app
+  keeps retrying with backoff, and it reloads itself automatically as soon as the
+  server is back — instead of silently showing stale data while fetches failed in
+  the console. There's a "Retry now" button too. (usability testing)
+- **Server code now hot-restarts in development** (`node --watch`), so backend
+  edits no longer need a manual restart.
+
+## 2.9.14
+
+- **Shift+click a group to fold its subgroups** — like function folding in VS
+  Code. A plain click collapses the group as one block; Shift+click leaves the
+  group open and folds every subgroup underneath it instead. Works from the feed
+  headers and the tree sidebar. (usability testing)
+- **Fixed: collapsing a parent no longer leaves its children collapsed too.**
+  Snapshotting (or collapsing) a group whose child was already snapshotted used
+  to draw two strips; the parent's state now supersedes its children's.
+  (usability testing)
+
+## 2.9.13
+
+- **Fixed: collapsing a nested group crashed the feed.** With two grouping levels
+  (e.g. Type › Folder), collapsing the outer group threw and left the feed blank.
+  Collapsed groups only carry the levels down to where they were collapsed, and
+  the header code assumed every level was always present. (usability testing)
+- **Errors now show up in the app, not just the console.** Anything that escapes
+  — a rendering crash, a failed background task — is surfaced in the status line
+  with what broke and what to try, instead of silently blanking the view.
+  (usability testing)
+- **Jump to the next/previous group from a group label** — new ‹ › buttons, the
+  mouse equivalent of Option+←/→. (usability testing)
+- **Option+←/→ at the first/last group** now jumps to that group's first/last
+  photo instead of doing nothing. (usability testing)
+- **"Remove" is now offered on folder-name groups too**, not just full-path
+  folder groups. (usability testing)
+
+## 2.9.12
+
+- **One icon for a group's state, everywhere.** The tree sidebar, the feed's
+  section headers, the snapshot strip and the collapsed pill now all show the
+  same tri-state icon — a full grid, a snapshot strip, or a collapsed bar (amber
+  once it isn't showing in full) — and clicking it cycles the group the same way
+  from either place. The sidebar previously only knew "collapsed" and missed the
+  snapshot state entirely. (usability testing)
+
+## 2.9.11
+
+- **The sidebar is resizable** — drag its right edge (double-click to reset, or
+  focus it and use ←/→). The width is remembered. (usability testing)
+- **Long folder names are readable again.** Hovering a truncated name in the tree
+  slides it across so you can read the whole thing. (usability testing)
+- **Expand all / Collapse all** buttons in the tree sidebar. (usability testing)
+- **The tree's two toggles no longer look alike.** The ▸/▾ triangle folds
+  sub-folders in the tree; a separate photo-grid icon controls whether that
+  group's photos show in the feed (and turns amber when hidden). (usability
+  testing)
+
+## 2.9.10
+
+- **The "Group by" control is far more compact.** Its title now sits on top, the
+  current grouping levels come first, the add-a-level autocomplete is short, and
+  "Clear All" is now a small ✕ — reclaiming a lot of toolbar width. (usability
+  testing; needs multi-auto-select 0.0.13)
+
+## 2.9.9
+
+- **Media-type filter now uses icons + a "Type" legend** — a photo icon, a RAW
+  badge, and a video icon, each with a tooltip, instead of plain text labels.
+  (usability testing)
+
+## 2.9.8
+
+- **Reveal a whole selection in Finder/Explorer.** Right-clicking a selected
+  photo now offers "Reveal N photos in Finder" — on macOS it highlights all of
+  them, on Windows the first (Explorer can't multi-select), on Linux it opens the
+  containing folder. Single-photo reveal is unchanged. (usability testing)
+
+## 2.9.7
+
+- **Time now sorts oldest-first by default**, so a freshly-scanned trip reads in
+  the order it was shot. (Your existing sort preference is kept.) (usability
+  testing)
+- **File sizes on the thumbnails when sorting by size.** Sorting by Size now
+  shows each photo's size in the bottom-right of its tile (tucked above the
+  burst-count badge on stacks). (usability testing)
+
+## 2.9.6
+
+- **Filter by media type.** New Photos / RAW / Videos toggles in the toolbar
+  narrow the view to just the kinds you want (e.g. show only videos). Combines
+  with the rating, orientation, and time filters. (usability testing)
+
+## 2.9.5
+
+- **The status bar is no longer hidden by background jobs.** The jobs strip
+  (scan/export/undo progress) now sits directly above the status bar instead of
+  painting over it, so counts, sort, and zoom stay visible while a job runs.
+  (usability testing)
+
+## 2.9.4
+
+- **Select all with ⌘A / Ctrl+A.** Pressing ⌘A (Ctrl+A on Windows/Linux) now
+  selects every photo in the current view — the whole filtered working set, not
+  just the loaded window — unless you're typing in a text field. (usability
+  testing)
+
+## 2.9.3
+
+- **Click to select, click to rate.** Every grid tile and the loupe now have a
+  selection circle — click it to add/remove a photo from the selection without
+  opening it (it appears on hover and on the focused tile, and stays solid once
+  selected). In the loupe you can also click the star row to set a rating
+  directly (click the same star again to clear). (usability testing)
+
+## 2.9.2
+
+- **Popups now close like popups.** The Loupe (full-photo view) has a visible ✕
+  close button, and the Export panel can be dismissed with Escape, a click
+  outside, or its own ✕ — it no longer stays stuck open. The Export panel and
+  add-folder popover also stay on-screen when their button sits near a screen
+  edge instead of spilling off. (usability testing)
+
+## 2.9.1
+
+- **Clearer first-run and folder controls.** An empty library now shows an
+  "Add folder…" button instead of just a hint. The add-folder popover leads with
+  a one-click "Choose folder to add…" picker and its manual-path button is now
+  labelled "Add & scan". The toolbar "Library" button is now "Folders", and the
+  grouping control has a visible "Group by" label. (usability testing)
+
 ## 2.9.0
 
 - **First stable release — the `-alpha` pre-release tag is dropped.** AutoGallery

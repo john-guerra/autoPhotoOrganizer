@@ -29,3 +29,46 @@ export function revealCommand(platform, filePath) {
       return null;
   }
 }
+
+/**
+ * Best-effort "reveal these N files" for a multi-selection. Where the platform
+ * can highlight multiple files it does; otherwise it falls back to the best it
+ * can (highlight the first / open the folder). Pure and side-effect-free.
+ *
+ * - darwin: AppleScript `reveal {POSIX file …}` selects ALL of them in Finder.
+ * - win32:  `explorer /select,` is single-file only, so highlight the first.
+ * - linux:  open the containing folder of the first file (no portable select).
+ *
+ * @param {NodeJS.Platform|string} platform
+ * @param {string[]} filePaths - absolute paths (assumed non-empty).
+ * @returns {{cmd: string, args: string[]}|null}
+ */
+export function revealManyCommand(platform, filePaths) {
+  const paths = Array.isArray(filePaths) ? filePaths.filter(Boolean) : [];
+  if (!paths.length) return null;
+  // A single path is just the single-file reveal on every platform.
+  if (paths.length === 1) return revealCommand(platform, paths[0]);
+
+  switch (platform) {
+    case "darwin": {
+      // Build `reveal {POSIX file "p1", POSIX file "p2", …}` then activate
+      // Finder. Escape backslashes and quotes inside each AppleScript string
+      // literal so a path with those characters can't break out of the quotes.
+      const list = paths
+        .map(
+          (p) => `POSIX file "${p.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+        )
+        .join(", ");
+      const script = `tell application "Finder"\nactivate\nreveal {${list}}\nend tell`;
+      return { cmd: "osascript", args: ["-e", script] };
+    }
+    case "win32":
+      // Explorer can't select multiple from the command line — highlight the
+      // first file (callers should note the limitation to the user).
+      return { cmd: "explorer", args: ["/select,", paths[0]] };
+    case "linux":
+      return { cmd: "xdg-open", args: [dirname(paths[0])] };
+    default:
+      return null;
+  }
+}

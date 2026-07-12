@@ -28,7 +28,6 @@
   import {
     mergeFeedPage,
     deriveSectionHeaders,
-    suppressPlaceholderHeaders,
     nearestRealItemId,
     formatGroupValue,
     computeHeaderPaths,
@@ -54,6 +53,7 @@
     removeFolderByPath,
     renameFolder,
     revealInFinder,
+    revealSelection,
   } from "./lib/api.js";
   import { jobs, waitForJob, takeNewlyFinished } from "./lib/jobs.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
@@ -61,6 +61,16 @@
   import ContextMenu from "./lib/ContextMenu.svelte";
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import JobsPanel from "./lib/JobsPanel.svelte";
+  import GroupStateIcon from "./lib/GroupStateIcon.svelte";
+  import {
+    getRenderer,
+    isServerCollapsed,
+    nextRendererId,
+    DEFAULT_RENDERER_ID,
+    SNAPSHOT_ID,
+  } from "./lib/groupRenderers.js";
+  import ServerBanner from "./lib/ServerBanner.svelte";
+  import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import UpdateBanner from "./lib/UpdateBanner.svelte";
@@ -185,7 +195,9 @@
     } catch {
       /* fall through to default */
     }
-    return { by: "date_taken", dir: "desc" };
+    // Ascending (oldest first) by default — culling a trip reads best in the
+    // order it was shot. Existing users keep their persisted sort (above).
+    return { by: "date_taken", dir: "asc" };
   })();
   $: localStorage.setItem(LS_SORT, JSON.stringify(sort));
 
@@ -371,15 +383,79 @@
   let exportOpen = false;
   let exportDest = localStorage.getItem(LS_EXPORT_DEST) || "";
   let exportName = defaultExportName();
+  // MOVE the originals instead of copying. Off by default and never remembered:
+  // a destructive default is how people lose photos. It is undoable (the job
+  // carries a manifest), and the UI says so before you commit.
+  let exportMove = false;
   let exporting = false;
   let exportResult = null;
 
   // Sidebar view: classic "tree" or focus+context "fisheye" (toggle, persisted).
+  // --- Resizable sidebar (drag its right edge; width persisted) -------------
+  const DEFAULT_SIDEBAR_WIDTH = 260;
+  const MIN_SIDEBAR_WIDTH = 150;
+  const MAX_SIDEBAR_WIDTH = 640;
+  const LS_SIDEBAR_WIDTH = "autogallery.sidebarWidth";
+  const clampSidebar = (w) =>
+    Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, Math.round(w)));
+  let sidebarWidth = (() => {
+    const stored = Number(localStorage.getItem(LS_SIDEBAR_WIDTH));
+    return Number.isFinite(stored) && stored > 0
+      ? clampSidebar(stored)
+      : DEFAULT_SIDEBAR_WIDTH;
+  })();
+  $: localStorage.setItem(LS_SIDEBAR_WIDTH, String(sidebarWidth));
+  let resizingSidebar = false;
+
+  /** Pointer-capture drag so the resize keeps tracking even when the cursor
+   * outruns the 5px handle (a plain mousemove-on-handle loses it instantly). */
+  function startSidebarResize(e) {
+    e.preventDefault();
+    resizingSidebar = true;
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    const handle = e.currentTarget;
+    handle.setPointerCapture?.(e.pointerId);
+    const onMove = (ev) =>
+      (sidebarWidth = clampSidebar(startW + ev.clientX - startX));
+    const onUp = (ev) => {
+      resizingSidebar = false;
+      handle.releasePointerCapture?.(ev.pointerId);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  }
+
+  /** Keyboard-resizable too — the handle is focusable, so arrows nudge it. */
+  function onSidebarResizeKey(e) {
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      sidebarWidth = clampSidebar(sidebarWidth - step);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      sidebarWidth = clampSidebar(sidebarWidth + step);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+    }
+  }
+
   const LS_SIDEBAR_MODE = "autogallery.sidebarMode";
   let sidebarMode =
     localStorage.getItem(LS_SIDEBAR_MODE) === "fisheye" ? "fisheye" : "tree";
   $: localStorage.setItem(LS_SIDEBAR_MODE, sidebarMode);
   let collapsedPaths = []; // Array<Array<{dimension,value}>>, reset on hierarchy change
+  // rendererIdFor() is called ~3x per header per render (class, title, icon) plus
+  // once per placeholder in the layout. Scanning collapsedPaths with a
+  // JSON.stringify compare each time was O(headers x collapsedPaths) stringifies
+  // per render — brutal after Collapse-all or a 400-leaf shift-fold, on top of
+  // the known large-selection stall (#97). Derive the key set ONCE.
+  $: collapsedKeys = new Set(collapsedPaths.map(pathKey));
   // Groups rendered as a one-line SnapshotStrip instead of the collapsed
   // pill. A group in this set is ALSO server-collapsed (its path lives in
   // collapsedPaths, per the tri-state design in
@@ -391,7 +467,9 @@
   // Last global view action (the top-of-toolbar "cycle all" control); the
   // per-group toggles may diverge from it, but the button just applies the
   // next whole-view state each click: full view → snapshot all → collapse all.
-  let globalViewMode = "expanded"; // "expanded" | "snapshot" | "collapsed"
+  // A GROUP_RENDERERS id — the whole-view control cycles the same registry order
+  // the per-group toggle does.
+  let globalViewMode = DEFAULT_RENDERER_ID;
   let cyclingAll = false;
   // Two-click confirm for "remove album from library" (drops the folder's rows
   // + ratings from the index; files on disk are untouched). Holds the pathKey
@@ -685,7 +763,7 @@
    * groups that (re)appear inherit it, rather than snapping back to expanded. In
    * expanded mode this is the plain reset-and-recenter path. */
   async function rebuildFeedForFilterOrSort() {
-    if (globalViewMode === "expanded") {
+    if (!isServerCollapsed(globalViewMode)) {
       await onGroupByChange(groupBy);
     } else {
       await applyViewModeToGroups(globalViewMode);
@@ -773,6 +851,27 @@
     return selectState(intersectionCount(entry.ids, _sel), entry.ids.length);
   }
 
+  /** Cmd/Ctrl+A: add every photo matching the current filter/sort to the
+   * selection (path=null → the whole working set, not just one group). Reuses
+   * the same server select-all query as group select-all and export. */
+  async function selectAllInView() {
+    if (!displayEntries.length) return;
+    try {
+      const ids = await fetchPhotoIds(
+        filterIsActive(displayFilter) ? displayFilter : null,
+        null,
+        sort
+      );
+      if (!ids.length) return;
+      selectedIds = new Set([...selectedIds, ...ids]);
+      status = `Selected ${selectedIds.size.toLocaleString()} photo${
+        selectedIds.size === 1 ? "" : "s"
+      }`;
+    } catch (e) {
+      error = `Select all failed: ${e.message}`;
+    }
+  }
+
   /** Click the group's select icon: select-all, or deselect-all if already all. */
   async function toggleGroupSelectAll(path) {
     const key = pathKey(path);
@@ -807,8 +906,15 @@
    * SQLite (files on disk are untouched; a rescan re-adds the photos, unrated).
    * Only meaningful for a folder group; the button is gated on a folder leaf. */
   async function removeAlbum(path) {
-    const folderPath = path?.find((p) => p.dimension === "folder")?.value;
-    if (!folderPath) return;
+    // Accept BOTH folder dims. isRemovableFolder() offers Remove for `folder`
+    // AND `folderName` groups (they carry the same abs path server-side), but
+    // this only looked for `folder` — so on a folderName group the button
+    // rendered and did nothing at all. A silent no-op is exactly what we forbid.
+    const folderPath = folderFromGroupPath(path);
+    if (!folderPath) {
+      error = "Can't remove this group — it isn't a folder.";
+      return;
+    }
     const key = pathKey(path);
     if (removeArmedKey !== key) {
       removeArmedKey = key; // first click arms the confirm
@@ -993,8 +1099,30 @@
     if (!it || typeof it.id !== "number") return;
     const res = await revealInFinder(it.id);
     if (!res.ok) {
-      status = `Couldn't reveal file: ${res.error ?? "unknown error"}`;
+      error = `Couldn't reveal file: ${res.error ?? "unknown error"}`;
       console.warn("[reveal]", res.error);
+    }
+  }
+
+  /** Reveal the whole current selection in the OS file browser (best-effort per
+   * platform — see /api/reveal-selection). */
+  async function revealSelectionInFinder() {
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+    const res = await revealSelection(ids);
+    if (!res.ok) {
+      // `error`, not `status`: the next feed operation overwrites `status`, and
+      // the server's 413 ("too many files… narrow the selection first") exists
+      // precisely to be read and acted on.
+      error = `Couldn't reveal selection: ${res.error ?? "unknown error"}`;
+      console.warn("[reveal-selection]", res.error);
+      return;
+    }
+    // Windows' Explorer can only highlight ONE file; the server says so rather
+    // than pretending it revealed them all. Don't leave the user believing a
+    // 30-file selection is sitting highlighted in Explorer.
+    if (res.partial) {
+      status = `Revealed 1 of ${ids.length} — ${res.partial}`;
     }
   }
 
@@ -1020,11 +1148,23 @@
 
   // Menu items for the current target. Kept as data so actions can be appended
   // without reworking the menu component; the stack items are built by the module.
+  $: revealTargetId = resolvedPhotos[contextMenu.targetIndex]?.id;
+  // Reveal the whole selection when the right-clicked photo is part of a
+  // multi-selection (like a file manager); otherwise reveal just that photo.
+  $: revealWholeSelection =
+    selectedIds.size > 1 &&
+    typeof revealTargetId === "number" &&
+    selectedIds.has(revealTargetId);
   $: contextMenuItems = [
     {
-      label: "Reveal in Finder",
-      action: () => reveal(contextMenu.targetIndex),
-      enabled: typeof resolvedPhotos[contextMenu.targetIndex]?.id === "number",
+      label: revealWholeSelection
+        ? `Reveal ${selectedIds.size} photos in Finder`
+        : "Reveal in Finder",
+      action: () =>
+        revealWholeSelection
+          ? revealSelectionInFinder()
+          : reveal(contextMenu.targetIndex),
+      enabled: typeof revealTargetId === "number",
     },
     ...buildStackMenuItems({
       items,
@@ -1115,6 +1255,7 @@
         photoIds: [...selectedIds],
         destParent: exportDest.trim(),
         folderName: exportName.trim(),
+        move: exportMove,
       });
       localStorage.setItem(LS_EXPORT_DEST, exportDest.trim());
       const job = await waitForJob(jobId);
@@ -1241,10 +1382,35 @@
       // See loadInitialFeed: displayEntries needs a tick to reflect the
       // `items` assignment above before it can be used to pick `selected`.
       await tick();
-      selected = nextSelectable(displayEntries, 0, 1) ?? 0;
       loupeOpen = false;
-      focusPending = true;
-      status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+
+      // A FOLDED target (snapshot/collapsed) has no photos in the feed — it is a
+      // single placeholder row. nextSelectable() skips placeholders, so it used
+      // to silently focus the NEXT group's photos and the jump appeared to do
+      // nothing. Land on the group's own row instead.
+      const targetKey = pathKey(path);
+      const folded = isServerCollapsed(
+        rendererIdFor(path, collapsedKeys, snapshotGroupKeys)
+      );
+      if (folded) {
+        await tick();
+        const el = [
+          ...(mainColumnEl?.querySelectorAll("[data-group-key]") ?? []),
+        ].find((n) => n.dataset.groupKey === targetKey);
+        if (el) {
+          el.scrollIntoView({ block: "start" });
+          status =
+            "Jumped to the group (it's folded — click its icon to open).";
+        } else {
+          // Never fail silently: the group didn't make it into the window.
+          error =
+            "Couldn't jump to that group — it isn't in the loaded range. Open it (click its icon) and try again.";
+        }
+      } else {
+        selected = nextSelectable(displayEntries, 0, 1) ?? 0;
+        focusPending = true;
+        status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
+      }
       enrichMeta(page.map((i) => i.id));
     });
   }
@@ -1541,22 +1707,276 @@
     }
   }
 
+  /** Which group labels offer "Remove from library". A group is a real folder on
+   * disk whether it's keyed by `folder` (the full path) or `folderName` (the
+   * leaf) — Remove was only offered for the former, so grouping by folderName
+   * hid it for no good reason. */
+  const REMOVABLE_FOLDER_DIMS = new Set(["folder", "folderName"]);
+  function isRemovableFolder(path) {
+    return REMOVABLE_FOLDER_DIMS.has(path?.at(-1)?.dimension);
+  }
+
+  // Watch the backend. If it dies or restarts (a crash, or `node --watch`
+  // reloading it after a server edit), ServerBanner says so and we refetch once
+  // it's back — instead of silently sitting on data from a server that's gone.
+  let seenRestart = 0;
+  startServerWatchdog();
+  $: if ($serverRestarted > seenRestart) {
+    seenRestart = $serverRestarted;
+    onServerBack();
+  }
+  async function onServerBack() {
+    try {
+      libraryVersion++; // sidebars refetch
+      await refreshCounts();
+      // Reload AROUND the photo you were on, not from the top. loadInitialFeed()
+      // resets `selected` to the first item — and with `node --watch` the server
+      // now restarts on every backend edit, so that teleported you out of
+      // whatever you were culling. Every other rebuild path (sort/filter/groupBy)
+      // uses recenterFeedOnId for exactly this reason.
+      const focusId = safeFocusId(selected);
+      if (focusId != null) await recenterFeedOnId(focusId);
+      else await loadInitialFeed();
+      status = "Reconnected to the server — reloaded.";
+    } catch (e) {
+      error = `Reconnected, but reloading failed: ${e.message}`;
+    }
+  }
+
+  /** The catch-all the UI never had: anything that escapes a try/catch — an
+   * uncaught error while rendering, or a rejected promise nobody awaited — gets
+   * SHOWN, not just logged. Keeps the "a console error is not user feedback"
+   * rule true even for bugs we didn't anticipate. Deduped so a render loop can't
+   * spam the status line. */
+  // Dedupe only within a short window: keyed forever, a recurring error the user
+  // had already dismissed could never be surfaced again (L6).
+  let lastUncaught = "";
+  let lastUncaughtAt = 0;
+  const UNCAUGHT_DEDUPE_MS = 4000;
+  function reportUncaught(kind, err) {
+    const msg = err?.message ?? String(err ?? "unknown error");
+    const now = performance.now();
+    if (msg === lastUncaught && now - lastUncaughtAt < UNCAUGHT_DEDUPE_MS)
+      return;
+    lastUncaught = msg;
+    lastUncaughtAt = now;
+    error = `Something broke while ${kind === "display" ? "drawing the view" : "finishing a background task"}: ${msg} — reload the window, or undo the last change (grouping / collapse / filter).`;
+    console.error(`[uncaught:${kind}]`, err);
+  }
+
+  /** A group label's ‹/› buttons: jump to the group before/after THIS one. We
+   * anchor on this group's edge photo in the travel direction so the server's
+   * boundary seek steps out of the group instead of hopping inside it — the UI
+   * equivalent of Option+←/→, but independent of where the keyboard focus is. */
+  async function jumpFromGroup(path, direction) {
+    if (jumpingGroup) return;
+    let ids;
+    try {
+      // Only the boundary photo is needed — don't drag every id of a 10k folder
+      // across the wire to read one of them.
+      ids = await fetchPhotoIds(
+        filterIsActive(displayFilter) ? displayFilter : null,
+        path,
+        sort,
+        direction === "next" ? "last" : "first"
+      );
+    } catch (e) {
+      error = `Couldn't jump: ${e.message}`;
+      return;
+    }
+    if (!ids.length) return;
+    await jumpGroupBoundary(direction, ids[0]);
+  }
+
+  /**
+   * THE single place that answers "which widget draws this group's photos?".
+   * Every read — the header icon, the layout's band height, the band's component,
+   * the tree sidebar — goes through here, so the two legacy structures behind it
+   * (collapsedPaths + snapshotGroupKeys) can be collapsed into one Map without
+   * touching any caller. See docs/superpowers/specs/2026-07-12-group-photo-renderers.md
+   * and issue #100.
+   *
+   * `_collapsed`/`_snapshots` are taken as ARGS (not closed over) so Svelte's
+   * dependency tracking — which reads the expression's source text — actually
+   * re-runs this in the template when either changes.
+   * @returns {string} a GROUP_RENDERERS id
+   */
+  function rendererIdFor(path, _collapsedKeys, _snapshots) {
+    const key = pathKey(path);
+    if (!_collapsedKeys.has(key)) return "grid";
+    return _snapshots.has(key) ? "snapshot" : "collapsed";
+  }
+
+  /** Tooltip for the group toggle, from the registry (no parallel string table:
+   *  a new renderer must not need a second edit somewhere else). */
+  function groupToggleTitle(rendererId) {
+    const now = getRenderer(rendererId);
+    const then = getRenderer(nextRendererId(rendererId));
+    return `${now.label} — click for ${then.label.toLowerCase()}`;
+  }
+
   /** Feed group tri-state: expanded → snapshot → collapsed → expanded.
    * snapshot is a server-collapsed group the client renders as a strip. */
   async function cycleGroupState(path) {
-    const key = pathKey(path);
-    const isCollapsed = collapsedPaths.some((p) => pathKey(p) === key);
-    const isSnapshot = snapshotGroupKeys.has(key);
-    if (!isCollapsed) {
-      snapshotGroupKeys.add(key);
-      snapshotGroupKeys = snapshotGroupKeys; // reassign → reactivity
-      await toggleSectionCollapse(path); // server-collapse
-    } else if (isSnapshot) {
-      snapshotGroupKeys.delete(key);
-      snapshotGroupKeys = snapshotGroupKeys; // snapshot → pill, no refetch
-    } else {
-      await toggleSectionCollapse(path); // server-expand
+    // A path with a missing level would poison collapsedPaths and blank the feed
+    // (the undefined value crashed formatGroupValue). Refuse it, loudly.
+    if (
+      !Array.isArray(path) ||
+      !path.length ||
+      path.some((p) => p?.value == null)
+    ) {
+      error =
+        "Couldn't collapse that group — its grouping values are incomplete. Try a different grouping.";
+      return;
     }
+    const current = rendererIdFor(path, collapsedKeys, snapshotGroupKeys);
+    await setGroupRenderer(path, nextRendererId(current));
+  }
+
+  /**
+   * THE single writer of a group's renderer — the counterpart to rendererIdFor().
+   *
+   * Everything derives from the registry descriptor: whether the group must be
+   * collapsed SERVER-side comes from `needsFeedPhotos`, never from a hand-kept
+   * list. collapsedPaths + snapshotGroupKeys are now an implementation detail of
+   * this one function, which is what makes the Map migration in issue #100 a
+   * local change rather than a 24-site rewrite.
+   */
+  async function setGroupRenderer(path, rendererId) {
+    const key = pathKey(path);
+    const wasCollapsed = collapsedKeys.has(key);
+    const nowCollapsed = isServerCollapsed(rendererId);
+
+    // A parent's renderer SUPERSEDES its descendants' — otherwise a leaf that was
+    // already snapshotted keeps its own entry and the feed draws a second strip
+    // inside the parent's one.
+    collapsedPaths = collapsedPaths.filter(
+      (p) => !isPathUnder(p, path) || pathKey(p) === key
+    );
+    const snaps = new Set(
+      [...snapshotGroupKeys].filter((k) => !isKeyUnder(k, path) || k === key)
+    );
+    if (rendererId === SNAPSHOT_ID) snaps.add(key);
+    else snaps.delete(key);
+    snapshotGroupKeys = snaps;
+
+    // Only touch the server when the group's "does the feed stream its photos"
+    // answer actually flips; a snapshot→collapsed change is client-side only.
+    if (nowCollapsed !== wasCollapsed) await toggleSectionCollapse(path);
+  }
+
+  // --- Shift+click a parent = fold its LEAVES (VS Code function folding) -----
+  // Plain click on a parent aggregates it (collapse/snapshot the parent as one
+  // block). Shift+click instead applies the state to every LEAF underneath, so
+  // the parent stays open and you see its subgroups as folded rows.
+  const MAX_FOLD_LEAVES = 400;
+
+  /** Is `p` (an Array<{dimension,value}>) at or beneath `parent`? */
+  function isPathUnder(p, parent) {
+    if (!Array.isArray(p) || p.length < parent.length) return false;
+    return parent.every(
+      (seg, i) => p[i]?.dimension === seg.dimension && p[i]?.value === seg.value
+    );
+  }
+  /** Same test, but for a snapshotGroupKeys entry (a pathKey string: [[dim,val],…]). */
+  function isKeyUnder(key, parent) {
+    let pairs;
+    try {
+      pairs = JSON.parse(key);
+    } catch {
+      return false;
+    }
+    if (!Array.isArray(pairs) || pairs.length < parent.length) return false;
+    return parent.every(
+      (seg, i) => pairs[i]?.[0] === seg.dimension && pairs[i]?.[1] === seg.value
+    );
+  }
+
+  /** Every LEAF group path under `parent` (a path of full groupBy depth). */
+  async function collectLeafPaths(parent) {
+    let frontier = [parent];
+    for (let depth = parent.length; depth < groupBy.length; depth++) {
+      const next = [];
+      for (const p of frontier) {
+        const { nodes } = await fetchTreeNode({
+          groupBy,
+          path: p,
+          filter: displayFilter,
+          sort,
+        });
+        for (const n of nodes) {
+          next.push([...p, { dimension: groupBy[depth], value: n.value }]);
+        }
+        if (next.length > MAX_FOLD_LEAVES) return next; // bail early, caller checks
+      }
+      frontier = next;
+      if (!frontier.length) break;
+    }
+    return frontier;
+  }
+
+  // A shift-fold walks the hierarchy with one tree fetch per internal node. That
+  // can take seconds on a deep/large library, and a second click mid-traversal
+  // would interleave two of them. Guard it, and SAY it's working (CLAUDE.md: a
+  // long operation must show progress, not a frozen control).
+  let foldingLeaves = false;
+
+  /** Shift+click on a group with subgroups: cycle ALL of its leaves together. */
+  async function cycleGroupLeaves(path) {
+    if (path.length >= groupBy.length) return cycleGroupState(path); // already a leaf
+    if (foldingLeaves) return;
+    foldingLeaves = true;
+    status = "Folding subgroups…";
+    let leaves;
+    try {
+      leaves = await collectLeafPaths(path);
+    } catch (e) {
+      error = `Couldn't fold the subgroups: ${e.message}`;
+      return;
+    } finally {
+      foldingLeaves = false;
+    }
+    if (!leaves.length) return cycleGroupState(path); // nothing beneath → aggregate
+    if (leaves.length > MAX_FOLD_LEAVES) {
+      error = `That group has more than ${MAX_FOLD_LEAVES} subgroups — too many to fold at once. Collapse it as a whole instead (click without Shift).`;
+      return;
+    }
+
+    // Next state, from where the leaves collectively are now (all-expanded →
+    // snapshot → collapsed → expanded). A mixed set resets to expanded.
+    const states = leaves.map((lp) =>
+      rendererIdFor(lp, collapsedKeys, snapshotGroupKeys)
+    );
+    // Uniform leaves advance together through the registry's cycle; a mixed set
+    // resets to the default. Works for any number of renderers.
+    const uniform = states.every((x) => x === states[0]);
+    const next = uniform ? nextRendererId(states[0]) : DEFAULT_RENDERER_ID;
+
+    // Drop any existing state inside this subtree (including the parent's own
+    // aggregate collapse), then apply the new state to the leaves.
+    const nextCollapsed = collapsedPaths.filter((p) => !isPathUnder(p, path));
+    const nextSnaps = new Set(
+      [...snapshotGroupKeys].filter((k) => !isKeyUnder(k, path))
+    );
+    if (isServerCollapsed(next)) {
+      for (const lp of leaves) {
+        nextCollapsed.push(lp);
+        if (next === SNAPSHOT_ID) nextSnaps.add(pathKey(lp));
+      }
+    }
+    collapsedPaths = nextCollapsed;
+    snapshotGroupKeys = nextSnaps;
+    try {
+      await loadInitialFeed();
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  /** Entry point for every group toggle (feed header + tree icon): Shift folds
+   * the leaves, a plain click aggregates the group itself. */
+  function onGroupToggle(path, event) {
+    return event?.shiftKey ? cycleGroupLeaves(path) : cycleGroupState(path);
   }
 
   /** Set collapsedPaths / snapshotGroupKeys so EVERY current top-level group
@@ -1566,7 +1986,7 @@
    * caller reloads after. Reused by the cycle-all control AND by filter/sort
    * rebuilds so a global view mode survives those changes (new groups inherit it). */
   async function applyViewModeToGroups(mode) {
-    if (mode === "expanded") {
+    if (!isServerCollapsed(mode)) {
       collapsedPaths = [];
       snapshotGroupKeys = new Set();
       return;
@@ -1582,7 +2002,7 @@
     ]);
     collapsedPaths = allPaths;
     snapshotGroupKeys =
-      mode === "snapshot" ? new Set(allPaths.map(pathKey)) : new Set();
+      mode === SNAPSHOT_ID ? new Set(allPaths.map(pathKey)) : new Set();
   }
 
   /** The top-of-toolbar "cycle all" control: flip EVERY top-level group at
@@ -1590,12 +2010,7 @@
    * collapsedPaths / snapshotGroupKeys wholesale and rebuilds the feed from the top. */
   async function cycleAllGroups() {
     if (cyclingAll) return;
-    const next =
-      globalViewMode === "expanded"
-        ? "snapshot"
-        : globalViewMode === "snapshot"
-          ? "collapsed"
-          : "expanded";
+    const next = nextRendererId(globalViewMode);
     cyclingAll = true;
     try {
       await applyViewModeToGroups(next);
@@ -2102,6 +2517,9 @@
   // aspect ratios in, positioned boxes out. Absolutely-positioned children
   // ignore CSS padding, so the frame inset is applied to the box coordinates.
   const PAD = 12;
+  // One nesting step, shared by the layout (photo indent) and the CSS (header
+  // indent + dendrogram trunk), so the lines and the photos agree.
+  const GROUP_INDENT = 18;
   const HEADER_HEIGHT = 32;
   const PLACEHOLDER_HEIGHT = 40; // a bit taller than a header — needs room for an icon, label, and count on one line
 
@@ -2143,9 +2561,13 @@
   // ancestor, so every surviving header's path stays intact. The path both
   // keys the count cache (see loadHeaderCounts) and, spread through the
   // layout, is read by the header template to look up its own count.
-  $: sectionHeaders = suppressPlaceholderHeaders(
-    computeHeaderPaths(deriveSectionHeaders(resolvedPhotos, groupBy)),
-    displayEntries
+  // Every group ALWAYS gets exactly one header — even when a non-grid renderer
+  // draws its photos. suppressPlaceholderHeaders() used to delete a collapsed
+  // group's own header so the pill/strip could show a duplicate label of its own;
+  // that's what made the snapshot ignore the header's indentation. See
+  // docs/superpowers/specs/2026-07-12-group-photo-renderers.md (invariant 1).
+  $: sectionHeaders = computeHeaderPaths(
+    deriveSectionHeaders(resolvedPhotos, groupBy)
   );
   // Fetch each visible group's total photo count, one query per *parent*
   // path (the tree API returns every sibling's count in a single GROUP BY),
@@ -2189,13 +2611,18 @@
       ? sectionedJustifiedLayout(
           displayEntries.map((e) => {
             if (e.kind === "placeholder") {
-              return snapshotGroupKeys.has(pathKey(e.item.path))
-                ? {
-                    id: entryDomId(e),
-                    placeholder: true,
-                    height: SNAPSHOT_ROW_HEIGHT,
-                  }
-                : { id: entryDomId(e), placeholder: true };
+              // The band under the header is the RENDERER's, and its height must
+              // be known before anything mounts (the feed is virtualized).
+              const r = getRenderer(
+                rendererIdFor(e.item.path, collapsedKeys, snapshotGroupKeys)
+              );
+              return {
+                id: entryDomId(e),
+                placeholder: true,
+                height: r.bandHeight({
+                  snapshotRowHeight: SNAPSHOT_ROW_HEIGHT,
+                }),
+              };
             }
             const photo = resolvePhoto(e);
             const baseRatio =
@@ -2220,6 +2647,10 @@
             targetRowHeight: rowHeight,
             headerHeight: HEADER_HEIGHT,
             placeholderHeight: PLACEHOLDER_HEIGHT,
+            // Nest the CONTENT, not just the header: photos of a sub-group are
+            // inset to sit under their own header. Same step as the header
+            // indent (--ind) so the dendrogram lines up with the photos.
+            indentPerDepth: GROUP_INDENT,
           }
         )
       : null;
@@ -2479,6 +2910,18 @@
   }
 
   async function onKeydown(e) {
+    // Cmd/Ctrl+A selects every photo in the current working set (the same
+    // whole-set query the group select-all and export use). Handled before the
+    // blanket meta/ctrl bail below, but only when focus isn't in a text field —
+    // there, Cmd/Ctrl+A must still select the field's text.
+    if ((e.metaKey || e.ctrlKey) && (e.key === "a" || e.key === "A")) {
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)
+        return;
+      e.preventDefault();
+      await selectAllInView();
+      return;
+    }
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
 
     // The shortcuts-help overlay owns the keyboard while open: '?' toggles
@@ -2702,9 +3145,11 @@
    * server-side (findGroupBoundary) rather than by paging through
    * intermediate photos client-side — a folder in this library can hold
    * 10,000+ photos between here and the boundary. */
-  async function jumpGroupBoundary(direction) {
+  async function jumpGroupBoundary(direction, fromId = undefined) {
     if (jumpingGroup) return;
-    const focusId = safeFocusId(selected);
+    // `fromId` lets a group label's own ‹/› buttons jump relative to THAT group
+    // (anchored on its edge photo) instead of wherever the keyboard focus is.
+    const focusId = fromId ?? safeFocusId(selected);
     if (focusId == null) return;
     jumpingGroup = true;
     try {
@@ -2744,8 +3189,37 @@
       error = err.message;
       return;
     }
-    if (boundary.id == null) return; // already at the first/last group
-    const targetId = boundary.id;
+    let targetId = boundary.id;
+    if (targetId == null) {
+      // No further group in this direction. Rather than doing nothing (which
+      // reads as "the shortcut is broken"), land on the far edge of the group
+      // we're already in: Alt+Right → its LAST photo, Alt+Left → its FIRST.
+      // Derive that group from the ANCHOR (focusId), not from `selected` — a
+      // label-button jump anchors on a group that may not hold the focus.
+      const anchorIdx = resolvedPhotos.findIndex((p) => p?.id === focusId);
+      const path = deriveCurrentPath(
+        anchorIdx >= 0 ? anchorIdx : selected,
+        displayEntries,
+        groupBy
+      );
+      if (!path || !path.length) return;
+      let ids;
+      try {
+        ids = await fetchPhotoIds(
+          filterIsActive(displayFilter) ? displayFilter : null,
+          path,
+          sort,
+          direction === "next" ? "last" : "first"
+        );
+      } catch (err) {
+        error = err.message;
+        return;
+      }
+      const edgeId = ids[0];
+      // Already sitting on that edge → genuinely nothing to do.
+      if (edgeId == null || edgeId === focusId) return;
+      targetId = edgeId;
+    }
     await withFeedTransaction(async (epoch) => {
       // Full PAGE_SIZE each side, not PAGE_SIZE/2 — a jump's initial window
       // used to load only 30+30, so any group bigger than that needed one
@@ -2829,9 +3303,20 @@
   }
 </script>
 
-<svelte:window on:keydown={onKeydown} on:resize={scheduleVisibleRangeUpdate} />
+<!-- Last-resort UI surface. An uncaught render error or a rejected promise used
+     to reach only the console, leaving the user staring at a blank/half-drawn
+     feed with no idea what happened (e.g. the collapsed-nested-group crash in
+     formatGroupValue). Never fail silently: put it on screen, say what to do. -->
+<svelte:window
+  on:keydown={onKeydown}
+  on:resize={scheduleVisibleRangeUpdate}
+  on:error={(e) => reportUncaught("display", e.error ?? e.message)}
+  on:unhandledrejection={(e) => reportUncaught("background", e.reason)}
+/>
 
 <UpdateBanner />
+
+<ServerBanner />
 
 <div class="app">
   <header class="topbar">
@@ -2910,22 +3395,6 @@
       </button>
     {/if}
 
-    <SelectionBar
-      {selectedCount}
-      {lastClearedSelection}
-      {hasNativePicker}
-      {exporting}
-      {exportResult}
-      bind:exportOpen
-      bind:exportDest
-      bind:exportName
-      on:clear={clearSelection}
-      on:keeponly={keepOnlySelection}
-      on:undoclear={undoClearSelection}
-      on:choosedest={chooseExportDest}
-      on:export={doExport}
-    />
-
     <button
       class="help-btn"
       title="Keyboard shortcuts (?)"
@@ -2945,27 +3414,45 @@
   </header>
 
   <div class="app-body">
-    {#if sidebarMode === "tree"}
-      <TreeSidebar
-        bind:this={treeSidebarRef}
-        {groupBy}
-        {collapsedPaths}
-        {sort}
-        filter={displayFilter}
-        refreshToken={libraryVersion}
-        on:toggle={(e) => toggleSectionCollapse(e.detail)}
-        on:jump={(e) => jumpToPath(e.detail)}
-      />
-    {:else}
-      <FisheyeSidebar
-        {groupBy}
-        {currentPath}
-        {sort}
-        filter={displayFilter}
-        refreshToken={libraryVersion}
-        on:jump={(e) => jumpToPath(e.detail)}
-      />
-    {/if}
+    <!-- Resizable sidebar pane: owns the width (persisted) for BOTH sidebar
+         modes, so the tree/fisheye components just fill it. -->
+    <div class="sidebar-pane" style="width:{sidebarWidth}px">
+      {#if sidebarMode === "tree"}
+        <TreeSidebar
+          bind:this={treeSidebarRef}
+          {groupBy}
+          {collapsedPaths}
+          snapshotKeys={snapshotGroupKeys}
+          {sort}
+          filter={displayFilter}
+          refreshToken={libraryVersion}
+          on:toggle={(e) => onGroupToggle(e.detail.path, e.detail.event)}
+          on:jump={(e) => jumpToPath(e.detail)}
+        />
+      {:else}
+        <FisheyeSidebar
+          {groupBy}
+          {currentPath}
+          {sort}
+          filter={displayFilter}
+          refreshToken={libraryVersion}
+          on:jump={(e) => jumpToPath(e.detail)}
+        />
+      {/if}
+    </div>
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+    <div
+      class="sidebar-resizer"
+      class:dragging={resizingSidebar}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar (double-click to reset)"
+      tabindex="0"
+      title="Drag to resize the sidebar (double-click to reset)"
+      on:pointerdown={startSidebarResize}
+      on:dblclick={() => (sidebarWidth = DEFAULT_SIDEBAR_WIDTH)}
+      on:keydown={onSidebarResizeKey}
+    ></div>
     <div
       class="main-column"
       bind:this={mainColumnEl}
@@ -3008,8 +3495,10 @@
             {#each layoutResult.headers as header (header.dimension + header.value + header.index)}
               <div
                 class="section-wrapper"
+                class:nested={header.depth > 0}
                 data-group-key={header.path ? pathKey(header.path) : undefined}
-                style="top:{header.y}px; height:{header.endY - header.y}px;"
+                style="--depth:{header.depth}; --ind:{GROUP_INDENT}px; top:{header.y}px; height:{header.endY -
+                  header.y}px;"
               >
                 <div
                   class="section-header"
@@ -3018,16 +3507,30 @@
                 >
                   <button
                     class="section-toggle-icon"
-                    title="Cycle: expanded → snapshot → collapsed"
-                    on:click={() =>
-                      cycleGroupState(
-                        groupBy.slice(0, header.depth + 1).map((d) => ({
-                          dimension: d,
-                          value: resolvedPhotos[header.index]?.groupValues[d],
-                        }))
-                      )}
+                    class:not-grid={rendererIdFor(
+                      header.path,
+                      collapsedKeys,
+                      snapshotGroupKeys
+                    ) !== DEFAULT_RENDERER_ID}
+                    title={groupToggleTitle(
+                      rendererIdFor(
+                        header.path,
+                        collapsedKeys,
+                        snapshotGroupKeys
+                      )
+                    )}
+                    aria-label="Cycle this group: full grid → snapshot strip → collapsed"
+                    on:click={(e) => onGroupToggle(header.path, e)}
                   >
-                    ▾
+                    <GroupStateIcon
+                      state={getRenderer(
+                        rendererIdFor(
+                          header.path,
+                          collapsedKeys,
+                          snapshotGroupKeys
+                        )
+                      ).icon}
+                    />
                   </button>
                   {#if header.path && renamingKey === pathKey(header.path)}
                     <!-- svelte-ignore a11y-autofocus -->
@@ -3045,9 +3548,11 @@
                   {:else}
                     <button
                       class="section-label"
-                      title={header.path?.at(-1)?.dimension === "folder"
-                        ? "Double-click to rename this folder on disk"
-                        : ""}
+                      title={`${header.label}${
+                        header.path?.at(-1)?.dimension === "folder"
+                          ? " — double-click to rename this folder on disk"
+                          : ""
+                      }`}
                       on:dblclick={() => startRename(header.path)}
                     >
                       {header.label}
@@ -3066,10 +3571,12 @@
                         groupIdCacheVersion,
                         groupSelSig
                       )}
-                      isFolder={header.path.at(-1)?.dimension === "folder"}
+                      isFolder={isRemovableFolder(header.path)}
                       removeArmed={removeArmedKey === pathKey(header.path)}
                       on:toggleselect={() => toggleGroupSelectAll(header.path)}
                       on:keeponly={() => keepOnlyGroup(header.path)}
+                      on:jumpprev={() => jumpFromGroup(header.path, "prev")}
+                      on:jumpnext={() => jumpFromGroup(header.path, "next")}
                       on:remove={() => removeAlbum(header.path)}
                     />
                   {/if}
@@ -3078,98 +3585,39 @@
             {/each}
             {#each visibleItems as { i, entry } (entryDomId(entry))}
               {#if entry.kind === "placeholder"}
-                {#if snapshotGroupKeys.has(pathKey(entry.item.path))}
+                <!-- The group's own section header (above) owns the label, icon,
+                     count and actions. This band is ONLY the renderer's photo
+                     widget, drawn inside the layout's content rect — which is why
+                     it inherits the group's nesting indent. A renderer with no
+                     component (e.g. "collapsed") reserves no band at all: the
+                     header alone represents the group. See
+                     docs/superpowers/specs/2026-07-12-group-photo-renderers.md -->
+                {@const renderer = getRenderer(
+                  rendererIdFor(
+                    entry.item.path,
+                    collapsedKeys,
+                    snapshotGroupKeys
+                  )
+                )}
+                {#if renderer.component && boxes[i].height > 0}
                   <div
-                    class="snapshot-row"
+                    class="group-band"
                     data-group-key={pathKey(entry.item.path)}
-                    style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
+                    style="top:{boxes[i].y}px; left:{boxes[i]
+                      .x}px; width:{boxes[i].width}px; height:{boxes[i]
+                      .height}px;"
                   >
-                    <div class="snapshot-head">
-                      <button
-                        class="snap-cycle"
-                        title="Cycle: expanded → snapshot → collapsed"
-                        on:click|stopPropagation={() =>
-                          cycleGroupState(entry.item.path)}
-                      >
-                        ◐
-                      </button>
-                      <span
-                        class="snapshot-label"
-                        title={entry.item.path
-                          .map((p) => formatGroupValue(p.dimension, p.value))
-                          .join(" / ")}
-                      >
-                        {entry.item.path
-                          .map((p) => formatGroupValue(p.dimension, p.value))
-                          .join(" / ")}
-                      </span>
-                      <span class="section-count">
-                        {entry.item.count.toLocaleString()} items
-                      </span>
-                      <GroupLabelActions
-                        selectState={groupSelectState(
-                          entry.item.path,
-                          selectedIds,
-                          groupIdCacheVersion,
-                          groupSelSig
-                        )}
-                        isFolder={entry.item.path.at(-1)?.dimension ===
-                          "folder"}
-                        removeArmed={removeArmedKey ===
-                          pathKey(entry.item.path)}
-                        on:toggleselect={() =>
-                          toggleGroupSelectAll(entry.item.path)}
-                        on:keeponly={() => keepOnlyGroup(entry.item.path)}
-                        on:remove={() => removeAlbum(entry.item.path)}
-                      />
-                    </div>
-                    <div class="snap-wrap">
-                      <SnapshotStrip
-                        groupPath={entry.item.path}
-                        count={entry.item.count}
-                        filter={displayFilter}
-                        {sort}
-                        {groupBy}
-                        thumbPx={SNAPSHOT_ROW_HEIGHT - 44}
-                        size={snapshotThumbSize}
-                        on:select={(e) =>
-                          openPhotoById(e.detail.id, entry.item.path)}
-                      />
-                    </div>
-                  </div>
-                {:else}
-                  <div
-                    class="placeholder-row"
-                    data-group-key={pathKey(entry.item.path)}
-                    style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
-                    role="button"
-                    tabindex="0"
-                    on:click={() => cycleGroupState(entry.item.path)}
-                    on:keydown={(e) =>
-                      e.key === "Enter" && cycleGroupState(entry.item.path)}
-                  >
-                    <span class="placeholder-icon">▸</span>
-                    <span class="placeholder-label">
-                      {entry.item.path
-                        .map((p) => formatGroupValue(p.dimension, p.value))
-                        .join(" / ")}
-                    </span>
-                    <span class="placeholder-count">
-                      {entry.item.count.toLocaleString()} items
-                    </span>
-                    <GroupLabelActions
-                      selectState={groupSelectState(
-                        entry.item.path,
-                        selectedIds,
-                        groupIdCacheVersion,
-                        groupSelSig
-                      )}
-                      isFolder={entry.item.path.at(-1)?.dimension === "folder"}
-                      removeArmed={removeArmedKey === pathKey(entry.item.path)}
-                      on:toggleselect={() =>
-                        toggleGroupSelectAll(entry.item.path)}
-                      on:keeponly={() => keepOnlyGroup(entry.item.path)}
-                      on:remove={() => removeAlbum(entry.item.path)}
+                    <svelte:component
+                      this={renderer.component}
+                      groupPath={entry.item.path}
+                      count={entry.item.count}
+                      filter={displayFilter}
+                      {sort}
+                      {groupBy}
+                      thumbPx={boxes[i].height - 12}
+                      size={snapshotThumbSize}
+                      on:select={(e) =>
+                        openPhotoById(e.detail.id, entry.item.path)}
                     />
                   </div>
                 {/if}
@@ -3182,6 +3630,7 @@
                   warm={thumbStatus.get(resolvePhoto(entry).id) === "ok"}
                   selected={i === selected}
                   inSelection={selectedIds.has(resolvePhoto(entry).id)}
+                  showSize={sort.by === "size"}
                   stackCount={entry.kind === "stack"
                     ? entry.stack.count
                     : undefined}
@@ -3194,6 +3643,7 @@
                     stacks.find((s) => s.id === entry.stackId)?.coverId ===
                       entry.item.id}
                   on:click={(e) => onTileClick(e, entry, i)}
+                  on:toggleselect={() => toggleSelect(resolvePhoto(entry)?.id)}
                   on:contextmenu={(e) => onTileContextMenu(e, entry, i)}
                   on:attempt={handleThumbAttempt}
                   on:settled={handleThumbSettled}
@@ -3205,7 +3655,17 @@
       {:else if !scanning && status !== "loading…"}
         {#if libraryTotal === 0}
           <div class="empty">
-            Nothing indexed yet — scan a folder to get started.
+            <p class="empty-title">Nothing indexed yet</p>
+            <p class="empty-hint">
+              Add a folder of photos or videos to get started.
+            </p>
+            <button
+              class="empty-action"
+              on:click={() =>
+                hasNativePicker ? chooseFolder() : (addFolderOpen = true)}
+            >
+              Add folder…
+            </button>
           </div>
         {:else if filterIsActive(filter) || keepIds}
           <div class="empty">
@@ -3235,6 +3695,12 @@
     </div>
   </div>
 
+  <!-- In the app's flex column, directly above the status bar: the jobs strip
+       takes its own space (up to 40vh) and the grid shrinks to fit, so an
+       active job never paints over the status bar (it used to be fixed at
+       bottom:0 and cover it). -->
+  <JobsPanel />
+
   <StatusBar
     {libraryTotal}
     {showingCount}
@@ -3249,10 +3715,29 @@
     bind:burstGapMs
     {sort}
     on:sortchange={(e) => onSortChange(e.detail)}
-  />
+  >
+    <!-- Clear / Keep only / Export live next to the selected count now: that is
+         what makes "Clear" read as "clear the selection" rather than "clear
+         something, somewhere". -->
+    <SelectionBar
+      slot="selection"
+      {selectedCount}
+      {lastClearedSelection}
+      {hasNativePicker}
+      {exporting}
+      {exportResult}
+      bind:exportOpen
+      bind:exportDest
+      bind:exportName
+      bind:exportMove
+      on:clear={clearSelection}
+      on:keeponly={keepOnlySelection}
+      on:undoclear={undoClearSelection}
+      on:choosedest={chooseExportDest}
+      on:export={doExport}
+    />
+  </StatusBar>
 </div>
-
-<JobsPanel />
 
 {#if loupeOpen}
   <Loupe
@@ -3265,6 +3750,9 @@
     showDetails={showLoupeDetails}
     showFilmstrip={showLoupeFilmstrip}
     on:contextmenu={(e) => openContextMenu(e.detail.x, e.detail.y, selected)}
+    on:close={closeLoupe}
+    on:rate={(e) => rate(selected, e.detail)}
+    on:toggleselect={() => toggleSelect(resolvedPhotos[selected]?.id)}
   />
 {/if}
 
@@ -3305,6 +3793,30 @@
     display: flex;
     flex: 1;
     min-height: 0;
+  }
+  /* The sidebar pane owns the (persisted, draggable) width; the tree/fisheye
+     components inside just fill it. flex-shrink:0 so the grid can't squeeze it. */
+  .sidebar-pane {
+    flex: 0 0 auto;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+  }
+  /* A slim grab strip between the sidebar and the grid. Widened hit area via
+     padding-box trickery isn't needed — 6px + a hover tint reads fine. */
+  .sidebar-resizer {
+    flex: 0 0 6px;
+    cursor: col-resize;
+    background: #2a2a2a;
+    border: none;
+    padding: 0;
+    transition: background 0.12s;
+  }
+  .sidebar-resizer:hover,
+  .sidebar-resizer:focus-visible,
+  .sidebar-resizer.dragging {
+    background: #4c9aff;
+    outline: none;
   }
   .main-column {
     flex: 1;
@@ -3427,10 +3939,43 @@
   .grid:focus {
     outline: none;
   }
+  /* Nesting is drawn as a dendrogram: each level is indented, a dotted trunk runs
+     down the sub-group's spine, and a dotted elbow joins each child header to it
+     — so a sub-group visibly belongs to the group above instead of floating as
+     just another header. `--depth` is set on the wrapper; custom properties
+     inherit, so the header reads it from there. */
+  /* The renderer's band: just a positioned rect. The group's label/icon/actions
+     live in its section header above — a renderer never draws chrome. */
+  .group-band {
+    position: absolute;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
   .section-wrapper {
+    /* --ind is set inline from GROUP_INDENT (the same constant the LAYOUT uses to
+       inset a nested group's photos) so the dendrogram and the photos can never
+       drift apart. The fallback only matters if the attr is ever dropped. */
+    --ind: 18px;
+    --trunk: calc(15px + (var(--depth, 0) - 1) * var(--ind));
     position: absolute;
     left: 0;
     width: 100%;
+    pointer-events: none;
+  }
+  /* Vertical trunk spanning this sub-group's whole extent — consecutive siblings
+     stack their segments into one continuous line. */
+  .section-wrapper.nested::before {
+    content: "";
+    position: absolute;
+    left: var(--trunk);
+    top: 0;
+    bottom: 0;
+    /* Must beat the section headers (z-index 15): they are sticky with an OPAQUE
+       background, so at 'auto' the trunk was painted over wherever a header sat
+       and the elbows looked like floating stubs. It runs up the header's left
+       padding gutter, which the per-depth padding reserves. */
+    z-index: 16;
+    border-left: 1px dotted #6a6a6a;
     pointer-events: none;
   }
   .section-header {
@@ -3439,18 +3984,43 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 8px;
+    padding: 4px 8px 4px calc(8px + var(--depth, 0) * var(--ind));
     background: #141414;
     pointer-events: auto;
   }
+  /* The elbow from the trunk into this header. */
+  .section-wrapper.nested > .section-header::before {
+    content: "";
+    position: absolute;
+    left: var(--trunk);
+    width: calc(var(--ind) - 4px);
+    top: 50%;
+    z-index: 16;
+    border-top: 1px dotted #6a6a6a;
+    pointer-events: none;
+  }
+  /* Same tri-state icon (and same colour language) as the tree sidebar's
+     feed-visibility control, so one group state always reads the same way:
+     grid = full, strip = snapshot, bar = collapsed (amber once it's not full). */
   .section-toggle-icon {
     background: none;
     border: none;
-    color: inherit;
+    color: #8a8a8a;
     font: inherit;
     cursor: pointer;
     padding: 2px 4px;
     border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .section-toggle-icon:hover {
+    color: #e8e8e8;
+  }
+  /* Amber whenever the group isn't showing its photos in full. One modifier —
+     NEVER interpolate a renderer id into the class list: "grid" collides with
+     the photo-grid container's own .grid rule. */
+  .section-toggle-icon.not-grid {
+    color: #ffd24c;
   }
   .section-toggle-icon:hover {
     background: #2a2a2a;
@@ -3465,6 +4035,17 @@
     padding: 2px 6px;
     border-radius: 4px;
     text-align: left;
+    /* A long group name used to WRAP, growing the sticky header band and letting
+       it cover the rows beneath it. Keep it to one line and ellipsize; the full
+       value is on the button's title attribute (see the markup). */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    max-width: 46ch;
+  }
+  .section-header {
+    min-width: 0;
   }
   .section-label:hover {
     background: #2a2a2a;
@@ -3489,81 +4070,15 @@
     /* Matches the collapsed-section placeholder's own count (.placeholder-count)
        so a section reads the same expanded or collapsed. */
   }
-  /* The group actions (Select/Keep only/Remove) live in GroupLabelActions
+  /* The group actions (jump / Keep only / Remove) live in GroupLabelActions
      (issue #88); its select icon is always visible, but its action buttons
-     (.gla-buttons) reveal only on hover of the surrounding header row. The
-     reveal target crosses the component boundary, so it's a :global rule keyed
-     on each of the three header states. */
+     (.gla-buttons) reveal only on hover of the header row. The reveal target
+     crosses the component boundary, so it's a :global rule. There is now ONE
+     header per group (see the group-renderers contract), so this is one rule —
+     it used to be repeated for the snapshot head and the collapsed pill. */
   .section-header:hover :global(.gla-buttons),
-  .section-header:focus-within :global(.gla-buttons),
-  .snapshot-head:hover :global(.gla-buttons),
-  .snapshot-head:focus-within :global(.gla-buttons),
-  .placeholder-row:hover :global(.gla-buttons),
-  .placeholder-row:focus-within :global(.gla-buttons) {
+  .section-header:focus-within :global(.gla-buttons) {
     opacity: 1;
-  }
-  .snapshot-row {
-    position: absolute;
-    left: 0;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    box-sizing: border-box;
-  }
-  .snapshot-head {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-  .snapshot-label {
-    flex: 1 1 auto;
-    color: #cfcfcf;
-    font-size: 0.82rem;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .snap-wrap {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .snap-cycle {
-    flex: 0 0 auto;
-    background: #222;
-    border: 1px solid #3a3a3a;
-    color: #ccc;
-    border-radius: 6px;
-    cursor: pointer;
-    padding: 2px 8px;
-  }
-  .placeholder-row {
-    position: absolute;
-    left: 0;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 12px;
-    box-sizing: border-box;
-    background: #1a1a1a;
-    border: 1px solid #2a2a2a;
-    border-radius: 4px;
-    cursor: pointer;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-  }
-  .placeholder-row:hover {
-    background: #2a2a2a;
-  }
-  .placeholder-count {
-    margin-left: auto;
-    color: #888;
-    font-size: 0.85em;
   }
   .empty {
     padding: 4rem 1rem;

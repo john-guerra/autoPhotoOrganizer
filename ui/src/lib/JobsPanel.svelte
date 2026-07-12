@@ -48,9 +48,10 @@
       return parts.join(" · ") || "done";
     }
     if (job.type === "export") {
+      const verb = r.move ? "moved" : "copied";
       return r.skipped
-        ? `copied ${r.copied} · skipped ${r.skipped}`
-        : `copied ${r.copied}`;
+        ? `${verb} ${r.copied} · skipped ${r.skipped}`
+        : `${verb} ${r.copied}`;
     }
     if (job.type === "scan") {
       const folders = r.folders ?? 0;
@@ -65,14 +66,12 @@
     return "";
   }
 
-  /** Undo is offered for a completed OR canceled move-materialize — the
-   * backend stashes a partial manifest on cancel too. */
+  /** Undo is offered for any completed OR canceled MOVE that left a manifest —
+   * a move-materialize, or an export run in "move" mode. (The backend stashes a
+   * partial manifest on cancel too.) Keyed on the manifest, not the job type, so
+   * a new move-capable job gets undo for free. */
   function canUndo(job) {
-    return (
-      job.type === "materialize" &&
-      !!job.result?.move &&
-      !!job.result?.manifest?.length
-    );
+    return !!job.result?.move && !!job.result?.manifest?.length;
   }
 </script>
 
@@ -145,11 +144,10 @@
 
 <style>
   .jobs-panel {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 500;
+    /* In-flow strip in the app's flex column (was position:fixed bottom:0,
+       which painted over the status bar). flex-shrink:0 so it keeps its
+       height and the grid above shrinks instead. */
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
     background: #101010;

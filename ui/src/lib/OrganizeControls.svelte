@@ -9,6 +9,7 @@
   import { createEventDispatcher } from "svelte";
   import RatingFilter from "./RatingFilter.svelte";
   import OrientationFilter from "./OrientationFilter.svelte";
+  import KindFilter from "./KindFilter.svelte";
   import TimelineFilter from "./TimelineFilter.svelte";
   import { DEFAULT_FILTER, isActive as filterIsActive } from "./filterSpec.js";
   import { ALL_DIMENSIONS } from "./dimensions.js";
@@ -33,9 +34,10 @@
   function groupBySelector(node, initialValue) {
     const widget = MultiAutoSelect(ALL_DIMENSIONS, {
       value: initialValue,
-      placeholder: "Add a grouping level…",
+      title: "Group by",
+      placeholder: "Add…",
       sortable: true,
-      layout: "inline",
+      layout: "compact",
     });
     widget.addEventListener("input", () =>
       dispatch("groupbychange", widget.value)
@@ -111,6 +113,7 @@
     {filter}
     on:change={(e) => dispatch("filterchange", e.detail)}
   />
+  <KindFilter {filter} on:change={(e) => dispatch("filterchange", e.detail)} />
   {#if timeMin != null && timeMax != null && timeMax > timeMin}
     <div class="time-filter" title="Filter by capture time — drag the handles">
       <TimelineFilter
@@ -220,6 +223,16 @@
   }
   .group-by :global(.multi-auto-select) {
     color: inherit;
+  }
+  /* Compact layout: keep the "Group by" title small and the whole widget
+     vertically tight so it fits the toolbar row. */
+  .group-by :global(.multi-auto-select.compact .title) {
+    font-size: 0.7rem;
+    color: #9a9a9a;
+    margin-bottom: 1px;
+  }
+  .group-by :global(.multi-auto-select.compact) {
+    min-height: 0 !important;
   }
   .group-by :global(.pill) {
     background: #2a2a2a !important;

@@ -3,12 +3,43 @@ import {
   formatGroupValue,
   mergeFeedPage,
   deriveSectionHeaders,
-  suppressPlaceholderHeaders,
   nearestRealItemId,
   computeHeaderPaths,
   pathKey,
   headerParentPaths,
 } from "./feed.js";
+
+describe("formatGroupValue — absent levels (collapsed-group placeholders)", () => {
+  // Regression: a collapsed group's placeholder only carries the grouping levels
+  // down to where it was collapsed, so a deeper level is `undefined`. This hit
+  // `value.replace()` and threw, blanking the whole feed.
+  it("treats undefined/null as Unknown instead of throwing", () => {
+    for (const dim of ["folderName", "folder", "year", "month"]) {
+      expect(() => formatGroupValue(dim, undefined)).not.toThrow();
+      expect(formatGroupValue(dim, undefined)).toBe("Unknown");
+      expect(formatGroupValue(dim, null)).toBe("Unknown");
+    }
+  });
+});
+
+describe("deriveSectionHeaders — items that don't define every level", () => {
+  it("skips levels an item lacks, and never emits an undefined value", () => {
+    const items = [
+      { groupValues: { kind: "image", folderName: "/a/x" } },
+      // A collapsed nested group: only the outer level is present.
+      { groupValues: { kind: "image" } },
+      { groupValues: { kind: "image", folderName: "/a/y" } },
+    ];
+    const headers = deriveSectionHeaders(items, ["kind", "folderName"]);
+    expect(() => headers.map((h) => h.label)).not.toThrow();
+    for (const h of headers) expect(h.value).not.toBeUndefined();
+    // The folderName level re-emits for /a/y after the gap.
+    const names = headers
+      .filter((h) => h.dimension === "folderName")
+      .map((h) => h.value);
+    expect(names).toEqual(["/a/x", "/a/y"]);
+  });
+});
 
 describe("formatGroupValue", () => {
   it("maps the empty-string sentinel to 'Unknown'", () => {
@@ -207,44 +238,6 @@ describe("headerParentPaths", () => {
 
   it("returns nothing for no headers", () => {
     expect(headerParentPaths([])).toEqual([]);
-  });
-});
-
-describe("suppressPlaceholderHeaders", () => {
-  const displayEntries = [
-    { kind: "photo", item: { id: 1 } },
-    {
-      kind: "placeholder",
-      item: {
-        id: "collapsed:folder=/a>year=2019",
-        path: [
-          { dimension: "folder", value: "/a" },
-          { dimension: "year", value: "2019" },
-        ],
-      },
-    },
-    { kind: "photo", item: { id: 2 } },
-  ];
-
-  it("drops a header at or below a placeholder's own collapse depth", () => {
-    const headers = [
-      { index: 1, depth: 0, dimension: "folder", value: "/a", label: "/a" },
-      { index: 1, depth: 1, dimension: "year", value: "2019", label: "2019" },
-    ];
-    const kept = suppressPlaceholderHeaders(headers, displayEntries);
-    expect(kept).toEqual([
-      { index: 1, depth: 0, dimension: "folder", value: "/a", label: "/a" },
-    ]);
-  });
-
-  it("keeps headers on real photo entries untouched", () => {
-    const headers = [
-      { index: 0, depth: 0, dimension: "folder", value: "/a", label: "/a" },
-      { index: 2, depth: 0, dimension: "folder", value: "/b", label: "/b" },
-    ];
-    expect(suppressPlaceholderHeaders(headers, displayEntries)).toEqual(
-      headers
-    );
   });
 });
 

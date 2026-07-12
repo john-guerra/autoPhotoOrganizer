@@ -9,6 +9,7 @@
 <script>
   import { onMount, onDestroy, createEventDispatcher } from "svelte";
   import { thumbUrl, previewUrl, formatDuration } from "./api.js";
+  import { formatSize } from "./exifFormat.js";
   import Stars from "./Stars.svelte";
 
   const dispatch = createEventDispatcher();
@@ -19,6 +20,7 @@
   export let size = 640; // thumb longest edge; higher zoom requests sharper
   export let selected = false;
   export let inSelection = false; // member of the multi-select set (batch export)
+  export let showSize = false; // show the file-size pill (when sorting by size)
   export let stackCount = undefined; // set when this tile is a collapsed stack's cover
   export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
   export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
@@ -210,9 +212,17 @@
     on:click
     on:contextmenu
   >
-    {#if inSelection}
-      <span class="select-check" title="Selected" aria-hidden="true">✓</span>
-    {/if}
+    <button
+      class="select-circle"
+      class:on={inSelection}
+      type="button"
+      title={inSelection ? "Deselect" : "Select"}
+      aria-label={inSelection ? "Deselect photo" : "Select photo"}
+      aria-pressed={inSelection}
+      on:click|stopPropagation={() => dispatch("toggleselect")}
+    >
+      {#if inSelection}✓{/if}
+    </button>
     {#if src && previewSrc && !loaded}
       <img
         src={previewSrc}
@@ -260,6 +270,13 @@
     {/if}
     {#if stackCount}
       <span class="stack-badge">×{stackCount}</span>
+    {/if}
+    {#if showSize && item.size != null}
+      <!-- Size pill: bottom-right (as requested when sorting by size); shifts
+           up above the ×N stack badge on a cover so they don't overlap. -->
+      <span class="size-badge" class:with-stack={stackCount}
+        >{formatSize(item.size)}</span
+      >
     {/if}
     {#if inExpandedStack}
       <span
@@ -321,22 +338,38 @@
   .thumb.selected.in-selection {
     box-shadow: 0 0 0 2px rgba(255, 210, 76, 0.5);
   }
-  .select-check {
+  .select-circle {
     position: absolute;
     top: 5px;
     right: 5px;
     z-index: 100;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
+    padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #ffd24c;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1.5px solid rgba(255, 255, 255, 0.9);
     color: #1a1400;
     border-radius: 50%;
     font-size: 0.72rem;
     font-weight: 700;
-    pointer-events: none;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  /* Discoverable without cluttering a dense grid: the empty circle appears on
+     hover and on the focused tile, and stays solid once the photo is selected. */
+  .thumb:hover .select-circle,
+  .thumb.selected .select-circle,
+  .select-circle:focus-visible,
+  .select-circle.on {
+    opacity: 1;
+  }
+  .select-circle.on {
+    background: #ffd24c;
+    border-color: #ffd24c;
   }
   img.cover,
   .stack-peek {
@@ -398,6 +431,22 @@
     font-size: 0.7rem;
     border-radius: 3px;
     pointer-events: none;
+  }
+  .size-badge {
+    position: absolute;
+    right: 5px;
+    bottom: 5px;
+    padding: 1px 5px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+    border-radius: 3px;
+    pointer-events: none;
+    z-index: 100;
+  }
+  .size-badge.with-stack {
+    bottom: 26px; /* sit just above the ×N stack badge on a cover */
   }
   /* Centered play glyph marking a video tile (the still is its poster frame). */
   .play-badge {

@@ -2,16 +2,16 @@ import { describe, it, expect } from "vitest";
 import { parseSort, sortSeekDim, applySortToDims, SORT_ATTRS } from "./sort.js";
 
 describe("parseSort", () => {
-  it("defaults to date_taken:desc", () => {
-    expect(parseSort(undefined)).toEqual({ by: "date_taken", dir: "desc" });
+  it("defaults to date_taken:asc", () => {
+    expect(parseSort(undefined)).toEqual({ by: "date_taken", dir: "asc" });
   });
   it("parses a valid by:dir", () => {
-    expect(parseSort("rating:asc")).toEqual({ by: "rating", dir: "asc" });
+    expect(parseSort("rating:desc")).toEqual({ by: "rating", dir: "desc" });
   });
   it("rejects unknown attribute and bad direction", () => {
     expect(parseSort("bogus:sideways")).toEqual({
       by: "date_taken",
-      dir: "desc",
+      dir: "asc",
     });
   });
 });

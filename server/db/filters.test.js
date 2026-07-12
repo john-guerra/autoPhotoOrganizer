@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildFilter, ALLOWED_ORIENTATIONS } from "./filters.js";
+import { buildFilter, ALLOWED_ORIENTATIONS, ALLOWED_KINDS } from "./filters.js";
 
 describe("buildFilter", () => {
   it("returns a no-op for an empty spec", () => {
@@ -31,6 +31,32 @@ describe("buildFilter", () => {
       "photos.width > 0 AND photos.height > 0 AND (photos.width > photos.height OR photos.height > photos.width)"
     );
     expect(f.params).toEqual([]);
+  });
+
+  it("all (or zero) kinds is a no-op", () => {
+    expect(buildFilter({ kinds: ALLOWED_KINDS })).toEqual({
+      sql: "1=1",
+      params: [],
+    });
+    expect(buildFilter({ kinds: [] })).toEqual({ sql: "1=1", params: [] });
+  });
+
+  it("a strict kind subset emits a bound IN clause", () => {
+    const f = buildFilter({ kinds: ["video"] });
+    expect(f.sql).toBe("photos.kind IN (?)");
+    expect(f.params).toEqual(["video"]);
+  });
+
+  it("kinds are normalized to canonical order and unknown names dropped", () => {
+    const f = buildFilter({ kinds: ["video", "bogus", "image"] });
+    expect(f.sql).toBe("photos.kind IN (?,?)");
+    expect(f.params).toEqual(["image", "video"]);
+  });
+
+  it("combines a kind facet with a rating facet, rating first", () => {
+    const f = buildFilter({ minRating: 2, kinds: ["image", "raw"] });
+    expect(f.sql).toBe("photos.rating >= ? AND photos.kind IN (?,?)");
+    expect(f.params).toEqual([2, "image", "raw"]);
   });
 
   it("single orientation: portrait", () => {

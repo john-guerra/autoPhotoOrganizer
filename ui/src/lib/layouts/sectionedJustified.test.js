@@ -187,3 +187,84 @@ describe("sectionedJustifiedLayout", () => {
     expect(boxes[3].y).toBeGreaterThanOrEqual(headers[0].y + headerHeight);
   });
 });
+
+describe("indentPerDepth — nesting the CONTENT, not just the header", () => {
+  const items = [
+    { id: "a", aspectRatio: 1 },
+    { id: "b", aspectRatio: 1 },
+  ];
+  // one photo run nested two levels deep
+  const headers = [
+    { index: 0, depth: 0, dimension: "year", value: "2024", label: "2024" },
+    { index: 0, depth: 1, dimension: "folder", value: "/a", label: "/a" },
+  ];
+
+  it("defaults to flush-left (no behaviour change when unset)", () => {
+    const { boxes } = sectionedJustifiedLayout(items, headers, {
+      containerWidth: 600,
+      targetRowHeight: 100,
+    });
+    expect(boxes[0].x).toBe(0);
+  });
+
+  it("insets a chunk by innermostDepth * indentPerDepth", () => {
+    const IND = 18;
+    const { boxes } = sectionedJustifiedLayout(items, headers, {
+      containerWidth: 600,
+      targetRowHeight: 100,
+      gap: 0,
+      indentPerDepth: IND,
+    });
+    // innermost open header is depth 1 -> inset one step
+    expect(boxes[0].x).toBe(IND);
+    // nothing spills past the frame (a short final row isn't stretched, so this
+    // is an upper bound, not an equality)
+    const right = Math.max(...boxes.map((b) => b.x + b.width));
+    expect(right).toBeLessThanOrEqual(600);
+  });
+
+  it("packs a FULL row into the narrowed width, not the original", () => {
+    const IND = 18;
+    // enough photos that the row must justify (and therefore fill its width)
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      id: `p${i}`,
+      aspectRatio: 1.5,
+    }));
+    const { boxes } = sectionedJustifiedLayout(many, headers, {
+      containerWidth: 600,
+      targetRowHeight: 100,
+      gap: 0,
+      indentPerDepth: IND,
+    });
+    const firstRowY = boxes[0].y;
+    const firstRow = boxes.filter((b) => b.y === firstRowY);
+    expect(firstRow.length).toBeGreaterThan(1); // it really did wrap
+    const right = Math.max(...firstRow.map((b) => b.x + b.width));
+    // a justified full row fills exactly the INSET width: 18 + (600 - 18) = 600
+    expect(Math.round(right)).toBe(600);
+    // ...which is only true because the layout was given the narrower width
+    expect(boxes[0].x).toBe(IND);
+  });
+
+  it("insets a placeholder band the same way", () => {
+    const withPlaceholder = [{ id: "p", placeholder: true, height: 40 }];
+    const { boxes } = sectionedJustifiedLayout(withPlaceholder, headers, {
+      containerWidth: 600,
+      indentPerDepth: 18,
+    });
+    expect(boxes[0].x).toBe(18);
+    expect(boxes[0].width).toBe(600 - 18);
+  });
+
+  it("a top-level (depth 0) group is not indented", () => {
+    const top = [
+      { index: 0, depth: 0, dimension: "year", value: "x", label: "x" },
+    ];
+    const { boxes } = sectionedJustifiedLayout(items, top, {
+      containerWidth: 600,
+      targetRowHeight: 100,
+      indentPerDepth: 18,
+    });
+    expect(boxes[0].x).toBe(0);
+  });
+});

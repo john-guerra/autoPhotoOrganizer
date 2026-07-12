@@ -3,6 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The real app icon (build/icon.svg — the same art electron-builder ships),
+         copied into ui/public so Vite serves it in dev AND emits it in the
+         production bundle. PNG fallback for browsers without SVG favicons. -->
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="alternate icon" type="image/png" href="/icon.png" />
+    <link rel="apple-touch-icon" href="/icon.png" />
     <!-- Replaced at runtime with the package version (see App.svelte onMount). -->
     <title>AutoGallery</title>
   </head>

@@ -3,8 +3,14 @@
  * which paths currently have their children fetched and shown, entirely
  * independent of collapsedPaths (which controls what the FEED excludes;
  * see docs/superpowers/specs/2026-07-06-tree-sidebar-design.md's "Two
- * distinct kinds of state"). Keyed by the same convention App.svelte's own
- * pathKey uses (dimension=value>dimension=value...).
+ * distinct kinds of state").
+ *
+ * WARNING: `treeKey` is NOT interchangeable with feed.js's `pathKey`. This one
+ * joins `dimension=value` on '>'; `pathKey` JSON-encodes the pairs. They produce
+ * different strings for the same path, so a Set keyed by one CANNOT be probed
+ * with the other (that silently never matches — it made every snapshot group
+ * render as "collapsed" in the sidebar). Compare path arrays with treeKey on
+ * both sides, and use pathKey for anything App.svelte keyed with pathKey.
  */
 
 /** @param {Array<{dimension:string,value:string}>} path @returns {string} */

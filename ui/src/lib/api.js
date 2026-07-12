@@ -116,6 +116,28 @@ export async function revealInFinder(id) {
   }
 }
 
+/** Reveal a whole selection in the OS file browser (best-effort per platform;
+ * macOS highlights all, Windows the first, Linux opens the folder). */
+export async function revealSelection(ids) {
+  try {
+    const res = await fetch(`/api/reveal-selection`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: body.error || `reveal failed (${res.status})`,
+      };
+    }
+    return body;
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+}
+
 // Image URLs carry a `v` version token (the file's mtimeMs). A numeric id is
 // only meaningful within the current scan session — after rescanning a
 // different folder, id 0 points to a different file. Without a version the
@@ -361,12 +383,18 @@ export async function fetchTreeNode({
  * @param {{by:string,dir:string}|null} [sort=null]
  * @returns {Promise<number[]>}
  */
-export async function fetchPhotoIds(filter = null, path = null, sort = null) {
+export async function fetchPhotoIds(
+  filter = null,
+  path = null,
+  sort = null,
+  edge = null // "first" | "last" — ask the server for ONE id, not all of them
+) {
   const params = new URLSearchParams();
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
   if (path && path.length) params.set("path", JSON.stringify(path));
   if (sort) params.set("sort", `${sort.by}:${sort.dir}`);
+  if (edge) params.set("edge", edge);
   const res = await fetch(`/api/photos/ids?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -536,11 +564,16 @@ export async function startScan(dir, { recursive = true } = {}) {
  * @param {{photoIds:number[], destParent:string, folderName:string}} opts
  * @returns {Promise<{jobId: string}>}
  */
-export async function startExport({ photoIds, destParent, folderName }) {
+export async function startExport({
+  photoIds,
+  destParent,
+  folderName,
+  move = false, // MOVE the originals out of their source folder (undoable)
+}) {
   const res = await fetch("/api/export", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ photoIds, destParent, folderName }),
+    body: JSON.stringify({ photoIds, destParent, folderName, move }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

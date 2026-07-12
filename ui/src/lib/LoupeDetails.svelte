@@ -89,12 +89,12 @@
 
     <section class="rating-row">
       <h4>Rating</h4>
-      <Stars rating={item.rating ?? 0} full />
+      <Stars rating={item.rating ?? 0} full interactive on:rate />
     </section>
 
     <section class="select-row">
       <span class="select-state" class:on={inSelection}>
-        {inSelection ? "✓ Selected" : "Press X to select"}
+        {inSelection ? "✓ Selected" : "Click ○ or press X to select"}
       </span>
       {#if selectedCount > 0}
         <span class="select-total">{selectedCount} selected</span>
