@@ -2413,6 +2413,9 @@
   // aspect ratios in, positioned boxes out. Absolutely-positioned children
   // ignore CSS padding, so the frame inset is applied to the box coordinates.
   const PAD = 12;
+  // One nesting step, shared by the layout (photo indent) and the CSS (header
+  // indent + dendrogram trunk), so the lines and the photos agree.
+  const GROUP_INDENT = 18;
   const HEADER_HEIGHT = 32;
   const PLACEHOLDER_HEIGHT = 40; // a bit taller than a header — needs room for an icon, label, and count on one line
 
@@ -2531,6 +2534,10 @@
             targetRowHeight: rowHeight,
             headerHeight: HEADER_HEIGHT,
             placeholderHeight: PLACEHOLDER_HEIGHT,
+            // Nest the CONTENT, not just the header: photos of a sub-group are
+            // inset to sit under their own header. Same step as the header
+            // indent (--ind) so the dendrogram lines up with the photos.
+            indentPerDepth: GROUP_INDENT,
           }
         )
       : null;
@@ -3493,7 +3500,9 @@
                   <div
                     class="snapshot-row"
                     data-group-key={pathKey(entry.item.path)}
-                    style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
+                    style="top:{boxes[i].y}px; left:{boxes[i]
+                      .x}px; width:{boxes[i].width}px; height:{boxes[i]
+                      .height}px;"
                   >
                     <div class="snapshot-head">
                       <button
@@ -3556,7 +3565,9 @@
                   <div
                     class="placeholder-row"
                     data-group-key={pathKey(entry.item.path)}
-                    style="top:{boxes[i].y}px; height:{boxes[i].height}px;"
+                    style="top:{boxes[i].y}px; left:{boxes[i]
+                      .x}px; width:{boxes[i].width}px; height:{boxes[i]
+                      .height}px;"
                     role="button"
                     tabindex="0"
                     on:click={(e) => onGroupToggle(entry.item.path, e)}
@@ -3912,7 +3923,12 @@
     left: var(--trunk);
     top: 0;
     bottom: 0;
-    border-left: 1px dotted #454545;
+    /* Must beat the section headers (z-index 15): they are sticky with an OPAQUE
+       background, so at 'auto' the trunk was painted over wherever a header sat
+       and the elbows looked like floating stubs. It runs up the header's left
+       padding gutter, which the per-depth padding reserves. */
+    z-index: 16;
+    border-left: 1px dotted #6a6a6a;
     pointer-events: none;
   }
   .section-header {
@@ -3932,7 +3948,8 @@
     left: var(--trunk);
     width: calc(var(--ind) - 4px);
     top: 50%;
-    border-top: 1px dotted #454545;
+    z-index: 16;
+    border-top: 1px dotted #6a6a6a;
     pointer-events: none;
   }
   /* Same tri-state icon (and same colour language) as the tree sidebar's
@@ -4006,10 +4023,10 @@
   .placeholder-row:focus-within :global(.gla-buttons) {
     opacity: 1;
   }
+  /* left/width come from the layout's content rect (boxes[i]), so a nested
+     group's row is inset under its header like its photos are. */
   .snapshot-row {
     position: absolute;
-    left: 0;
-    width: 100%;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -4056,10 +4073,9 @@
     color: #ffd24c;
     flex: 0 0 auto;
   }
+  /* left/width come from the layout's content rect (boxes[i]) — see .snapshot-row. */
   .placeholder-row {
     position: absolute;
-    left: 0;
-    width: 100%;
     display: flex;
     align-items: center;
     gap: 8px;

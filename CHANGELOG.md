@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.17
+
+- **Nested groups now really look nested.** The dendrogram lines actually connect
+  (they were being painted over by the sticky headers), and a sub-group's
+  **photos are indented under their own header** too — along with its snapshot
+  strip and collapsed pill — instead of every row starting at the left margin.
+  (usability testing)
+
 ## 2.9.16
 
 - **Nested groups now look nested.** With more than one grouping level, each
