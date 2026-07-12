@@ -21,12 +21,15 @@ const MONTH_NAMES = [
   "December",
 ];
 
-/** @param {string} dimension @param {string} value @returns {string} */
+/** @param {string} dimension @param {string|undefined|null} value @returns {string} */
 export function formatGroupValue(dimension, value) {
-  if (value === "") return "Unknown";
+  // null/undefined, not just "": a collapsed-group placeholder only carries the
+  // grouping levels down to where it was collapsed, so a deeper level is absent
+  // entirely. This used to reach `value.replace()` and throw, blanking the feed.
+  if (value == null || value === "") return "Unknown";
   if (dimension === "month") return MONTH_NAMES[Number(value) - 1] ?? value;
   if (dimension === "folderName") {
-    const trimmed = value.replace(/[/\\]+$/, "");
+    const trimmed = String(value).replace(/[/\\]+$/, "");
     const parts = trimmed.split(/[/\\]/);
     return parts[parts.length - 1] || "Unknown";
   }
@@ -75,7 +78,16 @@ export function deriveSectionHeaders(items, groupBy) {
   items.forEach((item, index) => {
     let changedAbove = false;
     groupBy.forEach((dimension, depth) => {
-      const value = item.groupValues[dimension];
+      const value = item.groupValues?.[dimension];
+      // An item need not define every level: a collapsed-group placeholder only
+      // carries the levels down to where it was collapsed. Emitting a header for
+      // a level it doesn't have produced an `undefined` value that crashed
+      // formatGroupValue (and blanked the whole feed). Skip the level, and drop
+      // the memo for it so the next item that DOES define it re-emits a header.
+      if (value === undefined || value === null) {
+        lastSeen[depth] = undefined;
+        return;
+      }
       if (changedAbove || value !== lastSeen[depth]) {
         lastSeen[depth] = value;
         changedAbove = true;

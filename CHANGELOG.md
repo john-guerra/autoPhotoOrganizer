@@ -6,6 +6,23 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.13
+
+- **Fixed: collapsing a nested group crashed the feed.** With two grouping levels
+  (e.g. Type › Folder), collapsing the outer group threw and left the feed blank.
+  Collapsed groups only carry the levels down to where they were collapsed, and
+  the header code assumed every level was always present. (usability testing)
+- **Errors now show up in the app, not just the console.** Anything that escapes
+  — a rendering crash, a failed background task — is surfaced in the status line
+  with what broke and what to try, instead of silently blanking the view.
+  (usability testing)
+- **Jump to the next/previous group from a group label** — new ‹ › buttons, the
+  mouse equivalent of Option+←/→. (usability testing)
+- **Option+←/→ at the first/last group** now jumps to that group's first/last
+  photo instead of doing nothing. (usability testing)
+- **"Remove" is now offered on folder-name groups too**, not just full-path
+  folder groups. (usability testing)
+
 ## 2.9.12
 
 - **One icon for a group's state, everywhere.** The tree sidebar, the feed's

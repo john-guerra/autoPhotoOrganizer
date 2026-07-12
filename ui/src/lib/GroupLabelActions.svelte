@@ -41,6 +41,24 @@
 
   <!-- Revealed on header hover (App.svelte controls opacity across the boundary). -->
   <span class="gla-buttons">
+    <!-- The UI equivalent of the Option+←/→ group-jump shortcut, anchored on
+         THIS group rather than wherever the keyboard focus happens to be. -->
+    <button
+      class="section-act nav"
+      title="Jump to the previous group (Option+←)"
+      aria-label="Jump to the previous group"
+      on:click|stopPropagation={() => dispatch("jumpprev")}
+    >
+      ‹
+    </button>
+    <button
+      class="section-act nav"
+      title="Jump to the next group (Option+→)"
+      aria-label="Jump to the next group"
+      on:click|stopPropagation={() => dispatch("jumpnext")}
+    >
+      ›
+    </button>
     <button
       class="section-act"
       title="Keep only this group as the working set"
@@ -125,6 +143,13 @@
   .section-act:hover {
     background: #2f2f2f;
     color: #fff;
+  }
+  /* The ‹/› group-jump pair: square and glyph-only, so they read as navigation
+     rather than another word-button. */
+  .section-act.nav {
+    padding: 1px 6px;
+    font-size: 0.85rem;
+    line-height: 1.1;
   }
   .section-act.danger {
     background: #5a1a1a;

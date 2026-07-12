@@ -10,6 +10,38 @@ import {
   headerParentPaths,
 } from "./feed.js";
 
+describe("formatGroupValue — absent levels (collapsed-group placeholders)", () => {
+  // Regression: a collapsed group's placeholder only carries the grouping levels
+  // down to where it was collapsed, so a deeper level is `undefined`. This hit
+  // `value.replace()` and threw, blanking the whole feed.
+  it("treats undefined/null as Unknown instead of throwing", () => {
+    for (const dim of ["folderName", "folder", "year", "month"]) {
+      expect(() => formatGroupValue(dim, undefined)).not.toThrow();
+      expect(formatGroupValue(dim, undefined)).toBe("Unknown");
+      expect(formatGroupValue(dim, null)).toBe("Unknown");
+    }
+  });
+});
+
+describe("deriveSectionHeaders — items that don't define every level", () => {
+  it("skips levels an item lacks, and never emits an undefined value", () => {
+    const items = [
+      { groupValues: { kind: "image", folderName: "/a/x" } },
+      // A collapsed nested group: only the outer level is present.
+      { groupValues: { kind: "image" } },
+      { groupValues: { kind: "image", folderName: "/a/y" } },
+    ];
+    const headers = deriveSectionHeaders(items, ["kind", "folderName"]);
+    expect(() => headers.map((h) => h.label)).not.toThrow();
+    for (const h of headers) expect(h.value).not.toBeUndefined();
+    // The folderName level re-emits for /a/y after the gap.
+    const names = headers
+      .filter((h) => h.dimension === "folderName")
+      .map((h) => h.value);
+    expect(names).toEqual(["/a/x", "/a/y"]);
+  });
+});
+
 describe("formatGroupValue", () => {
   it("maps the empty-string sentinel to 'Unknown'", () => {
     expect(formatGroupValue("year", "")).toBe("Unknown");

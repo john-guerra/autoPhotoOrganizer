@@ -1644,6 +1644,51 @@
     }
   }
 
+  /** Which group labels offer "Remove from library". A group is a real folder on
+   * disk whether it's keyed by `folder` (the full path) or `folderName` (the
+   * leaf) — Remove was only offered for the former, so grouping by folderName
+   * hid it for no good reason. */
+  const REMOVABLE_FOLDER_DIMS = new Set(["folder", "folderName"]);
+  function isRemovableFolder(path) {
+    return REMOVABLE_FOLDER_DIMS.has(path?.at(-1)?.dimension);
+  }
+
+  /** The catch-all the UI never had: anything that escapes a try/catch — an
+   * uncaught error while rendering, or a rejected promise nobody awaited — gets
+   * SHOWN, not just logged. Keeps the "a console error is not user feedback"
+   * rule true even for bugs we didn't anticipate. Deduped so a render loop can't
+   * spam the status line. */
+  let lastUncaught = "";
+  function reportUncaught(kind, err) {
+    const msg = err?.message ?? String(err ?? "unknown error");
+    if (msg === lastUncaught) return;
+    lastUncaught = msg;
+    error = `Something broke while ${kind === "display" ? "drawing the view" : "finishing a background task"}: ${msg} — reload the window, or undo the last change (grouping / collapse / filter).`;
+    console.error(`[uncaught:${kind}]`, err);
+  }
+
+  /** A group label's ‹/› buttons: jump to the group before/after THIS one. We
+   * anchor on this group's edge photo in the travel direction so the server's
+   * boundary seek steps out of the group instead of hopping inside it — the UI
+   * equivalent of Option+←/→, but independent of where the keyboard focus is. */
+  async function jumpFromGroup(path, direction) {
+    if (jumpingGroup) return;
+    let ids;
+    try {
+      ids = await fetchPhotoIds(
+        filterIsActive(displayFilter) ? displayFilter : null,
+        path,
+        sort
+      );
+    } catch (e) {
+      error = `Couldn't jump: ${e.message}`;
+      return;
+    }
+    if (!ids.length) return;
+    const anchor = direction === "next" ? ids.at(-1) : ids[0];
+    await jumpGroupBoundary(direction, anchor);
+  }
+
   /** A group's current FEED state, for the shared GroupStateIcon. `_collapsed`
    * and `_snapshots` are taken as ARGS (not closed over) so Svelte's dependency
    * tracking — which reads the expression's source text — actually re-runs this
@@ -1664,6 +1709,17 @@
   /** Feed group tri-state: expanded → snapshot → collapsed → expanded.
    * snapshot is a server-collapsed group the client renders as a strip. */
   async function cycleGroupState(path) {
+    // A path with a missing level would poison collapsedPaths and blank the feed
+    // (the undefined value crashed formatGroupValue). Refuse it, loudly.
+    if (
+      !Array.isArray(path) ||
+      !path.length ||
+      path.some((p) => p?.value == null)
+    ) {
+      error =
+        "Couldn't collapse that group — its grouping values are incomplete. Try a different grouping.";
+      return;
+    }
     const key = pathKey(path);
     const isCollapsed = collapsedPaths.some((p) => pathKey(p) === key);
     const isSnapshot = snapshotGroupKeys.has(key);
@@ -2834,9 +2890,11 @@
    * server-side (findGroupBoundary) rather than by paging through
    * intermediate photos client-side — a folder in this library can hold
    * 10,000+ photos between here and the boundary. */
-  async function jumpGroupBoundary(direction) {
+  async function jumpGroupBoundary(direction, fromId = undefined) {
     if (jumpingGroup) return;
-    const focusId = safeFocusId(selected);
+    // `fromId` lets a group label's own ‹/› buttons jump relative to THAT group
+    // (anchored on its edge photo) instead of wherever the keyboard focus is.
+    const focusId = fromId ?? safeFocusId(selected);
     if (focusId == null) return;
     jumpingGroup = true;
     try {
@@ -2876,8 +2934,36 @@
       error = err.message;
       return;
     }
-    if (boundary.id == null) return; // already at the first/last group
-    const targetId = boundary.id;
+    let targetId = boundary.id;
+    if (targetId == null) {
+      // No further group in this direction. Rather than doing nothing (which
+      // reads as "the shortcut is broken"), land on the far edge of the group
+      // we're already in: Alt+Right → its LAST photo, Alt+Left → its FIRST.
+      // Derive that group from the ANCHOR (focusId), not from `selected` — a
+      // label-button jump anchors on a group that may not hold the focus.
+      const anchorIdx = resolvedPhotos.findIndex((p) => p?.id === focusId);
+      const path = deriveCurrentPath(
+        anchorIdx >= 0 ? anchorIdx : selected,
+        displayEntries,
+        groupBy
+      );
+      if (!path || !path.length) return;
+      let ids;
+      try {
+        ids = await fetchPhotoIds(
+          filterIsActive(displayFilter) ? displayFilter : null,
+          path,
+          sort
+        );
+      } catch (err) {
+        error = err.message;
+        return;
+      }
+      const edgeId = direction === "next" ? ids.at(-1) : ids[0];
+      // Already sitting on that edge → genuinely nothing to do.
+      if (edgeId == null || edgeId === focusId) return;
+      targetId = edgeId;
+    }
     await withFeedTransaction(async (epoch) => {
       // Full PAGE_SIZE each side, not PAGE_SIZE/2 — a jump's initial window
       // used to load only 30+30, so any group bigger than that needed one
@@ -2961,7 +3047,16 @@
   }
 </script>
 
-<svelte:window on:keydown={onKeydown} on:resize={scheduleVisibleRangeUpdate} />
+<!-- Last-resort UI surface. An uncaught render error or a rejected promise used
+     to reach only the console, leaving the user staring at a blank/half-drawn
+     feed with no idea what happened (e.g. the collapsed-nested-group crash in
+     formatGroupValue). Never fail silently: put it on screen, say what to do. -->
+<svelte:window
+  on:keydown={onKeydown}
+  on:resize={scheduleVisibleRangeUpdate}
+  on:error={(e) => reportUncaught("display", e.error ?? e.message)}
+  on:unhandledrejection={(e) => reportUncaught("background", e.reason)}
+/>
 
 <UpdateBanner />
 
@@ -3186,10 +3281,11 @@
                     aria-label="Cycle this group: full grid → snapshot strip → collapsed"
                     on:click={() =>
                       cycleGroupState(
-                        groupBy.slice(0, header.depth + 1).map((d) => ({
-                          dimension: d,
-                          value: resolvedPhotos[header.index]?.groupValues[d],
-                        }))
+                        header.path ??
+                          groupBy.slice(0, header.depth + 1).map((d) => ({
+                            dimension: d,
+                            value: resolvedPhotos[header.index]?.groupValues[d],
+                          }))
                       )}
                   >
                     <GroupStateIcon
@@ -3239,10 +3335,12 @@
                         groupIdCacheVersion,
                         groupSelSig
                       )}
-                      isFolder={header.path.at(-1)?.dimension === "folder"}
+                      isFolder={isRemovableFolder(header.path)}
                       removeArmed={removeArmedKey === pathKey(header.path)}
                       on:toggleselect={() => toggleGroupSelectAll(header.path)}
                       on:keeponly={() => keepOnlyGroup(header.path)}
+                      on:jumpprev={() => jumpFromGroup(header.path, "prev")}
+                      on:jumpnext={() => jumpFromGroup(header.path, "next")}
                       on:remove={() => removeAlbum(header.path)}
                     />
                   {/if}
@@ -3287,13 +3385,16 @@
                           groupIdCacheVersion,
                           groupSelSig
                         )}
-                        isFolder={entry.item.path.at(-1)?.dimension ===
-                          "folder"}
+                        isFolder={isRemovableFolder(entry.item.path)}
                         removeArmed={removeArmedKey ===
                           pathKey(entry.item.path)}
                         on:toggleselect={() =>
                           toggleGroupSelectAll(entry.item.path)}
                         on:keeponly={() => keepOnlyGroup(entry.item.path)}
+                        on:jumpprev={() =>
+                          jumpFromGroup(entry.item.path, "prev")}
+                        on:jumpnext={() =>
+                          jumpFromGroup(entry.item.path, "next")}
                         on:remove={() => removeAlbum(entry.item.path)}
                       />
                     </div>
@@ -3342,11 +3443,13 @@
                         groupIdCacheVersion,
                         groupSelSig
                       )}
-                      isFolder={entry.item.path.at(-1)?.dimension === "folder"}
+                      isFolder={isRemovableFolder(entry.item.path)}
                       removeArmed={removeArmedKey === pathKey(entry.item.path)}
                       on:toggleselect={() =>
                         toggleGroupSelectAll(entry.item.path)}
                       on:keeponly={() => keepOnlyGroup(entry.item.path)}
+                      on:jumpprev={() => jumpFromGroup(entry.item.path, "prev")}
+                      on:jumpnext={() => jumpFromGroup(entry.item.path, "next")}
                       on:remove={() => removeAlbum(entry.item.path)}
                     />
                   </div>
