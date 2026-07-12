@@ -97,6 +97,12 @@ is **not** user feedback.
   and keep the working tree from piling up into one big unreviewable batch.
   Prefer many small checkpoint commits over one large one. (Branch/merge flow:
   see `docs/ROADMAP.md`.)
+- **Commit proactively — don't wait to be asked.** Whenever there's a stable
+  version or a significant change (a fix verified, a feature slice landed, a
+  refactor at a green state), commit it right then so we always have
+  checkpoints. Do not pause to ask permission to commit at these points; just
+  make the checkpoint commit. Only hold off if the work is mid-flight and
+  known-broken.
 
 ## Versioning
 
