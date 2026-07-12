@@ -210,9 +210,17 @@
     on:click
     on:contextmenu
   >
-    {#if inSelection}
-      <span class="select-check" title="Selected" aria-hidden="true">✓</span>
-    {/if}
+    <button
+      class="select-circle"
+      class:on={inSelection}
+      type="button"
+      title={inSelection ? "Deselect" : "Select"}
+      aria-label={inSelection ? "Deselect photo" : "Select photo"}
+      aria-pressed={inSelection}
+      on:click|stopPropagation={() => dispatch("toggleselect")}
+    >
+      {#if inSelection}✓{/if}
+    </button>
     {#if src && previewSrc && !loaded}
       <img
         src={previewSrc}
@@ -321,22 +329,38 @@
   .thumb.selected.in-selection {
     box-shadow: 0 0 0 2px rgba(255, 210, 76, 0.5);
   }
-  .select-check {
+  .select-circle {
     position: absolute;
     top: 5px;
     right: 5px;
     z-index: 100;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
+    padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #ffd24c;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1.5px solid rgba(255, 255, 255, 0.9);
     color: #1a1400;
     border-radius: 50%;
     font-size: 0.72rem;
     font-weight: 700;
-    pointer-events: none;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  /* Discoverable without cluttering a dense grid: the empty circle appears on
+     hover and on the focused tile, and stays solid once the photo is selected. */
+  .thumb:hover .select-circle,
+  .thumb.selected .select-circle,
+  .select-circle:focus-visible,
+  .select-circle.on {
+    opacity: 1;
+  }
+  .select-circle.on {
+    background: #ffd24c;
+    border-color: #ffd24c;
   }
   img.cover,
   .stack-peek {

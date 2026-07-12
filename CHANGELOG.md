@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.9.3
+
+- **Click to select, click to rate.** Every grid tile and the loupe now have a
+  selection circle — click it to add/remove a photo from the selection without
+  opening it (it appears on hover and on the focused tile, and stays solid once
+  selected). In the loupe you can also click the star row to set a rating
+  directly (click the same star again to clear). (usability testing)
+
 ## 2.9.2
 
 - **Popups now close like popups.** The Loupe (full-photo view) has a visible ✕

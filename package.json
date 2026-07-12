@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.9.2",
+  "version": "2.9.3",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",

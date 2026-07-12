@@ -3194,6 +3194,7 @@
                     stacks.find((s) => s.id === entry.stackId)?.coverId ===
                       entry.item.id}
                   on:click={(e) => onTileClick(e, entry, i)}
+                  on:toggleselect={() => toggleSelect(resolvePhoto(entry)?.id)}
                   on:contextmenu={(e) => onTileContextMenu(e, entry, i)}
                   on:attempt={handleThumbAttempt}
                   on:settled={handleThumbSettled}
@@ -3276,6 +3277,8 @@
     showFilmstrip={showLoupeFilmstrip}
     on:contextmenu={(e) => openContextMenu(e.detail.x, e.detail.y, selected)}
     on:close={closeLoupe}
+    on:rate={(e) => rate(selected, e.detail)}
+    on:toggleselect={() => toggleSelect(resolvedPhotos[selected]?.id)}
   />
 {/if}
 
