@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.13
+
+- **Collapsing a group no longer throws you back to the top of the library.**
+  Folding or snapshotting a group far down the feed used to reload the window
+  from photo #1 — the view jumped, and the group you had just clicked scrolled
+  out from under you (often without even showing its snapshot). The feed now
+  stays anchored on the group you clicked, in both directions (#113).
+
 ## 2.10.12
 
 - **Every folder-tree bug that shipped now has a test that would have caught it.**

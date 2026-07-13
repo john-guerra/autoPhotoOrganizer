@@ -1882,25 +1882,56 @@
     return head[0]?.id ?? null;
   }
 
+  /**
+   * The entry index where `path`'s group starts in the current window, or -1.
+   * The group you clicked is the thing to anchor the refetch on — `selected` can
+   * be anywhere (it's the FOCUSED tile, and a user who has only scrolled hasn't
+   * focused anything, so it sits at 0, at the top of the library).
+   */
+  function firstEntryIndexOfPath(path) {
+    const key = pathKey(path);
+    for (let i = 0; i < displayEntries.length; i++) {
+      const e = displayEntries[i];
+      if (!e) continue;
+      if (e.kind === "placeholder") {
+        if (pathKey(e.item.path) === key) return i;
+        continue;
+      }
+      const p = deriveCurrentPath(i, displayEntries, groupBy);
+      if (p && pathKey(p) === key) return i;
+    }
+    return -1;
+  }
+
   async function toggleSectionCollapse(path) {
     const key = pathKey(path);
     const collapsing = !collapsedPaths.some((p) => pathKey(p) === key);
-    // Expanding: remember where this group's header sits right now, and arm the
-    // pin BEFORE the refetch — recenterFeedOnId sets focusPending, whose focus()
-    // would otherwise scroll to `selected`; the pin's presence turns that scroll
-    // off (preventScroll) and holds the header in place instead (issue #74).
-    if (!collapsing) {
-      const offset = groupAnchorOffset(key);
-      expandPin = offset == null ? null : { key, offset };
-    }
+    // Hold this group's header where it is across the refetch, in BOTH
+    // directions. Arm the pin BEFORE the refetch — recenterFeedOnId sets
+    // focusPending, whose focus() would otherwise scroll to `selected`; the
+    // pin's presence turns that scroll off (preventScroll) and holds the header
+    // in place instead (issue #74). Collapsing needs it just as much: you were
+    // looking at this group when you clicked it.
+    const offset = groupAnchorOffset(key);
+    expandPin = offset == null ? null : { key, offset };
+
     collapsedPaths = collapsing
       ? [...collapsedPaths, path]
       : collapsedPaths.filter((p) => pathKey(p) !== key);
-    // Expand seeks to the group's own first photo (loads from the top, extends
-    // downward via loadMore("after")); collapse re-centers on the current
-    // selection, excluding the group about to be hidden.
+
+    // Both directions seek from THIS GROUP, never from `selected`.
+    //
+    // Collapse used to re-center on safeFocusId(selected, …). But `selected` is
+    // the focused tile, and a user who has only scrolled has never focused
+    // anything — it's photo 0. So collapsing a group far down the feed reloaded
+    // the window from the TOP of the library: the view jumped, and the group you
+    // just clicked fell outside the loaded window, so its placeholder never
+    // arrived and the snapshot band you asked for never rendered. Anchoring on
+    // the group keeps it inside the window, which is the whole point of clicking
+    // it. (Falls back to `selected` when the group isn't in the window at all.)
+    const anchorIndex = firstEntryIndexOfPath(path);
     const focusId = collapsing
-      ? safeFocusId(selected, path)
+      ? safeFocusId(anchorIndex >= 0 ? anchorIndex : selected, path)
       : ((await firstPhotoIdOfGroup(path)) ?? safeFocusId(selected));
     await recenterFeedOnId(focusId);
     if (expandPin) {
