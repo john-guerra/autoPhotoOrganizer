@@ -544,15 +544,33 @@ export async function resetLibrary() {
  * @param {{recursive?: boolean}} [opts]
  * @returns {Promise<{jobId: string}>}
  */
-export async function startScan(dir, { recursive = true } = {}) {
+export async function startScan(dir, { recursive = true, dirs = null } = {}) {
   const res = await fetch("/api/scan", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ dir, recursive }),
+    // `dirs` (optional) scans exactly that subset of the recursive walk — the
+    // subfolders the user checked. Omitted entirely when they didn't curate one,
+    // so the server takes its usual whole-tree path.
+    body: JSON.stringify({ dir, recursive, ...(dirs ? { dirs } : {}) }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `scan failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * The scannable subdirectories of `dir` (each with a media count) — the Add
+ * panel's subfolder checklist. One entry per `folders` row a recursive scan
+ * would create, so what the user checks maps 1:1 onto what they get.
+ * @returns {Promise<Array<{path:string, relPath:string, depth:number, mediaCount:number}>>}
+ */
+export async function fetchSubdirs(dir) {
+  const res = await fetch(`/api/fs/subdirs?dir=${encodeURIComponent(dir)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `couldn't read ${dir} (${res.status})`);
   }
   return res.json();
 }

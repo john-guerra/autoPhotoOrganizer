@@ -1,11 +1,17 @@
 <script>
   /**
-   * Toolbar cluster ①: the library dropdown ("Manage library…" + "Open a
-   * folder…") and the add/scan-a-folder popover. Purely presentational — it
-   * owns no scan/library logic, only the open/close popover state and form
-   * fields (two-way bound), and emits an event when the user asks to scan, pick
-   * a folder, manage the library, or open a folder to focus on it. The folder
-   * LIST that used to live in this dropdown moved to the tree/fisheye sidebar.
+   * Toolbar cluster ①: the add-a-folder popover (the single door — adding,
+   * opening, and rescanning a folder are all the same act with different
+   * options) plus a button that opens Manage folders. Purely presentational: it
+   * owns the popover's open/close state and the form fields (two-way bound to
+   * App, which owns the scan/scope logic) and emits `submit` when the user
+   * commits.
+   *
+   * The primary button's verb adapts to the path, so it never lies about what
+   * clicking it will do: "Add & scan" for a new folder, "Open" when the folder
+   * is already indexed and the user wants to scope to it (NO scan — that's what
+   * makes this work with the drive unmounted, since the index is an offline
+   * mirror), "Rescan" when it's already indexed and they don't.
    */
   import { createEventDispatcher } from "svelte";
   import { clickOutside, onEscape } from "./actions.js";
@@ -13,105 +19,39 @@
   export let scanning = false;
   export let hasNativePicker = false;
 
-  // Two-way with the parent: popover visibility + the scan form fields live in
-  // App (dir is persisted, manageLibraryOpen drives App's modal), so bind them.
-  export let libraryOpen = false;
-  export let manageLibraryOpen = false;
   export let addFolderOpen = false;
   export let dir = "";
   export let recursiveScan = true;
+  export let focusAfterAdd = false;
+  /** True when `dir` is already a library member (App computes it). */
+  export let alreadyIndexed = false;
 
-  // The "open a folder to focus on it" popover (a text-input fallback shown
-  // when there's no native OS picker) lives here next to its "Open a folder…"
-  // trigger. App owns the open/close + field state (bound, like `dir`) and the
-  // actual open-folder logic (emitted as `openfolderfocus`) — same split as the
-  // scan form.
-  export let openFolderOpen = false;
-  export let openFolderDir = "";
+  // The subfolder checklist. Collapsed by default: the common case (import
+  // everything) stays one click and never waits on a directory walk of a big
+  // card. App owns the state and the fetch; this renders it.
+  export let subdirsOpen = false;
+  export let subdirs = [];
+  export let subdirsLoading = false;
+  export let subdirsError = "";
+  export let subdirSelection = new Set();
 
   const dispatch = createEventDispatcher();
+
+  // A count only once a subset is actually in play — before the picker is
+  // expanded nothing has been walked, so there's no honest number to show.
+  $: chosenCount = subdirsOpen && subdirs.length ? subdirSelection.size : null;
+  $: emptySelection = chosenCount === 0;
+  $: verb = !alreadyIndexed
+    ? chosenCount === null
+      ? "Add & scan"
+      : `Add & scan ${chosenCount} folder${chosenCount === 1 ? "" : "s"}`
+    : focusAfterAdd
+      ? "Open"
+      : "Rescan";
+  $: busyVerb = verb === "Open" ? "Opening…" : "Scanning…";
 </script>
 
 <div class="cluster source">
-  <div
-    class="library"
-    use:clickOutside={() => (libraryOpen = false)}
-    use:onEscape={() => (libraryOpen = false)}
-  >
-    <button
-      class="library-toggle"
-      on:click={() => (libraryOpen = !libraryOpen)}
-      title="Your scanned folders — manage them or focus on one"
-    >
-      Folders ▾
-    </button>
-    {#if libraryOpen}
-      <ul class="library-panel">
-        <li>
-          <button
-            class="library-entry"
-            on:click={() => {
-              libraryOpen = false;
-              manageLibraryOpen = true;
-            }}
-          >
-            Manage folders…
-          </button>
-        </li>
-        <li>
-          <button
-            class="library-entry"
-            on:click={() => {
-              libraryOpen = false;
-              dispatch("openfolder");
-            }}
-            title="Open a single folder and focus the whole app on it"
-          >
-            Open a folder…
-          </button>
-        </li>
-      </ul>
-    {/if}
-    {#if openFolderOpen}
-      <div class="open-folder-popover">
-        <!-- svelte-ignore a11y-autofocus -->
-        <input
-          class="dir"
-          type="text"
-          placeholder="/path/to/folder"
-          bind:value={openFolderDir}
-          on:keydown={(e) => {
-            if (e.key === "Enter") {
-              openFolderOpen = false;
-              dispatch("openfolderfocus");
-            } else if (e.key === "Escape") {
-              openFolderOpen = false;
-            }
-          }}
-          spellcheck="false"
-          autofocus
-        />
-        <div class="open-folder-actions">
-          <button
-            class="open-folder-go"
-            on:click={() => {
-              openFolderOpen = false;
-              dispatch("openfolderfocus");
-            }}
-            disabled={scanning}
-          >
-            {scanning ? "Opening…" : "Open"}
-          </button>
-          <button
-            class="open-folder-cancel"
-            on:click={() => (openFolderOpen = false)}
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    {/if}
-  </div>
   <div
     class="add-folder"
     use:clickOutside={() => (addFolderOpen = false)}
@@ -120,8 +60,8 @@
     <button
       class="add-toggle"
       on:click={() => (addFolderOpen = !addFolderOpen)}
-      title="Add / scan a folder"
-      aria-label="Add folder"
+      title="Add a folder — scan it in, and optionally focus on it"
+      aria-label="Add a folder"
     >
       ＋
     </button>
@@ -134,14 +74,12 @@
           on:click={() => (addFolderOpen = false)}>✕</button
         >
         {#if hasNativePicker}
-          <!-- Primary path: one click → OS picker → scan. Leads the panel so the
-               common case doesn't require typing a raw filesystem path. -->
           <button
             class="choose-folder primary"
             on:click={() => dispatch("choosefolder")}
             disabled={scanning}
           >
-            {scanning ? "Scanning…" : "Choose folder to add…"}
+            Choose folder…
           </button>
           <div class="add-or">or type a path</div>
         {/if}
@@ -151,27 +89,91 @@
             type="text"
             placeholder="/path/to/photos"
             bind:value={dir}
-            on:keydown={(e) => e.key === "Enter" && dispatch("scan")}
+            on:keydown={(e) =>
+              e.key === "Enter" && !emptySelection && dispatch("submit")}
             spellcheck="false"
           />
           <button
             class="scan"
-            on:click={() => dispatch("scan")}
-            disabled={scanning || !dir.trim()}
+            on:click={() => dispatch("submit")}
+            disabled={scanning || !dir.trim() || emptySelection}
           >
-            {scanning ? "Scanning…" : "Add & scan"}
+            {scanning ? busyVerb : verb}
           </button>
         </div>
-        <label
-          class="recursive-opt"
-          title="Scan this folder and all folders inside it"
-        >
+        {#if emptySelection}
+          <p class="err">Nothing selected — check at least one folder.</p>
+        {/if}
+        <label class="opt" title="Scan this folder and all folders inside it">
           <input type="checkbox" bind:checked={recursiveScan} />
           <span>Include subfolders</span>
         </label>
+        {#if recursiveScan}
+          {#if !subdirsOpen}
+            <button
+              class="link"
+              disabled={!dir.trim()}
+              on:click={() => {
+                subdirsOpen = true;
+                dispatch("loadsubdirs");
+              }}
+            >
+              Choose subfolders…
+            </button>
+          {:else if subdirsLoading}
+            <p class="hint">Reading folders…</p>
+          {:else if subdirsError}
+            <p class="err">{subdirsError}</p>
+          {:else if subdirs.length === 0}
+            <p class="hint">No folders with photos in here.</p>
+          {:else}
+            <ul class="subdirs">
+              {#each subdirs as d (d.path)}
+                <li style="padding-left: {d.depth * 14}px">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={subdirSelection.has(d.path)}
+                      on:change={() => dispatch("toggledir", { path: d.path })}
+                    />
+                    <span class="name"
+                      >{d.relPath.split("/").pop() || "(this folder)"}</span
+                    >
+                    <span class="count">{d.mediaCount.toLocaleString()}</span>
+                  </label>
+                </li>
+              {/each}
+            </ul>
+            <div class="subdir-actions">
+              <button class="link" on:click={() => dispatch("selectalldirs")}
+                >All</button
+              >
+              <button class="link" on:click={() => dispatch("selectnodirs")}
+                >None</button
+              >
+            </div>
+          {/if}
+        {/if}
+        <label
+          class="opt"
+          title="Show only this folder — the rest of your library stays indexed, just out of view"
+        >
+          <input type="checkbox" bind:checked={focusAfterAdd} />
+          <span>Focus on this folder only</span>
+        </label>
+        {#if alreadyIndexed && dir.trim()}
+          <p class="hint">Already in your library.</p>
+        {/if}
       </div>
     {/if}
   </div>
+  <button
+    class="library-toggle"
+    on:click={() => dispatch("managelibrary")}
+    title="Your scanned folders — rename, remove, or rescan them"
+  >
+    Folders
+  </button>
 </div>
 
 <style>
@@ -181,9 +183,6 @@
     gap: 0.6rem;
     min-width: 0;
     flex-shrink: 0;
-  }
-  .library {
-    position: relative;
   }
   .library-toggle {
     padding: 0.45rem 1rem;
@@ -196,75 +195,6 @@
   }
   .library-toggle:hover {
     background: #5ba8ff;
-  }
-  .library-panel {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    z-index: 200;
-    margin: 4px 0 0;
-    padding: 4px 0;
-    min-width: 220px;
-    max-height: 300px;
-    overflow-y: auto;
-    list-style: none;
-    background: #1e1e1e;
-    border: 1px solid #333;
-    border-radius: 4px;
-  }
-  .library-entry {
-    display: block;
-    width: 100%;
-    padding: 6px 10px;
-    text-align: left;
-    background: none;
-    border: none;
-    color: inherit;
-    cursor: pointer;
-  }
-  .library-entry:hover:not(:disabled) {
-    background: #2a2a2a;
-  }
-  .open-folder-popover {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    z-index: 300;
-    margin-top: 4px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    background: #0d0d0d;
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 10px;
-    min-width: 300px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  }
-  .open-folder-actions {
-    display: flex;
-    gap: 8px;
-  }
-  .open-folder-go {
-    padding: 0.4rem 1rem;
-    background: #4c9aff;
-    color: #06121f;
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .open-folder-go:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-  .open-folder-cancel {
-    padding: 0.4rem 1rem;
-    background: #101010;
-    border: 1px solid #333;
-    color: #cfcfcf;
-    border-radius: 6px;
-    cursor: pointer;
   }
   .add-folder {
     position: relative;
@@ -279,6 +209,9 @@
     line-height: 1;
     cursor: pointer;
   }
+  .add-toggle:hover {
+    background: #1c1c1c;
+  }
   .add-panel {
     position: absolute;
     top: calc(100% + 6px);
@@ -291,7 +224,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    min-width: 260px;
+    min-width: 300px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   }
   .popover-close {
@@ -327,13 +260,74 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
-  .recursive-opt {
+  .opt {
     display: flex;
     align-items: center;
     gap: 6px;
     font-size: 0.8rem;
     color: #b8b8b8;
     cursor: pointer;
+  }
+  .hint {
+    margin: 0;
+    font-size: 0.75rem;
+    color: #8a8a8a;
+  }
+  .err {
+    margin: 0;
+    font-size: 0.75rem;
+    color: #ff8a80;
+  }
+  .link {
+    align-self: flex-start;
+    padding: 0;
+    background: none;
+    border: none;
+    color: #4c9aff;
+    font-size: 0.78rem;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .link:disabled {
+    color: #555;
+    cursor: default;
+    text-decoration: none;
+  }
+  .subdirs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid #262626;
+    border-radius: 6px;
+    background: #080808;
+  }
+  .subdirs li {
+    padding: 2px 6px;
+  }
+  .subdirs label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: #cfcfcf;
+    cursor: pointer;
+  }
+  .subdirs .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .subdirs .count {
+    margin-left: auto;
+    padding-left: 8px;
+    color: #7a7a7a;
+    font-variant-numeric: tabular-nums;
+  }
+  .subdir-actions {
+    display: flex;
+    gap: 10px;
   }
   .dir {
     flex: 1;
@@ -350,19 +344,7 @@
     outline: none;
     border-color: #4c9aff;
   }
-  .scan {
-    padding: 0.45rem 1rem;
-    background: #4c9aff;
-    color: #06121f;
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .scan:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
+  .scan,
   .choose-folder {
     padding: 0.45rem 1rem;
     background: #4c9aff;
@@ -372,6 +354,7 @@
     font-weight: 600;
     cursor: pointer;
   }
+  .scan:disabled,
   .choose-folder:disabled {
     opacity: 0.6;
     cursor: default;

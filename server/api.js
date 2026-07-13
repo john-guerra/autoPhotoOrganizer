@@ -27,6 +27,8 @@ import {
 import { safeResolve } from "./lib/safeResolve.js";
 import { nextAvailablePath } from "./lib/nextAvailablePath.js";
 import { listDirsRecursive } from "./lib/walkDirs.js";
+import { listSubdirsWithCounts } from "./lib/subdirs.js";
+import { isInsideDir } from "./lib/insideDir.js";
 import { getDb } from "./db/connection.js";
 import {
   volumeRootForPath,
@@ -437,6 +439,30 @@ export function registerApi(app) {
   });
 
   // --- Scan ---------------------------------------------------------------
+  // The directories a recursive scan of `dir` would import, each with a media
+  // count — the Add panel's subfolder checklist reads this so the user can
+  // uncheck an Exports/ or Selects/ folder BEFORE it lands in the library.
+  app.get("/api/fs/subdirs", async (req, res) => {
+    const dir = req.query?.dir;
+    if (typeof dir !== "string" || dir.length === 0) {
+      return res.status(400).json({ error: "dir is required" });
+    }
+    let st;
+    try {
+      st = statSync(dir);
+    } catch {
+      return res.status(404).json({ error: `not found: ${dir}` });
+    }
+    if (!st.isDirectory()) {
+      return res.status(400).json({ error: `not a directory: ${dir}` });
+    }
+    try {
+      res.json(await listSubdirsWithCounts(dir, processing));
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post("/api/scan", async (req, res) => {
     const dir = req.body?.dir;
     // Recursive ("soup folder") scan: point at a parent, pull in every
@@ -445,6 +471,40 @@ export function registerApi(app) {
     const recursive = req.body?.recursive === true;
     if (typeof dir !== "string" || dir.length === 0) {
       return res.status(400).json({ error: "dir is required" });
+    }
+    // Optional subset: scan exactly these directories instead of the whole
+    // recursive walk (the subfolders the user checked). These are user-supplied
+    // paths arriving over HTTP, so each is validated to be a real directory
+    // INSIDE `dir` — isInsideDir closes both the shared-name-prefix hole
+    // (/a/bc is not inside /a/b) and the `..`-traversal hole. One bad entry
+    // rejects the whole request: we never silently drop a folder the user asked
+    // for, and never scan one they didn't.
+    const dirsSubset = req.body?.dirs;
+    if (dirsSubset !== undefined) {
+      if (
+        !Array.isArray(dirsSubset) ||
+        dirsSubset.some((d) => typeof d !== "string")
+      ) {
+        return res
+          .status(400)
+          .json({ error: "dirs must be an array of strings" });
+      }
+      for (const d of dirsSubset) {
+        if (!isInsideDir(dir, d)) {
+          return res
+            .status(400)
+            .json({ error: `outside the scanned folder: ${d}` });
+        }
+        let sub;
+        try {
+          sub = statSync(d);
+        } catch {
+          return res.status(400).json({ error: `not found: ${d}` });
+        }
+        if (!sub.isDirectory()) {
+          return res.status(400).json({ error: `not a directory: ${d}` });
+        }
+      }
     }
     let st;
     try {
@@ -464,7 +524,10 @@ export function registerApi(app) {
     const t0 = performance.now();
 
     if (recursive) {
-      const dirs = await listDirsRecursive(dir);
+      const dirs =
+        dirsSubset && dirsSubset.length
+          ? dirsSubset
+          : await listDirsRecursive(dir);
       const job = registry.create("scan", {
         label: `Scan ${basename(dir)}`,
         total: dirs.length,
