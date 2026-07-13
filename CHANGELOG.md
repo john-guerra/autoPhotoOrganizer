@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.6
+
+- **Packaged build** of the folder-controls work: one ＋ panel for adding,
+  opening, and rescanning a folder; a subfolder checklist so a recursive add
+  imports only what you want; and a single scope chip in place of the old
+  "Folder focus" and "Keep only" pair.
+
 ## 2.10.5
 
 - **One door for folders.** Adding a folder and opening one were two separate
