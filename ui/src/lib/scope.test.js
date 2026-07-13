@@ -79,6 +79,10 @@ describe("scopeChip", () => {
     const chip = scopeChip(idsScope([1, 2, 3]));
     expect(chip.text).toBe("3 photos");
   });
+
+  it("says '1 photo', not '1 photos'", () => {
+    expect(scopeChip(idsScope([7])).text).toBe("1 photo");
+  });
 });
 
 describe("persistence", () => {

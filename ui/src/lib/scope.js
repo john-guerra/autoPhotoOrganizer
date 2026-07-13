@@ -55,9 +55,10 @@ export function scopeChip(scope) {
       title: `Exit folder scope — back to the whole library (${scope.path})`,
     };
   }
+  const n = scope.ids.length;
   return {
     icon: "●",
-    text: `${scope.ids.length.toLocaleString()} photos`,
+    text: `${n.toLocaleString()} photo${n === 1 ? "" : "s"}`,
     title: "Exit keep-only scope (back to the whole library)",
   };
 }
