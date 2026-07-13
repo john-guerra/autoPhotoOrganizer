@@ -14,6 +14,7 @@
    */
   import { createEventDispatcher } from "svelte";
   import { clickOutside, onEscape, clampToViewport } from "./actions.js";
+  import { combo } from "./platform.js";
 
   export let selectedCount = 0;
   export let lastClearedSelection = null;
@@ -58,7 +59,7 @@
       <button
         class="sel-btn confirm"
         on:click={() => dispatch("bulkconfirm")}
-        title="⌘A again also confirms"
+        title={`${combo("A", { shift: pendingBulk === "deselect" })} again also confirms`}
         >{pendingBulk === "select" ? "Select all" : "Remove all"}</button
       >
       <button class="sel-btn" on:click={() => dispatch("bulkcancel")}>

@@ -95,6 +95,7 @@
     selectedDirs,
   } from "./lib/subfolderSelection.js";
   import { nextBulkAction, groupLabel } from "./lib/bulkSelection.js";
+  import { combo } from "./lib/platform.js";
   import OrganizeControls from "./lib/OrganizeControls.svelte";
   import ViewControls from "./lib/ViewControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
@@ -981,7 +982,7 @@
       if (action === "group") {
         pendingBulk = null;
         selectedIds = new Set([...selectedIds, ...ids]);
-        status = `Selected ${ids.length.toLocaleString()} in ${groupLabel(currentPath)} — ⌘A again for all ${showingCount.toLocaleString()}`;
+        status = `Selected ${ids.length.toLocaleString()} in ${groupLabel(currentPath)} — ${combo("A")} again for all ${showingCount.toLocaleString()}`;
         return;
       }
       if (action === "prompt") {
