@@ -31,6 +31,8 @@
   export let pendingBulk = null;
   /** How many photos the answer would touch (everything the filters show). */
   export let pendingCount = 0;
+  /** A re-read job is in flight — the button says so instead of looking dead. */
+  export let rereading = false;
 
   const dispatch = createEventDispatcher();
 </script>
@@ -77,6 +79,13 @@
         on:click={() => dispatch("keeponly")}
         title="Focus the whole app on just these photos (keep only)"
         >Keep only</button
+      >
+      <button
+        class="sel-btn"
+        disabled={rereading}
+        on:click={() => dispatch("reread")}
+        title="Read these photos' EXIF again from disk — dates, camera, lens, dimensions (use after editing the files elsewhere)"
+        >{rereading ? "Re-reading…" : "Re-read metadata"}</button
       >
     {/if}
     {#if lastClearedSelection}

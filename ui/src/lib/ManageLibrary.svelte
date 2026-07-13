@@ -11,6 +11,9 @@
   import Modal from "./Modal.svelte";
 
   export let library = [];
+  /** Photos whose metadata has never been read, and whether a sweep is running. */
+  export let pendingMeta = 0;
+  export let sweeping = false;
 
   const dispatch = createEventDispatcher();
 
@@ -174,6 +177,31 @@
     {/if}
   </section>
 
+  <section>
+    <h3>Photo metadata</h3>
+    <p>
+      AutoGallery reads a photo's date, camera and lens the first time it shows
+      it to you. Photos you have never scrolled past have none yet — they group
+      under <strong>Unknown</strong> and are missing from the timeline.
+    </p>
+    {#if pendingMeta > 0}
+      <p>
+        <strong>{pendingMeta.toLocaleString()}</strong> photos not read yet.
+      </p>
+      <div class="cache-actions">
+        <button disabled={busy || sweeping} on:click={() => dispatch("sweep")}>
+          {sweeping ? "Reading…" : "Read all metadata"}
+        </button>
+      </div>
+      <p class="hint">
+        Runs in the background — keep browsing, and cancel any time from the
+        jobs panel. Stopping early loses nothing: it picks up where it left off.
+      </p>
+    {:else}
+      <p class="empty">Every photo's metadata has been read.</p>
+    {/if}
+  </section>
+
   <section class="danger">
     <h3>Danger zone</h3>
     <p class="danger-warn">
@@ -219,6 +247,11 @@
   .empty {
     color: #888;
     font-size: 0.85rem;
+  }
+  .hint {
+    color: #888;
+    font-size: 0.8rem;
+    margin: 0.4rem 0 0;
   }
   .folder-list,
   .breakdown-list {

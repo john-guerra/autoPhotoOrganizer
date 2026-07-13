@@ -42,6 +42,8 @@
     setRating as apiSetRating,
     setCover as apiSetCover,
     fetchMeta,
+    fetchPendingMeta,
+    startEnrich,
     fetchLibrary,
     scan as apiScan,
     startScan,
@@ -410,6 +412,12 @@
   let exportMove = false;
   let exporting = false;
   let exportResult = null;
+  // Metadata reading: `rereading` = a forced re-read of the selection is in
+  // flight; `sweeping` = the read-everything-unread job is; `pendingMeta` = how
+  // many photos have never been read (0 hides the sweep button).
+  let rereading = false;
+  let sweeping = false;
+  let pendingMeta = 0;
 
   // Sidebar view: classic "tree" or focus+context "fisheye" (toggle, persisted).
   // --- Resizable sidebar (drag its right edge; width persisted) -------------
@@ -1203,6 +1211,100 @@
   function keepOnlySelection() {
     if (selectedIds.size === 0) return;
     applyScope(idsScope([...selectedIds]));
+  }
+
+  /**
+   * Re-read the selected photos' metadata from disk (EXIF date, camera, lens,
+   * dimensions), even though we have read them before — the file may have
+   * changed, or an earlier read may have got it wrong. Runs as a cancelable job
+   * so a big selection shows progress instead of freezing a button.
+   *
+   * Reloads the feed afterwards because a new date is not a cosmetic change: the
+   * photo can move to a different day/year group entirely.
+   */
+  async function rereadSelection() {
+    if (selectedIds.size === 0) return;
+    rereading = true;
+    error = "";
+    try {
+      const { jobId, pending } = await startEnrich([...selectedIds]);
+      if (!jobId) {
+        status = "Nothing to re-read";
+        return;
+      }
+      status = `Re-reading metadata for ${pending.toLocaleString()} photo${pending === 1 ? "" : "s"}…`;
+      const job = await waitForJob(jobId);
+      if (job.status === "done") {
+        const { read, failed } = job.result;
+        status =
+          `Re-read ${read.toLocaleString()} photo${read === 1 ? "" : "s"}` +
+          (failed ? `, ${failed} unreadable` : "");
+        await reloadAfterMetadata();
+      } else if (job.status === "canceled") {
+        status = "Re-read canceled";
+        await reloadAfterMetadata(); // the ones we did finish still moved
+      } else {
+        error = job.error || "Re-reading metadata failed";
+      }
+    } catch (e) {
+      error = `Re-reading metadata failed: ${e.message}`;
+    } finally {
+      rereading = false;
+    }
+  }
+
+  /**
+   * Read the metadata of every photo nobody has looked at yet. Enrichment is
+   * lazy (only what you scroll past), so on a big library most photos have no
+   * date and sit under "Unknown" — this is the button that goes and reads it all.
+   */
+  async function sweepMetadata() {
+    sweeping = true;
+    error = "";
+    try {
+      const { jobId, pending } = await startEnrich();
+      if (!jobId) {
+        status = "Every photo's metadata is already read";
+        pendingMeta = 0;
+        return;
+      }
+      status = `Reading metadata for ${pending.toLocaleString()} photos…`;
+      const job = await waitForJob(jobId); // SSE-driven; a 100k sweep can take minutes
+      if (job.status === "done") {
+        const { read, failed } = job.result;
+        status =
+          `Read metadata for ${read.toLocaleString()} photos` +
+          (failed ? `, ${failed} unreadable` : "");
+      } else if (job.status === "canceled") {
+        status =
+          "Metadata read canceled — rerun it any time to pick up where it stopped";
+      } else {
+        error = job.error || "Reading metadata failed";
+      }
+      await reloadAfterMetadata();
+    } catch (e) {
+      error = `Reading metadata failed: ${e.message}`;
+    } finally {
+      sweeping = false;
+    }
+  }
+
+  /** New dates/cameras mean photos change GROUPS — reload the feed, the counts
+   *  and the tree, or the grid keeps showing them where they used to be. */
+  async function reloadAfterMetadata() {
+    await refreshPendingMeta();
+    await onGroupByChange(groupBy);
+    refreshCounts();
+    libraryVersion++;
+  }
+
+  /** How many photos still have unread metadata (hides the button at 0). */
+  async function refreshPendingMeta() {
+    try {
+      pendingMeta = await fetchPendingMeta();
+    } catch {
+      pendingMeta = 0; // a failed count must not break the panel
+    }
   }
 
   /** Keep only one group/section (all its photos) as the working set. */
@@ -3663,7 +3765,10 @@
       bind:subdirsOpen
       on:choosefolder={chooseFolder}
       on:submit={submitAddFolder}
-      on:managelibrary={() => (manageLibraryOpen = true)}
+      on:managelibrary={() => {
+        manageLibraryOpen = true;
+        refreshPendingMeta(); // the count moves as you browse — never show a stale one
+      }}
       on:loadsubdirs={loadSubdirs}
       on:toggledir={(e) =>
         (subdirSelection = toggleSubdir(
@@ -3724,7 +3829,10 @@
     {#if manageLibraryOpen}
       <ManageLibrary
         {library}
+        {pendingMeta}
+        {sweeping}
         on:close={() => (manageLibraryOpen = false)}
+        on:sweep={sweepMetadata}
         on:folderRemoved={onFolderRemoved}
         on:libraryReset={onLibraryReset}
       />
@@ -4064,8 +4172,10 @@
       pendingCount={pendingBulkCount}
       on:bulkconfirm={confirmPendingBulk}
       on:bulkcancel={() => (pendingBulk = null)}
+      {rereading}
       on:clear={clearSelection}
       on:keeponly={keepOnlySelection}
+      on:reread={rereadSelection}
       on:undoclear={undoClearSelection}
       on:choosedest={chooseExportDest}
       on:export={doExport}

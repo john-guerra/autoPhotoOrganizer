@@ -2705,3 +2705,120 @@ describe("subfolder selection", () => {
     });
   });
 });
+
+describe("POST /api/enrich — the metadata sweep", () => {
+  it("reads EXIF for every photo nobody has looked at, and reports it done", async () => {
+    await scan(srv.base, photosDir);
+    const db = getDb();
+    const before = await (await fetch(`${srv.base}/api/enrich/pending`)).json();
+    expect(before.pending).toBeGreaterThan(0);
+
+    const res = await fetch(`${srv.base}/api/enrich`, { method: "POST" });
+    expect(res.status).toBe(202);
+    const { jobId, pending } = await res.json();
+    expect(pending).toBe(before.pending);
+
+    const job = await waitJob(jobId);
+    expect(job.status).toBe("done");
+    expect(job.result.read).toBe(before.pending);
+
+    // Every photo now has dimensions — nothing is left un-read.
+    const stillPending = db
+      .prepare("SELECT COUNT(*) AS n FROM photos WHERE width IS NULL")
+      .get().n;
+    expect(stillPending).toBe(0);
+    const after = await (await fetch(`${srv.base}/api/enrich/pending`)).json();
+    expect(after.pending).toBe(0);
+  });
+
+  it("is a no-op when there is nothing left to read (no phantom job)", async () => {
+    await scan(srv.base, photosDir);
+    // Drain whatever is pending first (this file shares one DB across tests, so
+    // an earlier sweep may already have read everything).
+    const first = await (
+      await fetch(`${srv.base}/api/enrich`, { method: "POST" })
+    ).json();
+    if (first.jobId) await waitJob(first.jobId);
+
+    const res = await fetch(`${srv.base}/api/enrich`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ jobId: null, pending: 0 });
+  });
+
+  it("marks an unreadable file as attempted, so the sweep can't loop on it forever", async () => {
+    // Its OWN dir: dropping a file into the shared photosDir would reorder the
+    // fixture and break every test that indexes into scanBody.items.
+    const brokenDir = await mkdtemp(join(tmpdir(), "ag-broken-"));
+    // A file sharp can't read (same shape as a genuine RAW header failure).
+    await writeFile(join(brokenDir, "broken.cr2"), Buffer.from([0]));
+    await scan(srv.base, brokenDir);
+
+    const { jobId } = await (
+      await fetch(`${srv.base}/api/enrich`, { method: "POST" })
+    ).json();
+    const job = await waitJob(jobId);
+    expect(job.status).toBe("done");
+
+    // width 0, not NULL: the sweep considers it read and never returns to it.
+    const db = getDb();
+    const row = db
+      .prepare(
+        `SELECT width FROM photos WHERE filename = 'broken.cr2' AND stale = 0`
+      )
+      .get();
+    expect(row.width).toBe(0);
+    const again = await (await fetch(`${srv.base}/api/enrich/pending`)).json();
+    expect(again.pending).toBe(0);
+    await rm(brokenDir, { recursive: true, force: true });
+  });
+});
+
+describe("POST /api/enrich { ids } — re-read the selected photos", () => {
+  it("re-reads photos it has ALREADY read (the sweep's sentinel must not block it)", async () => {
+    const scanBody = await scan(srv.base, photosDir);
+    const id = scanBody.items[0].id;
+    const db = getDb();
+
+    // Read it once, then corrupt the stored row behind the app's back — this
+    // stands in for "the file changed on disk since we indexed it".
+    await fetch(`${srv.base}/api/meta?ids=${id}`);
+    db.prepare(`UPDATE photos SET width = 1, height = 1 WHERE id = ?`).run(id);
+
+    // A sweep would skip this photo entirely: width is set, so it looks done.
+    // The re-read must look again anyway.
+    const res = await fetch(`${srv.base}/api/enrich`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: [id] }),
+    });
+    expect(res.status).toBe(202);
+    const { jobId, pending } = await res.json();
+    expect(pending).toBe(1);
+    const job = await waitJob(jobId);
+    expect(job.status).toBe("done");
+    expect(job.result.read).toBe(1);
+
+    // Back to the truth on disk (the fixtures are 48x32).
+    const row = db
+      .prepare("SELECT width, height FROM photos WHERE id = ?")
+      .get(id);
+    expect(row).toMatchObject({ width: 48, height: 32 });
+  });
+
+  it("rejects a malformed or empty id list instead of silently doing nothing", async () => {
+    const bad = await fetch(`${srv.base}/api/enrich`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: "3" }),
+    });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/array/);
+
+    const empty = await fetch(`${srv.base}/api/enrich`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: [] }),
+    });
+    expect(empty.status).toBe(400);
+  });
+});

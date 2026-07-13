@@ -48,6 +48,17 @@ import {
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
 import {
+  pendingMetaPhotos,
+  pendingMetaCount,
+  photosByIds,
+  enrichBatch,
+  writeMeta,
+} from "./db/enrich.js";
+
+/** Photos per extraction batch: big enough to amortise the exiftool daemon
+ *  round-trip, small enough that Cancel feels immediate on a 100k library. */
+const BATCH = 200;
+import {
   getFeedPage,
   findGroupBoundary,
   photoIdsMatchingFilter,
@@ -590,6 +601,114 @@ export function registerApi(app) {
     res.json({ root: dir, count: items.length, folders: 1, elapsedMs, items });
   });
 
+  // --- Metadata sweep -------------------------------------------------------
+  // GET /api/enrich/pending -> { pending } so the UI can say how much is left
+  // (and hide the button when there's nothing to do).
+  app.get("/api/enrich/pending", (_req, res) => {
+    res.json({ pending: pendingMetaCount(getDb()) });
+  });
+
+  // POST /api/enrich -> 202 { jobId }. Two modes, deliberately one endpoint
+  // because the work (extract → write) is identical; only the to-do list differs.
+  //
+  //   {}            SWEEP: every photo nobody has looked at yet. Enrichment is
+  //                 otherwise LAZY (only what you scroll past), so on a big
+  //                 library most photos have no date, camera or dimensions —
+  //                 they sit in "Unknown" and never reach the timeline. This is
+  //                 the "go and actually read all of it" button.
+  //                 Resumable by construction: `width IS NULL` IS the to-do
+  //                 list, so a cancel (or crash, or quit) just leaves a shorter
+  //                 list next time. No cursor to persist, nothing to clean up.
+  //
+  //   { ids: [..] } RE-READ: exactly these photos, EVEN IF already read — the
+  //                 sentinel is ignored on purpose. This is "rescan the selected
+  //                 photos", for when the file changed on disk (or we got it
+  //                 wrong) and the user wants us to look again.
+  app.post("/api/enrich", async (req, res) => {
+    const db = getDb();
+    const rawIds = req.body?.ids;
+    if (rawIds !== undefined && !Array.isArray(rawIds)) {
+      return res.status(400).json({ error: "ids must be an array" });
+    }
+    const ids = Array.isArray(rawIds)
+      ? rawIds.map(Number).filter(Number.isInteger)
+      : null;
+    if (ids && ids.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "ids was empty — nothing to re-read" });
+    }
+
+    // The re-read list is FIXED up front (the same photos the user selected);
+    // the sweep's list is drained as it goes, since it shrinks as we write.
+    const forced = ids ? photosByIds(db, ids) : null;
+    const total = forced ? forced.length : pendingMetaCount(db);
+    if (total === 0) {
+      return res.status(200).json({ jobId: null, pending: 0 });
+    }
+    const job = registry.create("enrich", {
+      label: forced
+        ? `Re-read metadata for ${total.toLocaleString()} photo${total === 1 ? "" : "s"}`
+        : `Read metadata for ${total.toLocaleString()} photos`,
+      total,
+    });
+    res.status(202).json({ jobId: job.id, pending: total });
+
+    (async () => {
+      const t0 = performance.now();
+      let done = 0;
+      let failed = 0;
+      // Batched, not all-at-once: a 100k-photo array of paths handed to
+      // exiftool/sharp in one go would balloon memory and make cancel useless.
+      // Each batch awaits, so the event loop keeps serving the UI while the
+      // sweep runs (heavy IO stays off the main thread — see the usability rules).
+      const nextBatch = () =>
+        forced
+          ? forced.slice(done, done + BATCH)
+          : pendingMetaPhotos(db, { limit: BATCH });
+      try {
+        for (;;) {
+          if (job.controller.signal.aborted) {
+            const e = new Error("canceled");
+            e.name = "AbortError";
+            throw e;
+          }
+          const batch = nextBatch();
+          if (!batch.length) break;
+          try {
+            done += await enrichBatch(db, processing, batch);
+          } catch {
+            // One unreadable file must not kill a 100k sweep. Retry the batch
+            // one at a time so the bad file is isolated and the rest still land.
+            for (const p of batch) {
+              if (job.controller.signal.aborted) break;
+              try {
+                done += await enrichBatch(db, processing, [p]);
+              } catch {
+                // Mark it attempted (width 0) so the sweep can't loop on it
+                // forever — this file simply has no readable metadata.
+                writeMeta(db, p.id, {});
+                done += 1;
+                failed += 1;
+              }
+            }
+          }
+          registry.update(job.id, {
+            done,
+            phase: `${done.toLocaleString()} of ${total.toLocaleString()} read`,
+          });
+        }
+        registry.finish(job.id, {
+          read: done - failed,
+          failed,
+          elapsedMs: Math.round(performance.now() - t0),
+        });
+      } catch (e) {
+        registry.fail(job.id, e);
+      }
+    })();
+  });
+
   // --- Lazy metadata enrichment --------------------------------------------
   // GET /api/meta?ids=1,2,3 -> [{ id, takenAt, width, height }].
   // width is used as the "already attempted extraction" marker, but sharp
@@ -617,47 +736,14 @@ export function registerApi(app) {
     }
 
     if (need.length) {
+      // Same writer the sweep uses (server/db/enrich.js) — the sentinels it
+      // stores are what the date fallback in sort.js keys off, so there is
+      // exactly one place that decides what an enriched row looks like.
       const metas = await processing.metadata(need.map((p) => p.path));
-      const update = db.prepare(
-        `UPDATE photos SET taken_at = ?, width = ?, height = ?, camera = ?,
-           duration = ?, aperture = ?, shutter = ?, iso = ?, focal_length = ?,
-           lens = ? WHERE id = ?`
-      );
       metas.forEach((m, i) => {
         const photo = need[i];
-        const takenAtMs = m.createDate
-          ? new Date(m.createDate).getTime()
-          : null;
-        // duration has no tried-sentinel duty (width remains the sole "attempted"
-        // marker); NULL for images/undetermined is fine.
-        const duration = m.duration ?? null;
-        const lens = m.lens ?? ""; // "" marks EXIF attempted (see exifToMeta)
-        update.run(
-          takenAtMs,
-          m.width ?? 0,
-          m.height ?? 0,
-          m.camera ?? "",
-          duration,
-          m.aperture ?? null,
-          m.shutter ?? null,
-          m.iso ?? null,
-          m.focalLength ?? null,
-          lens,
-          photo.id
-        );
-        photosById.set(photo.id, {
-          ...photo,
-          taken_at: takenAtMs,
-          width: m.width ?? 0,
-          height: m.height ?? 0,
-          camera: m.camera ?? "",
-          duration,
-          aperture: m.aperture ?? null,
-          shutter: m.shutter ?? null,
-          iso: m.iso ?? null,
-          focal_length: m.focalLength ?? null,
-          lens,
-        });
+        const fields = writeMeta(db, photo.id, m);
+        photosById.set(photo.id, { ...photo, ...fields });
       });
     }
 

@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.4
+
+- **"Read all metadata"** (Folders → Manage library) reads the date, camera and
+  lens of every photo you have never scrolled past. Until now those photos had
+  no date at all: on a 114k library, 93,622 of them sat under "Unknown" and were
+  missing from the timeline. It runs in the background with progress and a
+  cancel, you can keep browsing, and stopping early loses nothing — it resumes
+  where it stopped.
+- **"Re-read metadata"** re-reads the selected photos from disk even if they were
+  read before — for when you have edited the files somewhere else.
+
 ## 2.12.3
 
 - **A photo with no EXIF date now uses the file's creation date** instead of

@@ -34,6 +34,35 @@ export async function fetchMeta(ids) {
   return res.json();
 }
 
+/** How many photos have never had their metadata read (drives the sweep button).
+ * @returns {Promise<number>} */
+export async function fetchPendingMeta() {
+  const res = await fetch("/api/enrich/pending");
+  if (!res.ok) throw new Error(`pending metadata check failed (${res.status})`);
+  return (await res.json()).pending;
+}
+
+/**
+ * Start a metadata job. With no ids it SWEEPS every photo nobody has read yet;
+ * with ids it RE-READS exactly those, even ones already read (the file may have
+ * changed on disk). Returns `{ jobId, pending }` — jobId is null when there was
+ * nothing to do.
+ * @param {number[]} [ids]
+ * @returns {Promise<{jobId: string|null, pending: number}>}
+ */
+export async function startEnrich(ids) {
+  const res = await fetch("/api/enrich", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(ids ? { ids } : {}),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `metadata read failed (${res.status})`);
+  }
+  return res.json();
+}
+
 /**
  * @param {number} id
  * @param {number} rating
