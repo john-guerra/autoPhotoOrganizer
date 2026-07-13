@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange } from "./lib/layouts/windowing.js";
+  import { ZOOM_LEVELS, resolveZoom, gapFor } from "./lib/zoom.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
   import {
     applyStackOverrides,
@@ -127,7 +128,8 @@
   const APP_VERSION = __APP_VERSION__;
 
   const LS_KEY = "autogallery.lastDir";
-  const LS_ZOOM = "autogallery.zoom";
+  const LS_ZOOM = "autogallery.zoom"; // legacy: an index, migrated by zoomLevel()
+  const LS_ZOOM_PX = "autogallery.zoomPx";
   const LS_BURST_GAP = "autogallery.burstGapMs";
   const DEFAULT_BURST_GAP_MS = 3000;
   const DEFAULT_RATIO = 1.5; // placeholder until real dimensions arrive
@@ -136,16 +138,13 @@
     typeof window !== "undefined" && !!window.autogallery?.pickFolder;
 
   // Zoom = target row height of the justified layout. +/- keys or the slider.
-  const ZOOM_LEVELS = [120, 160, 220, 300, 400];
-  const storedZoom = Number.parseInt(localStorage.getItem(LS_ZOOM) ?? "", 10);
-  let zoom = // index into ZOOM_LEVELS ("|| default" would swallow level 0)
-    Number.isInteger(storedZoom) &&
-    storedZoom >= 0 &&
-    storedZoom < ZOOM_LEVELS.length
-      ? storedZoom
-      : 2;
-  $: localStorage.setItem(LS_ZOOM, String(zoom));
+  let zoom = resolveZoom({
+    px: localStorage.getItem(LS_ZOOM_PX),
+    legacyIndex: localStorage.getItem(LS_ZOOM),
+  });
+  $: localStorage.setItem(LS_ZOOM_PX, String(ZOOM_LEVELS[zoom]));
   $: rowHeight = ZOOM_LEVELS[zoom];
+  $: gridGap = gapFor(rowHeight);
 
   const storedBurstGap = Number.parseInt(
     localStorage.getItem(LS_BURST_GAP) ?? "",
@@ -2958,7 +2957,7 @@
           sectionHeaders,
           {
             containerWidth: gridWidth - 2 * PAD,
-            gap: 8,
+            gap: gridGap,
             targetRowHeight: rowHeight,
             headerHeight: HEADER_HEIGHT,
             placeholderHeight: PLACEHOLDER_HEIGHT,

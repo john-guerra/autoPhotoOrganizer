@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.2
+
+- **The grid zooms out two steps further.** Two new smaller thumbnail sizes (the
+  `−` key or the slider) let you take in a whole shoot at a glance — a 99-photo
+  folder now fits in five rows. The gutter shrinks with the tiles, so the small
+  sizes read as a contact sheet rather than a field of gaps.
+- Your zoom setting survives this change: it now remembers the thumbnail _size_
+  rather than its position in the list, so adding sizes no longer moves you.
+
 ## 2.12.1
 
 - The fisheye navigator is now a standalone package ([@john-guerra/fisheye-nav](https://github.com/john-guerra/fisheye-nav)) and understands nesting: an icicle whose leaf axis is fisheyed, or a flat outline indented by level, so you can always see what level you are on.
