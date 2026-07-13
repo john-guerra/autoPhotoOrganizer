@@ -3,18 +3,23 @@
   import { treeKey } from "./treeState.js";
   import { pathKey } from "./feed.js";
   import { shortLeafLabel } from "./labels.js";
+  import { labelParts, EMPTY_STATS } from "./folderLabel.js";
+  import { descendantGroups } from "./folderTree.js";
   import GroupStateIcon from "./GroupStateIcon.svelte";
   import { getRenderer, nextRendererId } from "./groupRenderers.js";
 
   export let groupBy; // string[]
   export let path; // Array<{dimension,value}> — this node's own path
-  export let node; // {value, label, count, hasChildren}
+  export let node; // {value, label, count, hasChildren} — folder levels also carry
+  // {children, isGroup, ownCount} from folderTree.js
   export let expandedKeys; // Set<string>
   export let childrenByKey; // Map<string, {nodes, error?}>
   export let loadingKeys; // Set<string>
   export let highlightedKey; // string|null
   export let collapsedPaths; // Array<Array<{dimension,value}>>
   export let snapshotKeys = new Set(); // pathKeys rendered as a snapshot strip
+  export let tokenStats = EMPTY_STATS; // library-wide token df, for folder labels
+  export let siblingLabels = []; // every label at THIS level — the redundancy to strip
 
   const dispatch = createEventDispatcher();
 
@@ -24,58 +29,145 @@
   $: loading = loadingKeys.has(key);
   $: children = childrenByKey.get(key)?.nodes ?? [];
   $: childError = childrenByKey.get(key)?.error;
+
+  // --- Folder levels are a real hierarchy ------------------------------------
+  // Folders are the one dimension whose values nest: the server hands us every
+  // folder for this level in ONE response, and folderTree.js turns that flat list
+  // into a trie. So a folder row's sub-folders are already in hand — expanding one
+  // costs no fetch — and a row can stand for a folder that has no photos itself
+  // (a "virtual ancestor" the trie invented to hold its children together).
+  //
+  // Sub-folder rows keep the SAME path length as this row: the feed's groupBy has
+  // one `folder` dimension, so a group path is [.., {folder, absPath}] no matter
+  // how deep the folder sits. The nesting is a fact about the paths, not about the
+  // grouping. That is what keeps treeKey/pathKey matching collapsedPaths.
+  $: isFolderLevel = groupBy[depth] === "folder";
+  $: subfolders = isFolderLevel ? (node.children ?? []) : [];
+  $: isVirtual = isFolderLevel && node.isGroup === false;
+  $: nextDim = groupBy[depth + 1];
+  // Only a REAL group can have next-dimension children; a virtual ancestor has no
+  // photos of its own, so there is nothing for the server to group.
+  $: wantsFetch = isFolderLevel
+    ? Boolean(node.isGroup && nextDim)
+    : node.hasChildren;
+  $: hasChildren = isFolderLevel
+    ? subfolders.length > 0 || wantsFetch
+    : node.hasChildren;
+
+  $: subfolderPath = (value) => [
+    ...path.slice(0, -1),
+    { dimension: "folder", value },
+  ];
+  $: subfolderLabels = subfolders.map((n) => n.label);
+
+  // --- Feed state -----------------------------------------------------------
   // Compare against collapsedPaths directly (not via a called function) so
   // Svelte's dependency tracking — based on the reactive statement's own
   // source text, not what a called function closes over — actually re-runs
   // this when collapsedPaths changes.
   $: collapsedInFeed = collapsedPaths.some((p) => treeKey(p) === key);
-  // The group's FEED state — same tri-state (and same icon) the feed's section
-  // headers show, so the sidebar and the feed never disagree about a group.
-  //
-  // NOTE: snapshotGroupKeys is keyed by feed.js's `pathKey` (JSON-encoded), NOT
-  // by this file's `treeKey` (delimiter-joined) — they are different strings, so
+  // NOTE: snapshotKeys is keyed by feed.js's `pathKey` (JSON-encoded), NOT by
+  // this file's `treeKey` (delimiter-joined) — they are different strings, so
   // checking it with treeKey silently never matches and every snapshot group
   // rendered as "collapsed" here. Use pathKey for that Set specifically.
-  // Which widget draws this group's photos in the feed — same registry the feed
-  // uses, so the sidebar icon can never disagree with the header's.
-  $: rendererId = !collapsedInFeed
+  $: ownRendererId = !collapsedInFeed
     ? "grid"
     : snapshotKeys.has(pathKey(path))
       ? "snapshot"
       : "collapsed";
-  // Tooltip from the registry — the feed header derives its own the same way, so
-  // a new renderer needs no second edit here.
-  $: toggleTitle = `${getRenderer(rendererId).label} — click for ${getRenderer(
-    nextRendererId(rendererId)
-  ).label.toLowerCase()}`;
 
-  /** Svelte action: when a truncated label is hovered, slide it left so the
-   * whole name can be read, then slide back. Measures the real overflow (CSS
-   * alone can't know it) and only animates when there IS overflow. */
-  function hoverScroll(node) {
+  // Every real group this row speaks for. For a leaf that's just itself; for a
+  // folder row with sub-folders it's the whole subtree, so one click can fold a
+  // whole trip.
+  $: groupPaths = isFolderLevel
+    ? descendantGroups(node).map(subfolderPath)
+    : [path];
+
+  // A virtual ancestor has no state of its own — it reports what its descendants
+  // are collectively doing, and says "mixed" when they disagree rather than
+  // picking one and lying about the rest.
+  $: descendantStates = groupPaths.map((p) => {
+    const k = pathKey(p);
+    if (!collapsedPaths.some((c) => pathKey(c) === k)) return "grid";
+    return snapshotKeys.has(k) ? "snapshot" : "collapsed";
+  });
+  $: rendererId = !isVirtual
+    ? ownRendererId
+    : descendantStates.length &&
+        descendantStates.every((s) => s === descendantStates[0])
+      ? descendantStates[0]
+      : "mixed";
+  $: iconState =
+    rendererId === "mixed" ? "mixed" : getRenderer(rendererId).icon;
+  $: toggleTitle =
+    rendererId === "mixed"
+      ? "The groups under here are shown differently — click to show them all"
+      : `${getRenderer(rendererId).label} — click for ${getRenderer(
+          nextRendererId(rendererId)
+        ).label.toLowerCase()}`;
+
+  // Clicking a virtual ancestor's icon has to act on the groups beneath it —
+  // it has none of its own. Shift-click does the same for a real folder that
+  // also has sub-folders ("fold this whole trip").
+  function onToggleCollapse(event) {
+    const foldSubtree = isVirtual || (event.shiftKey && subfolders.length > 0);
+    dispatch("toggleCollapse", {
+      path,
+      event,
+      paths: foldSubtree ? groupPaths : undefined,
+    });
+  }
+
+  // A virtual ancestor is not a group, so there is no section to scroll to —
+  // jump to the first real group beneath it instead.
+  $: jumpPath = isVirtual ? (groupPaths[0] ?? null) : path;
+
+  // --- Label ----------------------------------------------------------------
+  // Folder names are mostly redundancy (the year the parent row already states,
+  // the _peq every folder carries); folderLabel.js decides which tokens earn a
+  // pixel. Other dimensions are already short — leave them alone.
+  $: parts = isFolderLevel
+    ? labelParts(node.label, { stats: tokenStats, siblings: siblingLabels })
+    : [{ text: shortLeafLabel(groupBy[depth], node.value), kind: "keep" }];
+  // The whole truth is always one hover away.
+  $: fullTitle = isFolderLevel ? node.value : node.label;
+
+  /** Svelte action: the row shows the END of the name (see the CSS); hovering
+   * slides it back to the RIGHT to reveal the clipped head, then returns.
+   * Measures the real overflow — CSS alone can't know it — and only animates, and
+   * only fades its left edge, when there IS something hidden. */
+  function hoverScroll(el, _parts) {
     let leaving;
     const distance = () =>
-      Math.max(0, node.scrollWidth - node.parentElement.clientWidth);
+      Math.max(0, el.scrollWidth - el.parentElement.clientWidth);
+    function mark() {
+      el.parentElement?.classList.toggle("clipped", distance() > 0);
+    }
     function enter() {
       clearTimeout(leaving);
       const d = distance();
       if (d <= 0) return;
-      // Pace the slide by how much is hidden, so long names aren't glacial.
-      node.style.transition = `transform ${Math.max(0.6, d / 40)}s linear`;
-      node.style.transform = `translateX(${-d}px)`;
+      // A reveal, not a ticker: reading a moving target is slow, so the text
+      // should feel like it snapped aside. ~200px/s, capped hard — the old
+      // 40px/s crawl took 2s+ to show the end of a long name.
+      const seconds = Math.min(0.35, Math.max(0.12, d / 200));
+      el.style.transition = `transform ${seconds}s cubic-bezier(0.2, 0.8, 0.2, 1)`;
+      el.style.transform = `translateX(${d}px)`;
     }
     function leave() {
-      node.style.transition = "transform 0.2s ease-out";
-      node.style.transform = "translateX(0)";
-      leaving = setTimeout(() => (node.style.transition = ""), 200);
+      el.style.transition = "transform 0.15s ease-out";
+      el.style.transform = "translateX(0)";
+      leaving = setTimeout(() => (el.style.transition = ""), 150);
     }
-    node.parentElement.addEventListener("mouseenter", enter);
-    node.parentElement.addEventListener("mouseleave", leave);
+    mark();
+    el.parentElement.addEventListener("mouseenter", enter);
+    el.parentElement.addEventListener("mouseleave", leave);
     return {
+      update: mark, // the label changed (filter, rescan) — re-measure
       destroy() {
         clearTimeout(leaving);
-        node.parentElement?.removeEventListener("mouseenter", enter);
-        node.parentElement?.removeEventListener("mouseleave", leave);
+        el.parentElement?.removeEventListener("mouseenter", enter);
+        el.parentElement?.removeEventListener("mouseleave", leave);
       },
     };
   }
@@ -85,13 +177,14 @@
   <div class="tree-node-row">
     <!-- TREE structure: a disclosure triangle — shows/hides this node's CHILD
          folders here in the sidebar. -->
-    {#if node.hasChildren}
+    {#if hasChildren}
       <button
         class="tree-fold-icon"
         title="Show/hide sub-folders in this tree (shift-click: fold all descendants)"
         aria-label="Show or hide sub-folders in the tree"
         aria-expanded={expanded}
-        on:click={(e) => dispatch("toggleExpand", { path, event: e })}
+        on:click={(e) =>
+          dispatch("toggleExpand", { path, event: e, fetch: wantsFetch })}
       >
         {expanded ? "▾" : "▸"}
       </button>
@@ -107,47 +200,72 @@
       class:not-grid={rendererId !== "grid"}
       title={toggleTitle}
       aria-label="Cycle this group in the feed: full grid → snapshot strip → collapsed"
-      on:click={(e) => dispatch("toggleCollapse", { path, event: e })}
+      on:click={onToggleCollapse}
     >
-      <GroupStateIcon state={getRenderer(rendererId).icon} />
+      <GroupStateIcon state={iconState} />
     </button>
     <button
       class="tree-label"
-      title={node.label}
-      on:click={() => dispatch("jump", path)}
+      class:virtual={isVirtual}
+      title={fullTitle}
+      disabled={!jumpPath}
+      on:click={() => jumpPath && dispatch("jump", jumpPath)}
     >
-      <span class="tree-label-text" use:hoverScroll
-        >{shortLeafLabel(groupBy[depth], node.value)}</span
+      <span class="tree-label-text" use:hoverScroll={parts}
+        >{#each parts as part}<span class="part-{part.kind}">{part.text}</span
+          >{/each}</span
       >
     </button>
     <span class="tree-count">{node.count}</span>
   </div>
   {#if expanded}
     <ul class="tree-level">
-      {#if loading}
-        <li class="tree-loading">Loading…</li>
-      {:else if childError}
-        <li class="tree-error">{childError}</li>
-      {:else}
-        {#each children as child (child.value)}
-          <svelte:self
-            {groupBy}
-            path={[
-              ...path,
-              { dimension: groupBy[depth + 1], value: child.value },
-            ]}
-            node={child}
-            {expandedKeys}
-            {childrenByKey}
-            {loadingKeys}
-            {highlightedKey}
-            {collapsedPaths}
-            {snapshotKeys}
-            on:toggleExpand
-            on:toggleCollapse
-            on:jump
-          />
-        {/each}
+      <!-- Sub-folders first: they came with this level's response, so they are
+           already here. The next grouping dimension (if any) is fetched, and only
+           ever exists for a folder that has photos of its own. -->
+      {#each subfolders as child (child.value)}
+        <svelte:self
+          {groupBy}
+          path={subfolderPath(child.value)}
+          node={child}
+          {expandedKeys}
+          {childrenByKey}
+          {loadingKeys}
+          {highlightedKey}
+          {collapsedPaths}
+          {snapshotKeys}
+          {tokenStats}
+          siblingLabels={subfolderLabels}
+          on:toggleExpand
+          on:toggleCollapse
+          on:jump
+        />
+      {/each}
+      {#if wantsFetch}
+        {#if loading}
+          <li class="tree-loading">Loading…</li>
+        {:else if childError}
+          <li class="tree-error">{childError}</li>
+        {:else}
+          {#each children as child (child.value)}
+            <svelte:self
+              {groupBy}
+              path={[...path, { dimension: nextDim, value: child.value }]}
+              node={child}
+              {expandedKeys}
+              {childrenByKey}
+              {loadingKeys}
+              {highlightedKey}
+              {collapsedPaths}
+              {snapshotKeys}
+              {tokenStats}
+              siblingLabels={children.map((n) => n.label)}
+              on:toggleExpand
+              on:toggleCollapse
+              on:jump
+            />
+          {/each}
+        {/if}
       {/if}
     </ul>
   {/if}
@@ -191,27 +309,59 @@
     width: 16px;
     flex: 0 0 auto;
   }
+  /* Clip the HEAD, not the tail.
+     A folder name puts its date first and its subject last
+     ("2002_12Dec_10_harbour_peq"), so a normal left-anchored ellipsis spends
+     the whole row on the date and cuts off the one word you were looking for —
+     and here the head is redundant anyway: the parent row directly above already
+     says "2002". direction:rtl on the clipper flips WHICH END overflows (the
+     inner span stays ltr, so the text itself is unchanged); the fade on the left
+     edge says there's more, and hovering slides it back into view. */
   .tree-label {
     background: none;
     border: none;
     color: inherit;
     font: inherit;
     cursor: pointer;
+    direction: rtl;
     text-align: left;
     flex: 1;
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
   }
-  /* The text slides on hover (see hoverScroll) so a truncated folder name can be
-     read in full; the fade-out edge hints there's more to see. */
+  /* Only fade the left edge when something IS hidden behind it (set by
+     hoverScroll, which is the only thing that can measure the overflow). */
+  .tree-label.clipped {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 14px);
+    mask-image: linear-gradient(to right, transparent 0, #000 14px);
+  }
+  /* The text slides on hover (see hoverScroll) so the clipped head can be read;
+     the full path is in the row's title either way. */
   .tree-label-text {
     display: inline-block;
+    direction: ltr;
     white-space: nowrap;
     will-change: transform;
   }
   .tree-label:hover {
     text-decoration: underline;
+  }
+  /* A row for a folder that holds no photos itself — it exists to hold its
+     children. It still jumps (to the first group beneath it), but it shouldn't
+     shout. */
+  .tree-label.virtual {
+    color: #b9b9b9;
+  }
+  /* Layering, the point of the whole exercise: the token that identifies this
+     folder is bright, the boilerplate every sibling repeats recedes. Nothing is
+     deleted that the eye needs — it just stops competing. */
+  .part-keep {
+    color: inherit;
+  }
+  .part-dim,
+  .part-ellipsis {
+    color: #8a8a8a;
   }
   .tree-count {
     color: #888;

@@ -6,6 +6,24 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.9
+
+- **The Library is a real folder tree now.** Grouping by folder used to list every
+  folder as a full absolute path, one flat row each. It now nests them, joining
+  single-child chains into one row the way VS Code does, and rolls the photo counts
+  up the tree. Folders on different drives come out as separate roots, so a library
+  spread across several volumes reads properly.
+- **Folder rows spend their width on the part that tells folders apart.** A name like
+  `2013_01Jan_02_Harbour_Walk_selected_peq` now shows the date and the `selected`/`peq`
+  boilerplate muted, with the event name bright — and the row is anchored to its end,
+  so a long name is clipped at the front (which the parent row already told you)
+  instead of at the subject. Nothing is ever removed: hover slides the name back into
+  view and the full path is in the tooltip.
+- **A folder row can fold everything beneath it.** Clicking the grid/strip/bar icon on
+  a parent folder cycles every group under it together, and shows a "mixed" icon when
+  they disagree. Clicking a folder that has no photos of its own jumps to the first
+  one that does.
+- **The hover reveal on a long name is ~5× faster** — a reveal, not a ticker.
 ## 2.10.8
 
 - **Checking a folder in the subfolder list now takes everything under it.** Tick

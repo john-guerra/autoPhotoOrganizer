@@ -67,6 +67,21 @@
         { keys: ["Esc"], label: "Close the loupe" },
       ],
     },
+    {
+      heading: "Library tree",
+      rows: [
+        {
+          keys: ["Shift", "+", "click"],
+          label:
+            "On a folder's ▸ triangle: fold every sub-folder under it. On its grid/strip/bar icon: cycle every group beneath it at once",
+        },
+        {
+          keys: ["hover"],
+          label:
+            "Slide a clipped folder name back into view (its full path is in the tooltip)",
+        },
+      ],
+    },
   ];
 </script>
 

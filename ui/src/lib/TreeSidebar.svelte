@@ -2,6 +2,8 @@
   import { createEventDispatcher } from "svelte";
   import { fetchTreeNode } from "./api.js";
   import { treeKey, collapseDescendants } from "./treeState.js";
+  import { buildFolderTree, isFolderNode, chainTo } from "./folderTree.js";
+  import { EMPTY_STATS } from "./folderLabel.js";
   import TreeNode from "./TreeNode.svelte";
 
   export let groupBy; // string[]
@@ -10,6 +12,10 @@
   export let filter = null;
   export let sort = null; // feed sort — date sorts change the date-group order
   export let refreshToken = 0; // bump to force a reload when the index changes
+  // Library-wide token frequencies, for the folder label rule (folderLabel.js).
+  // Owned by App (which already has the library list) so the feed's headers and
+  // these rows judge a folder name by exactly the same corpus.
+  export let tokenStats = EMPTY_STATS;
 
   const dispatch = createEventDispatcher();
 
@@ -20,6 +26,13 @@
   let loadingKeys = new Set();
   let highlightedKey = null;
 
+  /** Folder values nest; every other dimension's values are flat. The server can
+   * only hand us the flat list (folders is a flat table — the hierarchy lives in
+   * the path strings), so we build the tree here, once per level. */
+  function shapeLevel(nodes, depth) {
+    return groupBy[depth] === "folder" ? buildFolderTree(nodes) : nodes;
+  }
+
   async function loadRoot() {
     try {
       const { total, nodes } = await fetchTreeNode({
@@ -29,7 +42,7 @@
         sort,
       });
       rootTotal = total;
-      rootNodes = nodes;
+      rootNodes = shapeLevel(nodes, 0);
     } catch {
       rootTotal = null;
       rootNodes = [];
@@ -77,7 +90,9 @@
     loadingKeys = new Set(loadingKeys).add(key);
     try {
       const { nodes } = await fetchTreeNode({ groupBy, path, filter, sort });
-      childrenByKey = new Map(childrenByKey).set(key, { nodes });
+      childrenByKey = new Map(childrenByKey).set(key, {
+        nodes: shapeLevel(nodes, path.length),
+      });
     } catch (e) {
       childrenByKey = new Map(childrenByKey).set(key, {
         nodes: [],
@@ -104,39 +119,66 @@
   let expandingAll = false;
   let expandAllNote = "";
 
+  /** The rows beneath one row, whichever kind it is. A folder row's sub-folders
+   * are already in hand (they came with this level's response, via the trie), so
+   * only the next GROUPING dimension ever costs a fetch — and only a folder that
+   * has photos of its own has one. */
+  async function childRows({ node, path, depth }) {
+    const rows = [];
+    if (isFolderNode(node)) {
+      for (const child of node.children) {
+        rows.push({
+          node: child,
+          // Sub-folder rows keep this row's path length: the feed has ONE folder
+          // dimension, however deep the folder sits.
+          path: [
+            ...path.slice(0, -1),
+            { dimension: "folder", value: child.value },
+          ],
+          depth,
+        });
+      }
+      if (!(node.isGroup && groupBy[depth + 1])) return rows;
+    } else if (!node.hasChildren) {
+      return rows;
+    }
+    const childDim = groupBy[depth + 1];
+    if (!childDim) return rows;
+    await loadChildren(path);
+    for (const kid of childrenByKey.get(treeKey(path))?.nodes ?? []) {
+      rows.push({
+        node: kid,
+        path: [...path, { dimension: childDim, value: kid.value }],
+        depth: depth + 1,
+      });
+    }
+    return rows;
+  }
+
   async function expandAll() {
     if (expandingAll) return;
     expandingAll = true;
     expandAllNote = "";
     try {
       const next = new Set(expandedKeys);
-      let frontier = rootNodes
-        .filter((n) => n.hasChildren)
-        .map((n) => ({
-          path: [{ dimension: groupBy[0], value: n.value }],
-          depth: 0,
-        }));
+      let frontier = rootNodes.map((node) => ({
+        node,
+        path: [{ dimension: groupBy[0], value: node.value }],
+        depth: 0,
+      }));
       let visited = 0;
       let truncated = false;
       while (frontier.length && !truncated) {
         const nextFrontier = [];
-        for (const { path, depth } of frontier) {
+        for (const row of frontier) {
           if (++visited > MAX_EXPAND_NODES) {
             truncated = true;
             break;
           }
-          next.add(treeKey(path));
-          await loadChildren(path);
-          const childDim = groupBy[depth + 1];
-          if (!childDim) continue;
-          for (const kid of childrenByKey.get(treeKey(path))?.nodes ?? []) {
-            if (kid.hasChildren) {
-              nextFrontier.push({
-                path: [...path, { dimension: childDim, value: kid.value }],
-                depth: depth + 1,
-              });
-            }
-          }
+          const kids = await childRows(row);
+          if (!kids.length) continue;
+          next.add(treeKey(row.path));
+          nextFrontier.push(...kids);
         }
         frontier = nextFrontier;
       }
@@ -154,7 +196,7 @@
     expandAllNote = "";
   }
 
-  function handleToggleExpand({ detail: { path, event } }) {
+  function handleToggleExpand({ detail: { path, event, fetch } }) {
     const key = treeKey(path);
     if (expandedKeys.has(key)) {
       expandedKeys = event.shiftKey
@@ -162,15 +204,21 @@
         : deleteKey(expandedKeys, key);
     } else {
       expandedKeys = new Set(expandedKeys).add(key);
-      loadChildren(path);
+      // Sub-folders came with this level's response — only a deeper GROUPING
+      // dimension costs a request. Fetching for a folder row that has none would
+      // ask the server to group by nothing.
+      if (fetch) loadChildren(path);
     }
   }
 
-  function handleToggleCollapse({ detail: { path, event } }) {
+  function handleToggleCollapse({ detail: { path, event, paths } }) {
     event.stopPropagation();
     // Forward the event too: App needs the shiftKey to decide "fold this group"
-    // vs "fold all of its leaves" (VS Code-style folding).
-    dispatch("toggle", { path, event });
+    // vs "fold all of its leaves" (VS Code-style folding). `paths` is set when the
+    // row stands for several groups at once (a virtual folder ancestor, or a
+    // shift-click on a folder that has sub-folders) — App applies the cycle to all
+    // of them together.
+    dispatch("toggle", { path, event, paths });
   }
 
   function handleJump({ detail: path }) {
@@ -182,16 +230,39 @@
    * "reveal current location" button via bind:this. */
   export async function revealPath(targetPath) {
     let prefix = [];
-    for (let i = 0; i < targetPath.length; i++) {
-      const key = treeKey(prefix);
-      if (!expandedKeys.has(key)) {
-        expandedKeys = new Set(expandedKeys).add(key);
+    for (const seg of targetPath) {
+      if (prefix.length) {
+        expandedKeys = new Set(expandedKeys).add(treeKey(prefix));
+        await loadChildren(prefix);
       }
-      await loadChildren(prefix);
-      prefix = [...prefix, targetPath[i]];
+      // A folder sits at some depth inside the trie, and compaction means its
+      // ancestors' rows can't be derived from the path string (the row for
+      // /a/b/c may be labelled "a/b/c"). Walk the built tree to find the rows
+      // above it and open each one, or the target stays hidden.
+      if (seg.dimension === "folder") {
+        const levelNodes = prefix.length
+          ? (childrenByKey.get(treeKey(prefix))?.nodes ?? [])
+          : rootNodes;
+        const next = new Set(expandedKeys);
+        for (const node of chainTo(levelNodes, seg.value).slice(0, -1)) {
+          next.add(
+            treeKey([...prefix, { dimension: "folder", value: node.value }])
+          );
+        }
+        expandedKeys = next;
+      }
+      prefix = [...prefix, seg];
     }
     highlightedKey = treeKey(targetPath);
   }
+
+  // A folder grouping is a hierarchy even on its own, so "Expand all" is useful
+  // with a single folder dimension — it wasn't when every level was flat.
+  $: canExpandAll = groupBy.length > 1 || groupBy.includes("folder");
+
+  // What a row's siblings are called is what tells us which of its tokens are
+  // redundant (see folderLabel.js) — so every level passes its own labels down.
+  $: rootLabels = rootNodes.map((n) => n.label);
 </script>
 
 <nav class="tree-sidebar" aria-label="Library hierarchy">
@@ -203,7 +274,7 @@
     <button
       class="tree-action"
       title="Expand every group in the tree"
-      disabled={expandingAll || groupBy.length < 2}
+      disabled={expandingAll || !canExpandAll}
       on:click={expandAll}
     >
       {expandingAll ? "Expanding…" : "Expand all"}
@@ -232,6 +303,8 @@
         {highlightedKey}
         {collapsedPaths}
         {snapshotKeys}
+        {tokenStats}
+        siblingLabels={rootLabels}
         on:toggleExpand={handleToggleExpand}
         on:toggleCollapse={handleToggleCollapse}
         on:jump={handleJump}
