@@ -1,11 +1,12 @@
 <script>
   // Fisheye / focus+context library navigator.
   //
-  // The layout, the distortion math, the DOI selection and both renderers now
-  // live in @john-guerra/fisheye-nav — a standalone, property-tested widget.
-  // What stays here is the part that is genuinely AutoGallery's: fetching the
-  // flat tree, this app's label formatting, and translating the widget's
-  // {key,value} paths into the feed's {dimension,value} paths.
+  // The layout, the distortion math, the DOI selection, both renderers AND the
+  // settings gear now live in @john-guerra/fisheye-nav — a standalone,
+  // property-tested widget. What stays here is the part that is genuinely
+  // AutoGallery's: fetching the flat tree, this app's label formatting, and
+  // translating the widget's {key,value} paths into the feed's
+  // {dimension,value} paths.
   import { createEventDispatcher } from "svelte";
   import FisheyeNav from "@john-guerra/fisheye-nav/svelte";
   import { fetchFlatTree } from "./api.js";
@@ -19,40 +20,10 @@
 
   const dispatch = createEventDispatcher();
 
-  // Live-tunable lens settings, persisted. John tunes these.
+  // The lens settings (view, algorithm, distortion, DOI weights, …) are the
+  // widget's own — it renders the ⚙ and persists the choices under this key. We
+  // pass no `style`/`layout` at all, so the user's saved lens is what loads.
   const SETTINGS_KEY = "autogallery.fisheyeSettings";
-  const STYLES = ["flat", "icicle"];
-  const LAYOUTS = ["hybrid", "fisheye", "doi", "uniform"];
-  const DEFAULTS = {
-    style: "flat",
-    layout: "hybrid",
-    distortion: 4,
-    minRowPx: 16,
-  };
-
-  const num = (v, lo, hi, dflt) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
-  };
-  function loadSettings() {
-    let raw = {};
-    try {
-      raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {};
-    } catch {
-      raw = {};
-    }
-    return {
-      style: STYLES.includes(raw.style) ? raw.style : DEFAULTS.style,
-      layout: LAYOUTS.includes(raw.layout) ? raw.layout : DEFAULTS.layout,
-      distortion: num(raw.distortion, 1, 12, DEFAULTS.distortion),
-      minRowPx: Math.round(num(raw.minRowPx, 8, 40, DEFAULTS.minRowPx)),
-    };
-  }
-  let settings = loadSettings();
-  let settingsOpen = false;
-  $: if (typeof localStorage !== "undefined")
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  const resetSettings = () => (settings = { ...DEFAULTS });
 
   let leaves = [];
   // The groupBy the CURRENT `leaves` were fetched with — NOT the live prop.
@@ -109,76 +80,8 @@
 <nav class="fisheye" aria-label="Library fisheye">
   <div class="fisheye-head">
     <span class="fisheye-title">Fisheye</span>
-    <button
-      class="fisheye-gear"
-      class:on={settingsOpen}
-      title="Fisheye settings"
-      aria-label="Fisheye settings"
-      aria-expanded={settingsOpen}
-      on:click={() => (settingsOpen = !settingsOpen)}>⚙</button
-    >
     <span class="fisheye-total">{total || "…"}</span>
   </div>
-
-  {#if settingsOpen}
-    <div class="fisheye-settings">
-      <div class="set-row">
-        <span class="set-label">View</span>
-        <div class="seg" role="radiogroup" aria-label="View style">
-          <label class="seg-opt" class:sel={settings.style === "flat"}>
-            <input type="radio" bind:group={settings.style} value="flat" />List
-          </label>
-          <label class="seg-opt" class:sel={settings.style === "icicle"}>
-            <input
-              type="radio"
-              bind:group={settings.style}
-              value="icicle"
-            />Icicle
-          </label>
-        </div>
-      </div>
-
-      <div class="set-row">
-        <span class="set-label">Lens</span>
-        <select
-          class="set-select"
-          bind:value={settings.layout}
-          aria-label="Lens algorithm"
-        >
-          <option value="hybrid">Hybrid — magnify + collapse</option>
-          <option value="fisheye">Fisheye — every group</option>
-          <option value="doi">Interest — full-size rows</option>
-          <option value="uniform">Uniform — no lens</option>
-        </select>
-      </div>
-
-      <label class="set-row">
-        <span class="set-label">Distortion</span>
-        <input
-          type="range"
-          min="1"
-          max="12"
-          step="0.5"
-          bind:value={settings.distortion}
-        />
-        <span class="set-val">{settings.distortion}</span>
-      </label>
-
-      <label class="set-row">
-        <span class="set-label">Row size</span>
-        <input
-          type="range"
-          min="8"
-          max="40"
-          step="1"
-          bind:value={settings.minRowPx}
-        />
-        <span class="set-val">{settings.minRowPx}px</span>
-      </label>
-
-      <button class="set-reset" on:click={resetSettings}>Reset</button>
-    </div>
-  {/if}
 
   {#if loadError}
     <!-- Never fail silently: a dead column tells the user nothing. -->
@@ -192,13 +95,7 @@
         data={rows}
         keys={loadedGroupBy}
         {selected}
-        style={settings.style}
-        layout={settings.layout}
-        options={{
-          label,
-          distortion: settings.distortion,
-          minRowPx: settings.minRowPx,
-        }}
+        options={{ label, controls: true, persistKey: SETTINGS_KEY }}
         on:select={(e) => dispatch("jump", toFeedPath(e.detail))}
       />
     </div>
@@ -212,6 +109,16 @@
     height: 100%;
     min-height: 0;
     position: relative;
+
+    /* The widget's ⚙ popover is the one surface it paints itself, so it can't
+       just inherit our colors — it needs a background too, and it defaults to
+       the system pair. AutoGallery is dark whatever the OS is set to, so say
+       so: this also gives the popover's native selects and sliders dark
+       chrome. Custom properties inherit, so this reaches inside the widget. */
+    --fn-scheme: dark;
+    --fn-panel: var(--panel, #1a1a1e);
+    --fn-panel-fg: var(--text, #e8e8e8);
+    --fn-accent: var(--accent, #3b82f6);
   }
   .fisheye-head {
     display: flex;
@@ -231,93 +138,9 @@
     opacity: 0.6;
     font-variant-numeric: tabular-nums;
   }
-  .fisheye-gear {
-    background: none;
-    border: none;
-    color: inherit;
-    cursor: pointer;
-    opacity: 0.6;
-    padding: 0 2px;
-    font-size: 12px;
-  }
-  .fisheye-gear:hover,
-  .fisheye-gear.on {
-    opacity: 1;
-  }
   .fisheye-body {
     flex: 1 1 auto;
     min-height: 0;
-  }
-  .fisheye-settings {
-    padding: 8px;
-    border-bottom: 1px solid var(--border, #2a2a2e);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    font-size: 11px;
-    flex: 0 0 auto;
-  }
-  .set-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .set-label {
-    width: 62px;
-    opacity: 0.7;
-    flex: 0 0 auto;
-  }
-  .set-val {
-    width: 34px;
-    text-align: right;
-    opacity: 0.6;
-    font-variant-numeric: tabular-nums;
-  }
-  .set-row input[type="range"] {
-    flex: 1;
-    min-width: 0;
-  }
-  .set-select {
-    flex: 1;
-    min-width: 0;
-    font-size: 11px;
-    background: var(--panel, #1a1a1e);
-    color: inherit;
-    border: 1px solid var(--border, #2a2a2e);
-    border-radius: 4px;
-    padding: 2px 4px;
-  }
-  .seg {
-    display: flex;
-    gap: 2px;
-    flex: 1;
-  }
-  .seg-opt {
-    flex: 1;
-    text-align: center;
-    padding: 2px 4px;
-    border: 1px solid var(--border, #2a2a2e);
-    border-radius: 4px;
-    cursor: pointer;
-    opacity: 0.65;
-  }
-  .seg-opt.sel {
-    opacity: 1;
-    border-color: var(--accent, #3b82f6);
-    background: color-mix(in oklab, var(--accent, #3b82f6) 18%, transparent);
-  }
-  .seg-opt input {
-    display: none;
-  }
-  .set-reset {
-    align-self: flex-start;
-    font-size: 11px;
-    background: none;
-    border: 1px solid var(--border, #2a2a2e);
-    border-radius: 4px;
-    color: inherit;
-    padding: 2px 8px;
-    cursor: pointer;
   }
   .fisheye-error {
     margin: 8px;
