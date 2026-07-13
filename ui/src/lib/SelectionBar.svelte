@@ -83,7 +83,8 @@
       <button
         class="sel-btn undo"
         on:click={() => dispatch("undoclear")}
-        title="Restore the selection you just cleared">Undo</button
+        title="Put the selection back exactly as it was before the last bulk change (Clear, ⌘A, ⌘⇧A)"
+        >Undo</button
       >
     {/if}
     {#if selectedCount > 0}

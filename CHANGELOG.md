@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.10
+
+- **You can see where you are again.** A selected photo is marked by its gold
+  checkmark alone — the gold border is gone. The blue border now means one thing
+  only: this is the focused tile. Before, a photo that was both focused and
+  selected lost its focus ring to the selection colour, so in a sea of selected
+  photos you couldn't tell where the keyboard was.
+- **Undo covers every bulk selection change, not just removals** — Clear, ⌘A and
+  ⌘⇧A all stash first — and it restores _exactly_ the selection you had before.
+  It used to merge the old selection into the current one, which quietly made
+  undoing a select-all do nothing at all.
+
 ## 2.10.9
 
 - **⌘A now takes the group you're in, not the whole library.** Press it again and
