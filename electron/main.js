@@ -62,6 +62,18 @@ ipcMain.handle("pick-folder", async (event) => {
 
 app.whenReady().then(async () => {
   try {
+    // Who made this, in the place the OS looks for it: ⌘-About on macOS reads
+    // these fields, so the app names itself and its author rather than showing
+    // a bare "Electron".
+    app.setAboutPanelOptions({
+      applicationName: "AutoGallery",
+      applicationVersion: app.getVersion(),
+      credits: "John Alexis Guerra Gómez — https://johnguerra.co",
+      copyright: `© ${new Date().getFullYear()} John Alexis Guerra Gómez · https://johnguerra.co`,
+      website: "https://johnguerra.co",
+      iconPath: ICON_PATH,
+    });
+
     // In dev the app runs from the generic Electron.app bundle, so macOS shows
     // the default Electron dock icon. Set our icon explicitly. (The packaged
     // app gets its icon from electron-builder, so this dev-only path is enough.)

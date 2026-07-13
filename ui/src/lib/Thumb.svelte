@@ -205,7 +205,6 @@
     bind:this={el}
     class="thumb"
     class:selected
-    class:in-selection={inSelection}
     data-id={item.id}
     title={item.name}
     style={stackMarginPx ? `inset: 0 ${stackMarginPx}px;` : ""}
@@ -326,17 +325,14 @@
     cursor: pointer;
     outline: none;
   }
+  /* The blue border means ONE thing: this is the focused tile — where the
+     keyboard is. Selection membership is said by the gold checkmark alone.
+     They used to share the border (focus blue, membership gold), which meant a
+     tile that was both lost its focus ring to the gold: in a sea of selected
+     photos you couldn't see where you were. One channel per idea. */
   .thumb.selected {
     border-color: #4c9aff;
     box-shadow: 0 0 0 2px rgba(76, 154, 255, 0.35);
-  }
-  /* Multi-select membership: a gold ring, distinct from the blue focus
-     border so the two can coexist on the same tile. */
-  .thumb.in-selection {
-    border-color: #ffd24c;
-  }
-  .thumb.selected.in-selection {
-    box-shadow: 0 0 0 2px rgba(255, 210, 76, 0.5);
   }
   .select-circle {
     position: absolute;

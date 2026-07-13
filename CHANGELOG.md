@@ -6,40 +6,155 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.1
+
+- The fisheye navigator is now a standalone package ([@john-guerra/fisheye-nav](https://github.com/john-guerra/fisheye-nav)) and understands nesting: an icicle whose leaf axis is fisheyed, or a flat outline indented by level, so you can always see what level you are on.
+- Fisheye: hovering moves one group at a time instead of jumping past a whole month, every group can be reached and selected by drilling in, and the selected day is highlighted (below the top level, it never was).
+- Fisheye: the photo-count bars are back inside each row (a histogram silhouette down the column), the icicle shows aggregated counts on years and months, and the row under the cursor always shows its name.
+- Fisheye settings now live in the widget's own ⚙ and remember themselves: view, lens, band size (equal rows vs. photo mass), bar scale, and the interest weights.
+
+## 2.12.0
+
+- **The app says who made it.** ⌘-About (and the Windows installer, and the Linux
+  package metadata) now name AutoGallery and John Alexis Guerra Gómez, with a link
+  to https://johnguerra.co. Releases are credited to John rather than a bot.
+- **The macOS build is signed** — ad-hoc, not authenticated. The bundle is sealed,
+  so macOS can tell if it has been tampered with, and it launches cleanly on Apple
+  Silicon instead of being killed as unsigned. What an ad-hoc signature can't do is
+  prove the app came from John: without an Apple Developer ID, Gatekeeper still
+  needs a right-click → Open on first launch, and macOS auto-update stays off.
+
+## 2.11.0
+
+- **Packaged build** of the folder-tree and selection round (2.10.7–2.10.13). The
+  Library is a real nested folder tree whose labels spend their width on the part
+  that tells two folders apart; ⌘A takes the group you're in before it offers you
+  the whole library; a selected photo is its gold checkmark alone, so the focus
+  ring is visible again; Undo restores exactly the selection you had; collapsing a
+  group keeps you where you are; and "Choose subfolders…" is reachable from the
+  native picker again (the 2.10.6 regression).
+
+## 2.10.13
+
+- **Collapsing a group no longer throws you back to the top of the library.**
+  Folding or snapshotting a group far down the feed used to reload the window
+  from photo #1 — the view jumped, and the group you had just clicked scrolled
+  out from under you (often without even showing its snapshot). The feed now
+  stays anchored on the group you clicked, in both directions (#113).
+
+## 2.10.12
+
+- **Every folder-tree bug that shipped now has a test that would have caught it.**
+  Five defects in the folder tree passed a green unit suite and were found only by
+  looking at the running app; the browser tier now covers each one — nesting, a
+  photo-less parent folder that folds its children, the tree opening on load, a
+  label that keeps the folder's name when it has to be clipped, and two folders
+  whose names differ by a single character rendering differently. Each was checked
+  to fail with its fix reverted, not merely to pass.
+
+## 2.10.11
+
+- **The Library is a real folder tree now.** Grouping by folder used to list every
+  folder as a full absolute path, one flat row each. It now nests them, joining
+  single-child chains into one row the way VS Code does, and rolls the photo counts
+  up the tree. Folders on different drives come out as separate roots, so a library
+  spread across several volumes reads properly.
+- **Folder rows spend their width on the part that tells folders apart.** A name like
+  `2013_01Jan_02_Harbour_Walk_selected_peq` now shows the date and the `selected`/`peq`
+  boilerplate muted, with the event name bright — and the row is anchored to its end,
+  so a long name is clipped at the front (which the parent row already told you)
+  instead of at the subject. Nothing is ever removed: hover slides the name back into
+  view and the full path is in the tooltip.
+- **A folder row can fold everything beneath it.** Clicking the grid/strip/bar icon on
+  a parent folder cycles every group under it together, and shows a "mixed" icon when
+  they disagree. Clicking a folder that has no photos of its own jumps to the first
+  one that does.
+- **The path never outshines the folder's name.** A header put its rare middle
+  words (`Backup`, `temp`) in lights while the folder's own name sat grey beneath
+  them. Path segments are context now — always muted — and the emphasis goes to
+  the name. If the name is nothing but boilerplate (`2025_11Nov_08 Canon 1`), what
+  comes back bright is whatever differs from its siblings: the `1`. Two camera
+  folders that differ by one character no longer read identically.
+- **Feed headers keep the folder's name, not the path.** A long header used to be
+  cut at the end — so two groups under the same long parent both read
+  `…/2025_11Nov_08 Canon 1/2…` and looked identical. The header now clips its front
+  (the part the path above already told you) and always shows the folder it names.
+- **The tree starts expanded when you group by folder**, like it already did for
+  multi-level groupings — and it no longer stops a third of the way through a big
+  library. Opening a folder's sub-folders costs no request (they arrive with the
+  level), so they were being counted against a budget meant for requests.
+- **The hover reveal on a long name is ~5× faster** — a reveal, not a ticker.
+
+## 2.10.10
+
+- **You can see where you are again.** A selected photo is marked by its gold
+  checkmark alone — the gold border is gone. The blue border now means one thing
+  only: this is the focused tile. Before, a photo that was both focused and
+  selected lost its focus ring to the selection colour, so in a sea of selected
+  photos you couldn't tell where the keyboard was.
+- **Undo covers every bulk selection change, not just removals** — Clear, ⌘A and
+  ⌘⇧A all stash first — and it restores _exactly_ the selection you had before.
+  It used to merge the old selection into the current one, which quietly made
+  undoing a select-all do nothing at all.
+
+## 2.10.9
+
+- **⌘A now takes the group you're in, not the whole library.** Press it again and
+  it offers to take everything currently shown — asking first, inline in the
+  status bar, because pulling ten thousand photos into a selection shouldn't
+  happen on a keystroke. Press ⌘A once more (or click Select all) to confirm,
+  Esc to back out.
+- **⌘⇧A is the mirror image:** it removes the current group from the selection,
+  and pressing it again offers to remove everything shown. Anything it removes is
+  restorable with Undo.
+- Both are in the help menu (`?`).
+
+## 2.10.8
+
+- **Checking a folder in the subfolder list now takes everything under it.** Tick
+  or untick a parent and its whole subtree follows, however deep — you don't
+  click twenty boxes to take a year, or to drop one. If you then exclude
+  something inside it, the parent shows a dash instead of a tick, so it never
+  claims to be importing more than it is.
+
 ## 2.10.7
 
-- The fisheye navigator now ships as a published package (@john-guerra/fisheye-nav), so a clean checkout installs without a local link.
+- **Fix: "Choose subfolders…" was unreachable in the app** (regression in 2.10.6).
+  Picking a folder with the native picker started the scan immediately, so the
+  panel's options — which subfolders to import, whether to focus — were gone
+  before you could touch them. The picker now fills the path in and waits; you
+  choose your options and press the button to commit.
 
 ## 2.10.6
 
-- Fisheye: hovering now moves one group at a time instead of jumping past a whole month, every group can be reached and selected by drilling in, and the selected day is highlighted (it never was, below the top level).
-- Fisheye: the photo-count bars are back inside each row (a histogram silhouette down the column), the icicle shows aggregated counts on years and months, and the row under the cursor always shows its name.
+- **Packaged build** of the folder-controls work: one ＋ panel for adding,
+  opening, and rescanning a folder; a subfolder checklist so a recursive add
+  imports only what you want; and a single scope chip in place of the old
+  "Folder focus" and "Keep only" pair.
 
 ## 2.10.5
 
-- The fisheye sidebar now uses the widget's own ⚙ settings: on top of view and lens it exposes band size (equal rows vs. photo mass), the bar scale, and the interest weights — and remembers them across reloads.
+- **One door for folders.** Adding a folder and opening one were two separate
+  controls doing nearly the same thing. Now there's one ＋ panel: pick a folder,
+  choose whether to include subfolders, and tick "Focus on this folder only" to
+  see just that folder. The button says what it will do — **Add & scan** for a
+  new folder, **Rescan** for one you already have, **Open** to jump straight into
+  an already-scanned folder (still works with the drive unmounted, without
+  rescanning). The Folders dropdown is gone; the Folders button opens Manage
+  folders directly.
+- **Choose which subfolders to import.** Adding a folder with "Include
+  subfolders" used to be all-or-nothing. "Choose subfolders…" now lists every
+  folder it found with photo counts, so you can leave out the Exports/ and
+  Selects/ folders you don't want. Untouched by default — a plain add still
+  imports everything in one click, with no directory walk to wait on.
 
 ## 2.10.4
 
-- **The fisheye sidebar understands nesting now.** Group by year → month → day
-  and every level gets its own row, indented by depth, so you can always see
-  which level you are on. Hovering still magnifies where you point, and clicking
-  any band jumps the feed to _that_ level — click a day to land on the day, click
-  the year to land on the year.
-- **A new Icicle view** for the sidebar (⚙ → View): one column per level instead
-  of an indented list, with each group's band spanning exactly its children.
-- **The lens algorithm is now yours to pick** (⚙ → Lens). _Hybrid_ (the new
-  default) magnifies around the cursor and folds quiet stretches away into
-  labelled rows like `2019` or `⋯ 4 more`, so a 3,000-day library stays readable.
-  _Fisheye_ keeps every group. _Interest_ keeps full-size rows and no
-  magnification. _Uniform_ turns the lens off.
-- **The count bars are legible again.** They were all rendering at minimum length
-  on libraries where one bucket (e.g. "Unknown date") holds most of the photos;
-  they now use a log scale, so busy days actually look busy.
-- **Resizing the sidebar resizes the fisheye track.** It used to be pinned at a
-  fixed width no matter how wide you dragged the pane.
-- Under the hood, the whole navigator moved into its own reusable widget
-  (`@john-guerra/fisheye-nav`) with a property-based test suite.
+- **One scope, one chip.** "Folder focus" and "Keep only" were two chips and two
+  mental models for the same idea — showing you a subset of the library. They're
+  now a single scope with a single ✕ to leave it. Behavior is unchanged: scoping
+  to a folder still picks up photos scanned into it later and still survives a
+  reload, and keeping a hand-picked set still does neither.
 
 ## 2.10.3
 

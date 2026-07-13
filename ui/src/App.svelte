@@ -44,6 +44,7 @@
     fetchLibrary,
     scan as apiScan,
     startScan,
+    fetchSubdirs,
     startExport,
     fetchPhotoIds,
     fetchPhotoCount,
@@ -72,6 +73,13 @@
   import ServerBanner from "./lib/ServerBanner.svelte";
   import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
+  import {
+    buildTokenStats,
+    buildSiblingIndex,
+    labelParts,
+    dirname,
+  } from "./lib/folderLabel.js";
+  import { buildFolderTree, relativeTo } from "./lib/folderTree.js";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import UpdateBanner from "./lib/UpdateBanner.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
@@ -79,6 +87,26 @@
   import { loadAlbumPrefs, saveAlbumPrefs } from "./lib/albumPrefs.js";
   import SnapshotStrip from "./lib/SnapshotStrip.svelte";
   import SourceControls from "./lib/SourceControls.svelte";
+  import {
+    folderScope,
+    idsScope,
+    scopeFilterKeys,
+    scopeChip,
+    loadScope,
+    persistScope,
+  } from "./lib/scope.js";
+  import {
+    selectAll,
+    selectNone,
+    toggle as toggleSubdir,
+    selectedDirs,
+  } from "./lib/subfolderSelection.js";
+  import {
+    nextBulkAction,
+    groupLabel,
+    restoreSelection,
+  } from "./lib/bulkSelection.js";
+  import { combo } from "./lib/platform.js";
   import OrganizeControls from "./lib/OrganizeControls.svelte";
   import ViewControls from "./lib/ViewControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
@@ -262,23 +290,19 @@
   // used or the next clear replaces it — no timed toast, per project taste).
   let lastClearedSelection = null;
 
-  // "Keep only" working set: when non-null, an explicit id list that the feed,
-  // counts, sidebars, albums and export all scope to, while the counts still
-  // report the true library total. null = whole library.
-  let keepIds = null;
+  // The app's one working scope — "show me only this". Either a live folder-path
+  // predicate or an explicit id set, never both (see lib/scope.js for why the two
+  // kinds stay distinct: a folder scope tracks photos scanned into it later and
+  // survives a reload, an id set is frozen and session-only). null = whole library.
+  // Write it ONLY through applyScope().
+  let scope = loadScope();
+  $: persistScope(scope);
+  $: chip = scopeChip(scope);
 
-  // "Open a folder" focus: when non-null, an abs path whose subtree (the folder
-  // + everything under it) the feed/tree/counts/albums scope to via the
-  // folderPath filter key, while the library total keeps showing the whole
-  // index. The folder is a permanent library member (it was scanned in); focus
-  // is just a scoped view. Persisted so it survives a reload. null = unfocused.
-  const LS_FOCUS_PATH = "autogallery.focusPath";
-  let focusPath = localStorage.getItem(LS_FOCUS_PATH) || null;
-  $: focusName = focusPath
-    ? focusPath.split("/").filter(Boolean).pop() || focusPath
-    : "";
-  $: if (focusPath) localStorage.setItem(LS_FOCUS_PATH, focusPath);
-  else localStorage.removeItem(LS_FOCUS_PATH);
+  // Read-only projections, so every existing reader (albums, export, the empty
+  // state, activeFacetLabels, the loupe) keeps working unchanged.
+  $: focusPath = scope?.kind === "folder" ? scope.path : null;
+  $: keepIds = scope?.kind === "ids" ? scope.ids : null;
 
   // Auto-albums review mode: replaces the grid with a time-gap-clustered view
   // of the working set (see AlbumsView).
@@ -318,13 +342,11 @@
   // the display filter is the no-op default.
   $: displayFilter = {
     ...(filterMode === "select" ? DEFAULT_FILTER : filter),
-    // keep-only ids live server-side in the keep_scope table (POSTed by
-    // applyKeepOnly); the filter carries only a flag, so the scope is unbounded.
-    ...(keepIds ? { keepScope: true } : {}),
-    // Folder-focus ("open a folder"): scope the whole app to the focused
-    // subtree. A live WHERE over folders.abs_path — stays correct across
-    // rescans, no id enumeration, persists as a single path string.
-    ...(focusPath ? { folderPath: focusPath } : {}),
+    // The one scope, projected onto the filter keys the feed/tree/counts speak:
+    // a folder scope becomes the live folderPath predicate (a WHERE over
+    // folders.abs_path — no id enumeration), an id scope becomes the keepScope
+    // flag (the ids themselves live server-side in keep_scope, so it's unbounded).
+    ...scopeFilterKeys(scope),
     // dateAttr is which date the timeline PLOTS, not a constraint — so it follows
     // the sort date in both modes (in select mode the rest resets to DEFAULT, but
     // the timeline column must still track the sort).
@@ -539,14 +561,57 @@
   // full reset). The sidebars key their refetch on this so they always mirror
   // the real index, not just groupBy/filter changes.
   let libraryVersion = 0;
-  let libraryOpen = false;
   let addFolderOpen = false;
   let manageLibraryOpen = false;
-  // "Open a folder…" text-input popover (non-native fallback when there's no
-  // native folder picker). Kept separate from the ＋ add-folder `dir` state so
-  // the two popovers don't clobber each other's input.
-  let openFolderOpen = false;
-  let openFolderDir = "";
+  // Scope to the folder once it's in? (The old "Open a folder…" entry, now an
+  // option on the one Add panel rather than a second door to the same room.)
+  let focusAfterAdd = false;
+  // "Already in your library": the path itself, or any subtree of it, is a
+  // scanned folder. Decides the Add button's verb (Add & scan / Rescan / Open)
+  // and whether opening it needs a scan at all.
+  $: alreadyIndexed =
+    !!dir.trim() &&
+    library.some(
+      (e) => e.path === dir.trim() || e.path.startsWith(dir.trim() + "/")
+    );
+
+  // The subfolder checklist (see lib/subfolderSelection.js). Collapsed until the
+  // user asks for it, so a plain add never waits on a directory walk.
+  let subdirsOpen = false;
+  let subdirs = [];
+  let subdirsLoading = false;
+  let subdirsError = "";
+  let subdirSelection = new Set();
+
+  // A checklist built for a different folder is worse than none — drop it the
+  // moment the path changes.
+  $: (dir, resetSubdirs());
+  function resetSubdirs() {
+    subdirsOpen = false;
+    subdirs = [];
+    subdirsError = "";
+    subdirSelection = new Set();
+  }
+
+  /** Walk the folder for its scannable subdirs. Any failure (permission denied,
+   * unmounted, vanished) is shown in the panel, naming the path — never an
+   * empty list that looks like "no subfolders". */
+  async function loadSubdirs() {
+    const p = dir.trim();
+    if (!p) return;
+    subdirsLoading = true;
+    subdirsError = "";
+    try {
+      subdirs = await fetchSubdirs(p);
+      subdirSelection = selectAll(subdirs);
+    } catch (e) {
+      subdirsError = e.message;
+      subdirs = [];
+      subdirSelection = selectNone();
+    } finally {
+      subdirsLoading = false;
+    }
+  }
 
   let selected = 0; // index into displayEntries; must never land on a
   // {kind:'placeholder'} entry — see nextSelectable below.
@@ -744,8 +809,7 @@
    * filters" action. Preserves dateAttr so the timeline keeps following the sort
    * date rather than snapping back to date_taken. */
   function clearAllFilters() {
-    if (keepIds) exitKeepOnly();
-    if (focusPath) exitFocus();
+    if (scope) exitScope();
     onFilterChange({ ...DEFAULT_FILTER, dateAttr: filter.dateAttr });
   }
 
@@ -883,13 +947,116 @@
         sort
       );
       if (!ids.length) return;
+      snapshotSelection(); // selecting everything can bury a careful selection too
       selectedIds = new Set([...selectedIds, ...ids]);
       status = `Selected ${selectedIds.size.toLocaleString()} photo${
         selectedIds.size === 1 ? "" : "s"
-      }`;
+      } — Undo to restore`;
     } catch (e) {
       error = `Select all failed: ${e.message}`;
     }
+  }
+
+  // --- ⌘A / ⌘⇧A escalation (see lib/bulkSelection.js) -----------------------
+  // Both act on the current group first, and only reach for everything the
+  // filters show on a second press — which asks first, inline, because pulling
+  // 10,000 photos into a selection on a keystroke is a surprise, not a feature.
+  // `pendingBulk` is that question; pressing the same shortcut again answers it.
+  /** @type {null|"select"|"deselect"} */
+  let pendingBulk = null;
+  $: pendingBulkCount = pendingBulk ? showingCount : 0;
+
+  /** Every photo the filters currently show — the whole set, not just the
+   * loaded window. The same server query select-all and export already use. */
+  const fetchVisibleIds = () =>
+    fetchPhotoIds(
+      filterIsActive(displayFilter) ? displayFilter : null,
+      null,
+      sort
+    );
+
+  /** The ids of the group the focus is sitting in (empty when there's none). */
+  async function currentGroupIds() {
+    if (!currentPath || !currentPath.length) return [];
+    return await fetchPhotoIds(null, currentPath, sort);
+  }
+
+  /** ⌘A. Group → (already have it) → ask → everything shown. */
+  async function bulkSelect() {
+    try {
+      const ids = await currentGroupIds();
+      const action = nextBulkAction("select", {
+        pending: pendingBulk,
+        hasGroup: ids.length > 0,
+        groupFullySelected:
+          ids.length > 0 && ids.every((id) => selectedIds.has(id)),
+      });
+      if (action === "group") {
+        pendingBulk = null;
+        snapshotSelection();
+        selectedIds = new Set([...selectedIds, ...ids]);
+        status = `Selected ${ids.length.toLocaleString()} in ${groupLabel(currentPath)} — ${combo("A")} again for all ${showingCount.toLocaleString()}`;
+        return;
+      }
+      if (action === "prompt") {
+        pendingBulk = "select";
+        return; // the SelectionBar renders the question; no keystroke commits it
+      }
+      pendingBulk = null;
+      await selectAllInView();
+    } catch (e) {
+      pendingBulk = null;
+      error = `Select failed: ${e.message}`;
+    }
+  }
+
+  /** ⌘⇧A. The mirror image: drop the group, then (asking first) everything shown. */
+  async function bulkDeselect() {
+    try {
+      const ids = await currentGroupIds();
+      const action = nextBulkAction("deselect", {
+        pending: pendingBulk,
+        hasGroup: ids.length > 0,
+        groupHasSelection: ids.some((id) => selectedIds.has(id)),
+      });
+      if (action === "group") {
+        pendingBulk = null;
+        removeFromSelection(ids, groupLabel(currentPath));
+        return;
+      }
+      if (action === "prompt") {
+        pendingBulk = "deselect";
+        return;
+      }
+      pendingBulk = null;
+      removeFromSelection(await fetchVisibleIds(), "everything shown");
+    } catch (e) {
+      pendingBulk = null;
+      error = `Deselect failed: ${e.message}`;
+    }
+  }
+
+  /** Take ids out of the selection, stashing what left so Clear's Undo can put
+   * it back — removing 10,000 photos from a selection must be recoverable. */
+  function removeFromSelection(ids, what) {
+    const removed = ids.filter((id) => selectedIds.has(id));
+    if (!removed.length) return;
+    snapshotSelection();
+    const next = new Set(selectedIds);
+    for (const id of removed) next.delete(id);
+    selectedIds = next;
+    status = `Removed ${removed.length.toLocaleString()} photo${
+      removed.length === 1 ? "" : "s"
+    } from the selection (${what}) — Undo to restore`;
+  }
+
+  /** Answer the inline question with the mouse instead of the keyboard. */
+  async function confirmPendingBulk() {
+    const kind = pendingBulk;
+    pendingBulk = null;
+    if (kind === "select") await selectAllInView();
+    else if (kind === "deselect")
+      removeFromSelection(await fetchVisibleIds(), "everything shown");
   }
 
   /** Click the group's select icon: select-all, or deselect-all if already all. */
@@ -985,7 +1152,10 @@
     if (!folderPath || !name || name === current) return;
     try {
       const { newPath } = await renameFolder(folderPath, name);
-      if (focusPath === folderPath) focusPath = newPath; // keep focus on it
+      // A folder scope names the folder by path, so a rename must follow it —
+      // no rebuild needed, the feed reloads right below.
+      if (scope?.kind === "folder" && scope.path === folderPath)
+        scope = folderScope(newPath);
       await loadInitialFeed();
       refreshCounts();
     } catch (e) {
@@ -993,40 +1163,47 @@
     }
   }
 
-  /** Enter/replace "keep only" focus on an explicit id set. The set is stored
-   * server-side (keep_scope table via setScope) and referenced by displayFilter's
-   * keepScope flag, so it can be any size; the library total keeps showing the
-   * real count. Passing null (or an empty set) leaves keep-only. */
-  async function applyKeepOnly(ids) {
-    const next = ids && ids.length ? [...ids] : null;
+  /**
+   * Enter, replace, or leave the working scope (null = whole library). The ONE
+   * rebuild path for both scope kinds — it routes through onGroupByChange (the
+   * shared feed-window guard) rather than hand-rolling another window reset.
+   * The two kinds are mutually exclusive by construction, so "keep only this
+   * selection" while focused on a folder simply replaces the scope.
+   * @param {import("./lib/scope.js").Scope} next
+   */
+  async function applyScope(next) {
+    const wasIds = scope?.kind === "ids";
+    const touchesFolder = next?.kind === "folder" || scope?.kind === "folder";
     try {
-      // Push the scope to the server BEFORE any feed/tree/count query reads it.
-      await setScope(next ?? []);
+      // Push the id set to the server BEFORE any feed/tree/count query reads it,
+      // and clear it when leaving an id scope so a stale keep_scope row can't
+      // narrow the next query.
+      if (next?.kind === "ids") await setScope(next.ids);
+      else if (wasIds) await setScope([]);
     } catch (e) {
       error = e.message;
-      return;
+      return; // scope unchanged — the UI still matches what the server holds
     }
-    keepIds = next;
+    scope = next;
     countsEpoch++;
     headerCounts = {};
     fetchedParents = new Set();
     inFlightParents = new Set();
-    // displayFilter is a `$:` derived value keyed on keepIds; it hasn't
-    // recomputed yet. Flush reactive state before rebuilding so the feed loader
-    // reads the keepScope filter (mirrors setFocus) — otherwise the live rebuild
-    // fetches with the stale, unscoped filter and the focus window's "before"
-    // half bleeds in the previous group's photos (#75). Symmetric on exit:
-    // without the flush, leaving keep-only would rebuild while keepScope is
-    // still true against an already-cleared scope.
+    // displayFilter is a `$:` derived value keyed on `scope`; it hasn't
+    // recomputed yet. Flush before rebuilding so the feed loader reads the new
+    // filter — otherwise the rebuild fetches with the stale, unscoped filter and
+    // the focus window's "before" half bleeds in the previous group's photos
+    // (#75). Symmetric on exit, where the stale filter would still be scoped.
     await tick();
     await onGroupByChange(groupBy);
     refreshCounts();
+    if (touchesFolder) libraryVersion++; // TreeSidebar/Fisheye refetch
   }
 
   /** Keep only the current selection as the working set. */
   function keepOnlySelection() {
     if (selectedIds.size === 0) return;
-    applyKeepOnly([...selectedIds]);
+    applyScope(idsScope([...selectedIds]));
   }
 
   /** Keep only one group/section (all its photos) as the working set. */
@@ -1035,46 +1212,15 @@
     try {
       const ids = await fetchPhotoIds(null, path, sort);
       if (!ids.length) return;
-      await applyKeepOnly(ids);
+      await applyScope(idsScope(ids));
     } catch (e) {
       error = e.message;
     }
   }
 
-  /** Leave keep-only focus, back to the whole library. */
-  function exitKeepOnly() {
-    applyKeepOnly(null);
-  }
-
-  /** Enter/replace folder-focus on a subtree path (null exits). Mirrors
-   * applyKeepOnly's refresh sequence so the feed/tree/counts all rebuild against
-   * the new displayFilter — routes through onGroupByChange (the shared feed-window
-   * guard) rather than hand-rolling a window reset. Folder-focus and keep-only are
-   * both "scope the whole app to a subset"; stacking them is confusing and "keep it
-   * alone" implies a clean scope, so entering focus clears any active keep-only. */
-  async function setFocus(path) {
-    focusPath = path || null;
-    if (keepIds) {
-      keepIds = null;
-      setScope([]).catch(() => {}); // fire-and-forget the server-side clear
-    }
-    countsEpoch++;
-    headerCounts = {};
-    fetchedParents = new Set();
-    inFlightParents = new Set();
-    // displayFilter is a `$:` derived value; it hasn't recomputed with the new
-    // focusPath yet. Flush reactive state before rebuilding so the feed loader
-    // reads the updated filter (otherwise the live rebuild uses the stale,
-    // unfocused filter and the grid keeps showing out-of-scope folders).
-    await tick();
-    await onGroupByChange(groupBy);
-    refreshCounts();
-    libraryVersion++; // force TreeSidebar/Fisheye (refreshToken) to refetch
-  }
-
-  /** Leave folder-focus, back to the whole library. */
-  function exitFocus() {
-    setFocus(null);
+  /** Leave whatever scope is active, back to the whole library. */
+  function exitScope() {
+    applyScope(null);
   }
 
   /** Toggle one photo's membership in the selection. */
@@ -1240,15 +1386,37 @@
   function clearSelection() {
     if (selectedIds.size === 0) return;
     const n = selectedIds.size;
-    lastClearedSelection = new Set(selectedIds);
+    snapshotSelection();
     selectedIds = new Set();
     status = `Cleared ${n.toLocaleString()} photo${n === 1 ? "" : "s"} from the selection — Undo to restore`;
   }
 
+  /**
+   * Remember the selection as it is RIGHT NOW, so Undo can put exactly this back.
+   * Called before every bulk change — Clear, ⌘A (group or everything), ⌘⇧A —
+   * because any of them can wipe out a careful hand-picked selection, not just
+   * the ones that remove. Single-photo toggles are not snapshotted: they're one
+   * keystroke to reverse, and stashing on every X would make Undo mean "undo the
+   * last thing" instead of "put my selection back".
+   */
+  function snapshotSelection() {
+    lastClearedSelection = new Set(selectedIds);
+  }
+
+  /**
+   * Restore the selection to EXACTLY what it was before the last bulk change.
+   * This replaces the current selection rather than merging into it: the old
+   * union meant undoing a select-all left you with the union of both, which is
+   * not what "undo" says.
+   */
   function undoClearSelection() {
     if (!lastClearedSelection) return;
-    selectedIds = new Set([...selectedIds, ...lastClearedSelection]);
+    const n = lastClearedSelection.size;
+    selectedIds = restoreSelection(lastClearedSelection);
     lastClearedSelection = null;
+    status = n
+      ? `Selection restored (${n.toLocaleString()} photo${n === 1 ? "" : "s"})`
+      : "Selection restored (was empty)";
   }
 
   /** Refresh the library-total and showing counts (cheap COUNT queries). */
@@ -1373,8 +1541,10 @@
     manageLibraryOpen = false;
     selectedIds = new Set();
     lastClearedSelection = null;
-    keepIds = null;
-    focusPath = null; // the focused folder is gone with the whole index
+    // The whole index (and with it the scoped folder / the keep_scope rows) is
+    // gone, so drop the scope outright rather than routing through applyScope —
+    // this handler does its own full reload below.
+    scope = null;
     await refreshLibrary();
     await loadInitialFeed();
     refreshCounts();
@@ -1712,25 +1882,56 @@
     return head[0]?.id ?? null;
   }
 
+  /**
+   * The entry index where `path`'s group starts in the current window, or -1.
+   * The group you clicked is the thing to anchor the refetch on — `selected` can
+   * be anywhere (it's the FOCUSED tile, and a user who has only scrolled hasn't
+   * focused anything, so it sits at 0, at the top of the library).
+   */
+  function firstEntryIndexOfPath(path) {
+    const key = pathKey(path);
+    for (let i = 0; i < displayEntries.length; i++) {
+      const e = displayEntries[i];
+      if (!e) continue;
+      if (e.kind === "placeholder") {
+        if (pathKey(e.item.path) === key) return i;
+        continue;
+      }
+      const p = deriveCurrentPath(i, displayEntries, groupBy);
+      if (p && pathKey(p) === key) return i;
+    }
+    return -1;
+  }
+
   async function toggleSectionCollapse(path) {
     const key = pathKey(path);
     const collapsing = !collapsedPaths.some((p) => pathKey(p) === key);
-    // Expanding: remember where this group's header sits right now, and arm the
-    // pin BEFORE the refetch — recenterFeedOnId sets focusPending, whose focus()
-    // would otherwise scroll to `selected`; the pin's presence turns that scroll
-    // off (preventScroll) and holds the header in place instead (issue #74).
-    if (!collapsing) {
-      const offset = groupAnchorOffset(key);
-      expandPin = offset == null ? null : { key, offset };
-    }
+    // Hold this group's header where it is across the refetch, in BOTH
+    // directions. Arm the pin BEFORE the refetch — recenterFeedOnId sets
+    // focusPending, whose focus() would otherwise scroll to `selected`; the
+    // pin's presence turns that scroll off (preventScroll) and holds the header
+    // in place instead (issue #74). Collapsing needs it just as much: you were
+    // looking at this group when you clicked it.
+    const offset = groupAnchorOffset(key);
+    expandPin = offset == null ? null : { key, offset };
+
     collapsedPaths = collapsing
       ? [...collapsedPaths, path]
       : collapsedPaths.filter((p) => pathKey(p) !== key);
-    // Expand seeks to the group's own first photo (loads from the top, extends
-    // downward via loadMore("after")); collapse re-centers on the current
-    // selection, excluding the group about to be hidden.
+
+    // Both directions seek from THIS GROUP, never from `selected`.
+    //
+    // Collapse used to re-center on safeFocusId(selected, …). But `selected` is
+    // the focused tile, and a user who has only scrolled has never focused
+    // anything — it's photo 0. So collapsing a group far down the feed reloaded
+    // the window from the TOP of the library: the view jumped, and the group you
+    // just clicked fell outside the loaded window, so its placeholder never
+    // arrived and the snapshot band you asked for never rendered. Anchoring on
+    // the group keeps it inside the window, which is the whole point of clicking
+    // it. (Falls back to `selected` when the group isn't in the window at all.)
+    const anchorIndex = firstEntryIndexOfPath(path);
     const focusId = collapsing
-      ? safeFocusId(selected, path)
+      ? safeFocusId(anchorIndex >= 0 ? anchorIndex : selected, path)
       : ((await firstPhotoIdOfGroup(path)) ?? safeFocusId(selected));
     await recenterFeedOnId(focusId);
     if (expandPin) {
@@ -1837,6 +2038,78 @@
     const key = pathKey(path);
     if (!_collapsedKeys.has(key)) return "grid";
     return _snapshots.has(key) ? "snapshot" : "collapsed";
+  }
+
+  // --- Folder labels ---------------------------------------------------------
+  // Folder names are mostly redundancy — the year the parent already states, the
+  // _peq on every folder in the library. folderLabel.js decides which tokens earn
+  // a pixel; the corpus is the whole library (not the filtered view), so a label
+  // never changes shape as you filter or scroll. The tree sidebar is handed the
+  // same stats, so a folder reads the same in both places.
+  $: folderPaths = library.map((entry) => entry.path);
+  $: tokenStats = buildTokenStats(folderPaths);
+  $: siblingIndex = buildSiblingIndex(folderPaths);
+  // The same roots the tree draws. A header drops everything ABOVE its own root
+  // ("/Users/me/Pictures") and keeps the root itself ("backup/…"), so it
+  // still says which library it belongs to. Stripping a single library-wide
+  // ancestor can't work once folders live on more than one volume — they share
+  // only "/" — and then every header would render its full absolute path and get
+  // cut at the tail, losing the very part that names the group.
+  $: libraryRoots = buildFolderTree(
+    folderPaths.map((value) => ({ value, count: 0 }))
+  );
+  function headerPrefixFor(value) {
+    const root = libraryRoots.find(
+      (r) => value === r.value || value.startsWith(`${r.value}/`)
+    );
+    return root ? dirname(root.value) : "";
+  }
+
+  /** A folder section header, as display parts.
+   *
+   * Unlike a tree row, a header stands alone — there is no parent row above it to
+   * supply context — so it keeps its whole path. The same rule runs over all of
+   * it, path segments included: the prefix every folder shares is on 100% of the
+   * library, so it recedes on its own, while a directory that is genuinely rare
+   * stays bright. The siblings that decide what's redundant are the folders that
+   * actually share this one's parent on disk — not whatever happens to be in the
+   * feed window — so a header never changes shape as you scroll. */
+  function folderHeaderParts(value) {
+    const siblings = siblingIndex.get(dirname(value)) ?? [];
+    return labelParts(relativeTo(value, headerPrefixFor(value)), {
+      stats: tokenStats,
+      siblings,
+    });
+  }
+
+  /** Header parts for any dimension: only folders need the treatment. */
+  /** Header parts for any dimension: only folders need the treatment.
+   *
+   * `_stats` / `_roots` are unused INSIDE the function — they are there so the
+   * template's call site names them, and Svelte re-runs the each-block when they
+   * change. Svelte's reactivity tracks the variables an expression MENTIONS, not
+   * what the called function closes over: without them, headers rendered before
+   * /api/library resolved kept an empty corpus forever, printing the whole
+   * absolute path with nothing dimmed. (TreeNode.svelte carries a comment about
+   * the same trap for collapsedPaths.) */
+  function headerParts(header, _stats, _roots) {
+    return header.path?.at(-1)?.dimension === "folder"
+      ? folderHeaderParts(header.path.at(-1).value)
+      : [{ text: header.label, kind: "keep" }];
+  }
+
+  /** Svelte action: fade the clipped edge only when something IS hidden behind it.
+   * The header shows the END of the path (see .section-label), so what overflows
+   * is on the left — and CSS can't measure that, hence the class. `_parts` is here
+   * so the call site names it and the action re-measures when the label changes. */
+  function tailClip(el, _parts) {
+    const mark = () =>
+      el.parentElement?.classList.toggle(
+        "clipped",
+        el.scrollWidth > el.parentElement.clientWidth
+      );
+    mark();
+    return { update: mark };
   }
 
   /** Tooltip for the group toggle, from the registry (no parallel string table:
@@ -1969,10 +2242,28 @@
       foldingLeaves = false;
     }
     if (!leaves.length) return cycleGroupState(path); // nothing beneath → aggregate
+    return cycleLeafPaths(leaves, {
+      // Clear any state anywhere inside this subtree — including the parent's own
+      // aggregate collapse — before applying the new one to the leaves.
+      insidePath: (p) => isPathUnder(p, path),
+      insideKey: (k) => isKeyUnder(k, path),
+    });
+  }
+
+  /** Cycle a SET of groups as one: the shared state math behind shift-folding a
+   * subgroup and behind the tree's folder rows (a folder row can stand for every
+   * folder beneath it, and a virtual ancestor has no state of its own at all).
+   * `insidePath`/`insideKey` say what counts as "inside" the thing being folded —
+   * a group subtree for one caller, an explicit list of folders for the other. */
+  async function cycleLeafPaths(leaves, { insidePath, insideKey } = {}) {
+    if (!leaves.length) return;
     if (leaves.length > MAX_FOLD_LEAVES) {
       error = `That group has more than ${MAX_FOLD_LEAVES} subgroups — too many to fold at once. Collapse it as a whole instead (click without Shift).`;
       return;
     }
+    const leafKeys = new Set(leaves.map(pathKey));
+    const isInsidePath = insidePath ?? ((p) => leafKeys.has(pathKey(p)));
+    const isInsideKey = insideKey ?? ((k) => leafKeys.has(k));
 
     // Next state, from where the leaves collectively are now (all-expanded →
     // snapshot → collapsed → expanded). A mixed set resets to expanded.
@@ -1984,11 +2275,9 @@
     const uniform = states.every((x) => x === states[0]);
     const next = uniform ? nextRendererId(states[0]) : DEFAULT_RENDERER_ID;
 
-    // Drop any existing state inside this subtree (including the parent's own
-    // aggregate collapse), then apply the new state to the leaves.
-    const nextCollapsed = collapsedPaths.filter((p) => !isPathUnder(p, path));
+    const nextCollapsed = collapsedPaths.filter((p) => !isInsidePath(p));
     const nextSnaps = new Set(
-      [...snapshotGroupKeys].filter((k) => !isKeyUnder(k, path))
+      [...snapshotGroupKeys].filter((k) => !isInsideKey(k))
     );
     if (isServerCollapsed(next)) {
       for (const lp of leaves) {
@@ -2006,8 +2295,13 @@
   }
 
   /** Entry point for every group toggle (feed header + tree icon): Shift folds
-   * the leaves, a plain click aggregates the group itself. */
-  function onGroupToggle(path, event) {
+   * the leaves, a plain click aggregates the group itself.
+   *
+   * `paths` arrives from the tree when a row speaks for more than one group — a
+   * folder row that has sub-folders beneath it, or a virtual ancestor that has no
+   * group of its own. Those cycle together. */
+  function onGroupToggle(path, event, paths) {
+    if (paths?.length) return cycleLeafPaths(paths);
     return event?.shiftKey ? cycleGroupLeaves(path) : cycleGroupState(path);
   }
 
@@ -2443,8 +2737,11 @@
     }
   }
 
+  /** @returns {Promise<boolean>} true when the folder is indexed and the feed
+   * has caught up — the caller (submitAddFolder) needs to know whether it may
+   * scope to the folder afterwards. Renders its own error on every failure. */
   async function doScan() {
-    if (!dir.trim()) return;
+    if (!dir.trim()) return false;
     error = "";
     scanning = true;
     status = "scanning…";
@@ -2453,16 +2750,25 @@
         // Recursive ("soup folder") scans run as a cancelable background
         // job — live progress shows in the JobsPanel. Single-folder scan
         // stays synchronous below (fast; returns items for immediate render).
-        const { jobId } = await startScan(dir.trim(), { recursive: true });
+        // `chosen` is the curated subfolder subset, or null when the user never
+        // opened the picker (then the server walks the whole tree, as always).
+        const chosen =
+          subdirsOpen && subdirs.length
+            ? selectedDirs(subdirSelection, subdirs)
+            : null;
+        const { jobId } = await startScan(dir.trim(), {
+          recursive: true,
+          dirs: chosen,
+        });
         const job = await waitForJob(jobId);
         if (job.status === "canceled") {
           status = "Scan canceled";
-          return;
+          return false;
         }
         if (job.status !== "done") {
           error = job.error || "Scan failed";
           status = "";
-          return;
+          return false;
         }
       } else {
         await apiScan(dir.trim(), false);
@@ -2476,73 +2782,50 @@
       await loadInitialFeed();
       refreshCounts();
       libraryVersion++;
+      return true;
     } catch (e) {
       error = e.message;
       status = "";
+      return false;
     } finally {
       scanning = false;
     }
   }
 
-  /** "Open a folder" focus. If the subtree is already indexed, focus straight
-   * from the cache (works offline — an unmounted volume can't be rescanned).
-   * Otherwise scan it in recursively (the same background-job flow as the ＋
-   * add-folder path) so it becomes a permanent library member, then focus. */
-  async function openFolderFocus(path) {
-    const p = (path || "").trim();
+  /**
+   * The Add panel's one submit — adding, opening, and rescanning a folder are
+   * the same act with different options. Three outcomes:
+   *
+   *   already indexed + focus  → scope to it, NO scan. This is what lets you
+   *                              open a folder with its drive unmounted: the
+   *                              SQLite index is an offline mirror, and an
+   *                              unmounted volume can't be rescanned anyway.
+   *   already indexed, no focus→ incremental rescan, to catch up with disk.
+   *   new folder               → scan it in, then scope to it if asked.
+   */
+  async function submitAddFolder() {
+    const p = dir.trim();
     if (!p) return;
-    const alreadyIndexed = library.some(
-      (e) => e.path === p || e.path.startsWith(p + "/")
-    );
+    addFolderOpen = false;
     error = "";
-    try {
-      if (!alreadyIndexed) {
-        scanning = true;
-        status = "scanning…";
-        const { jobId } = await startScan(p, { recursive: true });
-        const job = await waitForJob(jobId);
-        if (job.status === "canceled") {
-          status = "Scan canceled";
-          return;
-        }
-        if (job.status !== "done") {
-          error = job.error || "Scan failed";
-          status = "";
-          return;
-        }
-        localStorage.setItem(LS_KEY, p);
-        await refreshLibrary();
-      }
-      setFocus(p);
-      status = "";
-    } catch (e) {
-      error = e.message;
-      status = "";
-    } finally {
-      scanning = false;
+    if (alreadyIndexed && focusAfterAdd) {
+      await applyScope(folderScope(p));
+      return;
     }
+    const ok = await doScan(); // renders its own error when it fails
+    if (ok && focusAfterAdd) await applyScope(folderScope(p));
   }
 
-  /** Toolbar "Open a folder…" entry: get a path (native picker when available,
-   * otherwise a small text-input popover) and hand it to openFolderFocus. */
-  function requestOpenFolder() {
-    libraryOpen = false;
-    if (hasNativePicker) {
-      window.autogallery?.pickFolder().then((path) => {
-        if (path) openFolderFocus(path);
-      });
-    } else {
-      openFolderDir = "";
-      openFolderOpen = true;
-    }
-  }
-
+  /** The native picker fills the path in and leaves the panel open — it does NOT
+   * scan. Scanning straight out of the picker would make every option in this
+   * panel (which subfolders to import, whether to focus) unreachable for anyone
+   * with a native picker, i.e. the packaged app: the scan would already be
+   * running by the time the panel came back. The user commits with the button. */
   async function chooseFolder() {
     const path = await window.autogallery?.pickFolder();
-    if (path) {
-      dir = path;
-      doScan();
-    }
+    if (!path) return;
+    dir = path;
+    addFolderOpen = true;
   }
 
   // Flickr-style justified layout via the pure module in lib/layouts/ —
@@ -2942,16 +3225,18 @@
   }
 
   async function onKeydown(e) {
-    // Cmd/Ctrl+A selects every photo in the current working set (the same
-    // whole-set query the group select-all and export use). Handled before the
-    // blanket meta/ctrl bail below, but only when focus isn't in a text field —
-    // there, Cmd/Ctrl+A must still select the field's text.
+    // Cmd/Ctrl+A adds the current group to the selection; pressed again (once
+    // the group is already all in) it asks before taking everything the filters
+    // show. Cmd/Ctrl+Shift+A is the mirror image, removing instead of adding.
+    // Handled before the blanket meta/ctrl bail below, but only when focus isn't
+    // in a text field — there, Cmd/Ctrl+A must still select the field's text.
     if ((e.metaKey || e.ctrlKey) && (e.key === "a" || e.key === "A")) {
       const tag = e.target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)
         return;
       e.preventDefault();
-      await selectAllInView();
+      if (e.shiftKey) await bulkDeselect();
+      else await bulkSelect();
       return;
     }
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
@@ -3117,9 +3402,15 @@
       return;
     }
 
-    // Escape in the grid: collapse an expanded stack if the selection is
-    // currently inside one.
+    // Escape in the grid: dismiss the ⌘A / ⌘⇧A question if one is up (it must
+    // be as easy to back out of as it was to raise), else collapse an expanded
+    // stack if the selection is currently inside one.
     if (key === "Escape") {
+      if (pendingBulk) {
+        e.preventDefault();
+        pendingBulk = null;
+        return;
+      }
       const entry = displayEntries[selected];
       if (entry?.stackId) {
         e.preventDefault();
@@ -3361,17 +3652,28 @@
     <SourceControls
       {scanning}
       {hasNativePicker}
-      bind:libraryOpen
-      bind:manageLibraryOpen
+      {alreadyIndexed}
+      {subdirs}
+      {subdirsLoading}
+      {subdirsError}
+      {subdirSelection}
       bind:addFolderOpen
       bind:dir
       bind:recursiveScan
-      bind:openFolderOpen
-      bind:openFolderDir
-      on:openfolder={requestOpenFolder}
-      on:scan={doScan}
+      bind:focusAfterAdd
+      bind:subdirsOpen
       on:choosefolder={chooseFolder}
-      on:openfolderfocus={() => openFolderFocus(openFolderDir)}
+      on:submit={submitAddFolder}
+      on:managelibrary={() => (manageLibraryOpen = true)}
+      on:loadsubdirs={loadSubdirs}
+      on:toggledir={(e) =>
+        (subdirSelection = toggleSubdir(
+          subdirSelection,
+          e.detail.path,
+          subdirs
+        ))}
+      on:selectalldirs={() => (subdirSelection = selectAll(subdirs))}
+      on:selectnodirs={() => (subdirSelection = selectNone())}
     />
 
     <div class="divider"></div>
@@ -3405,25 +3707,10 @@
       on:detectalbums={detectAlbums}
     />
 
-    {#if keepIds}
-      <button
-        class="keep-chip"
-        on:click={exitKeepOnly}
-        title="Exit keep-only focus (back to the whole library)"
-      >
-        ● Keep-only {keepIds.length.toLocaleString()} ✕
-      </button>
-    {/if}
-
-    {#if focusPath}
-      <button
-        class="focus-chip"
-        on:click={exitFocus}
-        title={"Exit folder focus — back to the whole library (" +
-          focusPath +
-          ")"}
-      >
-        ▣ Focused: {focusName} ✕
+    {#if chip}
+      <button class="scope-chip" on:click={exitScope} title={chip.title}>
+        {chip.icon}
+        {chip.text} ✕
       </button>
     {/if}
 
@@ -3458,7 +3745,9 @@
           {sort}
           filter={displayFilter}
           refreshToken={libraryVersion}
-          on:toggle={(e) => onGroupToggle(e.detail.path, e.detail.event)}
+          {tokenStats}
+          on:toggle={(e) =>
+            onGroupToggle(e.detail.path, e.detail.event, e.detail.paths)}
           on:jump={(e) => jumpToPath(e.detail)}
         />
       {:else}
@@ -3587,7 +3876,17 @@
                       }`}
                       on:dblclick={() => startRename(header.path)}
                     >
-                      {header.label}
+                      <span
+                        class="section-label-text"
+                        use:tailClip={headerParts(
+                          header,
+                          tokenStats,
+                          libraryRoots
+                        )}
+                        >{#each headerParts(header, tokenStats, libraryRoots) as part}<span
+                            class="part-{part.kind}">{part.text}</span
+                          >{/each}</span
+                      >
                     </button>
                   {/if}
                   {#if header.path && headerCounts[pathKey(header.path)] !== undefined}
@@ -3762,6 +4061,10 @@
       bind:exportDest
       bind:exportName
       bind:exportMove
+      {pendingBulk}
+      pendingCount={pendingBulkCount}
+      on:bulkconfirm={confirmPendingBulk}
+      on:bulkcancel={() => (pendingBulk = null)}
       on:clear={clearSelection}
       on:keeponly={keepOnlySelection}
       on:undoclear={undoClearSelection}
@@ -3890,25 +4193,10 @@
     margin-left: auto;
   }
 
-  .keep-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: #143a2a;
-    border: 1px solid #2e8b57;
-    color: #7fe0a8;
-    border-radius: 12px;
-    padding: 3px 10px;
-    font-size: 0.78rem;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .keep-chip:hover {
-    background: #1a4d38;
-  }
-  /* Folder-focus chip — a distinct blue/violet accent so it reads as a
-     different kind of scope than the green keep-only chip. */
-  .focus-chip {
+  /* The one scope chip. Both kinds of scope (a folder, a hand-picked id set)
+     are the same idea to the user — "you're seeing a subset" — so they share a
+     chip and an exit; the leading icon (▣ / ●) says which kind it is. */
+  .scope-chip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -3924,7 +4212,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .focus-chip:hover {
+  .scope-chip:hover {
     background: #263562;
   }
   h1 {
@@ -4068,16 +4356,44 @@
     border-radius: 4px;
     text-align: left;
     /* A long group name used to WRAP, growing the sticky header band and letting
-       it cover the rows beneath it. Keep it to one line and ellipsize; the full
-       value is on the button's title attribute (see the markup). */
+       it cover the rows beneath it. Keep it to one line; the full value is on the
+       button's title attribute (see the markup).
+
+       Clip the HEAD, not the tail — same rule as the tree rows. A folder path
+       ends with the folder's own name, so a normal ellipsis drops exactly the
+       part that identifies the group: two sibling folders under one long parent
+       both render as ".../2025_11Nov_08 Canon 1/2…" and become indistinguishable.
+       direction:rtl on the clipper flips which end overflows; the inner span
+       stays ltr, so the text itself is unchanged. */
+    direction: rtl;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
     min-width: 0;
-    max-width: 46ch;
+    max-width: 78ch;
+  }
+  /* Only fade the left edge when there IS something clipped behind it. */
+  .section-label.clipped {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
+    mask-image: linear-gradient(to right, transparent 0, #000 16px);
+  }
+  .section-label-text {
+    display: inline-block;
+    direction: ltr;
+    white-space: nowrap;
   }
   .section-header {
     min-width: 0;
+  }
+  /* Layering: the folder's own name is what identifies the section, so it gets
+     the emphasis; the path above it is context and recedes. Nothing the eye needs
+     is deleted — it just stops competing for attention. */
+  .section-label .part-keep {
+    color: inherit;
+  }
+  .section-label .part-dim,
+  .section-label .part-ellipsis {
+    color: #8a8a8a;
+    font-weight: 400;
   }
   .section-label:hover {
     background: #2a2a2a;

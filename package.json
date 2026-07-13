@@ -1,11 +1,16 @@
 {
   "name": "autogallery",
-  "version": "2.10.7",
+  "version": "2.12.1",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
   "license": "MIT",
-  "author": "John Alexis Guerra Gómez",
+  "author": {
+    "name": "John Alexis Guerra Gómez",
+    "email": "john.guerra@gmail.com",
+    "url": "https://johnguerra.co"
+  },
+  "homepage": "https://johnguerra.co",
   "engines": {
     "node": ">=22"
   },
@@ -28,7 +33,7 @@
     "test:all": "npm run test:unit && npm run test:e2e"
   },
   "dependencies": {
-    "@john-guerra/fisheye-nav": "^0.1.0",
+    "@john-guerra/fisheye-nav": "^0.1.1",
     "better-sqlite3": "^12.11.1",
     "d3": "^7.9.0",
     "electron-updater": "^6.3.0",
@@ -60,7 +65,9 @@
   "build": {
     "appId": "com.johnguerra.autogallery",
     "productName": "AutoGallery",
+    "copyright": "© 2026 John Alexis Guerra Gómez · https://johnguerra.co",
     "npmRebuild": false,
+    "afterPack": "build/adhoc-sign.cjs",
     "directories": {
       "output": "release"
     },
@@ -88,12 +95,14 @@
     },
     "win": {
       "icon": "build/icon.png",
+      "publisherName": "John Alexis Guerra Gómez",
       "target": [
         "nsis"
       ]
     },
     "linux": {
       "icon": "build/icon.png",
+      "maintainer": "John Alexis Guerra Gómez <john.guerra@gmail.com>",
       "target": [
         "AppImage"
       ],
