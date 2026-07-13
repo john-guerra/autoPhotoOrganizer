@@ -6,6 +6,11 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.6
+
+- Fisheye: hovering now moves one group at a time instead of jumping past a whole month, every group can be reached and selected by drilling in, and the selected day is highlighted (it never was, below the top level).
+- Fisheye: the photo-count bars are back inside each row (a histogram silhouette down the column), the icicle shows aggregated counts on years and months, and the row under the cursor always shows its name.
+
 ## 2.10.5
 
 - The fisheye sidebar now uses the widget's own ⚙ settings: on top of view and lens it exposes band size (equal rows vs. photo mass), the bar scale, and the interest weights — and remembers them across reloads.
