@@ -1,9 +1,16 @@
 <script>
   /**
    * Toolbar cluster ④: the selection action bar — Clear / Keep only / Undo and
-   * the Export popover. Renders only when there's a live selection. The
-   * selection itself and all export logic live in App; this emits an event per
-   * action and two-way binds the export popover's open state + form fields.
+   * the Export popover.
+   *
+   * Visible while there's a live selection, and ALSO while a cleared selection is
+   * still waiting to be undone — otherwise Clear takes the Undo button away with
+   * the selection and the "undoable" clear can't be undone (#97). The actions
+   * that need a selection (Clear / Keep only / Export) hide when it's empty; Undo
+   * is the one thing that outlives it.
+   *
+   * The selection itself and all export logic live in App; this emits an event
+   * per action and two-way binds the export popover's open state + form fields.
    */
   import { createEventDispatcher } from "svelte";
   import { clickOutside, onEscape, clampToViewport } from "./actions.js";
@@ -22,19 +29,24 @@
   const dispatch = createEventDispatcher();
 </script>
 
-{#if selectedCount > 0}
+<!-- Stays up while there's a selection OR a clear still waiting to be undone.
+     `selectedCount > 0` alone meant Clear removed the Undo button along with the
+     selection, so the "undoable" clear had no way to be undone (#97). -->
+{#if selectedCount > 0 || lastClearedSelection}
   <div class="cluster selection">
-    <button
-      class="sel-btn"
-      on:click={() => dispatch("clear")}
-      title="Clear selection">Clear</button
-    >
-    <button
-      class="sel-btn"
-      on:click={() => dispatch("keeponly")}
-      title="Focus the whole app on just these photos (keep only)"
-      >Keep only</button
-    >
+    {#if selectedCount > 0}
+      <button
+        class="sel-btn"
+        on:click={() => dispatch("clear")}
+        title="Clear selection">Clear</button
+      >
+      <button
+        class="sel-btn"
+        on:click={() => dispatch("keeponly")}
+        title="Focus the whole app on just these photos (keep only)"
+        >Keep only</button
+      >
+    {/if}
     {#if lastClearedSelection}
       <button
         class="sel-btn undo"
@@ -42,91 +54,93 @@
         title="Restore the selection you just cleared">Undo</button
       >
     {/if}
-    <div
-      class="export-wrap"
-      use:clickOutside={() => (exportOpen = false)}
-      use:onEscape={() => (exportOpen = false)}
-    >
-      <button
-        class="sel-btn export"
-        on:click={() => (exportOpen = !exportOpen)}
-        title="Copy the selected photos into a new folder">Export…</button
+    {#if selectedCount > 0}
+      <div
+        class="export-wrap"
+        use:clickOutside={() => (exportOpen = false)}
+        use:onEscape={() => (exportOpen = false)}
       >
-      {#if exportOpen}
-        <div class="export-panel" use:clampToViewport>
-          <button
-            class="export-close"
-            title="Close"
-            aria-label="Close export"
-            on:click={() => (exportOpen = false)}>✕</button
-          >
-          <label class="export-field">
-            <span>Destination folder</span>
-            <div class="export-row">
+        <button
+          class="sel-btn export"
+          on:click={() => (exportOpen = !exportOpen)}
+          title="Copy the selected photos into a new folder">Export…</button
+        >
+        {#if exportOpen}
+          <div class="export-panel" use:clampToViewport>
+            <button
+              class="export-close"
+              title="Close"
+              aria-label="Close export"
+              on:click={() => (exportOpen = false)}>✕</button
+            >
+            <label class="export-field">
+              <span>Destination folder</span>
+              <div class="export-row">
+                <input
+                  class="dir"
+                  type="text"
+                  placeholder="/path/to/destination"
+                  bind:value={exportDest}
+                  spellcheck="false"
+                />
+                {#if hasNativePicker}
+                  <button
+                    class="choose-folder"
+                    on:click={() => dispatch("choosedest")}
+                  >
+                    Choose…
+                  </button>
+                {/if}
+              </div>
+            </label>
+            <label class="export-field">
+              <span>New folder name</span>
               <input
                 class="dir"
                 type="text"
-                placeholder="/path/to/destination"
-                bind:value={exportDest}
+                placeholder="album-name"
+                bind:value={exportName}
                 spellcheck="false"
               />
-              {#if hasNativePicker}
-                <button
-                  class="choose-folder"
-                  on:click={() => dispatch("choosedest")}
-                >
-                  Choose…
-                </button>
-              {/if}
-            </div>
-          </label>
-          <label class="export-field">
-            <span>New folder name</span>
-            <input
-              class="dir"
-              type="text"
-              placeholder="album-name"
-              bind:value={exportName}
-              spellcheck="false"
-            />
-          </label>
-          <label
-            class="export-move"
-            title="Move the originals out of their current folder instead of copying them"
-          >
-            <input type="checkbox" bind:checked={exportMove} />
-            <span>Move the files instead of copying</span>
-          </label>
-          {#if exportMove}
-            <p class="export-warn" role="note">
-              The originals will be <strong>moved out</strong> of their current folders.
-              You can undo this from the jobs panel afterwards.
-            </p>
-          {/if}
-          <div class="export-actions">
-            <button
-              class="scan"
-              class:danger={exportMove}
-              on:click={() => dispatch("export")}
-              disabled={exporting || !exportDest.trim() || !exportName.trim()}
+            </label>
+            <label
+              class="export-move"
+              title="Move the originals out of their current folder instead of copying them"
             >
-              {exporting
-                ? exportMove
-                  ? "Moving…"
-                  : "Copying…"
-                : `${exportMove ? "Move" : "Copy"} ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
-            </button>
+              <input type="checkbox" bind:checked={exportMove} />
+              <span>Move the files instead of copying</span>
+            </label>
+            {#if exportMove}
+              <p class="export-warn" role="note">
+                The originals will be <strong>moved out</strong> of their current
+                folders. You can undo this from the jobs panel afterwards.
+              </p>
+            {/if}
+            <div class="export-actions">
+              <button
+                class="scan"
+                class:danger={exportMove}
+                on:click={() => dispatch("export")}
+                disabled={exporting || !exportDest.trim() || !exportName.trim()}
+              >
+                {exporting
+                  ? exportMove
+                    ? "Moving…"
+                    : "Copying…"
+                  : `${exportMove ? "Move" : "Copy"} ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
+              </button>
+            </div>
+            {#if exportResult}
+              <p class="export-result">
+                Copied {exportResult.copied}{exportResult.skipped
+                  ? `, skipped ${exportResult.skipped}`
+                  : ""} → {exportResult.target}
+              </p>
+            {/if}
           </div>
-          {#if exportResult}
-            <p class="export-result">
-              Copied {exportResult.copied}{exportResult.skipped
-                ? `, skipped ${exportResult.skipped}`
-                : ""} → {exportResult.target}
-            </p>
-          {/if}
-        </div>
-      {/if}
-    </div>
+        {/if}
+      </div>
+    {/if}
   </div>
 {/if}
 

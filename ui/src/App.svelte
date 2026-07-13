@@ -1227,17 +1227,22 @@
     else focusEntry(i);
   }
 
-  /** Clear the whole selection — guarded (it can represent a lot of work) and
-   * undoable until the next clear replaces the stash. */
+  /**
+   * Clear the whole selection — undoable until the next clear replaces the stash.
+   *
+   * Deliberately NOT confirm()-guarded (#97). The clear is already recoverable:
+   * it stashes the ids and SelectionBar shows an Undo button the moment there's
+   * something to restore, which is the affordance CLAUDE.md asks for ("prefer
+   * soft-delete + a visible undo over a hard action"). A native confirm() on top
+   * of that made you answer a modal about something you could already take back —
+   * and it froze the whole UI thread while it was up.
+   */
   function clearSelection() {
     if (selectedIds.size === 0) return;
     const n = selectedIds.size;
-    if (
-      !confirm(`Clear all ${n} selected photo${n === 1 ? "" : "s"}? (undoable)`)
-    )
-      return;
     lastClearedSelection = new Set(selectedIds);
     selectedIds = new Set();
+    status = `Cleared ${n.toLocaleString()} photo${n === 1 ? "" : "s"} from the selection — Undo to restore`;
   }
 
   function undoClearSelection() {
