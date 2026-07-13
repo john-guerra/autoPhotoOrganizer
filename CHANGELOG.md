@@ -6,6 +6,28 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.4
+
+- **The fisheye sidebar understands nesting now.** Group by year → month → day
+  and every level gets its own row, indented by depth, so you can always see
+  which level you are on. Hovering still magnifies where you point, and clicking
+  any band jumps the feed to _that_ level — click a day to land on the day, click
+  the year to land on the year.
+- **A new Icicle view** for the sidebar (⚙ → View): one column per level instead
+  of an indented list, with each group's band spanning exactly its children.
+- **The lens algorithm is now yours to pick** (⚙ → Lens). _Hybrid_ (the new
+  default) magnifies around the cursor and folds quiet stretches away into
+  labelled rows like `2019` or `⋯ 4 more`, so a 3,000-day library stays readable.
+  _Fisheye_ keeps every group. _Interest_ keeps full-size rows and no
+  magnification. _Uniform_ turns the lens off.
+- **The count bars are legible again.** They were all rendering at minimum length
+  on libraries where one bucket (e.g. "Unknown date") holds most of the photos;
+  they now use a log scale, so busy days actually look busy.
+- **Resizing the sidebar resizes the fisheye track.** It used to be pinned at a
+  fixed width no matter how wide you dragged the pane.
+- Under the hood, the whole navigator moved into its own reusable widget
+  (`@john-guerra/fisheye-nav`) with a property-based test suite.
+
 ## 2.10.3
 
 - **Undo actually works after clearing a selection** (#97). Clearing used to
