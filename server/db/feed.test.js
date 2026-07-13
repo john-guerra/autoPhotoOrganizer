@@ -41,6 +41,15 @@ function setTakenAt(db, id, isoOrNull) {
   );
 }
 
+/** Mark EXIF extraction as ATTEMPTED (width is the sentinel — see sort.js). A
+ *  freshly-scanned photo has width NULL = "not read yet", and the date fallback
+ *  deliberately doesn't fire for those. */
+function markExifRead(db, id) {
+  db.prepare(`UPDATE photos SET width = 100, height = 100 WHERE id = ?`).run(
+    id
+  );
+}
+
 describe("getFeedPage — composite ordering", () => {
   it("orders by folder ascending when groupBy is ['folder']", () => {
     const db = getDb();
@@ -71,18 +80,48 @@ describe("getFeedPage — composite ordering", () => {
     expect(items.map((i) => i.groupValues.year)).toEqual(["2024", "2020"]);
   });
 
-  it("sorts photos with no taken_at into an Unknown bucket, last", () => {
+  it("dates a photo with no EXIF by the file's creation date, not Unknown", () => {
     const db = getDb();
     seedVolume(db, 1);
-    const [known, unknown] = upsertScan(db, "/photos/trip", 1, [
-      { name: "known.jpg", size: 1, mtimeMs: 1, kind: "image" },
-      { name: "unknown.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    const [exif, noExif] = upsertScan(db, "/photos/trip", 1, [
+      { name: "exif.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      // A screenshot / export / SD-card copy: no EXIF, but the filesystem knows
+      // when it was created (2017).
+      {
+        name: "no-exif.jpg",
+        size: 1,
+        mtimeMs: 1,
+        btimeMs: 1497484800000,
+        kind: "image",
+      },
     ]);
-    setTakenAt(db, known.id, "2020-01-01T00:00:00.000Z");
-    // unknown.jpg keeps taken_at = NULL.
+    setTakenAt(db, exif.id, "2020-01-01T00:00:00.000Z");
+    markExifRead(db, exif.id);
+    markExifRead(db, noExif.id); // we looked; there was genuinely no date
     const { items } = getFeedPage(db, { groupBy: ["year"], after: 10 });
-    expect(items.map((i) => i.name)).toEqual(["known.jpg", "unknown.jpg"]);
-    expect(items[1].groupValues.year).toBe("");
+    expect(items.map((i) => i.name)).toEqual(["exif.jpg", "no-exif.jpg"]);
+    expect(items.map((i) => i.groupValues.year)).toEqual(["2020", "2017"]);
+    // …and it reports that date to the UI, rather than a blank taken date.
+    expect(items[1].takenAt).toBe(new Date(1497484800000).toISOString());
+  });
+
+  it("leaves a photo whose EXIF has NOT been read yet in Unknown", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    // Same file as above, but nobody has opened it: enrichment is lazy. Dating
+    // it by btime now would move it to another group the moment it is read.
+    upsertScan(db, "/photos/trip", 1, [
+      {
+        name: "unread.jpg",
+        size: 1,
+        mtimeMs: 1,
+        btimeMs: 1497484800000,
+        kind: "image",
+      },
+    ]);
+    const { items } = getFeedPage(db, { groupBy: ["year"], after: 10 });
+    expect(items[0].groupValues.year).toBe("");
+    expect(items[0].takenAt).toBe(null);
   });
 
   it("applies multiple levels outermost-first, mixed directions", () => {
@@ -1039,6 +1078,8 @@ describe("photoIdsMatchingFilter", () => {
         kind: "image",
       }, // 2020
     ]);
+    markExifRead(db, a.id); // both were read; neither had an EXIF date
+    markExifRead(db, b.id);
     const sort = { by: "date_created", dir: "desc" };
     // Grouped by created-year the feed puts a in 2017; the id set must agree.
     expect(
@@ -1058,11 +1099,12 @@ describe("photoIdsMatchingFilter", () => {
         sort
       )
     ).toEqual([b.id]);
-    // With no (or a taken-date) sort, taken_at is NULL → the '' Unknown bucket,
-    // so a created-year path correctly finds nothing (the two never mix).
+    // These files have no EXIF, so the taken date FALLS BACK to the file's
+    // creation date: a taken-date path now finds them under their created year
+    // instead of dumping both into Unknown, which is the point of the fallback.
     expect(
       photoIdsMatchingFilter(db, {}, [{ dimension: "year", value: "2017" }])
-    ).toEqual([]);
+    ).toEqual([a.id]);
   });
 });
 

@@ -34,6 +34,14 @@ function setTakenAt(db, id, isoOrNull) {
   );
 }
 
+/** Mark EXIF extraction as ATTEMPTED (width is the sentinel — see sort.js), so
+ *  the file-date fallback applies. Un-read photos deliberately stay Unknown. */
+function markExifRead(db, id) {
+  db.prepare(`UPDATE photos SET width = 100, height = 100 WHERE id = ?`).run(
+    id
+  );
+}
+
 describe("getTreeNode — root level", () => {
   it("returns the whole library's total and top-level nodes with counts", () => {
     const db = getDb();
@@ -108,18 +116,25 @@ describe("getTreeNode — nested path", () => {
     ]);
   });
 
-  it("formats the empty-string date sentinel as Unknown", () => {
+  it("files a photo with no EXIF under its file-creation year", () => {
     const db = getDb();
     seedVolume(db, 1);
-    upsertScan(db, "/photos/trip", 1, [
-      { name: "noexif.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    const [p] = upsertScan(db, "/photos/trip", 1, [
+      {
+        name: "noexif.jpg",
+        size: 1,
+        mtimeMs: 1,
+        btimeMs: 1497484800000, // 2017
+        kind: "image",
+      },
     ]);
+    markExifRead(db, p.id);
     const { nodes } = getTreeNode(db, {
       groupBy: ["folder", "year"],
       path: [{ dimension: "folder", value: "/photos/trip" }],
     });
     expect(nodes).toEqual([
-      { value: "", label: "Unknown", count: 1, hasChildren: false },
+      { value: "2017", label: "2017", count: 1, hasChildren: false },
     ]);
   });
 
@@ -236,15 +251,29 @@ describe("getFlatTree", () => {
     ]);
   });
 
-  it("keeps the empty-string date sentinel unformatted for a photo with NULL taken_at", () => {
+  it("falls all the way back to mtime when a file has neither EXIF nor a birth time", () => {
     const db = getDb();
     seedVolume(db, 1);
-    upsertScan(db, "/photos/trip", 1, [
-      { name: "noexif.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    // btimeMs omitted: some filesystems don't record one.
+    const [p] = upsertScan(db, "/photos/trip", 1, [
+      { name: "noexif.jpg", size: 1, mtimeMs: 1497484800000, kind: "image" },
     ]);
+    markExifRead(db, p.id);
     const { leaves } = getFlatTree(db, {
       groupBy: ["folder", "year"],
     });
+    expect(leaves).toEqual([
+      { values: { folder: "/photos/trip", year: "2017" }, count: 1 },
+    ]);
+  });
+
+  it("keeps the '' Unknown sentinel for a photo whose EXIF is not read yet", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/photos/trip", 1, [
+      { name: "unread.jpg", size: 1, mtimeMs: 1497484800000, kind: "image" },
+    ]);
+    const { leaves } = getFlatTree(db, { groupBy: ["folder", "year"] });
     expect(leaves).toEqual([
       { values: { folder: "/photos/trip", year: "" }, count: 1 },
     ]);

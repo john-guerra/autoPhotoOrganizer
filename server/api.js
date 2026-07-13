@@ -56,6 +56,7 @@ import {
   workingSetTimes,
   countGroupPath,
   fetchGroupRowsAtOffsets,
+  takenAtIso,
   DIMENSIONS,
 } from "./db/feed.js";
 import { getTreeNode, getFlatTree } from "./db/tree.js";
@@ -665,7 +666,9 @@ export function registerApi(app) {
       .filter(Boolean)
       .map((p) => ({
         id: p.id,
-        takenAt: p.taken_at ? new Date(p.taken_at).toISOString() : null,
+        // EXIF date, else the file's creation date (see TAKEN_AT_EXPR). Same
+        // helper the feed rows use, so the loupe and the grid never disagree.
+        takenAt: takenAtIso(p),
         width: p.width ?? null,
         height: p.height ?? null,
         duration: p.duration ?? null,

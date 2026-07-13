@@ -4,31 +4,35 @@ import {
   sortSeekDim,
   applySortToDims,
   dateAttrExpr,
+  TAKEN_AT_EXPR,
+  SORT_ATTRS,
+  effectiveTakenAtMs,
 } from "./sort.js";
 
 /**
  * Grouping dimensions available to the feed. Each maps to a plain SQL
- * expression over `photos`/`folders` — no new columns. Date dimensions
- * fall back to an empty string (not a real value) for NULL `taken_at`,
- * because an empty string sorts before every real value in both ASC and
- * DESC comparisons for the string data these expressions produce — the
- * cheapest way to force "unknown date" to the end of a DESC-ordered feed
- * without a separate null-flag sort key. `formatGroupValue` (frontend,
- * Task 4) turns "" back into the "Unknown" label for display.
+ * expression over `photos`/`folders` — no new columns. Date dimensions read
+ * TAKEN_AT_EXPR (EXIF date, else the file's creation date — see sort.js), and
+ * fall back to an empty string for a file with no usable date at all, because
+ * an empty string sorts before every real value in both ASC and DESC
+ * comparisons for the string data these expressions produce — the cheapest way
+ * to force "unknown date" to the end of a DESC-ordered feed without a separate
+ * null-flag sort key. `formatGroupValue` (frontend) turns "" back into the
+ * "Unknown" label for display.
  */
 export const DIMENSIONS = {
   folder: { expr: "folders.abs_path", direction: "ASC" },
   folderName: { expr: "folders.abs_path", direction: "ASC" },
   year: {
-    expr: "COALESCE(strftime('%Y', photos.taken_at / 1000, 'unixepoch'), '')",
+    expr: `COALESCE(strftime('%Y', ${TAKEN_AT_EXPR} / 1000, 'unixepoch'), '')`,
     direction: "DESC",
   },
   month: {
-    expr: "COALESCE(strftime('%m', photos.taken_at / 1000, 'unixepoch'), '')",
+    expr: `COALESCE(strftime('%m', ${TAKEN_AT_EXPR} / 1000, 'unixepoch'), '')`,
     direction: "DESC",
   },
   day: {
-    expr: "COALESCE(strftime('%Y-%m-%d', photos.taken_at / 1000, 'unixepoch'), '')",
+    expr: `COALESCE(strftime('%Y-%m-%d', ${TAKEN_AT_EXPR} / 1000, 'unixepoch'), '')`,
     direction: "DESC",
   },
   camera: { expr: "COALESCE(photos.camera, '')", direction: "ASC" },
@@ -150,6 +154,14 @@ function startPathCondition(dims, path) {
   return { sql: clauses.join(" OR "), params };
 }
 
+/** The effective taken date as an ISO string, or null if the file has no usable
+ *  date at all. Shared by the feed rows and /api/meta so they can't disagree.
+ *  @param {{taken_at?:number|null, btime?:number|null, mtimeMs?:number|null, mtime?:number|null}} r */
+export function takenAtIso(r) {
+  const ms = effectiveTakenAtMs(r);
+  return ms ? new Date(ms).toISOString() : null;
+}
+
 /**
  * @param {{id:number, name:string, size:number, mtimeMs:number, rating:number, preferredCover:number, width:number|null, height:number|null, taken_at:number|null, btime:number|null}} r
  * @param {Array<{name:string}>} dims
@@ -166,7 +178,9 @@ function rowToItem(r, dims) {
     preferredCover: r.preferredCover === 1,
     width: r.width,
     height: r.height,
-    takenAt: r.taken_at ? new Date(r.taken_at).toISOString() : null,
+    // The date the UI shows and groups by: EXIF, else the file's creation date
+    // (see TAKEN_AT_EXPR — this is its JS twin, and must agree with it).
+    takenAt: takenAtIso(r),
     // Filesystem birth time (epoch ms) — the "created" date the timeline uses
     // when sorting by date_created; kept numeric (the marker reads it directly).
     createdAt: r.btime ?? null,
@@ -661,7 +675,7 @@ export function photoCountMatchingFilter(db, filterSpec = {}) {
 
 /**
  * The working set as a time-ordered timeline for album clustering: each photo's
- * id, effective time (taken_at, falling back to mtime for undated files), and
+ * id, effective time (TAKEN_AT_EXPR: EXIF date, else the file's creation date), and
  * mtime version (for thumbnails), ordered ascending by that time. Respects the
  * same filter/scope as the feed. Capped at `limit`; `truncated` signals the
  * caller to narrow (keep-only) first — album detection is meant for a bounded
@@ -675,8 +689,10 @@ export function workingSetTimeline(db, filterSpec = {}, limit = 2000) {
   const filter = buildFilter(filterSpec);
   const rows = db
     .prepare(
+      // Clustering needs a time for EVERY photo (a NULL would break the gaps),
+      // so this uses the unconditional sort expr, not the guarded group one.
       `SELECT photos.id AS id,
-              COALESCE(photos.taken_at, photos.mtime) AS t,
+              ${SORT_ATTRS.date_taken.expr} AS t,
               photos.mtime AS mtimeMs
        FROM photos JOIN folders ON folders.id = photos.folder_id
        WHERE photos.stale = 0 AND (${filter.sql})

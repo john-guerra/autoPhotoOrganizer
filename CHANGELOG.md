@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.3
+
+- **A photo with no EXIF date now uses the file's creation date** instead of
+  landing in "Unknown". Screenshots, exports, scans and stripped images finally
+  sort and group under a real date, in the grid, the tree and the timeline alike.
+- Photos the app hasn't read yet still wait in "Unknown" rather than being filed
+  under a guessed date — so nothing jumps between groups while you browse.
+
 ## 2.12.2
 
 - **The grid zooms out two steps further.** Two new smaller thumbnail sizes (the
