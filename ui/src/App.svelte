@@ -2554,12 +2554,16 @@
     if (ok && focusAfterAdd) await applyScope(folderScope(p));
   }
 
+  /** The native picker fills the path in and leaves the panel open — it does NOT
+   * scan. Scanning straight out of the picker would make every option in this
+   * panel (which subfolders to import, whether to focus) unreachable for anyone
+   * with a native picker, i.e. the packaged app: the scan would already be
+   * running by the time the panel came back. The user commits with the button. */
   async function chooseFolder() {
     const path = await window.autogallery?.pickFolder();
-    if (path) {
-      dir = path;
-      await submitAddFolder();
-    }
+    if (!path) return;
+    dir = path;
+    addFolderOpen = true;
   }
 
   // Flickr-style justified layout via the pure module in lib/layouts/ —
