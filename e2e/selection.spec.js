@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { trackPageErrors, openApp, statusBar } from "./helpers.js";
+import { FOLDERS, TOTAL_PHOTOS } from "./fixture.mjs";
 
 /**
  * P1 — SELECTION. Select-all, clear, and undo. The selection is what every
@@ -14,10 +15,24 @@ test.describe("@p1 selection", () => {
     const errors = trackPageErrors(page);
     await openApp(page);
 
+    // ⌘A is a two-step (2.10.10): the first press takes the group you're in, and
+    // says so; a second press escalates to the whole working set. Asserting only
+    // the end state would let the confirmation step vanish unnoticed.
     await page.keyboard.press("Meta+a");
+    await expect(statusBar.root(page)).toContainText(
+      new RegExp(`${FOLDERS[0].count} selected`)
+    );
+    await expect(statusBar.root(page)).toContainText(/again for all/);
+
+    // The second press ASKS rather than acting — taking the whole library is not
+    // something a stray keystroke should do.
+    await page.keyboard.press("Meta+a");
+    await statusBar.confirmSelectAll(page).click();
 
     // The whole working set, not just the loaded feed window.
-    await expect(statusBar.root(page)).toContainText(/11 selected/);
+    await expect(statusBar.root(page)).toContainText(
+      new RegExp(`${TOTAL_PHOTOS} selected`)
+    );
 
     // Still responsive: a long block here is the #97 stall regressing.
     const t0 = Date.now();
@@ -37,7 +52,11 @@ test.describe("@p1 selection", () => {
     await openApp(page);
 
     await page.keyboard.press("Meta+a");
-    await expect(statusBar.root(page)).toContainText(/11 selected/);
+    await page.keyboard.press("Meta+a"); // escalate...
+    await statusBar.confirmSelectAll(page).click(); // ...and confirm
+    await expect(statusBar.root(page)).toContainText(
+      new RegExp(`${TOTAL_PHOTOS} selected`)
+    );
 
     await statusBar.clear(page).click();
     await expect(statusBar.root(page)).toContainText(/0 selected/);
@@ -46,7 +65,9 @@ test.describe("@p1 selection", () => {
     const undo = page.locator(".sel-btn", { hasText: /^Undo$/ });
     await expect(undo).toBeVisible();
     await undo.click();
-    await expect(statusBar.root(page)).toContainText(/11 selected/);
+    await expect(statusBar.root(page)).toContainText(
+      new RegExp(`${TOTAL_PHOTOS} selected`)
+    );
 
     expect(errors).toEqual([]);
   });

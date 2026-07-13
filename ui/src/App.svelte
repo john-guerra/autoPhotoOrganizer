@@ -73,6 +73,13 @@
   import ServerBanner from "./lib/ServerBanner.svelte";
   import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
+  import {
+    buildTokenStats,
+    buildSiblingIndex,
+    labelParts,
+    dirname,
+  } from "./lib/folderLabel.js";
+  import { buildFolderTree, relativeTo } from "./lib/folderTree.js";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import UpdateBanner from "./lib/UpdateBanner.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
@@ -1875,25 +1882,56 @@
     return head[0]?.id ?? null;
   }
 
+  /**
+   * The entry index where `path`'s group starts in the current window, or -1.
+   * The group you clicked is the thing to anchor the refetch on — `selected` can
+   * be anywhere (it's the FOCUSED tile, and a user who has only scrolled hasn't
+   * focused anything, so it sits at 0, at the top of the library).
+   */
+  function firstEntryIndexOfPath(path) {
+    const key = pathKey(path);
+    for (let i = 0; i < displayEntries.length; i++) {
+      const e = displayEntries[i];
+      if (!e) continue;
+      if (e.kind === "placeholder") {
+        if (pathKey(e.item.path) === key) return i;
+        continue;
+      }
+      const p = deriveCurrentPath(i, displayEntries, groupBy);
+      if (p && pathKey(p) === key) return i;
+    }
+    return -1;
+  }
+
   async function toggleSectionCollapse(path) {
     const key = pathKey(path);
     const collapsing = !collapsedPaths.some((p) => pathKey(p) === key);
-    // Expanding: remember where this group's header sits right now, and arm the
-    // pin BEFORE the refetch — recenterFeedOnId sets focusPending, whose focus()
-    // would otherwise scroll to `selected`; the pin's presence turns that scroll
-    // off (preventScroll) and holds the header in place instead (issue #74).
-    if (!collapsing) {
-      const offset = groupAnchorOffset(key);
-      expandPin = offset == null ? null : { key, offset };
-    }
+    // Hold this group's header where it is across the refetch, in BOTH
+    // directions. Arm the pin BEFORE the refetch — recenterFeedOnId sets
+    // focusPending, whose focus() would otherwise scroll to `selected`; the
+    // pin's presence turns that scroll off (preventScroll) and holds the header
+    // in place instead (issue #74). Collapsing needs it just as much: you were
+    // looking at this group when you clicked it.
+    const offset = groupAnchorOffset(key);
+    expandPin = offset == null ? null : { key, offset };
+
     collapsedPaths = collapsing
       ? [...collapsedPaths, path]
       : collapsedPaths.filter((p) => pathKey(p) !== key);
-    // Expand seeks to the group's own first photo (loads from the top, extends
-    // downward via loadMore("after")); collapse re-centers on the current
-    // selection, excluding the group about to be hidden.
+
+    // Both directions seek from THIS GROUP, never from `selected`.
+    //
+    // Collapse used to re-center on safeFocusId(selected, …). But `selected` is
+    // the focused tile, and a user who has only scrolled has never focused
+    // anything — it's photo 0. So collapsing a group far down the feed reloaded
+    // the window from the TOP of the library: the view jumped, and the group you
+    // just clicked fell outside the loaded window, so its placeholder never
+    // arrived and the snapshot band you asked for never rendered. Anchoring on
+    // the group keeps it inside the window, which is the whole point of clicking
+    // it. (Falls back to `selected` when the group isn't in the window at all.)
+    const anchorIndex = firstEntryIndexOfPath(path);
     const focusId = collapsing
-      ? safeFocusId(selected, path)
+      ? safeFocusId(anchorIndex >= 0 ? anchorIndex : selected, path)
       : ((await firstPhotoIdOfGroup(path)) ?? safeFocusId(selected));
     await recenterFeedOnId(focusId);
     if (expandPin) {
@@ -2000,6 +2038,78 @@
     const key = pathKey(path);
     if (!_collapsedKeys.has(key)) return "grid";
     return _snapshots.has(key) ? "snapshot" : "collapsed";
+  }
+
+  // --- Folder labels ---------------------------------------------------------
+  // Folder names are mostly redundancy — the year the parent already states, the
+  // _peq on every folder in the library. folderLabel.js decides which tokens earn
+  // a pixel; the corpus is the whole library (not the filtered view), so a label
+  // never changes shape as you filter or scroll. The tree sidebar is handed the
+  // same stats, so a folder reads the same in both places.
+  $: folderPaths = library.map((entry) => entry.path);
+  $: tokenStats = buildTokenStats(folderPaths);
+  $: siblingIndex = buildSiblingIndex(folderPaths);
+  // The same roots the tree draws. A header drops everything ABOVE its own root
+  // ("/Users/me/Pictures") and keeps the root itself ("backup/…"), so it
+  // still says which library it belongs to. Stripping a single library-wide
+  // ancestor can't work once folders live on more than one volume — they share
+  // only "/" — and then every header would render its full absolute path and get
+  // cut at the tail, losing the very part that names the group.
+  $: libraryRoots = buildFolderTree(
+    folderPaths.map((value) => ({ value, count: 0 }))
+  );
+  function headerPrefixFor(value) {
+    const root = libraryRoots.find(
+      (r) => value === r.value || value.startsWith(`${r.value}/`)
+    );
+    return root ? dirname(root.value) : "";
+  }
+
+  /** A folder section header, as display parts.
+   *
+   * Unlike a tree row, a header stands alone — there is no parent row above it to
+   * supply context — so it keeps its whole path. The same rule runs over all of
+   * it, path segments included: the prefix every folder shares is on 100% of the
+   * library, so it recedes on its own, while a directory that is genuinely rare
+   * stays bright. The siblings that decide what's redundant are the folders that
+   * actually share this one's parent on disk — not whatever happens to be in the
+   * feed window — so a header never changes shape as you scroll. */
+  function folderHeaderParts(value) {
+    const siblings = siblingIndex.get(dirname(value)) ?? [];
+    return labelParts(relativeTo(value, headerPrefixFor(value)), {
+      stats: tokenStats,
+      siblings,
+    });
+  }
+
+  /** Header parts for any dimension: only folders need the treatment. */
+  /** Header parts for any dimension: only folders need the treatment.
+   *
+   * `_stats` / `_roots` are unused INSIDE the function — they are there so the
+   * template's call site names them, and Svelte re-runs the each-block when they
+   * change. Svelte's reactivity tracks the variables an expression MENTIONS, not
+   * what the called function closes over: without them, headers rendered before
+   * /api/library resolved kept an empty corpus forever, printing the whole
+   * absolute path with nothing dimmed. (TreeNode.svelte carries a comment about
+   * the same trap for collapsedPaths.) */
+  function headerParts(header, _stats, _roots) {
+    return header.path?.at(-1)?.dimension === "folder"
+      ? folderHeaderParts(header.path.at(-1).value)
+      : [{ text: header.label, kind: "keep" }];
+  }
+
+  /** Svelte action: fade the clipped edge only when something IS hidden behind it.
+   * The header shows the END of the path (see .section-label), so what overflows
+   * is on the left — and CSS can't measure that, hence the class. `_parts` is here
+   * so the call site names it and the action re-measures when the label changes. */
+  function tailClip(el, _parts) {
+    const mark = () =>
+      el.parentElement?.classList.toggle(
+        "clipped",
+        el.scrollWidth > el.parentElement.clientWidth
+      );
+    mark();
+    return { update: mark };
   }
 
   /** Tooltip for the group toggle, from the registry (no parallel string table:
@@ -2132,10 +2242,28 @@
       foldingLeaves = false;
     }
     if (!leaves.length) return cycleGroupState(path); // nothing beneath → aggregate
+    return cycleLeafPaths(leaves, {
+      // Clear any state anywhere inside this subtree — including the parent's own
+      // aggregate collapse — before applying the new one to the leaves.
+      insidePath: (p) => isPathUnder(p, path),
+      insideKey: (k) => isKeyUnder(k, path),
+    });
+  }
+
+  /** Cycle a SET of groups as one: the shared state math behind shift-folding a
+   * subgroup and behind the tree's folder rows (a folder row can stand for every
+   * folder beneath it, and a virtual ancestor has no state of its own at all).
+   * `insidePath`/`insideKey` say what counts as "inside" the thing being folded —
+   * a group subtree for one caller, an explicit list of folders for the other. */
+  async function cycleLeafPaths(leaves, { insidePath, insideKey } = {}) {
+    if (!leaves.length) return;
     if (leaves.length > MAX_FOLD_LEAVES) {
       error = `That group has more than ${MAX_FOLD_LEAVES} subgroups — too many to fold at once. Collapse it as a whole instead (click without Shift).`;
       return;
     }
+    const leafKeys = new Set(leaves.map(pathKey));
+    const isInsidePath = insidePath ?? ((p) => leafKeys.has(pathKey(p)));
+    const isInsideKey = insideKey ?? ((k) => leafKeys.has(k));
 
     // Next state, from where the leaves collectively are now (all-expanded →
     // snapshot → collapsed → expanded). A mixed set resets to expanded.
@@ -2147,11 +2275,9 @@
     const uniform = states.every((x) => x === states[0]);
     const next = uniform ? nextRendererId(states[0]) : DEFAULT_RENDERER_ID;
 
-    // Drop any existing state inside this subtree (including the parent's own
-    // aggregate collapse), then apply the new state to the leaves.
-    const nextCollapsed = collapsedPaths.filter((p) => !isPathUnder(p, path));
+    const nextCollapsed = collapsedPaths.filter((p) => !isInsidePath(p));
     const nextSnaps = new Set(
-      [...snapshotGroupKeys].filter((k) => !isKeyUnder(k, path))
+      [...snapshotGroupKeys].filter((k) => !isInsideKey(k))
     );
     if (isServerCollapsed(next)) {
       for (const lp of leaves) {
@@ -2169,8 +2295,13 @@
   }
 
   /** Entry point for every group toggle (feed header + tree icon): Shift folds
-   * the leaves, a plain click aggregates the group itself. */
-  function onGroupToggle(path, event) {
+   * the leaves, a plain click aggregates the group itself.
+   *
+   * `paths` arrives from the tree when a row speaks for more than one group — a
+   * folder row that has sub-folders beneath it, or a virtual ancestor that has no
+   * group of its own. Those cycle together. */
+  function onGroupToggle(path, event, paths) {
+    if (paths?.length) return cycleLeafPaths(paths);
     return event?.shiftKey ? cycleGroupLeaves(path) : cycleGroupState(path);
   }
 
@@ -3614,7 +3745,9 @@
           {sort}
           filter={displayFilter}
           refreshToken={libraryVersion}
-          on:toggle={(e) => onGroupToggle(e.detail.path, e.detail.event)}
+          {tokenStats}
+          on:toggle={(e) =>
+            onGroupToggle(e.detail.path, e.detail.event, e.detail.paths)}
           on:jump={(e) => jumpToPath(e.detail)}
         />
       {:else}
@@ -3743,7 +3876,17 @@
                       }`}
                       on:dblclick={() => startRename(header.path)}
                     >
-                      {header.label}
+                      <span
+                        class="section-label-text"
+                        use:tailClip={headerParts(
+                          header,
+                          tokenStats,
+                          libraryRoots
+                        )}
+                        >{#each headerParts(header, tokenStats, libraryRoots) as part}<span
+                            class="part-{part.kind}">{part.text}</span
+                          >{/each}</span
+                      >
                     </button>
                   {/if}
                   {#if header.path && headerCounts[pathKey(header.path)] !== undefined}
@@ -4213,16 +4356,44 @@
     border-radius: 4px;
     text-align: left;
     /* A long group name used to WRAP, growing the sticky header band and letting
-       it cover the rows beneath it. Keep it to one line and ellipsize; the full
-       value is on the button's title attribute (see the markup). */
+       it cover the rows beneath it. Keep it to one line; the full value is on the
+       button's title attribute (see the markup).
+
+       Clip the HEAD, not the tail — same rule as the tree rows. A folder path
+       ends with the folder's own name, so a normal ellipsis drops exactly the
+       part that identifies the group: two sibling folders under one long parent
+       both render as ".../2025_11Nov_08 Canon 1/2…" and become indistinguishable.
+       direction:rtl on the clipper flips which end overflows; the inner span
+       stays ltr, so the text itself is unchanged. */
+    direction: rtl;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
     min-width: 0;
-    max-width: 46ch;
+    max-width: 78ch;
+  }
+  /* Only fade the left edge when there IS something clipped behind it. */
+  .section-label.clipped {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
+    mask-image: linear-gradient(to right, transparent 0, #000 16px);
+  }
+  .section-label-text {
+    display: inline-block;
+    direction: ltr;
+    white-space: nowrap;
   }
   .section-header {
     min-width: 0;
+  }
+  /* Layering: the folder's own name is what identifies the section, so it gets
+     the emphasis; the path above it is context and recedes. Nothing the eye needs
+     is deleted — it just stops competing for attention. */
+  .section-label .part-keep {
+    color: inherit;
+  }
+  .section-label .part-dim,
+  .section-label .part-ellipsis {
+    color: #8a8a8a;
+    font-weight: 400;
   }
   .section-label:hover {
     background: #2a2a2a;

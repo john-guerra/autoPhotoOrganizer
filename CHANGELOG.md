@@ -6,6 +6,57 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.13
+
+- **Collapsing a group no longer throws you back to the top of the library.**
+  Folding or snapshotting a group far down the feed used to reload the window
+  from photo #1 — the view jumped, and the group you had just clicked scrolled
+  out from under you (often without even showing its snapshot). The feed now
+  stays anchored on the group you clicked, in both directions (#113).
+
+## 2.10.12
+
+- **Every folder-tree bug that shipped now has a test that would have caught it.**
+  Five defects in the folder tree passed a green unit suite and were found only by
+  looking at the running app; the browser tier now covers each one — nesting, a
+  photo-less parent folder that folds its children, the tree opening on load, a
+  label that keeps the folder's name when it has to be clipped, and two folders
+  whose names differ by a single character rendering differently. Each was checked
+  to fail with its fix reverted, not merely to pass.
+
+## 2.10.11
+
+- **The Library is a real folder tree now.** Grouping by folder used to list every
+  folder as a full absolute path, one flat row each. It now nests them, joining
+  single-child chains into one row the way VS Code does, and rolls the photo counts
+  up the tree. Folders on different drives come out as separate roots, so a library
+  spread across several volumes reads properly.
+- **Folder rows spend their width on the part that tells folders apart.** A name like
+  `2013_01Jan_02_Harbour_Walk_selected_peq` now shows the date and the `selected`/`peq`
+  boilerplate muted, with the event name bright — and the row is anchored to its end,
+  so a long name is clipped at the front (which the parent row already told you)
+  instead of at the subject. Nothing is ever removed: hover slides the name back into
+  view and the full path is in the tooltip.
+- **A folder row can fold everything beneath it.** Clicking the grid/strip/bar icon on
+  a parent folder cycles every group under it together, and shows a "mixed" icon when
+  they disagree. Clicking a folder that has no photos of its own jumps to the first
+  one that does.
+- **The path never outshines the folder's name.** A header put its rare middle
+  words (`Backup`, `temp`) in lights while the folder's own name sat grey beneath
+  them. Path segments are context now — always muted — and the emphasis goes to
+  the name. If the name is nothing but boilerplate (`2025_11Nov_08 Canon 1`), what
+  comes back bright is whatever differs from its siblings: the `1`. Two camera
+  folders that differ by one character no longer read identically.
+- **Feed headers keep the folder's name, not the path.** A long header used to be
+  cut at the end — so two groups under the same long parent both read
+  `…/2025_11Nov_08 Canon 1/2…` and looked identical. The header now clips its front
+  (the part the path above already told you) and always shows the folder it names.
+- **The tree starts expanded when you group by folder**, like it already did for
+  multi-level groupings — and it no longer stops a third of the way through a big
+  library. Opening a folder's sub-folders costs no request (they arrive with the
+  level), so they were being counted against a budget meant for requests.
+- **The hover reveal on a long name is ~5× faster** — a reveal, not a ticker.
+
 ## 2.10.10
 
 - **You can see where you are again.** A selected photo is marked by its gold
