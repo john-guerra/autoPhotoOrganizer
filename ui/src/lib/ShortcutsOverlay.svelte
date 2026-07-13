@@ -23,7 +23,13 @@
         { keys: ["X"], label: "Toggle selection (auto-advances in loupe)" },
         {
           keys: ["⌘", "/", "Ctrl", "+", "A"],
-          label: "Select every photo currently shown",
+          label:
+            "Add this group to the selection — press again to take everything shown (asks first)",
+        },
+        {
+          keys: ["⌘", "/", "Ctrl", "+", "Shift", "+", "A"],
+          label:
+            "Remove this group from the selection — press again to remove everything shown (asks first)",
         },
         { keys: ["C"], label: "Set / unset this photo as its stack's cover" },
         { keys: ["G"], label: "Group the selected photos into one stack" },
