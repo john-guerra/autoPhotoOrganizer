@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.5
+
+- **Re-reading metadata for a large selection no longer kills the app.** Select
+  everything (⌘A) and hit "Re-read metadata" and the server used to die outright,
+  taking the window with it.
+- **The metadata sweep now stays out of your way.** It reads in the background
+  only while you aren't waiting on anything, so scrolling stays as fast as it is
+  when nothing is running — thumbnails no longer slow to a crawl or fail to load
+  while a big read is in progress.
+
 ## 2.12.4
 
 - **"Read all metadata"** (Folders → Manage library) reads the date, camera and

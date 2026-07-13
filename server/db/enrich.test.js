@@ -7,6 +7,7 @@ import { upsertScan } from "./photos.js";
 import {
   pendingMetaPhotos,
   pendingMetaCount,
+  photosByIds,
   writeMeta,
   enrichBatch,
 } from "./enrich.js";
@@ -78,6 +79,41 @@ describe("pendingMetaPhotos / pendingMetaCount", () => {
     const [a] = seed(db, ["a.jpg"]);
     db.prepare(`UPDATE photos SET stale = 1 WHERE id = ?`).run(a.id);
     expect(pendingMetaCount(db)).toBe(0);
+  });
+});
+
+describe("photosByIds", () => {
+  it("handles a whole-library id list without blowing SQLite's parameter limit", () => {
+    // ⌘A on a big library, then "Re-read metadata". One `IN (?,?,…)` per id
+    // exceeds SQLITE_MAX_VARIABLE_NUMBER (32766) and throws "too many SQL
+    // variables" — and since the route is an async handler, Express 4 doesn't
+    // catch it: the throw KILLED THE SERVER. 40k is over the ceiling; 500 would
+    // sail past this test, which is why the number here is deliberately large.
+    const db = getDb();
+    const names = Array.from({ length: 40000 }, (_, i) => `p${i}.jpg`);
+    const rows = seed(db, names);
+    expect(rows).toHaveLength(40000);
+
+    const found = photosByIds(
+      db,
+      rows.map((r) => r.id)
+    );
+    expect(found).toHaveLength(40000);
+  });
+
+  it("re-reads photos it has already read (unlike the sweep, it ignores the sentinel)", () => {
+    const db = getDb();
+    const [a] = seed(db, ["a.jpg"]);
+    writeMeta(db, a.id, { width: 100, height: 50 }); // already read
+    expect(pendingMetaPhotos(db)).toEqual([]); // the sweep would skip it…
+    expect(photosByIds(db, [a.id])).toHaveLength(1); // …a forced re-read won't
+  });
+
+  it("skips stale photos — they aren't on disk to read", () => {
+    const db = getDb();
+    const [a] = seed(db, ["a.jpg"]);
+    db.prepare(`UPDATE photos SET stale = 1 WHERE id = ?`).run(a.id);
+    expect(photosByIds(db, [a.id])).toEqual([]);
   });
 });
 

@@ -51,16 +51,30 @@ export function pendingMetaPhotos(db, { limit = 500, folderId = null } = {}) {
  */
 export function photosByIds(db, ids) {
   if (!ids.length) return [];
-  const placeholders = ids.map(() => "?").join(",");
-  return db
-    .prepare(
-      `SELECT photos.id AS id,
-              folders.abs_path || '/' || photos.filename AS path
-         FROM photos JOIN folders ON folders.id = photos.folder_id
-        WHERE photos.stale = 0 AND photos.id IN (${placeholders})
-        ORDER BY photos.id ASC`
-    )
-    .all(...ids);
+  // CHUNKED, and that is not an optimisation. One `IN (?,?,…)` with a parameter
+  // per id blows SQLite's host-parameter ceiling (SQLITE_MAX_VARIABLE_NUMBER,
+  // 32766) the moment the user selects the whole library and asks for a re-read
+  // — better-sqlite3 throws "too many SQL variables", and because the route is
+  // an async handler Express 4 does not catch it, so the throw took the whole
+  // SERVER down. ⌘A + Re-read metadata killed the app.
+  const CHUNK = 500;
+  const rows = [];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const slice = ids.slice(i, i + CHUNK);
+    const placeholders = slice.map(() => "?").join(",");
+    rows.push(
+      ...db
+        .prepare(
+          `SELECT photos.id AS id,
+                  folders.abs_path || '/' || photos.filename AS path
+             FROM photos JOIN folders ON folders.id = photos.folder_id
+            WHERE photos.stale = 0 AND photos.id IN (${placeholders})
+            ORDER BY photos.id ASC`
+        )
+        .all(...slice)
+    );
+  }
+  return rows;
 }
 
 /** How many photos still have no metadata (drives the sweep's progress total).

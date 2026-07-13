@@ -47,6 +47,7 @@ import {
   renameFolderPath,
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
+import { interactiveRoute, whenIdle } from "./lib/interactive.js";
 import {
   pendingMetaPhotos,
   pendingMetaCount,
@@ -56,8 +57,9 @@ import {
 } from "./db/enrich.js";
 
 /** Photos per extraction batch: big enough to amortise the exiftool daemon
- *  round-trip, small enough that Cancel feels immediate on a 100k library. */
-const BATCH = 200;
+ *  round-trip, small enough that Cancel feels immediate on a 100k library AND
+ *  that the sweep can step aside for the user between batches (see whenIdle). */
+const BATCH = 50;
 import {
   getFeedPage,
   findGroupBoundary,
@@ -639,14 +641,26 @@ export function registerApi(app) {
         .json({ error: "ids was empty — nothing to re-read" });
     }
 
-    // The re-read list is FIXED up front (the same photos the user selected);
-    // the sweep's list is drained as it goes, since it shrinks as we write.
-    const forced = ids ? photosByIds(db, ids) : null;
-    const total = forced ? forced.length : pendingMetaCount(db);
+    // Building the to-do list touches SQLite, and this is an ASYNC handler:
+    // Express 4 does not catch a throw in one, so an uncaught error here does
+    // not 500 — it takes the whole server down with it (which is exactly what
+    // "too many SQL variables" did before photosByIds learned to chunk). The
+    // user gets a real message instead of a dead app.
+    let forced, total, job;
+    try {
+      // The re-read list is FIXED up front (the same photos the user selected);
+      // the sweep's list is drained as it goes, since it shrinks as we write.
+      forced = ids ? photosByIds(db, ids) : null;
+      total = forced ? forced.length : pendingMetaCount(db);
+    } catch (e) {
+      return res
+        .status(500)
+        .json({ error: `could not work out what to read: ${e.message}` });
+    }
     if (total === 0) {
       return res.status(200).json({ jobId: null, pending: 0 });
     }
-    const job = registry.create("enrich", {
+    job = registry.create("enrich", {
       label: forced
         ? `Re-read metadata for ${total.toLocaleString()} photo${total === 1 ? "" : "s"}`
         : `Read metadata for ${total.toLocaleString()} photos`,
@@ -673,6 +687,13 @@ export function registerApi(app) {
             e.name = "AbortError";
             throw e;
           }
+          // Let the user go first. The sweep and the grid share one
+          // ProcessingService, and a full-library sweep will happily starve the
+          // thumbnails the user is actually waiting on (measured: 15ms → 90ms,
+          // with tiles abandoned mid-scroll). Between batches we stand aside
+          // until nothing interactive is in flight — so scrolling stays fast and
+          // the sweep uses what's left.
+          await whenIdle();
           const batch = nextBatch();
           if (!batch.length) break;
           try {
@@ -717,7 +738,7 @@ export function registerApi(app) {
   // indistinguishable from "never tried" and re-trigger extraction forever,
   // so a completed-but-dimensionless attempt is stored as 0 (falsy, but
   // distinct from NULL) — only NULL means "never tried".
-  app.get("/api/meta", async (req, res) => {
+  app.get("/api/meta", interactiveRoute, async (req, res) => {
     const db = getDb();
     const idsParam = String(req.query.ids ?? "");
     const ids = idsParam
@@ -771,7 +792,7 @@ export function registerApi(app) {
   });
 
   // --- Thumbnail ----------------------------------------------------------
-  app.get("/api/thumb/:id", async (req, res) => {
+  app.get("/api/thumb/:id", interactiveRoute, async (req, res) => {
     const db = getDb();
     const it = getPhotoById(db, Number(req.params.id));
     if (!it) return res.status(404).end();
@@ -806,7 +827,7 @@ export function registerApi(app) {
   });
 
   // --- Embedded preview (fast tier) ----------------------------------------
-  app.get("/api/preview/:id", async (req, res) => {
+  app.get("/api/preview/:id", interactiveRoute, async (req, res) => {
     const db = getDb();
     const it = getPhotoById(db, Number(req.params.id));
     if (!it) return res.status(404).end();
