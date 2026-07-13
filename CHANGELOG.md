@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.8
+
+- **Checking a folder in the subfolder list now takes everything under it.** Tick
+  or untick a parent and its whole subtree follows, however deep — you don't
+  click twenty boxes to take a year, or to drop one. If you then exclude
+  something inside it, the parent shows a dash instead of a tick, so it never
+  claims to be importing more than it is.
+
 ## 2.10.7
 
 - **Fix: "Choose subfolders…" was unreachable in the app** (regression in 2.10.6).

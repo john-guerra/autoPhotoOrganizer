@@ -15,6 +15,7 @@
    */
   import { createEventDispatcher } from "svelte";
   import { clickOutside, onEscape } from "./actions.js";
+  import { subtreeState } from "./subfolderSelection.js";
 
   export let scanning = false;
   export let hasNativePicker = false;
@@ -129,11 +130,16 @@
           {:else}
             <ul class="subdirs">
               {#each subdirs as d (d.path)}
+                {@const state = subtreeState(subdirSelection, d.path, subdirs)}
                 <li style="padding-left: {d.depth * 14}px">
                   <label>
+                    <!-- Checking a folder pulls in everything under it. When a
+                         descendant is excluded the box goes indeterminate, so a
+                         parent never shows a full tick over a partial import. -->
                     <input
                       type="checkbox"
-                      checked={subdirSelection.has(d.path)}
+                      checked={state === "all"}
+                      indeterminate={state === "some"}
                       on:change={() => dispatch("toggledir", { path: d.path })}
                     />
                     <span class="name"
