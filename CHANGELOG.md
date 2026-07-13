@@ -6,6 +6,10 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.7
+
+- The fisheye navigator now ships as a published package (@john-guerra/fisheye-nav), so a clean checkout installs without a local link.
+
 ## 2.10.6
 
 - Fisheye: hovering now moves one group at a time instead of jumping past a whole month, every group can be reached and selected by drilling in, and the selected day is highlighted (it never was, below the top level).

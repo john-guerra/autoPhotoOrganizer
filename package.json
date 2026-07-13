@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.10.6",
+  "version": "2.10.7",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
@@ -28,7 +28,7 @@
     "test:all": "npm run test:unit && npm run test:e2e"
   },
   "dependencies": {
-    "@john-guerra/fisheye-nav": "^0.0.1",
+    "@john-guerra/fisheye-nav": "^0.1.0",
     "better-sqlite3": "^12.11.1",
     "d3": "^7.9.0",
     "electron-updater": "^6.3.0",
