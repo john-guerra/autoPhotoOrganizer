@@ -1,5 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { nextBulkAction, groupLabel } from "./bulkSelection.js";
+import {
+  nextBulkAction,
+  groupLabel,
+  restoreSelection,
+} from "./bulkSelection.js";
+
+describe("restoreSelection (Undo)", () => {
+  it("restores exactly the snapshot, replacing what is selected now", () => {
+    const before = new Set([1, 2]);
+    // ...user hits ⌘A and ends up with everything...
+    const now = new Set([1, 2, 3, 4, 5]);
+    expect([...restoreSelection(before)]).toEqual([1, 2]);
+    expect([...now]).toEqual([1, 2, 3, 4, 5]); // untouched — a new Set comes back
+  });
+
+  it("does NOT union — undoing a select-all must not leave everything selected", () => {
+    // The bug: `new Set([...selectedIds, ...snapshot])` looked right for Clear
+    // (merging into an empty set) but made undoing a select-all a no-op.
+    const snapshot = new Set([1, 2]);
+    const restored = restoreSelection(snapshot);
+    expect(restored.has(3)).toBe(false);
+    expect(restored.size).toBe(2);
+  });
+
+  it("restores an empty selection — undoing a select-all from nothing selects nothing", () => {
+    expect(restoreSelection(new Set()).size).toBe(0);
+    expect(restoreSelection(null).size).toBe(0);
+  });
+});
 
 describe("groupLabel", () => {
   it("names a folder group by its last segment, not the whole path", () => {

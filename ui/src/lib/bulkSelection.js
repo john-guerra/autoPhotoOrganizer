@@ -46,6 +46,22 @@ export function nextBulkAction(kind, state) {
 }
 
 /**
+ * Undo a bulk selection change: the selection becomes EXACTLY what the snapshot
+ * held, replacing whatever is selected now.
+ *
+ * It must not union. Unioning happens to look right for Clear (you're merging
+ * into an empty set), but it makes undoing a select-all a no-op — you'd get
+ * everything-you-had ∪ everything, which is everything. "Undo" means "put it
+ * back", not "add the old one to the new one".
+ *
+ * @param {Set<number>|Iterable<number>|null} snapshot
+ * @returns {Set<number>}
+ */
+export function restoreSelection(snapshot) {
+  return new Set(snapshot ?? []);
+}
+
+/**
  * What to call the current group in the status line ("Selected 6 in DCIM").
  *
  * A group path is [{dimension, value}] — NOT strings, so a naive String(last)

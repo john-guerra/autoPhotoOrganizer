@@ -94,7 +94,11 @@
     toggle as toggleSubdir,
     selectedDirs,
   } from "./lib/subfolderSelection.js";
-  import { nextBulkAction, groupLabel } from "./lib/bulkSelection.js";
+  import {
+    nextBulkAction,
+    groupLabel,
+    restoreSelection,
+  } from "./lib/bulkSelection.js";
   import { combo } from "./lib/platform.js";
   import OrganizeControls from "./lib/OrganizeControls.svelte";
   import ViewControls from "./lib/ViewControls.svelte";
@@ -936,10 +940,11 @@
         sort
       );
       if (!ids.length) return;
+      snapshotSelection(); // selecting everything can bury a careful selection too
       selectedIds = new Set([...selectedIds, ...ids]);
       status = `Selected ${selectedIds.size.toLocaleString()} photo${
         selectedIds.size === 1 ? "" : "s"
-      }`;
+      } — Undo to restore`;
     } catch (e) {
       error = `Select all failed: ${e.message}`;
     }
@@ -981,6 +986,7 @@
       });
       if (action === "group") {
         pendingBulk = null;
+        snapshotSelection();
         selectedIds = new Set([...selectedIds, ...ids]);
         status = `Selected ${ids.length.toLocaleString()} in ${groupLabel(currentPath)} — ${combo("A")} again for all ${showingCount.toLocaleString()}`;
         return;
@@ -1028,7 +1034,7 @@
   function removeFromSelection(ids, what) {
     const removed = ids.filter((id) => selectedIds.has(id));
     if (!removed.length) return;
-    lastClearedSelection = [...selectedIds];
+    snapshotSelection();
     const next = new Set(selectedIds);
     for (const id of removed) next.delete(id);
     selectedIds = next;
@@ -1373,15 +1379,37 @@
   function clearSelection() {
     if (selectedIds.size === 0) return;
     const n = selectedIds.size;
-    lastClearedSelection = new Set(selectedIds);
+    snapshotSelection();
     selectedIds = new Set();
     status = `Cleared ${n.toLocaleString()} photo${n === 1 ? "" : "s"} from the selection — Undo to restore`;
   }
 
+  /**
+   * Remember the selection as it is RIGHT NOW, so Undo can put exactly this back.
+   * Called before every bulk change — Clear, ⌘A (group or everything), ⌘⇧A —
+   * because any of them can wipe out a careful hand-picked selection, not just
+   * the ones that remove. Single-photo toggles are not snapshotted: they're one
+   * keystroke to reverse, and stashing on every X would make Undo mean "undo the
+   * last thing" instead of "put my selection back".
+   */
+  function snapshotSelection() {
+    lastClearedSelection = new Set(selectedIds);
+  }
+
+  /**
+   * Restore the selection to EXACTLY what it was before the last bulk change.
+   * This replaces the current selection rather than merging into it: the old
+   * union meant undoing a select-all left you with the union of both, which is
+   * not what "undo" says.
+   */
   function undoClearSelection() {
     if (!lastClearedSelection) return;
-    selectedIds = new Set([...selectedIds, ...lastClearedSelection]);
+    const n = lastClearedSelection.size;
+    selectedIds = restoreSelection(lastClearedSelection);
     lastClearedSelection = null;
+    status = n
+      ? `Selection restored (${n.toLocaleString()} photo${n === 1 ? "" : "s"})`
+      : "Selection restored (was empty)";
   }
 
   /** Refresh the library-total and showing counts (cheap COUNT queries). */
