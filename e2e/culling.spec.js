@@ -101,6 +101,29 @@ test.describe("@p0 culling", () => {
     expect(errors).toEqual([]);
   });
 
+  test("clicking the first photo then rating rates THAT photo (#104)", async ({
+    page,
+  }) => {
+    // The user-visible consequence of #104, and the reason it's a P0 and not a
+    // papercut: a plain click on photo #1 used to open the loupe, where rating
+    // auto-advances — so this "1" landed on photo #2 while photo #1 stayed on
+    // screen. You'd rate a whole run of photos one slot off and never see it.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    await page.locator(".thumb").first().click(); // a plain click, no helper
+    await page.keyboard.press("1");
+
+    await expect(grid.ratingBadge(page, 0)).toContainText("1");
+    await expect(grid.ratingBadge(page, 1)).toHaveCount(0);
+
+    await reload(page);
+    await expect(grid.ratingBadge(page, 0)).toContainText("1");
+    await expect(grid.ratingBadge(page, 1)).toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+
   test("typing a digit into a text field does NOT rate a photo", async ({
     page,
   }) => {

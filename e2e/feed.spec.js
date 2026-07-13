@@ -111,6 +111,27 @@ test("the group toggle stays icon-sized (no CSS class collision)", async ({
   expect(box.width).toBeLessThan(60);
 });
 
+test("a single click on the FIRST tile focuses it — it does not open the loupe (#104)", async ({
+  page,
+}) => {
+  // `selected` starts at 0 so the keyboard has an anchor, and clicking an
+  // ALREADY-focused tile opens the loupe — which used to mean one click on photo
+  // #1 jumped straight into the loupe, while every other tile needed two. Worse:
+  // rating auto-advances in the loupe, so a user who landed there by accident
+  // rated a different photo with every keystroke.
+  const errors = trackPageErrors(page);
+  await gotoFeed(page);
+
+  const tile = page.locator(".thumb").first();
+  await tile.click();
+  await expect(page.locator(".loupe")).toHaveCount(0); // focused, not opened
+
+  await tile.click(); // now it IS explicitly focused, so this opens it
+  await expect(page.locator(".loupe")).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+
 test("clicking a tile's circle selects it and does NOT open the loupe", async ({
   page,
 }) => {
