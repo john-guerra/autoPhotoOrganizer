@@ -51,8 +51,11 @@ verification), and decisions already made.
 
 - `server/` — Express API + `ProcessingService` + `albums/` clustering.
 - `ui/` — Vite + Svelte frontend (config in `ui/vite.config.js`, `vite ui`).
-- `docs/superpowers/specs/` — design docs. Start with
-  `2026-07-06-photo-triage-design.md`.
+- `docs/superpowers/specs/` — design docs (the **why**; some are cited from
+  source, so don't move them). Start with `2026-07-06-photo-triage-design.md`.
+- `docs/superpowers/completed_plans/` — build plans whose feature has shipped.
+  History, **not instructions**: the code is now a better answer than the plan.
+  See `docs/superpowers/README.md`.
 - `legacy/` — **do-not-run** reference only (two prior generations; known insecure
   patterns). Read it to port the album-clustering algorithm; never execute it.
 
