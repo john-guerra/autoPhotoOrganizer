@@ -95,6 +95,13 @@ export function applySchema(db) {
   ensureColumn(db, "photos", "iso", "INTEGER");
   ensureColumn(db, "photos", "focal_length", "REAL");
   ensureColumn(db, "photos", "lens", "TEXT");
+  // Video stream format, so playback knows whether the BROWSER can decode this
+  // file or whether it needs a transcoded proxy first (see lib/videoPlayback.js
+  // — Chromium has no MPEG-4 Part 2 decoder, which is why a camcorder .avi
+  // plays its audio and shows a black frame). NULL for images and for videos
+  // indexed before this column existed; playback probes those on demand.
+  ensureColumn(db, "photos", "video_codec", "TEXT");
+  ensureColumn(db, "photos", "pix_fmt", "TEXT");
 }
 
 /** Idempotent ADD COLUMN — the app ships no migration runner, and

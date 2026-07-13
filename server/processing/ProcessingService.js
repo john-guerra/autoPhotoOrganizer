@@ -102,4 +102,18 @@ export class ProcessingService {
   async metadata(_files) {
     throw new Error("ProcessingService.metadata is abstract");
   }
+
+  /**
+   * Transcode a video the browser cannot decode (see lib/videoPlayback.js) into
+   * an H.264 4:2:0 + AAC MP4 at `_dest`. Must write atomically: a canceled or
+   * crashed transcode may not leave a partial file behind, or it would be served
+   * later as a valid cached proxy.
+   * @param {string} _file
+   * @param {string} _dest
+   * @param {{signal?: AbortSignal, maxHeight?: number}} [_opts]
+   * @returns {Promise<void>}
+   */
+  async transcodeForPlayback(_file, _dest, _opts) {
+    throw new Error("ProcessingService.transcodeForPlayback is abstract");
+  }
 }

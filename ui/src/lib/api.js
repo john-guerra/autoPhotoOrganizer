@@ -195,6 +195,27 @@ export function videoUrl(id, v = 0) {
   return `/api/image/${id}?v=${v}`;
 }
 
+/**
+ * Ask the server how to play a video. Never point a <video> at the file
+ * directly: the browser can't decode everything ffmpeg can read (an old
+ * camcorder .avi plays its AUDIO and shows a black frame — Chromium has no
+ * MPEG-4 Part 2 decoder), and a silent black rectangle looks like a broken file
+ * rather than a missing codec.
+ *
+ * @param {number} id
+ * @returns {Promise<{ready: true, url: string} | {preparing: true, jobId: string, reason: string}>}
+ *   ready → play `url` (the original, or an already-built proxy).
+ *   preparing → a transcode is running; wait on `jobId`, then play its result.
+ */
+export async function prepareVideo(id) {
+  const res = await fetch(`/api/video/${id}`);
+  if (!res.ok && res.status !== 202) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `video failed (${res.status})`);
+  }
+  return res.json();
+}
+
 /** Format a duration in seconds as m:ss (or h:mm:ss past an hour). Returns "" for
  * null/NaN so the caller can omit the badge for un-probed videos.
  * @param {number|null|undefined} seconds */

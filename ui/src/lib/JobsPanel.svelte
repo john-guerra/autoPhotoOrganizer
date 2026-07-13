@@ -86,11 +86,21 @@
         <span class="job-label">{job.label}</span>
 
         {#if job.status === "running"}
-          <progress
-            class="job-progress"
-            value={job.total ? job.done : undefined}
-            max={job.total || undefined}
-          ></progress>
+          <!-- Two elements, not one with undefined props. A job with no countable
+               total (a transcode: ffmpeg reports no step count) wants an
+               INDETERMINATE bar, and the only way to get one is to omit `value`
+               entirely. Passing `undefined` doesn't omit it — Svelte still
+               assigns the DOM property, and `progress.value = undefined` throws
+               "The provided double value is non-finite", inside Svelte's flush.
+               That took the whole component update down with it: the loupe froze
+               mid-render on an unrelated video. A crash in a progress bar must
+               not be able to break the rest of the app. -->
+          {#if job.total}
+            <progress class="job-progress" value={job.done ?? 0} max={job.total}
+            ></progress>
+          {:else}
+            <progress class="job-progress"></progress>
+          {/if}
           <span class="job-phase">
             {#if job.total}<strong class="job-count"
                 >{(job.done ?? 0).toLocaleString()} / {job.total.toLocaleString()}</strong

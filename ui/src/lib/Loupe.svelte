@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher } from "svelte";
-  import { imageUrl, videoUrl, fetchMeta } from "./api.js";
+  import { imageUrl, fetchMeta, prepareVideo } from "./api.js";
+  import { waitForJob } from "./jobs.js";
   import LoupeDetails from "./LoupeDetails.svelte";
   import LoupeFilmstrip from "./LoupeFilmstrip.svelte";
 
@@ -49,6 +50,45 @@
         currentMeta = detailMeta.get(id) ?? currentMeta;
     } catch {
       /* metadata is an enhancement; the panel falls back to item fields */
+    }
+  }
+
+  // --- Video playback -------------------------------------------------------
+  // The browser can't decode every video ffmpeg can read: an old camcorder .avi
+  // (MPEG-4 + MP3) plays its AUDIO and shows nothing at all, because Chromium
+  // has no MPEG-4 Part 2 decoder. So we ask the server what to play rather than
+  // pointing <video> at the file and hoping — a black rectangle with sound is
+  // the worst possible failure, since it looks like a broken FILE, not a
+  // missing codec. The server hands back a URL, or transcodes one for us.
+  let videoState = null; // { status: "ready"|"preparing"|"error", url?, reason?, message? }
+  $: if (item?.kind === "video") loadVideo(item.id);
+  $: if (item && item.kind !== "video") videoState = null;
+
+  async function loadVideo(id) {
+    videoState = null;
+    try {
+      const r = await prepareVideo(id);
+      if (item?.id !== id) return; // navigated away while we asked
+      if (r.ready) {
+        videoState = { status: "ready", url: r.url };
+        return;
+      }
+      videoState = { status: "preparing", reason: r.reason };
+      const job = await waitForJob(r.jobId);
+      if (item?.id !== id) return;
+      if (job.status === "done") {
+        videoState = { status: "ready", url: job.result.url };
+      } else if (job.status === "canceled") {
+        videoState = { status: "error", message: "Conversion canceled." };
+      } else {
+        videoState = {
+          status: "error",
+          message: job.error || "Could not convert this video for playback.",
+        };
+      }
+    } catch (e) {
+      if (item?.id !== id) return;
+      videoState = { status: "error", message: e.message };
     }
   }
 
@@ -102,17 +142,32 @@
           {#if item.kind === "video"}
             <!-- muted so the browser doesn't block autoplay; controls give the
                  scrub bar that drives the server's Range requests. The {#key}
-                 tears down/rebuilds the element on navigation, stopping playback. -->
-            <video
-              src={videoUrl(item.id, item.mtimeMs)}
-              controls
-              autoplay
-              muted
-              playsinline
-              preload="metadata"
-            >
-              <track kind="captions" />
-            </video>
+                 tears down/rebuilds the element on navigation, stopping playback.
+                 src comes from the server (see loadVideo): the original when the
+                 browser can decode it, a transcoded proxy when it can't. -->
+            {#if videoState?.status === "ready"}
+              <video
+                src={videoState.url}
+                controls
+                autoplay
+                muted
+                playsinline
+                preload="metadata"
+              >
+                <track kind="captions" />
+              </video>
+            {:else if videoState?.status === "error"}
+              <p class="video-msg error">
+                {videoState.message}
+              </p>
+            {:else}
+              <p class="video-msg">
+                <span class="thumb-spinner" aria-hidden="true"></span>
+                {videoState?.reason
+                  ? `Converting for playback — ${videoState.reason}.`
+                  : "Loading video…"}
+              </p>
+            {/if}
           {:else}
             <img src={imageUrl(item.id, item.mtimeMs)} alt={item.name} />
           {/if}
@@ -147,6 +202,39 @@
     display: flex;
     flex-direction: column;
     z-index: 100;
+  }
+  /* Says what is happening to a video the browser can't decode yet, instead of
+     the black rectangle (with sound!) this feature exists to eliminate. */
+  .video-msg {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: #bbb;
+    font-size: 0.9rem;
+    padding: 1rem 1.25rem;
+    background: #161616;
+    border: 1px solid #2c2c2c;
+    border-radius: 8px;
+    max-width: 32rem;
+    text-align: center;
+  }
+  .video-msg.error {
+    color: #ff8a80;
+    border-color: #5a2a2a;
+  }
+  .thumb-spinner {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    border: 2px solid #444;
+    border-top-color: #999;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
   .loupe-close {
     position: absolute;

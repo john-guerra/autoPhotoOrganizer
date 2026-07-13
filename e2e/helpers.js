@@ -156,6 +156,16 @@ export const loupe = {
   },
 };
 
+// --- video playback ---------------------------------------------------------
+
+export const video = {
+  /** The <video> element — present only once the file is actually playable. */
+  player: (page) => page.locator(".loupe video"),
+  /** The "converting…" / "couldn't convert" line that stands in for it. A video
+   *  the browser can't decode must SAY so, not render a silent black rectangle. */
+  message: (page) => page.locator(".loupe .video-msg"),
+};
+
 // --- groups (feed headers) --------------------------------------------------
 
 export const group = {

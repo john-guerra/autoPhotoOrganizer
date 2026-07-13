@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { trackPageErrors, openApp, statusBar } from "./helpers.js";
-import { FOLDERS, TOTAL_PHOTOS } from "./fixture.mjs";
+import { FOLDERS, TOTAL_PHOTOS, itemsIn } from "./fixture.mjs";
 
 /**
  * P1 — SELECTION. Select-all, clear, and undo. The selection is what every
@@ -20,7 +20,7 @@ test.describe("@p1 selection", () => {
     // the end state would let the confirmation step vanish unnoticed.
     await page.keyboard.press("Meta+a");
     await expect(statusBar.root(page)).toContainText(
-      new RegExp(`${FOLDERS[0].count} selected`)
+      new RegExp(`${itemsIn(FOLDERS[0])} selected`)
     );
     await expect(statusBar.root(page)).toContainText(/again for all/);
 

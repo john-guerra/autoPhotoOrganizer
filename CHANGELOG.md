@@ -6,6 +6,19 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.6
+
+- **Videos that used to play sound but show nothing now play properly.** Old
+  camcorder clips (AVI/DivX, MJPEG, H.263) and 4:2:2 footage can't be decoded by
+  the browser at all — on Windows especially, you'd hear the audio and see a black
+  rectangle. AutoGallery now converts those to a playable copy the first time you
+  open one, cached alongside the thumbnails; your original files are never touched.
+  That's 317 of the 1,173 videos in a real library.
+- While a clip is converting, the loupe says so (and says why) instead of showing
+  an empty black frame, and a conversion that fails tells you it failed.
+- Fixed: a background job with no progress count could crash the jobs panel, which
+  silently froze whatever else was on screen.
+
 ## 2.12.5
 
 - **Re-reading metadata for a large selection no longer kills the app.** Select

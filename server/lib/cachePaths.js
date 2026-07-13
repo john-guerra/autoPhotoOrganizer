@@ -22,6 +22,16 @@ export function thumbsDir() {
   return dir;
 }
 
+/** Browser-playable proxies for videos whose codec the browser can't decode
+ *  (see videoPlayback.js). Same deal as thumbs: a derived, rebuildable cache on
+ *  the internal disk — the source video is never touched.
+ *  @returns {string} Absolute path to the video-proxy cache dir (created if missing). */
+export function videoProxiesDir() {
+  const dir = join(cacheRoot(), "cache", "videos");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 /** @returns {string} Absolute path to the ratings JSON file. */
 export function ratingsFile() {
   mkdirSync(cacheRoot(), { recursive: true });

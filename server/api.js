@@ -17,7 +17,7 @@ import { extname, join, basename, dirname, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { revealCommand, revealManyCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
-import { thumbsDir, cacheRoot } from "./lib/cachePaths.js";
+import { thumbsDir, cacheRoot, videoProxiesDir } from "./lib/cachePaths.js";
 import {
   getCacheStats,
   getCacheBreakdown,
@@ -48,6 +48,7 @@ import {
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
 import { interactiveRoute, whenIdle } from "./lib/interactive.js";
+import { browserCanPlay, whyTranscode } from "./lib/videoPlayback.js";
 import {
   pendingMetaPhotos,
   pendingMetaCount,
@@ -850,20 +851,22 @@ export function registerApi(app) {
   // even begin, without 206 support); images take the same path and simply
   // request without a Range header, getting the whole-file 200. No transcoding —
   // the browser plays whatever codec the container holds.
-  app.get("/api/image/:id", async (req, res) => {
-    const db = getDb();
-    const it = getPhotoById(db, Number(req.params.id));
-    if (!it) return res.status(404).end();
+  /**
+   * Serve a file with byte-range support (what a <video> scrub bar needs). Used
+   * for both originals and transcoded proxies, so seeking works identically in
+   * either — a proxy the user can't scrub would be a downgrade, not a fix.
+   */
+  async function serveFileWithRanges(req, res, path) {
     let st;
     try {
-      st = await stat(it.path);
+      st = await stat(path);
     } catch {
       return res.status(404).end();
     }
     res.set("Cache-Control", "public, max-age=3600");
     res.set("Accept-Ranges", "bytes");
     res.type(
-      MIME_BY_EXT[extname(it.path).toLowerCase()] || "application/octet-stream"
+      MIME_BY_EXT[extname(path).toLowerCase()] || "application/octet-stream"
     );
 
     const range = parseByteRange(req.headers.range, st.size);
@@ -881,14 +884,121 @@ export function registerApi(app) {
       res.status(206);
       res.set("Content-Range", `bytes ${start}-${end}/${st.size}`);
       res.set("Content-Length", String(end - start + 1));
-      createReadStream(it.path, { start, end })
+      createReadStream(path, { start, end })
         .on("error", onStreamError)
         .pipe(res);
       return;
     }
 
     res.set("Content-Length", String(st.size));
-    createReadStream(it.path).on("error", onStreamError).pipe(res);
+    createReadStream(path).on("error", onStreamError).pipe(res);
+  }
+
+  app.get("/api/image/:id", async (req, res) => {
+    const db = getDb();
+    const it = getPhotoById(db, Number(req.params.id));
+    if (!it) return res.status(404).end();
+    await serveFileWithRanges(req, res, it.path);
+  });
+
+  // --- Video playback -------------------------------------------------------
+  // Chromium can't decode everything ffmpeg can. It has NO MPEG-4 Part 2
+  // decoder and won't demux AVI at all — so an old camcorder .avi (MPEG-4 video
+  // + MP3 audio) hands it an audio track it CAN play and a video track it can't:
+  // the clip plays sound and shows nothing. On the real library that was 275
+  // files, plus 32 more in MJPEG/H.263 and 10 in 4:2:2 H.264 (which plays on
+  // macOS via VideoToolbox and shows black on Windows — same file, different
+  // machine, which is exactly what got reported).
+  //
+  // So: anything the browser can't decode gets transcoded ONCE into an H.264
+  // 4:2:0 MP4 and cached beside the thumbnails. The source video is never
+  // touched. GET /api/video/:id answers "can I play this yet?":
+  //   { ready: true, url }        → play it (original, or a proxy already built)
+  //   202 { jobId, preparing }    → a transcode is running; watch the job
+  const proxyPathFor = (it) =>
+    join(videoProxiesDir(), `${it.id}-${Math.round(it.mtime ?? 0)}.mp4`);
+
+  /** Codec/pix_fmt from the index, probing once if this video predates the
+   *  columns (and remembering the answer, so it's probed at most once). */
+  async function videoFormatOf(db, it) {
+    if (it.video_codec) return { codec: it.video_codec, pixFmt: it.pix_fmt };
+    const [meta] = await processing.metadata([it.path]);
+    if (meta?.videoCodec) {
+      db.prepare(
+        `UPDATE photos SET video_codec = ?, pix_fmt = ? WHERE id = ?`
+      ).run(meta.videoCodec, meta.pixFmt ?? null, it.id);
+    }
+    return { codec: meta?.videoCodec ?? null, pixFmt: meta?.pixFmt ?? null };
+  }
+
+  app.get("/api/video/:id", async (req, res) => {
+    const db = getDb();
+    const it = getPhotoById(db, Number(req.params.id));
+    if (!it) return res.status(404).json({ error: "unknown id" });
+    if (it.kind !== "video") {
+      return res.status(400).json({ error: "not a video" });
+    }
+
+    try {
+      const ext = extname(it.path).toLowerCase();
+      const { codec, pixFmt } = await videoFormatOf(db, it);
+
+      if (browserCanPlay({ ext, codec, pixFmt })) {
+        return res.json({ ready: true, url: `/api/image/${it.id}` });
+      }
+
+      const proxy = proxyPathFor(it);
+      if (existsSync(proxy)) {
+        return res.json({ ready: true, url: `/api/video/${it.id}/file` });
+      }
+
+      // Already being built (the user re-opened the loupe on it) — hand back the
+      // SAME job rather than starting a second ffmpeg on the same file.
+      const running = registry
+        .list()
+        .find(
+          (j) =>
+            j.type === "transcode" &&
+            j.status === "running" &&
+            j.photoId === it.id
+        );
+      if (running) {
+        return res
+          .status(202)
+          .json({ preparing: true, jobId: running.id, reason: running.reason });
+      }
+
+      const reason = whyTranscode({ ext, codec, pixFmt });
+      const job = registry.create("transcode", {
+        label: `Converting ${it.filename} for playback`,
+        total: 0, // ffmpeg progress isn't wired up; this is a spinner, not a bar
+      });
+      registry.update(job.id, { photoId: it.id, reason, phase: reason });
+      res.status(202).json({ preparing: true, jobId: job.id, reason });
+
+      (async () => {
+        try {
+          await processing.transcodeForPlayback(it.path, proxy, {
+            signal: job.controller.signal,
+          });
+          registry.finish(job.id, { url: `/api/video/${it.id}/file` });
+        } catch (e) {
+          registry.fail(job.id, e);
+        }
+      })();
+    } catch (e) {
+      // Async handler: an uncaught throw here would take the whole server down
+      // (Express 4 doesn't catch them), so the user gets a message instead.
+      res.status(500).json({ error: `could not prepare video: ${e.message}` });
+    }
+  });
+
+  /** The transcoded proxy itself, with ranges so the scrub bar still works. */
+  app.get("/api/video/:id/file", async (req, res) => {
+    const db = getDb();
+    const it = getPhotoById(db, Number(req.params.id));
+    if (!it) return res.status(404).end();
+    await serveFileWithRanges(req, res, proxyPathFor(it));
   });
 
   // --- Ratings / cover choices ----------------------------------------------

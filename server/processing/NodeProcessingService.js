@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { readdir, stat, rename, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { extname, join } from "node:path";
 import sharp from "sharp";
@@ -391,6 +391,13 @@ export class NodeProcessingService extends ProcessingService {
         meta.height = swap ? stream.width : stream.height;
       }
 
+      // The codec decides whether the browser can play this at all (see
+      // lib/videoPlayback.js — Chromium has no MPEG-4 Part 2 decoder, so a
+      // camcorder .avi plays its audio and shows nothing). We are already
+      // probing; record it so playback doesn't have to probe again.
+      if (stream?.codec_name) meta.videoCodec = stream.codec_name;
+      if (stream?.pix_fmt) meta.pixFmt = stream.pix_fmt;
+
       const created = probe.format?.tags?.creation_time;
       if (created) {
         const d = new Date(created);
@@ -400,6 +407,88 @@ export class NodeProcessingService extends ProcessingService {
       /* ffprobe unavailable / unparseable — leave fields unset */
     }
     return meta;
+  }
+
+  /**
+   * Transcode a video the browser cannot decode into one it can: H.264 4:2:0 +
+   * AAC in an MP4. Writes to `dest` (atomically — via a temp file, so a killed
+   * transcode can never leave a half-file that later looks like a valid cache
+   * hit).
+   *
+   * NOT routed through runBinary: that has a short fixed timeout suited to
+   * probing a frame, and a long clip would be SIGKILLed mid-encode. This one
+   * runs as long as it takes and stops when the caller's AbortSignal says so.
+   *
+   * @override
+   * @param {string} file source path
+   * @param {string} dest destination .mp4 path
+   * @param {{signal?: AbortSignal, maxHeight?: number}} [opts]
+   * @returns {Promise<void>}
+   */
+  async transcodeForPlayback(file, dest, { signal, maxHeight = 1080 } = {}) {
+    const tmp = `${dest}.${process.pid}.tmp.mp4`;
+    const args = [
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-i",
+      file,
+      // Scale down only if taller than maxHeight, and force BOTH dimensions
+      // even. H.264 4:2:0 subsamples chroma 2x2, so an odd width or height is
+      // rejected outright ("height not divisible by 2") — and real files are odd
+      // more often than you'd think: the first clip this hit was 1200x675.
+      // `-2` handles the width; the trunc handles the height, which `-2` doesn't.
+      "-vf",
+      `scale=-2:'min(${maxHeight},trunc(ih/2)*2)':flags=bicubic`,
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p", // the whole point — 4:2:2 in, 4:2:0 out
+      "-preset",
+      "veryfast",
+      "-crf",
+      "23",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      // Some sources (MJPEG AVIs) carry no audio at all; -c:a on a missing
+      // stream is not an error, ffmpeg simply writes none.
+      "-movflags",
+      "+faststart", // moov atom up front, so playback can start before EOF
+      "-y",
+      tmp,
+    ];
+
+    await new Promise((resolve, reject) => {
+      const child = spawn(ffmpegPath, args, {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      const err = [];
+      const onAbort = () => child.kill("SIGKILL");
+      signal?.addEventListener("abort", onAbort, { once: true });
+      child.stderr.on("data", (c) => err.push(c));
+      child.on("error", reject);
+      child.on("close", (code) => {
+        signal?.removeEventListener("abort", onAbort);
+        if (signal?.aborted) {
+          const e = new Error("canceled");
+          e.name = "AbortError";
+          return reject(e);
+        }
+        if (code === 0) return resolve();
+        reject(
+          new Error(
+            `transcode failed: ${Buffer.concat(err).toString().trim().split("\n").pop() || `exit ${code}`}`
+          )
+        );
+      });
+    }).catch(async (e) => {
+      await rm(tmp, { force: true });
+      throw e;
+    });
+
+    await rename(tmp, dest);
   }
 }
 

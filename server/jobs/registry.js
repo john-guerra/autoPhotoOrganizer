@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-/** @typedef {"scan"|"export"|"materialize"|"undo-move"|"enrich"} JobType */
+/** @typedef {"scan"|"export"|"materialize"|"undo-move"|"enrich"|"transcode"} JobType */
 
 class JobRegistry extends EventEmitter {
   #jobs = new Map();

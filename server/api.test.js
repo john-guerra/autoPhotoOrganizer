@@ -2706,6 +2706,99 @@ describe("subfolder selection", () => {
   });
 });
 
+describe("GET /api/video/:id — playable in the browser, or transcoded", () => {
+  /** Build a real video with ffmpeg.
+   *  `size` defaults to ODD (65x49) on purpose: H.264 4:2:0 rejects an odd width
+   *  or height, and the first real file this feature met was 1200x675 — the
+   *  transcode died with "height not divisible by 2". An even fixture would have
+   *  sailed straight past it. (An H.264 SOURCE has to be even for the same
+   *  reason — libx264 can't encode 65x49 either, which is how this comment got
+   *  written twice.) */
+  async function makeVideo(dir, name, args, size = "65x49") {
+    const ffmpeg = (await import("ffmpeg-static")).default;
+    const out = join(dir, name);
+    await new Promise((resolve, reject) => {
+      const p = spawn(ffmpeg, [
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        `testsrc=size=${size}:rate=10:duration=1`,
+        ...args,
+        "-y",
+        out,
+      ]);
+      p.on("error", reject);
+      p.on("close", (c) =>
+        c === 0 ? resolve() : reject(new Error(`ffmpeg ${c}`))
+      );
+    });
+    return out;
+  }
+
+  it("transcodes an AVI/MPEG-4 clip — the one that plays sound and shows nothing", async () => {
+    // The reported bug, end to end: Chromium has no MPEG-4 Part 2 decoder and
+    // won't demux AVI, so this file is audible and invisible. It must come back
+    // as a transcode job, not as a playable URL.
+    const dir = await mkdtemp(join(tmpdir(), "ag-vid-"));
+    await makeVideo(dir, "camcorder.avi", ["-c:v", "mpeg4"]);
+    const body = await scan(srv.base, dir);
+    const id = body.items[0].id;
+
+    const res = await fetch(`${srv.base}/api/video/${id}`);
+    expect(res.status).toBe(202);
+    const { preparing, jobId, reason } = await res.json();
+    expect(preparing).toBe(true);
+    expect(reason).toMatch(/\.avi/); // tells the user WHY, not just "error"
+
+    const job = await waitJob(jobId, { timeoutMs: 30000 });
+    expect(job.status).toBe("done");
+
+    // And now it plays: a real MP4 the browser can decode, servable with ranges.
+    const play = await fetch(`${srv.base}${job.result.url}`, {
+      headers: { range: "bytes=0-99" },
+    });
+    expect(play.status).toBe(206); // seeking works on the proxy, not just the original
+    expect(play.headers.get("content-type")).toBe("video/mp4");
+
+    // Asked again, it's already built — no second ffmpeg.
+    const again = await fetch(`${srv.base}/api/video/${id}`);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ ready: true });
+
+    await rm(dir, { recursive: true, force: true });
+  }, 40000);
+
+  it("plays an ordinary H.264 4:2:0 MP4 straight from disk — no transcode", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ag-vid-"));
+    await makeVideo(
+      dir,
+      "phone.mp4",
+      ["-c:v", "libx264", "-pix_fmt", "yuv420p"],
+      "64x48" // even: libx264 cannot ENCODE odd dimensions in the first place
+    );
+    const body = await scan(srv.base, dir);
+    const id = body.items[0].id;
+
+    const res = await fetch(`${srv.base}/api/video/${id}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ready: true,
+      url: `/api/image/${id}`, // the ORIGINAL: transcoding this would be waste
+    });
+    await rm(dir, { recursive: true, force: true });
+  }, 30000);
+
+  it("400s on a still image rather than pretending to prepare it", async () => {
+    const body = await scan(srv.base, photosDir);
+    const image = body.items.find((i) => i.kind === "image");
+    const res = await fetch(`${srv.base}/api/video/${image.id}`);
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("POST /api/enrich — the metadata sweep", () => {
   it("reads EXIF for every photo nobody has looked at, and reports it done", async () => {
     await scan(srv.base, photosDir);

@@ -114,12 +114,16 @@ export function writeMeta(db, id, m) {
     iso: m.iso ?? null,
     focal_length: m.focalLength ?? null,
     lens: m.lens ?? "",
+    // Videos only: what the stream actually is, so playback can tell whether the
+    // browser can decode it (see lib/videoPlayback.js). NULL for images.
+    video_codec: m.videoCodec ?? null,
+    pix_fmt: m.pixFmt ?? null,
   };
   db.prepare(
     `UPDATE photos SET taken_at = @taken_at, width = @width, height = @height,
        camera = @camera, duration = @duration, aperture = @aperture,
        shutter = @shutter, iso = @iso, focal_length = @focal_length,
-       lens = @lens
+       lens = @lens, video_codec = @video_codec, pix_fmt = @pix_fmt
      WHERE id = @id`
   ).run({ ...fields, id });
   return fields;

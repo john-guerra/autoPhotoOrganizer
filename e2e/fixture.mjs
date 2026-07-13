@@ -1,5 +1,6 @@
 import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import sharp from "sharp";
 
 /**
@@ -50,12 +51,32 @@ export const FOLDERS = [
   },
 ];
 
-/** How many photos the fixture library holds, derived — never hand-counted.
+/** A video the BROWSER CANNOT PLAY: MPEG-4 Part 2 in an AVI, which is what an
+ * old camcorder produces and what Chromium has no decoder for. Pointed straight
+ * at a <video> it plays its audio and shows nothing, so the app must transcode
+ * it before playback. Odd dimensions (65x49) on purpose: H.264 4:2:0 rejects an
+ * odd width or height, and the first real file this met was 1200x675 — an
+ * even-sized fixture would have missed it. */
+export const VIDEO = {
+  folder: FOLDERS[0].name,
+  name: "clip.avi",
+};
+
+/** Items in a folder — photos PLUS any video. A folder's `count` is its JPEGs;
+ *  the grid, the selection and the tree all count the video too, so a spec that
+ *  reads `count` where it means "everything here" is quietly wrong (and was:
+ *  ⌘A took 7 and the spec expected 6). */
+export function itemsIn(folder) {
+  return folder.count + (folder.name === VIDEO.folder ? 1 : 0);
+}
+
+/** How many ITEMS the fixture library holds (photos + the video), derived —
+ * never hand-counted.
  *
  * A spec that asserts "11 selected" is really asserting "the whole library", and
  * it silently becomes a lie the moment anyone adds a folder to the fixture (which
  * is exactly what happened when the nested pair landed). Import this instead. */
-export const TOTAL_PHOTOS = FOLDERS.reduce((sum, f) => sum + f.count, 0);
+export const TOTAL_PHOTOS = FOLDERS.reduce((sum, f) => sum + itemsIn(f), 0);
 
 /**
  * Deterministic, tiny, EXIF-dated JPEGs.
@@ -94,7 +115,33 @@ export async function buildFixture() {
         .toFile(join(dir, `img_${String(i).padStart(2, "0")}.jpg`));
     }
   }
-  return { PHOTOS_DIR, HOME_DIR, FOLDERS };
+
+  await buildUnplayableVideo(join(PHOTOS_DIR, VIDEO.folder, VIDEO.name));
+  return { PHOTOS_DIR, HOME_DIR, FOLDERS, VIDEO };
+}
+
+/** Generate the AVI/MPEG-4 clip described on VIDEO, with ffmpeg. */
+async function buildUnplayableVideo(dest) {
+  const { default: ffmpeg } = await import("ffmpeg-static");
+  await new Promise((resolve, reject) => {
+    const p = spawn(ffmpeg, [
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc=size=65x49:rate=10:duration=1",
+      "-c:v",
+      "mpeg4",
+      "-y",
+      dest,
+    ]);
+    p.on("error", reject);
+    p.on("close", (code) =>
+      code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`))
+    );
+  });
 }
 
 export function fixtureExists() {
