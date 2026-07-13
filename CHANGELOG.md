@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.1
+
+- The fisheye navigator is now a standalone package ([@john-guerra/fisheye-nav](https://github.com/john-guerra/fisheye-nav)) and understands nesting: an icicle whose leaf axis is fisheyed, or a flat outline indented by level, so you can always see what level you are on.
+- Fisheye: hovering moves one group at a time instead of jumping past a whole month, every group can be reached and selected by drilling in, and the selected day is highlighted (below the top level, it never was).
+- Fisheye: the photo-count bars are back inside each row (a histogram silhouette down the column), the icicle shows aggregated counts on years and months, and the row under the cursor always shows its name.
+- Fisheye settings now live in the widget's own ⚙ and remember themselves: view, lens, band size (equal rows vs. photo mass), bar scale, and the interest weights.
+
 ## 2.12.0
 
 - **The app says who made it.** ⌘-About (and the Windows installer, and the Linux
