@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.9
+
+- **⌘A now takes the group you're in, not the whole library.** Press it again and
+  it offers to take everything currently shown — asking first, inline in the
+  status bar, because pulling ten thousand photos into a selection shouldn't
+  happen on a keystroke. Press ⌘A once more (or click Select all) to confirm,
+  Esc to back out.
+- **⌘⇧A is the mirror image:** it removes the current group from the selection,
+  and pressing it again offers to remove everything shown. Anything it removes is
+  restorable with Undo.
+- Both are in the help menu (`?`).
+
 ## 2.10.8
 
 - **Checking a folder in the subfolder list now takes everything under it.** Tick
