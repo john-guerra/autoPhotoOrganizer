@@ -22,7 +22,10 @@ async function waitForApi(timeoutMs = 30000) {
  * guarantees the stack is listening).
  */
 export default async function globalSetup() {
-  await buildFixture();
+  // E2E_KEEP_FIXTURE reuses whatever is already in e2e/.tmp/photos instead of
+  // regenerating the small one — used to point the suite at a large library when
+  // measuring performance (#97). Still hermetic: same temp dir, same temp index.
+  if (!process.env.E2E_KEEP_FIXTURE) await buildFixture();
   await waitForApi();
   const res = await fetch(`${API}/api/scan`, {
     method: "POST",
