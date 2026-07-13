@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.4
+
+- **One scope, one chip.** "Folder focus" and "Keep only" were two chips and two
+  mental models for the same idea — showing you a subset of the library. They're
+  now a single scope with a single ✕ to leave it. Behavior is unchanged: scoping
+  to a folder still picks up photos scanned into it later and still survives a
+  reload, and keeping a hand-picked set still does neither.
+
 ## 2.10.3
 
 - **Undo actually works after clearing a selection** (#97). Clearing used to
