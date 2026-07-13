@@ -6,6 +6,37 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.6
+
+- **Packaged build** of the folder-controls work: one ＋ panel for adding,
+  opening, and rescanning a folder; a subfolder checklist so a recursive add
+  imports only what you want; and a single scope chip in place of the old
+  "Folder focus" and "Keep only" pair.
+
+## 2.10.5
+
+- **One door for folders.** Adding a folder and opening one were two separate
+  controls doing nearly the same thing. Now there's one ＋ panel: pick a folder,
+  choose whether to include subfolders, and tick "Focus on this folder only" to
+  see just that folder. The button says what it will do — **Add & scan** for a
+  new folder, **Rescan** for one you already have, **Open** to jump straight into
+  an already-scanned folder (still works with the drive unmounted, without
+  rescanning). The Folders dropdown is gone; the Folders button opens Manage
+  folders directly.
+- **Choose which subfolders to import.** Adding a folder with "Include
+  subfolders" used to be all-or-nothing. "Choose subfolders…" now lists every
+  folder it found with photo counts, so you can leave out the Exports/ and
+  Selects/ folders you don't want. Untouched by default — a plain add still
+  imports everything in one click, with no directory walk to wait on.
+
+## 2.10.4
+
+- **One scope, one chip.** "Folder focus" and "Keep only" were two chips and two
+  mental models for the same idea — showing you a subset of the library. They're
+  now a single scope with a single ✕ to leave it. Behavior is unchanged: scoping
+  to a folder still picks up photos scanned into it later and still survives a
+  reload, and keeping a hand-picked set still does neither.
+
 ## 2.10.3
 
 - **Undo actually works after clearing a selection** (#97). Clearing used to

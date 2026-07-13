@@ -44,6 +44,7 @@
     fetchLibrary,
     scan as apiScan,
     startScan,
+    fetchSubdirs,
     startExport,
     fetchPhotoIds,
     fetchPhotoCount,
@@ -79,6 +80,20 @@
   import { loadAlbumPrefs, saveAlbumPrefs } from "./lib/albumPrefs.js";
   import SnapshotStrip from "./lib/SnapshotStrip.svelte";
   import SourceControls from "./lib/SourceControls.svelte";
+  import {
+    folderScope,
+    idsScope,
+    scopeFilterKeys,
+    scopeChip,
+    loadScope,
+    persistScope,
+  } from "./lib/scope.js";
+  import {
+    selectAll,
+    selectNone,
+    toggle as toggleSubdir,
+    selectedDirs,
+  } from "./lib/subfolderSelection.js";
   import OrganizeControls from "./lib/OrganizeControls.svelte";
   import ViewControls from "./lib/ViewControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
@@ -262,23 +277,19 @@
   // used or the next clear replaces it — no timed toast, per project taste).
   let lastClearedSelection = null;
 
-  // "Keep only" working set: when non-null, an explicit id list that the feed,
-  // counts, sidebars, albums and export all scope to, while the counts still
-  // report the true library total. null = whole library.
-  let keepIds = null;
+  // The app's one working scope — "show me only this". Either a live folder-path
+  // predicate or an explicit id set, never both (see lib/scope.js for why the two
+  // kinds stay distinct: a folder scope tracks photos scanned into it later and
+  // survives a reload, an id set is frozen and session-only). null = whole library.
+  // Write it ONLY through applyScope().
+  let scope = loadScope();
+  $: persistScope(scope);
+  $: chip = scopeChip(scope);
 
-  // "Open a folder" focus: when non-null, an abs path whose subtree (the folder
-  // + everything under it) the feed/tree/counts/albums scope to via the
-  // folderPath filter key, while the library total keeps showing the whole
-  // index. The folder is a permanent library member (it was scanned in); focus
-  // is just a scoped view. Persisted so it survives a reload. null = unfocused.
-  const LS_FOCUS_PATH = "autogallery.focusPath";
-  let focusPath = localStorage.getItem(LS_FOCUS_PATH) || null;
-  $: focusName = focusPath
-    ? focusPath.split("/").filter(Boolean).pop() || focusPath
-    : "";
-  $: if (focusPath) localStorage.setItem(LS_FOCUS_PATH, focusPath);
-  else localStorage.removeItem(LS_FOCUS_PATH);
+  // Read-only projections, so every existing reader (albums, export, the empty
+  // state, activeFacetLabels, the loupe) keeps working unchanged.
+  $: focusPath = scope?.kind === "folder" ? scope.path : null;
+  $: keepIds = scope?.kind === "ids" ? scope.ids : null;
 
   // Auto-albums review mode: replaces the grid with a time-gap-clustered view
   // of the working set (see AlbumsView).
@@ -318,13 +329,11 @@
   // the display filter is the no-op default.
   $: displayFilter = {
     ...(filterMode === "select" ? DEFAULT_FILTER : filter),
-    // keep-only ids live server-side in the keep_scope table (POSTed by
-    // applyKeepOnly); the filter carries only a flag, so the scope is unbounded.
-    ...(keepIds ? { keepScope: true } : {}),
-    // Folder-focus ("open a folder"): scope the whole app to the focused
-    // subtree. A live WHERE over folders.abs_path — stays correct across
-    // rescans, no id enumeration, persists as a single path string.
-    ...(focusPath ? { folderPath: focusPath } : {}),
+    // The one scope, projected onto the filter keys the feed/tree/counts speak:
+    // a folder scope becomes the live folderPath predicate (a WHERE over
+    // folders.abs_path — no id enumeration), an id scope becomes the keepScope
+    // flag (the ids themselves live server-side in keep_scope, so it's unbounded).
+    ...scopeFilterKeys(scope),
     // dateAttr is which date the timeline PLOTS, not a constraint — so it follows
     // the sort date in both modes (in select mode the rest resets to DEFAULT, but
     // the timeline column must still track the sort).
@@ -539,14 +548,57 @@
   // full reset). The sidebars key their refetch on this so they always mirror
   // the real index, not just groupBy/filter changes.
   let libraryVersion = 0;
-  let libraryOpen = false;
   let addFolderOpen = false;
   let manageLibraryOpen = false;
-  // "Open a folder…" text-input popover (non-native fallback when there's no
-  // native folder picker). Kept separate from the ＋ add-folder `dir` state so
-  // the two popovers don't clobber each other's input.
-  let openFolderOpen = false;
-  let openFolderDir = "";
+  // Scope to the folder once it's in? (The old "Open a folder…" entry, now an
+  // option on the one Add panel rather than a second door to the same room.)
+  let focusAfterAdd = false;
+  // "Already in your library": the path itself, or any subtree of it, is a
+  // scanned folder. Decides the Add button's verb (Add & scan / Rescan / Open)
+  // and whether opening it needs a scan at all.
+  $: alreadyIndexed =
+    !!dir.trim() &&
+    library.some(
+      (e) => e.path === dir.trim() || e.path.startsWith(dir.trim() + "/")
+    );
+
+  // The subfolder checklist (see lib/subfolderSelection.js). Collapsed until the
+  // user asks for it, so a plain add never waits on a directory walk.
+  let subdirsOpen = false;
+  let subdirs = [];
+  let subdirsLoading = false;
+  let subdirsError = "";
+  let subdirSelection = new Set();
+
+  // A checklist built for a different folder is worse than none — drop it the
+  // moment the path changes.
+  $: (dir, resetSubdirs());
+  function resetSubdirs() {
+    subdirsOpen = false;
+    subdirs = [];
+    subdirsError = "";
+    subdirSelection = new Set();
+  }
+
+  /** Walk the folder for its scannable subdirs. Any failure (permission denied,
+   * unmounted, vanished) is shown in the panel, naming the path — never an
+   * empty list that looks like "no subfolders". */
+  async function loadSubdirs() {
+    const p = dir.trim();
+    if (!p) return;
+    subdirsLoading = true;
+    subdirsError = "";
+    try {
+      subdirs = await fetchSubdirs(p);
+      subdirSelection = selectAll(subdirs);
+    } catch (e) {
+      subdirsError = e.message;
+      subdirs = [];
+      subdirSelection = selectNone();
+    } finally {
+      subdirsLoading = false;
+    }
+  }
 
   let selected = 0; // index into displayEntries; must never land on a
   // {kind:'placeholder'} entry — see nextSelectable below.
@@ -744,8 +796,7 @@
    * filters" action. Preserves dateAttr so the timeline keeps following the sort
    * date rather than snapping back to date_taken. */
   function clearAllFilters() {
-    if (keepIds) exitKeepOnly();
-    if (focusPath) exitFocus();
+    if (scope) exitScope();
     onFilterChange({ ...DEFAULT_FILTER, dateAttr: filter.dateAttr });
   }
 
@@ -985,7 +1036,10 @@
     if (!folderPath || !name || name === current) return;
     try {
       const { newPath } = await renameFolder(folderPath, name);
-      if (focusPath === folderPath) focusPath = newPath; // keep focus on it
+      // A folder scope names the folder by path, so a rename must follow it —
+      // no rebuild needed, the feed reloads right below.
+      if (scope?.kind === "folder" && scope.path === folderPath)
+        scope = folderScope(newPath);
       await loadInitialFeed();
       refreshCounts();
     } catch (e) {
@@ -993,40 +1047,47 @@
     }
   }
 
-  /** Enter/replace "keep only" focus on an explicit id set. The set is stored
-   * server-side (keep_scope table via setScope) and referenced by displayFilter's
-   * keepScope flag, so it can be any size; the library total keeps showing the
-   * real count. Passing null (or an empty set) leaves keep-only. */
-  async function applyKeepOnly(ids) {
-    const next = ids && ids.length ? [...ids] : null;
+  /**
+   * Enter, replace, or leave the working scope (null = whole library). The ONE
+   * rebuild path for both scope kinds — it routes through onGroupByChange (the
+   * shared feed-window guard) rather than hand-rolling another window reset.
+   * The two kinds are mutually exclusive by construction, so "keep only this
+   * selection" while focused on a folder simply replaces the scope.
+   * @param {import("./lib/scope.js").Scope} next
+   */
+  async function applyScope(next) {
+    const wasIds = scope?.kind === "ids";
+    const touchesFolder = next?.kind === "folder" || scope?.kind === "folder";
     try {
-      // Push the scope to the server BEFORE any feed/tree/count query reads it.
-      await setScope(next ?? []);
+      // Push the id set to the server BEFORE any feed/tree/count query reads it,
+      // and clear it when leaving an id scope so a stale keep_scope row can't
+      // narrow the next query.
+      if (next?.kind === "ids") await setScope(next.ids);
+      else if (wasIds) await setScope([]);
     } catch (e) {
       error = e.message;
-      return;
+      return; // scope unchanged — the UI still matches what the server holds
     }
-    keepIds = next;
+    scope = next;
     countsEpoch++;
     headerCounts = {};
     fetchedParents = new Set();
     inFlightParents = new Set();
-    // displayFilter is a `$:` derived value keyed on keepIds; it hasn't
-    // recomputed yet. Flush reactive state before rebuilding so the feed loader
-    // reads the keepScope filter (mirrors setFocus) — otherwise the live rebuild
-    // fetches with the stale, unscoped filter and the focus window's "before"
-    // half bleeds in the previous group's photos (#75). Symmetric on exit:
-    // without the flush, leaving keep-only would rebuild while keepScope is
-    // still true against an already-cleared scope.
+    // displayFilter is a `$:` derived value keyed on `scope`; it hasn't
+    // recomputed yet. Flush before rebuilding so the feed loader reads the new
+    // filter — otherwise the rebuild fetches with the stale, unscoped filter and
+    // the focus window's "before" half bleeds in the previous group's photos
+    // (#75). Symmetric on exit, where the stale filter would still be scoped.
     await tick();
     await onGroupByChange(groupBy);
     refreshCounts();
+    if (touchesFolder) libraryVersion++; // TreeSidebar/Fisheye refetch
   }
 
   /** Keep only the current selection as the working set. */
   function keepOnlySelection() {
     if (selectedIds.size === 0) return;
-    applyKeepOnly([...selectedIds]);
+    applyScope(idsScope([...selectedIds]));
   }
 
   /** Keep only one group/section (all its photos) as the working set. */
@@ -1035,46 +1096,15 @@
     try {
       const ids = await fetchPhotoIds(null, path, sort);
       if (!ids.length) return;
-      await applyKeepOnly(ids);
+      await applyScope(idsScope(ids));
     } catch (e) {
       error = e.message;
     }
   }
 
-  /** Leave keep-only focus, back to the whole library. */
-  function exitKeepOnly() {
-    applyKeepOnly(null);
-  }
-
-  /** Enter/replace folder-focus on a subtree path (null exits). Mirrors
-   * applyKeepOnly's refresh sequence so the feed/tree/counts all rebuild against
-   * the new displayFilter — routes through onGroupByChange (the shared feed-window
-   * guard) rather than hand-rolling a window reset. Folder-focus and keep-only are
-   * both "scope the whole app to a subset"; stacking them is confusing and "keep it
-   * alone" implies a clean scope, so entering focus clears any active keep-only. */
-  async function setFocus(path) {
-    focusPath = path || null;
-    if (keepIds) {
-      keepIds = null;
-      setScope([]).catch(() => {}); // fire-and-forget the server-side clear
-    }
-    countsEpoch++;
-    headerCounts = {};
-    fetchedParents = new Set();
-    inFlightParents = new Set();
-    // displayFilter is a `$:` derived value; it hasn't recomputed with the new
-    // focusPath yet. Flush reactive state before rebuilding so the feed loader
-    // reads the updated filter (otherwise the live rebuild uses the stale,
-    // unfocused filter and the grid keeps showing out-of-scope folders).
-    await tick();
-    await onGroupByChange(groupBy);
-    refreshCounts();
-    libraryVersion++; // force TreeSidebar/Fisheye (refreshToken) to refetch
-  }
-
-  /** Leave folder-focus, back to the whole library. */
-  function exitFocus() {
-    setFocus(null);
+  /** Leave whatever scope is active, back to the whole library. */
+  function exitScope() {
+    applyScope(null);
   }
 
   /** Toggle one photo's membership in the selection. */
@@ -1373,8 +1403,10 @@
     manageLibraryOpen = false;
     selectedIds = new Set();
     lastClearedSelection = null;
-    keepIds = null;
-    focusPath = null; // the focused folder is gone with the whole index
+    // The whole index (and with it the scoped folder / the keep_scope rows) is
+    // gone, so drop the scope outright rather than routing through applyScope —
+    // this handler does its own full reload below.
+    scope = null;
     await refreshLibrary();
     await loadInitialFeed();
     refreshCounts();
@@ -2443,8 +2475,11 @@
     }
   }
 
+  /** @returns {Promise<boolean>} true when the folder is indexed and the feed
+   * has caught up — the caller (submitAddFolder) needs to know whether it may
+   * scope to the folder afterwards. Renders its own error on every failure. */
   async function doScan() {
-    if (!dir.trim()) return;
+    if (!dir.trim()) return false;
     error = "";
     scanning = true;
     status = "scanning…";
@@ -2453,16 +2488,25 @@
         // Recursive ("soup folder") scans run as a cancelable background
         // job — live progress shows in the JobsPanel. Single-folder scan
         // stays synchronous below (fast; returns items for immediate render).
-        const { jobId } = await startScan(dir.trim(), { recursive: true });
+        // `chosen` is the curated subfolder subset, or null when the user never
+        // opened the picker (then the server walks the whole tree, as always).
+        const chosen =
+          subdirsOpen && subdirs.length
+            ? selectedDirs(subdirSelection, subdirs)
+            : null;
+        const { jobId } = await startScan(dir.trim(), {
+          recursive: true,
+          dirs: chosen,
+        });
         const job = await waitForJob(jobId);
         if (job.status === "canceled") {
           status = "Scan canceled";
-          return;
+          return false;
         }
         if (job.status !== "done") {
           error = job.error || "Scan failed";
           status = "";
-          return;
+          return false;
         }
       } else {
         await apiScan(dir.trim(), false);
@@ -2476,72 +2520,45 @@
       await loadInitialFeed();
       refreshCounts();
       libraryVersion++;
+      return true;
     } catch (e) {
       error = e.message;
       status = "";
+      return false;
     } finally {
       scanning = false;
     }
   }
 
-  /** "Open a folder" focus. If the subtree is already indexed, focus straight
-   * from the cache (works offline — an unmounted volume can't be rescanned).
-   * Otherwise scan it in recursively (the same background-job flow as the ＋
-   * add-folder path) so it becomes a permanent library member, then focus. */
-  async function openFolderFocus(path) {
-    const p = (path || "").trim();
+  /**
+   * The Add panel's one submit — adding, opening, and rescanning a folder are
+   * the same act with different options. Three outcomes:
+   *
+   *   already indexed + focus  → scope to it, NO scan. This is what lets you
+   *                              open a folder with its drive unmounted: the
+   *                              SQLite index is an offline mirror, and an
+   *                              unmounted volume can't be rescanned anyway.
+   *   already indexed, no focus→ incremental rescan, to catch up with disk.
+   *   new folder               → scan it in, then scope to it if asked.
+   */
+  async function submitAddFolder() {
+    const p = dir.trim();
     if (!p) return;
-    const alreadyIndexed = library.some(
-      (e) => e.path === p || e.path.startsWith(p + "/")
-    );
+    addFolderOpen = false;
     error = "";
-    try {
-      if (!alreadyIndexed) {
-        scanning = true;
-        status = "scanning…";
-        const { jobId } = await startScan(p, { recursive: true });
-        const job = await waitForJob(jobId);
-        if (job.status === "canceled") {
-          status = "Scan canceled";
-          return;
-        }
-        if (job.status !== "done") {
-          error = job.error || "Scan failed";
-          status = "";
-          return;
-        }
-        localStorage.setItem(LS_KEY, p);
-        await refreshLibrary();
-      }
-      setFocus(p);
-      status = "";
-    } catch (e) {
-      error = e.message;
-      status = "";
-    } finally {
-      scanning = false;
+    if (alreadyIndexed && focusAfterAdd) {
+      await applyScope(folderScope(p));
+      return;
     }
-  }
-
-  /** Toolbar "Open a folder…" entry: get a path (native picker when available,
-   * otherwise a small text-input popover) and hand it to openFolderFocus. */
-  function requestOpenFolder() {
-    libraryOpen = false;
-    if (hasNativePicker) {
-      window.autogallery?.pickFolder().then((path) => {
-        if (path) openFolderFocus(path);
-      });
-    } else {
-      openFolderDir = "";
-      openFolderOpen = true;
-    }
+    const ok = await doScan(); // renders its own error when it fails
+    if (ok && focusAfterAdd) await applyScope(folderScope(p));
   }
 
   async function chooseFolder() {
     const path = await window.autogallery?.pickFolder();
     if (path) {
       dir = path;
-      doScan();
+      await submitAddFolder();
     }
   }
 
@@ -3361,17 +3378,24 @@
     <SourceControls
       {scanning}
       {hasNativePicker}
-      bind:libraryOpen
-      bind:manageLibraryOpen
+      {alreadyIndexed}
+      {subdirs}
+      {subdirsLoading}
+      {subdirsError}
+      {subdirSelection}
       bind:addFolderOpen
       bind:dir
       bind:recursiveScan
-      bind:openFolderOpen
-      bind:openFolderDir
-      on:openfolder={requestOpenFolder}
-      on:scan={doScan}
+      bind:focusAfterAdd
+      bind:subdirsOpen
       on:choosefolder={chooseFolder}
-      on:openfolderfocus={() => openFolderFocus(openFolderDir)}
+      on:submit={submitAddFolder}
+      on:managelibrary={() => (manageLibraryOpen = true)}
+      on:loadsubdirs={loadSubdirs}
+      on:toggledir={(e) =>
+        (subdirSelection = toggleSubdir(subdirSelection, e.detail.path))}
+      on:selectalldirs={() => (subdirSelection = selectAll(subdirs))}
+      on:selectnodirs={() => (subdirSelection = selectNone())}
     />
 
     <div class="divider"></div>
@@ -3405,25 +3429,10 @@
       on:detectalbums={detectAlbums}
     />
 
-    {#if keepIds}
-      <button
-        class="keep-chip"
-        on:click={exitKeepOnly}
-        title="Exit keep-only focus (back to the whole library)"
-      >
-        ● Keep-only {keepIds.length.toLocaleString()} ✕
-      </button>
-    {/if}
-
-    {#if focusPath}
-      <button
-        class="focus-chip"
-        on:click={exitFocus}
-        title={"Exit folder focus — back to the whole library (" +
-          focusPath +
-          ")"}
-      >
-        ▣ Focused: {focusName} ✕
+    {#if chip}
+      <button class="scope-chip" on:click={exitScope} title={chip.title}>
+        {chip.icon}
+        {chip.text} ✕
       </button>
     {/if}
 
@@ -3890,25 +3899,10 @@
     margin-left: auto;
   }
 
-  .keep-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: #143a2a;
-    border: 1px solid #2e8b57;
-    color: #7fe0a8;
-    border-radius: 12px;
-    padding: 3px 10px;
-    font-size: 0.78rem;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .keep-chip:hover {
-    background: #1a4d38;
-  }
-  /* Folder-focus chip — a distinct blue/violet accent so it reads as a
-     different kind of scope than the green keep-only chip. */
-  .focus-chip {
+  /* The one scope chip. Both kinds of scope (a folder, a hand-picked id set)
+     are the same idea to the user — "you're seeing a subset" — so they share a
+     chip and an exit; the leading icon (▣ / ●) says which kind it is. */
+  .scope-chip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -3924,7 +3918,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .focus-chip:hover {
+  .scope-chip:hover {
     background: #263562;
   }
   h1 {

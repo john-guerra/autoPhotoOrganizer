@@ -2567,3 +2567,141 @@ describe("GET /api/system/same-volume", () => {
     await rm(root, { recursive: true, force: true });
   });
 });
+
+// --- The Add panel's subfolder checklist (choose what a recursive add imports)
+//
+// A recursive scan turns every directory with media into its own `folders` row,
+// so the checklist is a 1:1 preview of those rows and `dirs` is the subset the
+// user kept. The containment checks below are a security boundary, not a sanity
+// check: `dirs` is user-supplied path input arriving over HTTP.
+describe("subfolder selection", () => {
+  let card;
+
+  beforeAll(async () => {
+    // <card>/DCIM/{a,b}.jpg, <card>/DCIM/raw/c.jpg, <card>/docs/notes.txt
+    card = await mkdtemp(join(tmpdir(), "ag-card-"));
+    await mkdir(join(card, "DCIM", "raw"), { recursive: true });
+    await mkdir(join(card, "docs"), { recursive: true });
+    const jpg = (path) =>
+      sharp({
+        create: {
+          width: 16,
+          height: 16,
+          channels: 3,
+          background: { r: 10, g: 10, b: 10 },
+        },
+      })
+        .jpeg()
+        .toFile(path);
+    await jpg(join(card, "DCIM", "a.jpg"));
+    await jpg(join(card, "DCIM", "b.jpg"));
+    await jpg(join(card, "DCIM", "raw", "c.jpg"));
+    await writeFile(join(card, "docs", "notes.txt"), "not a photo");
+  });
+
+  afterAll(async () => {
+    await rm(card, { recursive: true, force: true });
+  });
+
+  const subdirs = (dir) =>
+    fetch(`${srv.base}/api/fs/subdirs?dir=${encodeURIComponent(dir)}`);
+
+  const scanDirs = (body) =>
+    fetch(`${srv.base}/api/scan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const libraryPaths = async () =>
+    (await (await fetch(`${srv.base}/api/library`)).json()).map((e) => e.path);
+
+  describe("GET /api/fs/subdirs", () => {
+    it("lists each directory with media, its depth and its count", async () => {
+      const res = await subdirs(card);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      expect(body.map((d) => d.relPath).sort()).toEqual([
+        "DCIM",
+        join("DCIM", "raw"),
+      ]);
+      expect(body.find((d) => d.relPath === "DCIM").mediaCount).toBe(2);
+      expect(body.find((d) => d.relPath === "DCIM").depth).toBe(1);
+      expect(body.find((d) => d.relPath === join("DCIM", "raw")).depth).toBe(2);
+    });
+
+    it("omits a directory with no media — it would produce no folders row", async () => {
+      const body = await (await subdirs(card)).json();
+      expect(body.some((d) => d.relPath === "docs")).toBe(false);
+    });
+
+    it("404s a missing path, 400s a file, 400s a missing dir param", async () => {
+      expect((await subdirs(join(card, "nope"))).status).toBe(404);
+      expect((await subdirs(join(card, "DCIM", "a.jpg"))).status).toBe(400);
+      expect((await fetch(`${srv.base}/api/fs/subdirs`)).status).toBe(400);
+    });
+  });
+
+  describe("POST /api/scan with a dirs subset", () => {
+    it("scans only the selected subdirs", async () => {
+      const res = await scanDirs({
+        dir: card,
+        recursive: true,
+        dirs: [join(card, "DCIM")], // deliberately excludes DCIM/raw
+      });
+      expect(res.status).toBe(202);
+      const job = await waitJob((await res.json()).jobId);
+      expect(job.status).toBe("done");
+
+      const paths = await libraryPaths();
+      expect(paths).toContain(join(card, "DCIM"));
+      expect(paths).not.toContain(join(card, "DCIM", "raw"));
+    });
+
+    it("rejects an entry outside the scanned folder", async () => {
+      const res = await scanDirs({
+        dir: card,
+        recursive: true,
+        dirs: ["/etc"],
+      });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/outside/i);
+    });
+
+    it("rejects a sibling that merely shares a name prefix", async () => {
+      // The classic hole: a naive startsWith(card) would let `${card}X` through.
+      const res = await scanDirs({
+        dir: card,
+        recursive: true,
+        dirs: [card + "X"],
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects a `..` traversal that escapes the scanned folder", async () => {
+      const res = await scanDirs({
+        dir: card,
+        recursive: true,
+        dirs: [join(card, "DCIM", "..", "..")],
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects a non-array dirs", async () => {
+      const res = await scanDirs({ dir: card, recursive: true, dirs: "DCIM" });
+      expect(res.status).toBe(400);
+    });
+
+    it("without dirs, still scans the whole tree", async () => {
+      const res = await scanDirs({ dir: card, recursive: true });
+      expect(res.status).toBe(202);
+      const job = await waitJob((await res.json()).jobId);
+      expect(job.status).toBe("done");
+
+      const paths = await libraryPaths();
+      expect(paths).toContain(join(card, "DCIM"));
+      expect(paths).toContain(join(card, "DCIM", "raw"));
+    });
+  });
+});
