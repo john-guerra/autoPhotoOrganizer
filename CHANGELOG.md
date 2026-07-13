@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.0
+
+- **The app says who made it.** ⌘-About (and the Windows installer, and the Linux
+  package metadata) now name AutoGallery and John Alexis Guerra Gómez, with a link
+  to https://johnguerra.co. Releases are credited to John rather than a bot.
+- **The macOS build is signed** — ad-hoc, not authenticated. The bundle is sealed,
+  so macOS can tell if it has been tampered with, and it launches cleanly on Apple
+  Silicon instead of being killed as unsigned. What an ad-hoc signature can't do is
+  prove the app came from John: without an Apple Developer ID, Gatekeeper still
+  needs a right-click → Open on first launch, and macOS auto-update stays off.
+
 ## 2.11.0
 
 - **Packaged build** of the folder-tree and selection round (2.10.7–2.10.13). The

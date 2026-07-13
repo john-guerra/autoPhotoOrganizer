@@ -48,8 +48,17 @@ jobs:
       - run: npx electron-rebuild -f -w better-sqlite3
       - run: npx electron-builder ${{ matrix.flag }} --publish always
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No signing certs in CI yet — keep the mac build from stalling on
-          # signing. Remove once Developer ID secrets are added (enables macOS
-          # auto-update).
+          # WHO THE RELEASE IS BY. GitHub credits a release to whoever's token
+          # created it, and it can't be reassigned afterwards — with the default
+          # GITHUB_TOKEN every release reads "github-actions[bot]". Add a personal
+          # access token (repo scope) as the RELEASE_TOKEN secret and releases are
+          # authored by John instead. Falls back to the built-in token so a fork
+          # without the secret still builds.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          # No Developer ID certs in CI — keep the mac build from stalling on
+          # signing. The build still gets an AD-HOC signature (see
+          # build/adhoc-sign.cjs): the bundle is sealed and runs on Apple
+          # Silicon, but Gatekeeper can't authenticate the author, so a first
+          # launch needs right-click → Open and macOS auto-update stays off.
+          # Both are fixed by adding Developer ID secrets here.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
