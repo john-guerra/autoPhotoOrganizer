@@ -29,6 +29,25 @@ const FOLDERS = [
     count: 5,
     days: ["2024:02:20", "2024:02:21"],
   },
+  // A NESTED pair, under a parent that holds no photos of its own. This one
+  // structure carries every folder-tree behaviour worth protecting:
+  //  - the tree must nest these under "Cards" instead of listing two long paths
+  //  - "Cards" is a VIRTUAL ancestor (no photos) — it must still count, fold and
+  //    jump on behalf of its children
+  //  - the two leaves differ ONLY by a number, and every label rule wants to throw
+  //    that number away (it's a bare digit, so date-shaped; everything else in the
+  //    name is shared). If it goes, the two rows render identically — which is
+  //    exactly the bug this fixture exists to catch.
+  {
+    name: "2024_03Mar_05 Cards/2024_03Mar_05 Cam 1",
+    count: 3,
+    days: ["2024:03:05", "2024:03:06"],
+  },
+  {
+    name: "2024_03Mar_05 Cards/2024_03Mar_05 Cam 10",
+    count: 3,
+    days: ["2024:03:05", "2024:03:06"],
+  },
 ];
 
 /**
