@@ -6,7 +6,7 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
-## 2.10.9
+## 2.10.11
 
 - **The Library is a real folder tree now.** Grouping by folder used to list every
   folder as a full absolute path, one flat row each. It now nests them, joining
@@ -38,6 +38,30 @@ user-facing — what you can now do, not how it's built.
   library. Opening a folder's sub-folders costs no request (they arrive with the
   level), so they were being counted against a budget meant for requests.
 - **The hover reveal on a long name is ~5× faster** — a reveal, not a ticker.
+
+## 2.10.10
+
+- **You can see where you are again.** A selected photo is marked by its gold
+  checkmark alone — the gold border is gone. The blue border now means one thing
+  only: this is the focused tile. Before, a photo that was both focused and
+  selected lost its focus ring to the selection colour, so in a sea of selected
+  photos you couldn't tell where the keyboard was.
+- **Undo covers every bulk selection change, not just removals** — Clear, ⌘A and
+  ⌘⇧A all stash first — and it restores _exactly_ the selection you had before.
+  It used to merge the old selection into the current one, which quietly made
+  undoing a select-all do nothing at all.
+
+## 2.10.9
+
+- **⌘A now takes the group you're in, not the whole library.** Press it again and
+  it offers to take everything currently shown — asking first, inline in the
+  status bar, because pulling ten thousand photos into a selection shouldn't
+  happen on a keystroke. Press ⌘A once more (or click Select all) to confirm,
+  Esc to back out.
+- **⌘⇧A is the mirror image:** it removes the current group from the selection,
+  and pressing it again offers to remove everything shown. Anything it removes is
+  restorable with Undo.
+- Both are in the help menu (`?`).
 
 ## 2.10.8
 

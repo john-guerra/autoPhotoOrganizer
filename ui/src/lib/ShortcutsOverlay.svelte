@@ -11,6 +11,11 @@
   const dispatch = createEventDispatcher();
   const close = () => dispatch("close");
 
+  // The platform's own modifier key (lib/platform.js). Listing both as
+  // "⌘ / Ctrl" rendered the slash as its own <kbd> pill — it read as a third key
+  // to press. Nobody needs the shortcut for the OS they aren't using.
+  import { MOD } from "./platform.js";
+
   // Each group: a heading + rows of {keys, label}. `keys` is an array so each
   // token renders as its own <kbd>; connective tokens ("+", "arrow", "–")
   // render as plain text between keys.
@@ -22,8 +27,12 @@
         { keys: ["0"], label: "Clear rating" },
         { keys: ["X"], label: "Toggle selection (auto-advances in loupe)" },
         {
-          keys: ["⌘", "/", "Ctrl", "+", "A"],
-          label: "Select every photo currently shown",
+          keys: [MOD, "+", "A"],
+          label: "Select this group — again for everything shown",
+        },
+        {
+          keys: [MOD, "+", "Shift", "+", "A"],
+          label: "Deselect this group — again for everything shown",
         },
         { keys: ["C"], label: "Set / unset this photo as its stack's cover" },
         { keys: ["G"], label: "Group the selected photos into one stack" },

@@ -101,6 +101,12 @@
     toggle as toggleSubdir,
     selectedDirs,
   } from "./lib/subfolderSelection.js";
+  import {
+    nextBulkAction,
+    groupLabel,
+    restoreSelection,
+  } from "./lib/bulkSelection.js";
+  import { combo } from "./lib/platform.js";
   import OrganizeControls from "./lib/OrganizeControls.svelte";
   import ViewControls from "./lib/ViewControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
@@ -941,13 +947,116 @@
         sort
       );
       if (!ids.length) return;
+      snapshotSelection(); // selecting everything can bury a careful selection too
       selectedIds = new Set([...selectedIds, ...ids]);
       status = `Selected ${selectedIds.size.toLocaleString()} photo${
         selectedIds.size === 1 ? "" : "s"
-      }`;
+      } — Undo to restore`;
     } catch (e) {
       error = `Select all failed: ${e.message}`;
     }
+  }
+
+  // --- ⌘A / ⌘⇧A escalation (see lib/bulkSelection.js) -----------------------
+  // Both act on the current group first, and only reach for everything the
+  // filters show on a second press — which asks first, inline, because pulling
+  // 10,000 photos into a selection on a keystroke is a surprise, not a feature.
+  // `pendingBulk` is that question; pressing the same shortcut again answers it.
+  /** @type {null|"select"|"deselect"} */
+  let pendingBulk = null;
+  $: pendingBulkCount = pendingBulk ? showingCount : 0;
+
+  /** Every photo the filters currently show — the whole set, not just the
+   * loaded window. The same server query select-all and export already use. */
+  const fetchVisibleIds = () =>
+    fetchPhotoIds(
+      filterIsActive(displayFilter) ? displayFilter : null,
+      null,
+      sort
+    );
+
+  /** The ids of the group the focus is sitting in (empty when there's none). */
+  async function currentGroupIds() {
+    if (!currentPath || !currentPath.length) return [];
+    return await fetchPhotoIds(null, currentPath, sort);
+  }
+
+  /** ⌘A. Group → (already have it) → ask → everything shown. */
+  async function bulkSelect() {
+    try {
+      const ids = await currentGroupIds();
+      const action = nextBulkAction("select", {
+        pending: pendingBulk,
+        hasGroup: ids.length > 0,
+        groupFullySelected:
+          ids.length > 0 && ids.every((id) => selectedIds.has(id)),
+      });
+      if (action === "group") {
+        pendingBulk = null;
+        snapshotSelection();
+        selectedIds = new Set([...selectedIds, ...ids]);
+        status = `Selected ${ids.length.toLocaleString()} in ${groupLabel(currentPath)} — ${combo("A")} again for all ${showingCount.toLocaleString()}`;
+        return;
+      }
+      if (action === "prompt") {
+        pendingBulk = "select";
+        return; // the SelectionBar renders the question; no keystroke commits it
+      }
+      pendingBulk = null;
+      await selectAllInView();
+    } catch (e) {
+      pendingBulk = null;
+      error = `Select failed: ${e.message}`;
+    }
+  }
+
+  /** ⌘⇧A. The mirror image: drop the group, then (asking first) everything shown. */
+  async function bulkDeselect() {
+    try {
+      const ids = await currentGroupIds();
+      const action = nextBulkAction("deselect", {
+        pending: pendingBulk,
+        hasGroup: ids.length > 0,
+        groupHasSelection: ids.some((id) => selectedIds.has(id)),
+      });
+      if (action === "group") {
+        pendingBulk = null;
+        removeFromSelection(ids, groupLabel(currentPath));
+        return;
+      }
+      if (action === "prompt") {
+        pendingBulk = "deselect";
+        return;
+      }
+      pendingBulk = null;
+      removeFromSelection(await fetchVisibleIds(), "everything shown");
+    } catch (e) {
+      pendingBulk = null;
+      error = `Deselect failed: ${e.message}`;
+    }
+  }
+
+  /** Take ids out of the selection, stashing what left so Clear's Undo can put
+   * it back — removing 10,000 photos from a selection must be recoverable. */
+  function removeFromSelection(ids, what) {
+    const removed = ids.filter((id) => selectedIds.has(id));
+    if (!removed.length) return;
+    snapshotSelection();
+    const next = new Set(selectedIds);
+    for (const id of removed) next.delete(id);
+    selectedIds = next;
+    status = `Removed ${removed.length.toLocaleString()} photo${
+      removed.length === 1 ? "" : "s"
+    } from the selection (${what}) — Undo to restore`;
+  }
+
+  /** Answer the inline question with the mouse instead of the keyboard. */
+  async function confirmPendingBulk() {
+    const kind = pendingBulk;
+    pendingBulk = null;
+    if (kind === "select") await selectAllInView();
+    else if (kind === "deselect")
+      removeFromSelection(await fetchVisibleIds(), "everything shown");
   }
 
   /** Click the group's select icon: select-all, or deselect-all if already all. */
@@ -1277,15 +1386,37 @@
   function clearSelection() {
     if (selectedIds.size === 0) return;
     const n = selectedIds.size;
-    lastClearedSelection = new Set(selectedIds);
+    snapshotSelection();
     selectedIds = new Set();
     status = `Cleared ${n.toLocaleString()} photo${n === 1 ? "" : "s"} from the selection — Undo to restore`;
   }
 
+  /**
+   * Remember the selection as it is RIGHT NOW, so Undo can put exactly this back.
+   * Called before every bulk change — Clear, ⌘A (group or everything), ⌘⇧A —
+   * because any of them can wipe out a careful hand-picked selection, not just
+   * the ones that remove. Single-photo toggles are not snapshotted: they're one
+   * keystroke to reverse, and stashing on every X would make Undo mean "undo the
+   * last thing" instead of "put my selection back".
+   */
+  function snapshotSelection() {
+    lastClearedSelection = new Set(selectedIds);
+  }
+
+  /**
+   * Restore the selection to EXACTLY what it was before the last bulk change.
+   * This replaces the current selection rather than merging into it: the old
+   * union meant undoing a select-all left you with the union of both, which is
+   * not what "undo" says.
+   */
   function undoClearSelection() {
     if (!lastClearedSelection) return;
-    selectedIds = new Set([...selectedIds, ...lastClearedSelection]);
+    const n = lastClearedSelection.size;
+    selectedIds = restoreSelection(lastClearedSelection);
     lastClearedSelection = null;
+    status = n
+      ? `Selection restored (${n.toLocaleString()} photo${n === 1 ? "" : "s"})`
+      : "Selection restored (was empty)";
   }
 
   /** Refresh the library-total and showing counts (cheap COUNT queries). */
@@ -3063,16 +3194,18 @@
   }
 
   async function onKeydown(e) {
-    // Cmd/Ctrl+A selects every photo in the current working set (the same
-    // whole-set query the group select-all and export use). Handled before the
-    // blanket meta/ctrl bail below, but only when focus isn't in a text field —
-    // there, Cmd/Ctrl+A must still select the field's text.
+    // Cmd/Ctrl+A adds the current group to the selection; pressed again (once
+    // the group is already all in) it asks before taking everything the filters
+    // show. Cmd/Ctrl+Shift+A is the mirror image, removing instead of adding.
+    // Handled before the blanket meta/ctrl bail below, but only when focus isn't
+    // in a text field — there, Cmd/Ctrl+A must still select the field's text.
     if ((e.metaKey || e.ctrlKey) && (e.key === "a" || e.key === "A")) {
       const tag = e.target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)
         return;
       e.preventDefault();
-      await selectAllInView();
+      if (e.shiftKey) await bulkDeselect();
+      else await bulkSelect();
       return;
     }
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
@@ -3238,9 +3371,15 @@
       return;
     }
 
-    // Escape in the grid: collapse an expanded stack if the selection is
-    // currently inside one.
+    // Escape in the grid: dismiss the ⌘A / ⌘⇧A question if one is up (it must
+    // be as easy to back out of as it was to raise), else collapse an expanded
+    // stack if the selection is currently inside one.
     if (key === "Escape") {
+      if (pendingBulk) {
+        e.preventDefault();
+        pendingBulk = null;
+        return;
+      }
       const entry = displayEntries[selected];
       if (entry?.stackId) {
         e.preventDefault();
@@ -3891,6 +4030,10 @@
       bind:exportDest
       bind:exportName
       bind:exportMove
+      {pendingBulk}
+      pendingCount={pendingBulkCount}
+      on:bulkconfirm={confirmPendingBulk}
+      on:bulkcancel={() => (pendingBulk = null)}
       on:clear={clearSelection}
       on:keeponly={keepOnlySelection}
       on:undoclear={undoClearSelection}

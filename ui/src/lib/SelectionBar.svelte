@@ -14,6 +14,7 @@
    */
   import { createEventDispatcher } from "svelte";
   import { clickOutside, onEscape, clampToViewport } from "./actions.js";
+  import { combo } from "./platform.js";
 
   export let selectedCount = 0;
   export let lastClearedSelection = null;
@@ -26,14 +27,45 @@
   export let exportName = "";
   export let exportMove = false;
 
+  /** The pending ⌘A / ⌘⇧A question, if one is up. @type {null|"select"|"deselect"} */
+  export let pendingBulk = null;
+  /** How many photos the answer would touch (everything the filters show). */
+  export let pendingCount = 0;
+
   const dispatch = createEventDispatcher();
 </script>
 
 <!-- Stays up while there's a selection OR a clear still waiting to be undone.
      `selectedCount > 0` alone meant Clear removed the Undo button along with the
-     selection, so the "undoable" clear had no way to be undone (#97). -->
-{#if selectedCount > 0 || lastClearedSelection}
+     selection, so the "undoable" clear had no way to be undone (#97).
+     It also stays up for the ⌘A / ⌘⇧A question, which can be asked from an
+     empty selection. -->
+{#if selectedCount > 0 || lastClearedSelection || pendingBulk}
   <div class="cluster selection">
+    <!-- The inline answer to "⌘A again": asking in the status bar rather than a
+         blocking confirm() (#97 — the native dialog froze the whole UI). Press
+         the shortcut again, click, or Escape. -->
+    {#if pendingBulk}
+      <span class="ask">
+        <!-- Select names its count (it really will take that many). Deselect
+             can't: only the shown photos that are ALSO selected get removed, and
+             we don't know how many that is without fetching the ids. Quoting the
+             shown-count here would promise a number the action won't deliver, so
+             it stays unnumbered and the status line reports the true count after. -->
+        {pendingBulk === "select"
+          ? `Select all ${pendingCount.toLocaleString()} photos shown?`
+          : "Remove everything shown from the selection?"}
+      </span>
+      <button
+        class="sel-btn confirm"
+        on:click={() => dispatch("bulkconfirm")}
+        title={`${combo("A", { shift: pendingBulk === "deselect" })} again also confirms`}
+        >{pendingBulk === "select" ? "Select all" : "Remove all"}</button
+      >
+      <button class="sel-btn" on:click={() => dispatch("bulkcancel")}>
+        Cancel
+      </button>
+    {/if}
     {#if selectedCount > 0}
       <button
         class="sel-btn"
@@ -51,7 +83,8 @@
       <button
         class="sel-btn undo"
         on:click={() => dispatch("undoclear")}
-        title="Restore the selection you just cleared">Undo</button
+        title="Put the selection back exactly as it was before the last bulk change (Clear, ⌘A, ⌘⇧A)"
+        >Undo</button
       >
     {/if}
     {#if selectedCount > 0}
@@ -175,6 +208,17 @@
   }
   .sel-btn.undo {
     color: #ffd24c;
+  }
+  .sel-btn.confirm {
+    background: #4c9aff;
+    border-color: #4c9aff;
+    color: #06121f;
+    font-weight: 600;
+  }
+  .ask {
+    font-size: 0.8rem;
+    color: #ffd24c;
+    white-space: nowrap;
   }
   .export-wrap {
     position: relative;
