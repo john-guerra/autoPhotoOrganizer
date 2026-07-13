@@ -22,7 +22,9 @@ async function emphasised(locator) {
   return (await locator.locator(".part-keep").allInnerTexts()).join("").trim();
 }
 
-test("the tree nests folders instead of listing full paths", async ({ page }) => {
+test("the tree nests folders instead of listing full paths", async ({
+  page,
+}) => {
   const errors = trackPageErrors(page);
   await openApp(page, { groupBy: ["folder"] });
 
@@ -44,7 +46,9 @@ test("the tree nests folders instead of listing full paths", async ({ page }) =>
   expect(errors).toEqual([]);
 });
 
-test("the tree starts expanded when grouping by folder alone", async ({ page }) => {
+test("the tree starts expanded when grouping by folder alone", async ({
+  page,
+}) => {
   const errors = trackPageErrors(page);
   await openApp(page, { groupBy: ["folder"] });
 
@@ -57,7 +61,9 @@ test("the tree starts expanded when grouping by folder alone", async ({ page }) 
   expect(errors).toEqual([]);
 });
 
-test("a folder's own name is what the eye lands on, not its path", async ({ page }) => {
+test("a folder's own name is what the eye lands on, not its path", async ({
+  page,
+}) => {
   const errors = trackPageErrors(page);
   await openApp(page, { groupBy: ["folder"] });
 
@@ -120,9 +126,7 @@ test("a virtual ancestor folds every group beneath it", async ({ page }) => {
   const errors = trackPageErrors(page);
   await openApp(page, { groupBy: ["folder"] });
 
-  const cardsIcon = tree
-    .node(page, "Cards")
-    .locator(".tree-collapse-icon");
+  const cardsIcon = tree.node(page, "Cards").locator(".tree-collapse-icon");
   await cardsIcon.click();
 
   // "Cards" has no photos of its own, so it has no group of its own to collapse —

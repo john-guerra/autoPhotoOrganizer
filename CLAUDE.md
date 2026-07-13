@@ -67,6 +67,33 @@ verification), and decisions already made.
 - Every file-serving endpoint MUST route user paths through
   `server/lib/safeResolve.js` (path-traversal guard — the legacy app was flagged).
 
+## A fixed bug gets a test that would have caught it
+
+Full guide: `docs/TESTING.md`. The rules that matter most:
+
+- **Fix a bug → add a test at the tier that would have CAUGHT it**, in the same
+  commit. If pure logic was wrong, that's a vitest test next to the source. If the
+  code was right and the _app_ was still wrong — a stale Svelte binding, a label
+  clipped at the wrong end, something that only misbehaves once real data loads —
+  no unit test can see it, and it belongs in `e2e/` (Playwright).
+- **A test that never failed proves nothing.** Before you commit it, revert the fix
+  and watch the test go red, then restore. If it stays green, it isn't testing your
+  fix — it's decoration. (This is the single cheapest way to avoid a suite that is
+  green for the wrong reasons.)
+- **Assert on what the user gets, not on how it's built.** "These two groups don't
+  render identically", not "labelParts returns 4 parts". Selectors live in
+  `e2e/helpers.js`, never inline in a spec, so a markup change is a one-line fix.
+- **Be economical: one clever fixture beats five specs.** Prefer extending the shared
+  fixture with a single structure that exercises many behaviours at once over
+  bolting on a bespoke setup per bug. (The nested `Cards/Cam 1` + `Cards/Cam 10`
+  pair covers nesting, a photo-less ancestor, _and_ two names that differ by one
+  character — three shipped bugs, one fixture.)
+- **Keep the pyramid.** e2e is slow; don't test in the browser what a vitest test can
+  prove. Reach for e2e when the bug lives in the seam between modules, the DOM, or
+  the load order — which is exactly where this app's shipped bugs keep coming from.
+- **`trackPageErrors(page)` in every spec.** It's free, and it alone would have caught
+  three of the five bugs that reached a user in the 2.9.x round.
+
 ## Usability (never fail silently)
 
 Every user-facing action must tell the user what is happening. A console error

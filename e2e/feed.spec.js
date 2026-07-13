@@ -56,6 +56,12 @@ test("cycles a group grid -> snapshot -> collapsed -> grid without throwing", as
   const header = page.locator(".section-header").last();
   const icon = header.locator(".section-toggle-icon");
 
+  // The feed is VIRTUALIZED: a group below the fold has no band in the DOM, so
+  // the band assertions below would read 0 whatever the click did. This spec used
+  // to pass only because the fixture happened to fit on one screen — it doesn't
+  // any more, and "it fits" was never what this test is about.
+  await header.scrollIntoViewIfNeeded();
+
   // grid: no band, icon not amber
   await expect(page.locator(".group-band")).toHaveCount(0);
   await expect(icon).not.toHaveClass(/not-grid/);

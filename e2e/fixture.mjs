@@ -18,7 +18,7 @@ export const HOME_DIR = join(E2E_ROOT, "home");
 
 // Each folder spans TWO days, so `folder > day` produces a genuinely nested
 // feed (two children per parent) instead of one degenerate child.
-const FOLDERS = [
+export const FOLDERS = [
   {
     name: "2024_01Jan_10 Trip",
     count: 6,
@@ -49,6 +49,13 @@ const FOLDERS = [
     days: ["2024:03:05", "2024:03:06"],
   },
 ];
+
+/** How many photos the fixture library holds, derived — never hand-counted.
+ *
+ * A spec that asserts "11 selected" is really asserting "the whole library", and
+ * it silently becomes a lie the moment anyone adds a folder to the fixture (which
+ * is exactly what happened when the nested pair landed). Import this instead. */
+export const TOTAL_PHOTOS = FOLDERS.reduce((sum, f) => sum + f.count, 0);
 
 /**
  * Deterministic, tiny, EXIF-dated JPEGs.

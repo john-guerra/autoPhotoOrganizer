@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.12
+
+- **Every folder-tree bug that shipped now has a test that would have caught it.**
+  Five defects in the folder tree passed a green unit suite and were found only by
+  looking at the running app; the browser tier now covers each one — nesting, a
+  photo-less parent folder that folds its children, the tree opening on load, a
+  label that keeps the folder's name when it has to be clipped, and two folders
+  whose names differ by a single character rendering differently. Each was checked
+  to fail with its fix reverted, not merely to pass.
+
 ## 2.10.11
 
 - **The Library is a real folder tree now.** Grouping by folder used to list every

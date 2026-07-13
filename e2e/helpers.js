@@ -123,6 +123,11 @@ export const statusBar = {
   keepOnly: (page) =>
     page.locator(".statusbar .sel-btn", { hasText: /^Keep only$/ }),
   exportBtn: (page) => page.locator(".statusbar .sel-btn.export"),
+  /** ⌘A is a two-step (2.10.10): the first press takes the group you're in, the
+   * second ASKS before taking everything shown. This is the "yes" — in the status
+   * bar, deliberately not a modal. */
+  confirmSelectAll: (page) =>
+    page.locator(".statusbar button", { hasText: /^Select all$/ }),
 };
 
 // --- the loupe --------------------------------------------------------------
