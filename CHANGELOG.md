@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.7
+
+- **Fix: "Choose subfolders…" was unreachable in the app** (regression in 2.10.6).
+  Picking a folder with the native picker started the scan immediately, so the
+  panel's options — which subfolders to import, whether to focus — were gone
+  before you could touch them. The picker now fills the path in and waits; you
+  choose your options and press the button to commit.
+
 ## 2.10.6
 
 - **Packaged build** of the folder-controls work: one ＋ panel for adding,
