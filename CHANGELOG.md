@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.11.0
+
+- **Packaged build** of the folder-tree and selection round (2.10.7–2.10.13). The
+  Library is a real nested folder tree whose labels spend their width on the part
+  that tells two folders apart; ⌘A takes the group you're in before it offers you
+  the whole library; a selected photo is its gold checkmark alone, so the focus
+  ring is visible again; Undo restores exactly the selection you had; collapsing a
+  group keeps you where you are; and "Choose subfolders…" is reachable from the
+  native picker again (the 2.10.6 regression).
+
 ## 2.10.13
 
 - **Collapsing a group no longer throws you back to the top of the library.**
