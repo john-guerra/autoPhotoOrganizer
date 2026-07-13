@@ -3397,7 +3397,11 @@
       on:managelibrary={() => (manageLibraryOpen = true)}
       on:loadsubdirs={loadSubdirs}
       on:toggledir={(e) =>
-        (subdirSelection = toggleSubdir(subdirSelection, e.detail.path))}
+        (subdirSelection = toggleSubdir(
+          subdirSelection,
+          e.detail.path,
+          subdirs
+        ))}
       on:selectalldirs={() => (subdirSelection = selectAll(subdirs))}
       on:selectnodirs={() => (subdirSelection = selectNone())}
     />
