@@ -1921,7 +1921,16 @@
   }
 
   /** Header parts for any dimension: only folders need the treatment. */
-  function headerParts(header) {
+  /** Header parts for any dimension: only folders need the treatment.
+   *
+   * `_stats` / `_roots` are unused INSIDE the function — they are there so the
+   * template's call site names them, and Svelte re-runs the each-block when they
+   * change. Svelte's reactivity tracks the variables an expression MENTIONS, not
+   * what the called function closes over: without them, headers rendered before
+   * /api/library resolved kept an empty corpus forever, printing the whole
+   * absolute path with nothing dimmed. (TreeNode.svelte carries a comment about
+   * the same trap for collapsedPaths.) */
+  function headerParts(header, _stats, _roots) {
     return header.path?.at(-1)?.dimension === "folder"
       ? folderHeaderParts(header.path.at(-1).value)
       : [{ text: header.label, kind: "keep" }];
@@ -3683,7 +3692,7 @@
                       }`}
                       on:dblclick={() => startRename(header.path)}
                     >
-                      {#each headerParts(header) as part}<span
+                      {#each headerParts(header, tokenStats, libraryRoots) as part}<span
                           class="part-{part.kind}">{part.text}</span
                         >{/each}
                     </button>

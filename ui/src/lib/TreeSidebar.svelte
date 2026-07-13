@@ -60,10 +60,14 @@
     highlightedKey = null;
     await loadRoot();
     // Open by default: the tree is a map of the library, and a map you have to
-    // unfold one node at a time isn't much of a map. expandAll() is capped
-    // (MAX_EXPAND_NODES) and reports when it stops, so a huge library degrades
-    // to "expanded as far as is sane" rather than a fetch storm.
-    if (groupBy.length > 1) expandAll();
+    // unfold one node at a time isn't much of a map. expandAll() is capped and
+    // reports when it stops, so a huge library degrades to "expanded as far as is
+    // sane" rather than a fetch storm.
+    //
+    // Grouping by folder ALONE is now a hierarchy too (folderTree.js), so the
+    // old `groupBy.length > 1` test would have left the commonest grouping of all
+    // starting collapsed — and folder levels cost no fetch to expand.
+    if (groupBy.length > 1 || groupBy.includes("folder")) expandAll();
   }
   $: (groupBy, filter, sort, refreshToken, resetAndLoad());
 
@@ -115,9 +119,26 @@
   // Expanding walks the hierarchy level by level, fetching each level's children
   // as it goes. A deep tree over a big library can be enormous, so it's capped:
   // we stop and SAY SO rather than firing thousands of requests.
-  const MAX_EXPAND_NODES = 800;
+  //
+  // The cap that matters is the number of REQUESTS, not the number of rows. A
+  // folder row's sub-folders arrived with its level's response, so expanding the
+  // folder hierarchy is free — counting those against the request budget stopped a
+  // 1,200-folder library less than a third of the way through and left most of the
+  // tree folded, for no reason. Rows still get a (much looser) ceiling of their
+  // own, since every row is DOM.
+  const MAX_EXPAND_FETCHES = 800;
+  const MAX_EXPAND_ROWS = 5000;
   let expandingAll = false;
   let expandAllNote = "";
+
+  /** Does opening this row hit the server? Only a next-dimension level does — and
+   * only for a folder that has photos of its own to group. */
+  function needsFetch({ node, depth }) {
+    if (!groupBy[depth + 1]) return false;
+    return isFolderNode(node)
+      ? Boolean(node.isGroup)
+      : Boolean(node.hasChildren);
+  }
 
   /** The rows beneath one row, whichever kind it is. A folder row's sub-folders
    * are already in hand (they came with this level's response, via the trie), so
@@ -166,26 +187,34 @@
         path: [{ dimension: groupBy[0], value: node.value }],
         depth: 0,
       }));
-      let visited = 0;
-      let truncated = false;
+      let fetches = 0;
+      let rows = frontier.length;
+      let truncated = "";
       while (frontier.length && !truncated) {
         const nextFrontier = [];
         for (const row of frontier) {
-          if (++visited > MAX_EXPAND_NODES) {
-            truncated = true;
-            break;
+          // Only a next-dimension level costs a request; a folder's sub-folders
+          // are already here.
+          if (needsFetch(row)) {
+            if (++fetches > MAX_EXPAND_FETCHES) {
+              truncated = `Stopped after ${MAX_EXPAND_FETCHES} groups — expand deeper levels by hand.`;
+              break;
+            }
           }
           const kids = await childRows(row);
           if (!kids.length) continue;
           next.add(treeKey(row.path));
+          rows += kids.length;
+          if (rows > MAX_EXPAND_ROWS) {
+            truncated = `Stopped at ${MAX_EXPAND_ROWS} rows — expand deeper levels by hand.`;
+            break;
+          }
           nextFrontier.push(...kids);
         }
         frontier = nextFrontier;
       }
       expandedKeys = next;
-      if (truncated) {
-        expandAllNote = `Stopped at ${MAX_EXPAND_NODES} groups — expand deeper levels by hand.`;
-      }
+      expandAllNote = truncated;
     } finally {
       expandingAll = false;
     }

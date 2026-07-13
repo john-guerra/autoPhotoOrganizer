@@ -23,7 +23,12 @@ user-facing — what you can now do, not how it's built.
   a parent folder cycles every group under it together, and shows a "mixed" icon when
   they disagree. Clicking a folder that has no photos of its own jumps to the first
   one that does.
+- **The tree starts expanded when you group by folder**, like it already did for
+  multi-level groupings — and it no longer stops a third of the way through a big
+  library. Opening a folder's sub-folders costs no request (they arrive with the
+  level), so they were being counted against a budget meant for requests.
 - **The hover reveal on a long name is ~5× faster** — a reveal, not a ticker.
+
 ## 2.10.8
 
 - **Checking a folder in the subfolder list now takes everything under it.** Tick
