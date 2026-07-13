@@ -104,6 +104,22 @@ is **not** user feedback.
   make the checkpoint commit. Only hold off if the work is mid-flight and
   known-broken.
 
+## Keyboard shortcuts
+
+This is a keyboard-first app: a shortcut nobody can find does not exist.
+
+- **Every new (or changed, or removed) keyboard shortcut MUST be documented in
+  the help menu — `ui/src/lib/ShortcutsOverlay.svelte` — in the same commit that
+  adds it.** The overlay is a plain `groups` array of `{ keys, label }` rows, so
+  this is one line; put it in the group it belongs to (Rating & selection,
+  Navigation, View, …), and add a new group only if none fits.
+- The `label` describes **what the user gets**, not the handler ("Jump to the
+  next group", not "call jumpFromGroup"). Note modifiers and any mode-specific
+  behaviour (e.g. "auto-advances in loupe").
+- A shortcut added to `onKeydown` without a matching overlay row is an
+  **incomplete change**, the same way a feature without user-visible error
+  handling is (see Usability above).
+
 ## Versioning
 
 - **Every change bumps the app version in `package.json`.** The version shows

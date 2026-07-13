@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { loupe as loupeHelper } from "./helpers.js";
 
 /**
  * These cover the interactions that actually regressed during the 2.9.x usability
@@ -133,12 +134,12 @@ test("the loupe opens on a tile click and closes with its ✕", async ({
   const errors = trackPageErrors(page);
   await gotoFeed(page);
 
-  const tile = page.locator(".thumb").first();
-  await tile.click(); // focuses
-  await tile.click(); // opens the loupe (issue #72 behaviour)
+  // Via the helper: a click opens the loupe on an ALREADY-focused tile, and the
+  // first tile is focused by default — so a blind double-click would open the
+  // loupe and then click straight into it.
+  await loupeHelper.open(page, 0);
 
   const loupe = page.locator(".loupe");
-  await expect(loupe).toBeVisible();
   await loupe.locator(".loupe-close").click();
   await expect(loupe).toHaveCount(0);
 
