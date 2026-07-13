@@ -167,6 +167,60 @@ describe("labelParts", () => {
   });
 });
 
+describe("the path never outshines the name", () => {
+  // A camera dump: every folder shares the parent, the date and the word "Canon",
+  // and the ONLY thing telling two of them apart is a bare number.
+  const CARD = Array.from(
+    { length: 14 },
+    (_, i) => `/pics/backup_temp/2025_11Nov_08 Canon ${i + 1}`
+  );
+  const cardStats = buildTokenStats(CARD);
+  const cardSiblings = CARD.map((p) => p.split("/").pop());
+
+  const cardKinds = (name) =>
+    Object.fromEntries(
+      labelParts(name, { stats: cardStats, siblings: cardSiblings })
+        .filter((p) => /[a-z0-9]/i.test(p.text))
+        .map((p) => [p.text, p.kind])
+    );
+
+  it("dims every path segment, however rare its words are", () => {
+    // "backup"/"temp" are rare in the corpus, so rarity alone lit them up while the
+    // folder's own name sat grey underneath — exactly backwards. The path is the
+    // route to the folder, not the folder.
+    const k = cardKinds("backup_temp/2025_11Nov_08 Canon 1");
+    expect(k["backup"]).toBe("dim");
+    expect(k["temp"]).toBe("dim");
+  });
+
+  it("brings back the token that differs from the siblings, even a bare number", () => {
+    // Everything in the name is dim on its own terms: the date is date-shaped,
+    // "Canon" is on every folder, and "1" is a bare number. But "1" is the ONLY
+    // difference between this folder and "Canon 10" — throw it away and the two
+    // rows render identically.
+    const k = cardKinds("backup_temp/2025_11Nov_08 Canon 1");
+    expect(k["1"]).toBe("keep");
+    expect(k["Canon"]).toBe("dim");
+    expect(k["11Nov"]).toBe("dim");
+  });
+
+  it("keeps siblings distinguishable", () => {
+    const one = labelText(
+      labelParts("2025_11Nov_08 Canon 1", {
+        stats: cardStats,
+        siblings: cardSiblings,
+      }).filter((p) => p.kind === "keep")
+    );
+    const ten = labelText(
+      labelParts("2025_11Nov_08 Canon 10", {
+        stats: cardStats,
+        siblings: cardSiblings,
+      }).filter((p) => p.kind === "keep")
+    );
+    expect(one).not.toEqual(ten);
+  });
+});
+
 describe("buildSiblingIndex", () => {
   it("groups folder names by the parent they share on disk", () => {
     const index = buildSiblingIndex(LIBRARY);

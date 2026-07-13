@@ -23,6 +23,12 @@ user-facing — what you can now do, not how it's built.
   a parent folder cycles every group under it together, and shows a "mixed" icon when
   they disagree. Clicking a folder that has no photos of its own jumps to the first
   one that does.
+- **The path never outshines the folder's name.** A header put its rare middle
+  words (`Backup`, `temp`) in lights while the folder's own name sat grey beneath
+  them. Path segments are context now — always muted — and the emphasis goes to
+  the name. If the name is nothing but boilerplate (`2025_11Nov_08 Canon 1`), what
+  comes back bright is whatever differs from its siblings: the `1`. Two camera
+  folders that differ by one character no longer read identically.
 - **Feed headers keep the folder's name, not the path.** A long header used to be
   cut at the end — so two groups under the same long parent both read
   `…/2025_11Nov_08 Canon 1/2…` and looked identical. The header now clips its front

@@ -172,18 +172,30 @@ export function labelParts(name, { stats = EMPTY_STATS, siblings = [] } = {}) {
 
   const constant = constantTokens(siblings);
   const siblingCount = siblings.length;
-  const classified = tokens.map((t) => {
+  // Where the folder's OWN name starts. Everything before it is the path — the
+  // route to the folder, not the folder — and it is never allowed to outshine the
+  // name, however rare its words happen to be. (Rarity alone put "Backup" and
+  // "temp" in lights while the folder's actual name sat grey beneath them.)
+  const nameStart = tokens.map((t) => t.sep).lastIndexOf("/") + 1;
+
+  const classified = tokens.map((t, i) => {
     const { count, df } = commonness(t.text, stats);
+    const isConstant = constant.has(t.text.toLowerCase());
     return {
       ...t,
       df,
-      kind: classifyToken({
-        token: t.text,
-        df,
-        count,
-        constantAcrossSiblings: constant.has(t.text.toLowerCase()),
-        siblingCount,
-      }),
+      isConstant,
+      inName: i >= nameStart,
+      kind:
+        i < nameStart
+          ? "dim"
+          : classifyToken({
+              token: t.text,
+              df,
+              count,
+              constantAcrossSiblings: isConstant,
+              siblingCount,
+            }),
     };
   });
 
@@ -202,18 +214,27 @@ function constantTokens(siblings) {
   return shared ?? new Set();
 }
 
-/** Renders the tokens, guaranteeing the row still has something to look at.
+/** Renders the tokens, guaranteeing the folder's own name still says something.
  *
- * A row whose tokens are ALL common would come out entirely grey — the library's
- * own root row ("Users/me/Pictures/library") is exactly that, since every
- * one of its tokens is on every folder by definition. So the final SEGMENT comes
- * back bright: the deeper you go in a path the more it tells you, and the last
- * segment is the folder's own name. It has to be the whole segment, not the last
- * token — lighting up only the "peq" of "trips_peq" reads as a different folder. */
+ * A name whose every token is common comes out entirely grey. Two real cases:
+ * the library's own root row ("Users/me/Pictures/library" — every token is on
+ * every folder by definition), and a camera dump ("2025_11Nov_08 Canon 1", where
+ * the date is date-shaped, "Canon" is on hundreds of folders, and the "1" is a
+ * bare number). The row would be unreadable, and worse, its SIBLING would render
+ * identically — "Canon 1" and "Canon 10" differ by one character and that
+ * character is the only thing either rule would throw away.
+ *
+ * So: if nothing in the name survived, bring back whatever DIFFERS from the
+ * siblings — that is the discriminator, by definition, whatever shape it has. If
+ * even that is empty (a lone row, nothing to differ from), bring the whole name
+ * back. Never touch the path: it is context, and it already lost. */
 function assembleLabel(classified) {
-  if (classified.every((t) => t.kind === "dim")) {
-    const lastSlash = classified.map((t) => t.sep).lastIndexOf("/");
-    for (const token of classified.slice(lastSlash + 1)) token.kind = "keep";
+  const name = classified.filter((t) => t.inName);
+  if (name.length && name.every((t) => t.kind === "dim")) {
+    const discriminators = name.filter((t) => !t.isConstant);
+    for (const token of discriminators.length ? discriminators : name) {
+      token.kind = "keep";
+    }
   }
   const parts = [];
   for (const token of classified) {
