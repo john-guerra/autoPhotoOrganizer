@@ -85,6 +85,23 @@ that way.
   JPEGs with real EXIF capture dates.
 - `e2e/global-setup.mjs` builds the fixture, waits for `/api/health`, and scans.
 
+### Measuring performance on a big library
+
+Set **`E2E_KEEP_FIXTURE=1`** and the setup reuses whatever is already in
+`e2e/.tmp/photos` instead of regenerating the small fixture — so you can drop
+10,000 generated photos in there and measure against them, still hermetically.
+That's how #97's "⌘A freezes for 15s" was retested (it came back at **20ms** on
+10k, on current code).
+
+Two traps when generating a big fixture, both of which produced a meaningless
+measurement first time:
+
+- **Give every photo a distinct timestamp.** Identical capture times make burst
+  clustering collapse each folder into a single `×500` stack, so the grid renders
+  ~7 tiles and there's no per-tile cost left to measure.
+- **Wait for the grid to settle** before timing. Measuring while 7 of 80 tiles
+  have painted tells you nothing.
+
 > **EXIF gotcha:** `DateTimeOriginal` must be written to **`IFD2`** (the Exif
 > IFD). Put it in `IFD0` and sharp accepts it, exifr never finds it, every photo
 > scans with no capture date, and every date group silently renders "Unknown."
