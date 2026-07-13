@@ -550,6 +550,26 @@
 
   let selected = 0; // index into displayEntries; must never land on a
   // {kind:'placeholder'} entry — see nextSelectable below.
+
+  /**
+   * Has the user actually PUT focus somewhere (clicked a tile, arrowed to one),
+   * as opposed to `selected` merely starting at 0 so the keyboard has an anchor?
+   *
+   * Only an explicit focus arms click-to-open-the-loupe. Without this, photo #1
+   * counted as "already focused" from the moment the app loaded, so one click on
+   * it opened the loupe while every other tile needed two — and in the loupe,
+   * rating auto-advances, so a user who landed there by accident rated a
+   * different photo with every keystroke (issue #104).
+   */
+  let focusIsExplicit = false;
+
+  /** The one place that records a deliberate focus. Use it instead of assigning
+   *  `selected` directly whenever the USER moved the focus. */
+  function focusEntry(index) {
+    selected = index;
+    focusIsExplicit = true;
+  }
+
   let loupeOpen = false;
   let shortcutsHelpOpen = false; // '?' toggles the keyboard-shortcuts overlay
   let gridEl;
@@ -1196,8 +1216,15 @@
     // second click, or a double-click (whose second click lands here with the
     // tile already focused), opens it. Lets you click through the grid to pick
     // a photo without the loupe taking over every time (issue #72).
-    if (selected === i) openLoupe(i);
-    else selected = i;
+    //
+    // `focusIsExplicit` is what makes that true of the FIRST tile too: `selected`
+    // starts at 0 so the keyboard has somewhere to begin, but the user hasn't
+    // focused anything yet, and treating that as "already focused" made a single
+    // click on photo #1 jump straight into the loupe — where rating auto-advances,
+    // so every subsequent keystroke rated a different photo than the one on
+    // screen (issue #104).
+    if (selected === i && focusIsExplicit) openLoupe(i);
+    else focusEntry(i);
   }
 
   /** Clear the whole selection — guarded (it can represent a lot of work) and
@@ -2758,7 +2785,7 @@
   }
 
   function openLoupe(index) {
-    selected = index;
+    focusEntry(index);
     loupeOpen = true;
   }
 
@@ -2812,7 +2839,7 @@
       (e) => e.kind === "stack" && e.stack.id === stackId
     );
     if (newIndex !== -1) {
-      selected = newIndex;
+      focusEntry(newIndex);
       await tick();
       // The re-collapsed tile resolves to its cover photo, so its data-id
       // is the cover's raw id, not stackId — see focusPending's comment.
@@ -2835,7 +2862,7 @@
       (e) => e.kind === "photo" && e.item.id === stack.coverId
     );
     if (newIndex !== -1) {
-      selected = newIndex;
+      focusEntry(newIndex);
       await tick();
       focusTile(stack.coverId, { preventScroll: true });
     }
@@ -3003,7 +3030,7 @@
       // Auto-advance, but never onto a placeholder (see nextSelectable).
       if (loupeOpen) {
         const t = nextSelectable(displayEntries, selected + 1, 1);
-        if (t !== null) selected = t;
+        if (t !== null) focusEntry(t);
       }
       return;
     }
@@ -3055,7 +3082,7 @@
       if (p && typeof p.id === "number") toggleSelect(p.id);
       if (loupeOpen) {
         const t = nextSelectable(displayEntries, selected + 1, 1);
-        if (t !== null) selected = t;
+        if (t !== null) focusEntry(t);
       }
       return;
     }
@@ -3072,14 +3099,14 @@
         // Shift+arrow extends the selection as you sweep (both endpoints).
         if (t !== null) {
           if (e.shiftKey) selectRange(selected, t);
-          selected = t;
+          focusEntry(t);
         }
       } else if (key === "ArrowLeft" || key === "ArrowUp") {
         e.preventDefault();
         const t = nextSelectable(displayEntries, selected - 1, -1);
         if (t !== null) {
           if (e.shiftKey) selectRange(selected, t);
-          selected = t;
+          focusEntry(t);
         }
       }
       return;
@@ -3131,7 +3158,7 @@
     // both the old and new focus), so a run of Shift+Right/Down builds a
     // contiguous selection without the mouse.
     if (e.shiftKey && next !== selected) selectRange(selected, next);
-    selected = next;
+    focusEntry(next);
     await tick();
     // focus (preventScroll) suppresses the browser's native focus scroll;
     // revealSelected is the sole, deliberate reveal for keyboard navigation.

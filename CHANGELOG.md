@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.10.2
+
+- **Clicking the first photo no longer jumps into the loupe** (#104). Every tile
+  now behaves the same way: one click focuses, a second opens. Before, photo #1
+  counted as focused from the moment the app loaded, so a single click opened the
+  loupe — and because rating auto-advances in the loupe, anyone who landed there
+  by accident rated the _next_ photo with every keystroke while looking at the
+  one on screen.
+
 ## 2.10.1
 
 - **Critical-path UI tests.** Rating a photo — the thing the app is for — is now
