@@ -1936,6 +1936,20 @@
       : [{ text: header.label, kind: "keep" }];
   }
 
+  /** Svelte action: fade the clipped edge only when something IS hidden behind it.
+   * The header shows the END of the path (see .section-label), so what overflows
+   * is on the left — and CSS can't measure that, hence the class. `_parts` is here
+   * so the call site names it and the action re-measures when the label changes. */
+  function tailClip(el, _parts) {
+    const mark = () =>
+      el.parentElement?.classList.toggle(
+        "clipped",
+        el.scrollWidth > el.parentElement.clientWidth
+      );
+    mark();
+    return { update: mark };
+  }
+
   /** Tooltip for the group toggle, from the registry (no parallel string table:
    *  a new renderer must not need a second edit somewhere else). */
   function groupToggleTitle(rendererId) {
@@ -3692,9 +3706,17 @@
                       }`}
                       on:dblclick={() => startRename(header.path)}
                     >
-                      {#each headerParts(header, tokenStats, libraryRoots) as part}<span
-                          class="part-{part.kind}">{part.text}</span
-                        >{/each}
+                      <span
+                        class="section-label-text"
+                        use:tailClip={headerParts(
+                          header,
+                          tokenStats,
+                          libraryRoots
+                        )}
+                        >{#each headerParts(header, tokenStats, libraryRoots) as part}<span
+                            class="part-{part.kind}">{part.text}</span
+                          >{/each}</span
+                      >
                     </button>
                   {/if}
                   {#if header.path && headerCounts[pathKey(header.path)] !== undefined}
@@ -4160,17 +4182,30 @@
     border-radius: 4px;
     text-align: left;
     /* A long group name used to WRAP, growing the sticky header band and letting
-       it cover the rows beneath it. Keep it to one line and ellipsize; the full
-       value is on the button's title attribute (see the markup). */
+       it cover the rows beneath it. Keep it to one line; the full value is on the
+       button's title attribute (see the markup).
+
+       Clip the HEAD, not the tail — same rule as the tree rows. A folder path
+       ends with the folder's own name, so a normal ellipsis drops exactly the
+       part that identifies the group: two sibling folders under one long parent
+       both render as ".../2025_11Nov_08 Canon 1/2…" and become indistinguishable.
+       direction:rtl on the clipper flips which end overflows; the inner span
+       stays ltr, so the text itself is unchanged. */
+    direction: rtl;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
     min-width: 0;
-    /* Wide enough that a folder path almost never has to be cut at all: the
-       library's shared prefix is already stripped, and what's left renders with
-       its noise dimmed, so the length it needs is real information. Cutting a
-       header at the tail would remove exactly the part that names the group. */
     max-width: 78ch;
+  }
+  /* Only fade the left edge when there IS something clipped behind it. */
+  .section-label.clipped {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
+    mask-image: linear-gradient(to right, transparent 0, #000 16px);
+  }
+  .section-label-text {
+    display: inline-block;
+    direction: ltr;
+    white-space: nowrap;
   }
   .section-header {
     min-width: 0;

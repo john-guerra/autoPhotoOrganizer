@@ -23,6 +23,10 @@ user-facing — what you can now do, not how it's built.
   a parent folder cycles every group under it together, and shows a "mixed" icon when
   they disagree. Clicking a folder that has no photos of its own jumps to the first
   one that does.
+- **Feed headers keep the folder's name, not the path.** A long header used to be
+  cut at the end — so two groups under the same long parent both read
+  `…/2025_11Nov_08 Canon 1/2…` and looked identical. The header now clips its front
+  (the part the path above already told you) and always shows the folder it names.
 - **The tree starts expanded when you group by folder**, like it already did for
   multi-level groupings — and it no longer stops a third of the way through a big
   library. Opening a folder's sub-folders costs no request (they arrive with the
