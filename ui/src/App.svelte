@@ -59,7 +59,12 @@
     revealInFinder,
     revealSelection,
   } from "./lib/api.js";
-  import { jobs, waitForJob, takeNewlyFinished } from "./lib/jobs.js";
+  import {
+    jobs,
+    waitForJob,
+    takeNewlyFinished,
+    crossedStep,
+  } from "./lib/jobs.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
   import ContextMenu from "./lib/ContextMenu.svelte";
@@ -2844,10 +2849,41 @@
     }
   }
 
+  /** How many newly-indexed photos are worth re-reading the feed for, while a
+   *  scan is still running. Bounds the cost: one extra feed page per 200 photos
+   *  scanned, not one per photo. */
+  const SCAN_REFRESH_STEP = 200;
+  let scanRefreshAt = 0;
+  let scanRefreshing = false;
+
+  /**
+   * Show photos AS they are indexed, instead of staring at an empty grid until
+   * the whole disk walk finishes ("the grid appears while scanning continues" —
+   * the founding perf thesis; the server has streamed this progress all along
+   * and the client simply awaited the end of the job).
+   *
+   * Only while the feed is still empty. A scan that ADDS a folder to a library
+   * you are already browsing must not reload the grid under your cursor — there,
+   * the one refresh at the end is both correct and less rude.
+   */
+  function onScanProgress(job) {
+    if (items.length) return; // you're browsing — don't yank the feed
+    if (scanRefreshing) return; // one in flight is enough
+    if (!crossedStep(scanRefreshAt, job.done ?? 0, SCAN_REFRESH_STEP)) return;
+    scanRefreshAt = job.done ?? 0;
+    scanRefreshing = true;
+    loadInitialFeed()
+      .catch(() => {}) // a mid-scan refresh that misses is not a user-facing failure; the final load still runs
+      .finally(() => {
+        scanRefreshing = false;
+      });
+  }
+
   /** @returns {Promise<boolean>} true when the folder is indexed and the feed
    * has caught up — the caller (submitAddFolder) needs to know whether it may
    * scope to the folder afterwards. Renders its own error on every failure. */
   async function doScan() {
+    scanRefreshAt = 0;
     if (!dir.trim()) return false;
     error = "";
     scanning = true;
@@ -2867,7 +2903,7 @@
           recursive: true,
           dirs: chosen,
         });
-        const job = await waitForJob(jobId);
+        const job = await waitForJob(jobId, onScanProgress);
         if (job.status === "canceled") {
           status = "Scan canceled";
           return false;

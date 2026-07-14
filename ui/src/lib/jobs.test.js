@@ -6,6 +6,7 @@ import {
   waitForJob,
   takeNewlyFinished,
   undoFailureMessage,
+  crossedStep,
 } from "./jobs.js";
 
 /** Minimal fake EventSource — enough for the store reducer + waitForJob. */
@@ -151,5 +152,68 @@ describe("undoFailureMessage", () => {
 
   it("never produces 'undefined' when the error has no message", () => {
     expect(undoFailureMessage(undefined, 1)).not.toMatch(/undefined/);
+  });
+});
+
+describe("crossedStep", () => {
+  // The gate that lets the grid fill in WHILE a scan is still walking the disk,
+  // instead of staying empty until the whole job finishes. It fires once per
+  // `step` photos, so a 100k-photo scan costs ~500 refreshes, not 100,000.
+  it("fires once when the count crosses a multiple of the step", () => {
+    expect(crossedStep(0, 199, 200)).toBe(false);
+    expect(crossedStep(0, 200, 200)).toBe(true);
+    expect(crossedStep(200, 399, 200)).toBe(false);
+    expect(crossedStep(200, 400, 200)).toBe(true);
+  });
+
+  it("fires only once per step, however many ticks land inside it", () => {
+    // Progress ticks arrive per FILE. Without the floor-division the refresh
+    // would fire on every tick past the first threshold — a feed page per photo.
+    let last = 0;
+    let refreshes = 0;
+    for (let done = 1; done <= 1000; done++) {
+      if (crossedStep(last, done, 200)) {
+        refreshes++;
+        last = done;
+      }
+    }
+    expect(refreshes).toBe(5); // 200, 400, 600, 800, 1000 — not 1000
+  });
+
+  it("never fires before the first photo is indexed", () => {
+    // A refresh at done=0 would just re-read an empty feed.
+    expect(crossedStep(0, 0, 200)).toBe(false);
+    expect(crossedStep(0, undefined, 200)).toBe(false);
+    expect(crossedStep(0, NaN, 200)).toBe(false);
+  });
+
+  it("survives a job that jumps several steps between snapshots", () => {
+    // SSE snapshots coalesce: done can leap 0 -> 1000 in one tick.
+    expect(crossedStep(0, 1000, 200)).toBe(true);
+  });
+});
+
+describe("waitForJob — progress", () => {
+  it("reports every running snapshot, then resolves on the terminal one", async () => {
+    const seen = [];
+    jobs.set([{ id: "s1", type: "scan", status: "running", done: 0 }]);
+    const settled = waitForJob("s1", (j) => seen.push(j.done));
+
+    jobs.set([{ id: "s1", type: "scan", status: "running", done: 200 }]);
+    jobs.set([{ id: "s1", type: "scan", status: "running", done: 400 }]);
+    jobs.set([{ id: "s1", type: "scan", status: "done", done: 500 }]);
+
+    const job = await settled;
+    expect(job.status).toBe("done");
+    // The whole point: the client HEARS the scan progressing. It used to await
+    // the end of the job and throw every one of these away.
+    expect(seen).toEqual([0, 200, 400]);
+  });
+
+  it("still resolves for a caller that passes no progress callback", async () => {
+    jobs.set([{ id: "s2", type: "scan", status: "running", done: 1 }]);
+    const settled = waitForJob("s2");
+    jobs.set([{ id: "s2", type: "scan", status: "done", done: 9 }]);
+    expect((await settled).status).toBe("done");
   });
 });

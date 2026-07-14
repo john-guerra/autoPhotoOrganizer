@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.13
+
+- **Photos show up while the scan is still running.** Adding a big folder used to
+  mean staring at an empty grid until the whole walk finished; now the grid fills
+  in as photos are indexed (verified on a 112,618-photo, 1,164-folder archive: the
+  first few hundred are on screen while the scan is 300 folders in). A scan you
+  add to a library you're already browsing still lands all at once, so the grid
+  never moves under your cursor.
+
 ## 2.12.12
 
 - The browser tests and a production build now run on every push, not just when

@@ -82,19 +82,48 @@ export function undoFailureMessage(err, fileCount) {
 }
 
 /**
+ * Has `done` crossed another multiple of `step` since `prev`?
+ *
+ * The gate for refreshing the grid *while* a scan is still walking the disk.
+ * Progress ticks arrive per file, and reloading the feed on every one would be
+ * a page of work per photo; this fires once per `step` photos instead, so the
+ * cost is bounded no matter how big the folder is. A plain counter comparison,
+ * not a timer — the refresh rate follows the scan's real progress rather than a
+ * wall-clock guess about it.
+ *
+ * @param {number} prev the `done` count at the last refresh
+ * @param {number} done the job's current `done` count
+ * @param {number} step how many newly-indexed photos are worth a refresh
+ */
+export function crossedStep(prev, done, step) {
+  if (!Number.isFinite(done) || done <= 0 || step <= 0) return false;
+  return Math.floor(done / step) > Math.floor(Math.max(0, prev) / step);
+}
+
+/**
  * Resolve once the given job id leaves "running" (done/canceled/failed).
  * Resolves immediately if the job is already terminal by the time this is
  * called (or once the next snapshot after subscribing already shows it
  * terminal — no polling, just an SSE-driven store subscription).
+ *
+ * `onProgress` is called with each RUNNING snapshot of the job, which is what
+ * lets the grid fill in while a scan is still walking (the server has streamed
+ * this all along; the client used to throw it away and await the whole job).
+ *
  * @param {string} id
+ * @param {(job: object) => void} [onProgress]
  * @returns {Promise<object>} the terminal job
  */
-export function waitForJob(id) {
+export function waitForJob(id, onProgress) {
   return new Promise((resolve) => {
     let unsub;
     unsub = jobs.subscribe((list) => {
       const job = list.find((j) => j.id === id);
-      if (!job || job.status === "running") return;
+      if (!job) return;
+      if (job.status === "running") {
+        onProgress?.(job);
+        return;
+      }
       resolve(job);
       // `subscribe` invokes its callback synchronously on the first tick,
       // before the `subscribe(...)` call below has returned and assigned
