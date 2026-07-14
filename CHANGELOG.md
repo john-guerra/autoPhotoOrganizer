@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.13.3
+
+- **HEVC videos play natively when your machine can decode them.** Most Macs (and
+  any Windows PC with the free HEVC Video Extension) decode HEVC in hardware — the
+  app now hands those clips straight to the player instead of converting every one
+  of them first. On a machine that _can't_ decode HEVC, it notices and converts, as
+  before: you always get a picture, you just don't wait for one you didn't need.
+- **Videos are probed for their format during the metadata sweep**, not the first
+  time you open them — so opening a clip no longer stalls while we work out what it
+  is. (The codec columns were added after the videos were indexed, which left 1,171
+  of 1,173 clips in the library unprobed and unable to ever be picked up.)
+
 ## 2.13.2
 
 - **Search.** A search box in the toolbar narrows the library to photos whose
