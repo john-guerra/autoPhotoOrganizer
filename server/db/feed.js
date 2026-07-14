@@ -21,8 +21,18 @@ import {
  * "Unknown" label for display.
  */
 export const DIMENSIONS = {
-  folder: { expr: "folders.abs_path", direction: "ASC" },
-  folderName: { expr: "folders.abs_path", direction: "ASC" },
+  folder: {
+    expr: "folders.abs_path",
+    direction: "ASC",
+    sortExpr: "folders.sort_path",
+    sortKey: folderSortKey,
+  },
+  folderName: {
+    expr: "folders.abs_path",
+    direction: "ASC",
+    sortExpr: "folders.sort_path",
+    sortKey: folderSortKey,
+  },
   year: {
     expr: `COALESCE(strftime('%Y', ${TAKEN_AT_EXPR} / 1000, 'unixepoch'), '')`,
     direction: "DESC",
@@ -38,6 +48,46 @@ export const DIMENSIONS = {
   camera: { expr: "COALESCE(photos.camera, '')", direction: "ASC" },
   kind: { expr: "photos.kind", direction: "ASC" },
 };
+
+/**
+ * A dimension may ORDER by a different expression than it SELECTS. Folders do:
+ * they select the real `abs_path` (that value IS the group's identity — it keys
+ * paths, labels, renderers, rename and remove) but order by `sort_path`, which
+ * is `abs_path` with "/" replaced by char(1).
+ *
+ * Why: plain `abs_path ASC` is BYTE order, not a pre-order walk of the tree, so
+ * a subtree is not contiguous. In the real library, "/Selectas copy" sorts
+ * BETWEEN "/Selectas" and "/Selectas/…" because ' ' (0x20) < '/' (0x2F) — the
+ * parent's own children end up stranded after an unrelated sibling. char(1)
+ * sorts below every character a path can contain, so children always follow
+ * their parent immediately and the feed can nest folders (see folderSections.js).
+ *
+ * THE INVARIANT, and it is easy to break:
+ *   - equality and params  -> `expr` + the RAW value
+ *   - ordering and seeking -> `sortExpr` + `sortKey(value)`
+ *   - every JS comparison  -> `sortKey` applied to BOTH sides
+ * The JS comparators below (compareKeyTuples/keyPassesSeek) are mirrors of the
+ * SQL comparison. If they and the SQL ever disagree, collapsed placeholders
+ * splice into the wrong slot — silently, and only for folders whose names
+ * collide this way.
+ */
+function folderSortKey(v) {
+  return String(v).replaceAll("/", "");
+}
+
+/** The expression a dimension ORDERS by (defaults to the one it selects).
+ *  Never default `sortExpr` at resolve time: applySortToDims rewrites `expr`
+ *  for the date dims, and an eager copy would freeze the PRE-rewrite expr here.
+ *  @param {{expr:string, sortExpr?:string}} d */
+export function sortExprOf(d) {
+  return d.sortExpr ?? d.expr;
+}
+
+/** A group value mapped into the space its dimension ORDERS in.
+ *  @param {{sortKey?:(v:any)=>any}} d */
+function sortKeyOf(d, value) {
+  return d.sortKey ? d.sortKey(value) : value;
+}
 
 /** @param {string[]} groupBy @returns {Array<{name:string, expr:string, direction:string}>} */
 export function resolveDimensions(groupBy) {
@@ -144,12 +194,15 @@ function seekCondition(seekDims, focusValues, wantAfter) {
   for (let i = 0; i < seekDims.length; i++) {
     const parts = [];
     for (let j = 0; j < i; j++) {
-      parts.push(`${seekDims[j].expr} = ?`);
-      params.push(focusValues[j]);
+      // Equality at a non-final level goes through sortExpr too. `replace` is
+      // injective, so it means exactly the same rows — and it keeps the whole
+      // seek tuple in ONE key space instead of straddling two.
+      parts.push(`${sortExprOf(seekDims[j])} = ?`);
+      params.push(sortKeyOf(seekDims[j], focusValues[j]));
     }
     const op = cmpOp(seekDims[i].direction, wantAfter);
-    parts.push(`${seekDims[i].expr} ${op} ?`);
-    params.push(focusValues[i]);
+    parts.push(`${sortExprOf(seekDims[i])} ${op} ?`);
+    params.push(sortKeyOf(seekDims[i], focusValues[i]));
     clauses.push(`(${parts.join(" AND ")})`);
   }
   return { sql: clauses.join(" OR "), params };
@@ -171,8 +224,8 @@ function startPathCondition(dims, path) {
   path.forEach(({ value }, i) => {
     const parts = [];
     for (let j = 0; j < i; j++) {
-      parts.push(`${dims[j].expr} = ?`);
-      params.push(path[j].value);
+      parts.push(`${sortExprOf(dims[j])} = ?`);
+      params.push(sortKeyOf(dims[j], path[j].value));
     }
     // Row-value ">=" decomposes as: d0>v0 OR (d0=v0 AND d1>v1) OR … OR
     // (d0=v0 AND … AND dN>=vN). Every level EXCEPT the last compares STRICTLY —
@@ -183,8 +236,8 @@ function startPathCondition(dims, path) {
     const op = cmpOp(dims[i].direction, true);
     const inclusiveOp = op === ">" ? ">=" : "<=";
     const isLast = i === path.length - 1;
-    parts.push(`${dims[i].expr} ${isLast ? inclusiveOp : op} ?`);
-    params.push(value);
+    parts.push(`${sortExprOf(dims[i])} ${isLast ? inclusiveOp : op} ?`);
+    params.push(sortKeyOf(dims[i], value));
     clauses.push(`(${parts.join(" AND ")})`);
   });
   return { sql: clauses.join(" OR "), params };
@@ -244,11 +297,15 @@ function pathGroupValues(path) {
 }
 
 /** Per-dimension comparison of two key tuples of the SAME length, honoring
- * each dimension's own sort direction. @returns {-1|0|1} */
+ * each dimension's own sort direction. The JS mirror of the SQL ORDER BY, so
+ * both sides go through `sortKey` — a folder compares in pre-order key space,
+ * exactly as `sortExpr` does in SQL (see the invariant above). @returns {-1|0|1} */
 function compareKeyTuples(a, b, dims) {
   for (let i = 0; i < a.length; i++) {
-    if (a[i] === b[i]) continue;
-    const lt = dims[i].direction === "ASC" ? a[i] < b[i] : a[i] > b[i];
+    const ka = sortKeyOf(dims[i], a[i]);
+    const kb = sortKeyOf(dims[i], b[i]);
+    if (ka === kb) continue;
+    const lt = dims[i].direction === "ASC" ? ka < kb : ka > kb;
     return lt ? -1 : 1;
   }
   return 0;
@@ -261,11 +318,11 @@ function compareKeyTuples(a, b, dims) {
  * equal it. */
 function keyPassesSeek(key, focusValues, dims, wantAfter) {
   for (let i = 0; i < key.length; i++) {
-    if (key[i] === focusValues[i]) continue;
-    const gt =
-      dims[i].direction === "ASC"
-        ? key[i] > focusValues[i]
-        : key[i] < focusValues[i];
+    // Mirrors seekCondition's SQL, so it compares in the same key space.
+    const k = sortKeyOf(dims[i], key[i]);
+    const f = sortKeyOf(dims[i], focusValues[i]);
+    if (k === f) continue;
+    const gt = dims[i].direction === "ASC" ? k > f : k < f;
     return wantAfter ? gt : !gt;
   }
   return false;
@@ -459,8 +516,13 @@ export function getFeedPage(
   // Combined SELECT fragment for dims + the sort value — built with an array
   // join (not naive string concat) so an empty groupBy (flat feed, no dims)
   // doesn't leave a stray leading/double comma in the SQL text.
+  // `dim<i>` is the group's IDENTITY (what rowToItem hands the client); `ord<i>`
+  // is what it ORDERS by. They differ only for folders — see the invariant at
+  // the top of this file. Ordering on `dim<i>` here would byte-sort the folders
+  // and un-nest the feed.
   const selectDimAndSortCols = [
     ...dims.map((d, i) => `${d.expr} AS dim${i}`),
+    ...dims.map((d, i) => `${sortExprOf(d)} AS ord${i}`),
     `${sortDim.expr} AS sortval`,
   ].join(", ");
   const { sql: exclSql, params: exclParams } = exclusionClause(collapsed, dims);
@@ -521,7 +583,7 @@ export function getFeedPage(
     const orderCols = seekDims
       .map((d, i) => {
         let col;
-        if (i < dims.length) col = `dim${i}`;
+        if (i < dims.length) col = `ord${i}`;
         else if (d.name === "__sort") col = "sortval";
         else col = "photos.id";
         const direction = wantAfter
@@ -644,10 +706,14 @@ export function fetchGroupRowsAtOffsets(
   );
   const selectDimAndSortCols = [
     ...dims.map((d, i) => `${d.expr} AS dim${i}`),
+    ...dims.map((d, i) => `${sortExprOf(d)} AS ord${i}`),
     `${sortDim.expr} AS sortval`,
   ].join(", ");
+  // Orders on ord<i>, exactly as getFeedPage does. A path pins its own dims, but
+  // it is only a PREFIX — with groupBy ["day","folder"] the folder still varies
+  // within the group, so byte-ordering it here would disagree with the feed.
   const orderCols = [
-    ...dims.map((d, i) => `dim${i} ${d.direction}`),
+    ...dims.map((d, i) => `ord${i} ${d.direction}`),
     `sortval ${sortDim.direction}`,
     `photos.id ASC`,
   ].join(", ");
@@ -880,11 +946,12 @@ export function findGroupBoundary(
   const wantAfter = direction === "next";
   const selectDimCols = [
     ...dims.map((d, i) => `${d.expr} AS dim${i}`),
+    ...dims.map((d, i) => `${sortExprOf(d)} AS ord${i}`),
     `${sortDim.expr} AS sortval`,
   ].join(", ");
-  // Map a seek-dim to the SELECT alias it orders by (dim<i> / sortval / id).
+  // Map a seek-dim to the SELECT alias it orders by (ord<i> / sortval / id).
   const seekCol = (d, i) =>
-    i < dims.length ? `dim${i}` : d.name === "__sort" ? "sortval" : "photos.id";
+    i < dims.length ? `ord${i}` : d.name === "__sort" ? "sortval" : "photos.id";
 
   const focusRow = db
     .prepare(

@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.4
+
+- **Folders now come back in tree order.** Grouping by folder walks a folder and
+  then its own sub-folders, instead of letting an unrelated neighbour cut in
+  between them — in this library, `Selectas copy` was landing in the middle of
+  `Selectas`, separating it from its own contents. Groundwork for showing folder
+  subtrees in the feed.
+
 ## 2.14.3
 
 - **Editing a `.svelte` file no longer shows a bogus "No Svelte configuration found

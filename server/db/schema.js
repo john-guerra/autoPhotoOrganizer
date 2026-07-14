@@ -83,6 +83,25 @@ CREATE INDEX IF NOT EXISTS idx_manual_stacks_group ON manual_stacks(group_id);
 /** @param {import("better-sqlite3").Database} db */
 export function applySchema(db) {
   db.exec(SCHEMA_SQL);
+  // The folder feed's ORDER BY key: abs_path with "/" replaced by char(1), which
+  // sorts below every character a path can contain. That turns byte order into a
+  // pre-order walk of the folder tree, so a folder's children immediately follow
+  // it and a subtree stays contiguous — the precondition for nesting folders in
+  // the feed. Byte order does NOT do this: "/Selectas copy" sorts between
+  // "/Selectas" and "/Selectas/…" (' ' 0x20 < '/' 0x2F). See db/feed.js.
+  //
+  // VIRTUAL, not STORED: SQLite only permits adding a VIRTUAL generated column
+  // via ALTER TABLE, and this app ships no migration runner. Costs nothing — the
+  // index below materializes the value, which is what the ORDER BY actually reads.
+  ensureColumn(
+    db,
+    "folders",
+    "sort_path",
+    "TEXT GENERATED ALWAYS AS (replace(abs_path, '/', char(1))) VIRTUAL"
+  );
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_folders_sort_path ON folders(sort_path)`
+  );
   ensureColumn(db, "photos", "btime", "INTEGER");
   // "Keep separate" (dissolve) marker — a per-photo boolean like preferred_cover,
   // so it rides upsertScan's ON CONFLICT and survives rescans of unchanged files.
@@ -144,9 +163,15 @@ function ensureFeedIndexes(db) {
 }
 
 /** Idempotent ADD COLUMN — the app ships no migration runner, and
- *  CREATE TABLE IF NOT EXISTS never alters an existing table. */
+ *  CREATE TABLE IF NOT EXISTS never alters an existing table.
+ *
+ *  table_xinfo, NOT table_info: `table_info` omits GENERATED columns entirely,
+ *  so it reports sort_path as missing on every run after the first, and the
+ *  second ALTER dies with "duplicate column name" — i.e. the app would crash on
+ *  its second open. `table_xinfo` lists the hidden/generated ones too, and is
+ *  identical to `table_info` for ordinary columns. */
 function ensureColumn(db, table, column, type) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  const cols = db.prepare(`PRAGMA table_xinfo(${table})`).all();
   if (!cols.some((c) => c.name === column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }

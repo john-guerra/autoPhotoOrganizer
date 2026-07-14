@@ -67,6 +67,94 @@ describe("getFeedPage — composite ordering", () => {
     ]);
   });
 
+  // The folder feed must be a PRE-ORDER walk of the tree (a folder, then its
+  // children, then its next sibling) — that is the precondition for nesting
+  // folders in the feed. Plain byte order is not: ' ' (0x20) < '/' (0x2F), so a
+  // sibling named "<parent> copy" sorts BETWEEN the parent and its own children.
+  // This is not hypothetical — it is /Selectas, /Selectas copy and /Selectas/…
+  // in the real library, which is what motivated the sort_path key.
+  function seedSelectasTriple(db) {
+    seedVolume(db, 1);
+    // Inserted out of order on purpose: the ORDER BY must do the work.
+    upsertScan(db, "/L/Selectas copy", 1, [
+      { name: "copy.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/L/Selectas/sub", 1, [
+      { name: "sub.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/L/Selectas", 1, [
+      { name: "own.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+  }
+
+  const PRE_ORDER = ["/L/Selectas", "/L/Selectas/sub", "/L/Selectas copy"];
+
+  it("walks folders in pre-order, so a subtree is contiguous", () => {
+    const db = getDb();
+    seedSelectasTriple(db);
+    const { items } = getFeedPage(db, { groupBy: ["folder"], after: 10 });
+    // Byte order would give Selectas, "Selectas copy", "Selectas/sub" — the
+    // parent's own child stranded behind an unrelated sibling.
+    expect(items.map((i) => i.groupValues.folder)).toEqual(PRE_ORDER);
+  });
+
+  it("splices a collapsed placeholder into its pre-order slot", () => {
+    const db = getDb();
+    seedSelectasTriple(db);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      collapsed: [[{ dimension: "folder", value: "/L/Selectas copy" }]],
+      after: 10,
+    });
+    // This is the JS-mirror test. spliceInPlaceholders compares in JS, not SQL,
+    // so if compareKeyTuples ever stops applying the folder sortKey, the
+    // placeholder lands BEFORE /L/Selectas/sub — silently, and only for folders
+    // that collide this way.
+    expect(items.map((i) => i.groupValues.folder)).toEqual(PRE_ORDER);
+    expect(items[2].collapsed).toBe(true);
+  });
+
+  it("paginates across the pre-order key without dupes or gaps", () => {
+    const db = getDb();
+    seedSelectasTriple(db);
+    const all = getFeedPage(db, { groupBy: ["folder"], after: 10 }).items;
+
+    // Walk the same feed two rows at a time, chaining focusId — the keyset seek
+    // must reproduce the single-page order exactly.
+    const paged = [all[0]];
+    let focusId = all[0].id;
+    for (;;) {
+      const { items } = getFeedPage(db, {
+        groupBy: ["folder"],
+        focusId,
+        before: 0,
+        after: 2,
+      });
+      const next = items.filter((i) => i.id !== focusId);
+      if (!next.length) break;
+      paged.push(...next);
+      focusId = paged[paged.length - 1].id;
+    }
+    expect(paged.map((i) => i.id)).toEqual(all.map((i) => i.id));
+  });
+
+  it("seeks to a folder path (jump-to-group) in the pre-order key space", () => {
+    const db = getDb();
+    seedSelectasTriple(db);
+    // startPath binds its params through sortKey; if it bound the raw path
+    // instead, it would compare a raw value against the sort_path expression and
+    // land on the wrong folder (or none).
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      startPath: [{ dimension: "folder", value: "/L/Selectas/sub" }],
+      after: 10,
+    });
+    expect(items.map((i) => i.groupValues.folder)).toEqual([
+      "/L/Selectas/sub",
+      "/L/Selectas copy",
+    ]);
+  });
+
   it("orders by year descending (newest first) within groupBy ['year']", () => {
     const db = getDb();
     seedVolume(db, 1);

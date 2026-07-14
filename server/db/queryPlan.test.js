@@ -175,6 +175,32 @@ describe("the feed's query plans", () => {
     expect(bad).toEqual([]);
   });
 
+  it("serves the folder pre-order key from an index (drift guard)", () => {
+    // The folder feed ORDERs by `folders.sort_path` (see DIMENSIONS.folder's
+    // sortExpr) — a generated column whose index is what makes the pre-order walk
+    // cheap to produce. Column and index are declared in schema.js while the
+    // query names them in feed.js, so they can drift apart with no error and no
+    // failing assertion, exactly the way the date expression indexes can. This is
+    // the guard: rename either side and it goes red.
+    //
+    // NOTE what this deliberately does NOT assert: that a folder-grouped page
+    // avoids a temp B-tree. It does not, and it did not before the pre-order key
+    // either — on the real 114k library SQLite drives `photos` outer off a date
+    // index and sorts the folder key in memory, both with and without this
+    // change. Asserting "no temp sort" would pass only on a toy fixture and lie
+    // about the real one. Making the folder feed index-ordered is its own change.
+    const db = getDb();
+    seed(db);
+    const plan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT abs_path FROM folders ORDER BY sort_path ASC`
+      )
+      .all()
+      .map((r) => r.detail);
+    expect(plan.some((l) => /idx_folders_sort_path/.test(l))).toBe(true);
+  });
+
   it("finds the sweep's un-read photos by index, not by scanning the library", () => {
     // enrich.js asks "which photos have width IS NULL" once per batch — ~2,000
     // times during a full sweep. Unindexed, that is a full scan every time.

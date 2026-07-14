@@ -1,4 +1,4 @@
-import { resolveDimensions } from "./feed.js";
+import { resolveDimensions, sortExprOf } from "./feed.js";
 import { buildFilter } from "./filters.js";
 import { applySortToDims } from "./sort.js";
 
@@ -53,11 +53,14 @@ export function getTreeNode(
   ].join(" AND ");
   const rows = db
     .prepare(
+      // Orders by the dimension's SORT expression (pre-order for folders), so the
+      // tree lists a level in exactly the order the feed renders it. Grouping
+      // still keys on the identity expr — see the invariant in db/feed.js.
       `SELECT ${nextDim.expr} AS value, COUNT(*) AS count
        FROM photos JOIN folders ON folders.id = photos.folder_id
        WHERE ${whereSql}
        GROUP BY ${nextDim.expr}
-       ORDER BY ${nextDim.expr} ${nextDim.direction}`
+       ORDER BY ${sortExprOf(nextDim)} ${nextDim.direction}`
     )
     .all(...filter.params, ...prefixParams);
 
@@ -126,7 +129,7 @@ export function getFlatTree(
   const selectCols = dims.map((dim, i) => `${dim.expr} AS d${i}`).join(", ");
   const groupByCols = dims.map((dim) => dim.expr).join(", ");
   const orderByCols = dims
-    .map((dim) => `${dim.expr} ${dim.direction}`)
+    .map((dim) => `${sortExprOf(dim)} ${dim.direction}`)
     .join(", ");
 
   const rows = db
