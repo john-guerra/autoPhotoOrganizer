@@ -6,6 +6,32 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.0
+
+Packaged build. Bundles everything since 2.14.0 — folder hierarchy in the feed,
+the toolbar reorganisation, a compact jobs widget, and the folder-order and
+snapshot-fold work from this round.
+
+- **The feed shows folder subtrees, not a flat list of paths** — the same nested
+  shape the sidebar draws, with every ancestor pinned as you scroll. Folders walk
+  in tree order.
+- **Folders follow the sort you picked.** With "Taken, ascending" the first folder
+  is the one holding your oldest matching photo, and it re-ranks when you change
+  the filter. (#14)
+- **Right-click a folder in the tree** to reveal it in Finder, rescan it, copy its
+  path, or remove it from the library. (#2)
+- **The toolbar reorganised into labelled groups**, holds one line, gives the
+  timeline room, and folds groups into dropdowns when the window is too narrow
+  instead of pushing controls off the edge. (#3, #9)
+- **Selecting a folder selects the photos inside it**, with a partial-state icon
+  and a confirmation past ~1,000 photos. (#8)
+- **Job notices stopped stacking up over the photos** — they live in a compact,
+  dismissable widget in the status bar now. (#4)
+- **Folding a group into a snapshot is animated**, and the strip lines up exactly
+  with the photos it replaced. (#12)
+- **Closing a photo returns you to the view you opened it from** — a snapshot
+  stays a snapshot. (#11)
+
 ## 2.14.20
 
 - **Folding a group into a snapshot is animated.** The strip now unrolls from
