@@ -22,6 +22,8 @@
   export let timeMin = null; // epoch ms domain start (null = no time data yet)
   export let timeMax = null; // epoch ms domain end
   export let timeTimes = []; // sampled timestamps for the density sparkline
+  export let timeSampled = false; // is timeTimes a down-sample? (disclosed on the axis)
+  export let timeTotal = 0; // size of the working set it was sampled FROM
   export let viewTime = null; // "current view" marker — first row on screen (epoch ms)
   export let focusTime = null; // "focused photo" marker — the selected photo (epoch ms)
 
@@ -120,6 +122,8 @@
         min={timeMin}
         max={timeMax}
         times={timeTimes}
+        sampled={timeSampled}
+        total={timeTotal}
         {viewTime}
         {focusTime}
         value={[filter.dateFrom ?? null, filter.dateTo ?? null]}

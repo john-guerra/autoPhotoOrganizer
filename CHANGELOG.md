@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.15
+
+- **The timeline now says when it's showing you a sample.** Above ~12,000 photos
+  the density curve is drawn from a sample, not every photo — so a small dip in it
+  could be a sampling artifact rather than a real gap between trips. It now says
+  "sampled 12,001 of 123,599" right on the axis, which matters because that curve
+  is what you brush to find album boundaries.
+
 ## 2.12.14
 
 - **The loupe opens faster.** Its filmstrip was asking for a thumbnail size no

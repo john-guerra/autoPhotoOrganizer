@@ -37,6 +37,14 @@
   export let min = null; // epoch ms, domain start (null = no data)
   export let max = null; // epoch ms, domain end
   export let times = []; // sampled timestamps (ms) for the KDE
+  /** True when `times` is a DOWN-SAMPLE of the working set rather than all of it
+   *  (the server caps it at 12k). Above that cap the curve you brush to find trip
+   *  boundaries can contain sampling artifacts that look exactly like real gaps —
+   *  in the one view that drives the album-boundary decision. A chart that is a
+   *  sample has to say so, so this is disclosed on the axis, not hidden in a
+   *  tooltip. */
+  export let sampled = false;
+  export let total = 0; // photos the density is drawn FROM (the working set)
   export let value = null; // [fromMs|null, toMs|null] current brush, or null
   export let viewTime = null; // epoch ms of the first photo on screen ("current view")
   export let focusTime = null; // epoch ms of the focused/selected photo ("focused photo")
@@ -215,6 +223,14 @@
       </div>
     {/if}
   </div>
+  {#if sampled}
+    <div
+      class="sampled-note"
+      title="The density curve is drawn from a {times.length.toLocaleString()}-photo sample of {total.toLocaleString()} — small bumps and dips may be sampling artifacts rather than real gaps."
+    >
+      ~ sampled {times.length.toLocaleString()} of {total.toLocaleString()}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -228,6 +244,22 @@
   .timeline-axis {
     position: relative;
     min-height: 60px;
+  }
+  /* Recessive on purpose: it must be readable without competing with the data,
+     but it must be THERE — a sampled chart that doesn't say so is a chart that
+     lies about its own resolution. */
+  .sampled-note {
+    position: absolute;
+    /* Top-left: both BOTTOM corners are occupied by the axis' own date badges,
+       and this note must never sit on top of the data or its labels. */
+    left: 24px;
+    top: 0;
+    font-size: 9px;
+    line-height: 1;
+    color: #8a8f98;
+    pointer-events: auto;
+    cursor: help;
+    white-space: nowrap;
   }
   /* The widget draws its own SVG axis + handles; give its accent a home. A muted
      slate-blue (same ~213° hue as the app's #4c9aff action-azure, but low chroma)

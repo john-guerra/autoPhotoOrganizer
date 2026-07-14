@@ -375,6 +375,11 @@
   let timeMin = null;
   let timeMax = null;
   let timeTimes = [];
+  // The density curve is a SAMPLE above ~12k photos. The server says so; the app
+  // used to throw that away and draw the curve as if it were the whole truth —
+  // in the one view you brush to find album boundaries.
+  let timeSampled = false;
+  let timeTotal = 0;
   let timesEpoch = 0;
   $: timesFilter = (() => {
     const { dateFrom, dateTo, ...rest } = displayFilter;
@@ -396,12 +401,16 @@
       timeMin = r.min;
       timeMax = r.max;
       timeTimes = r.times;
+      timeSampled = !!r.sampled;
+      timeTotal = r.total ?? 0;
     } catch (e) {
       // Non-fatal: the strip just hides (timeMin stays null); feed unaffected.
       if (epoch === timesEpoch) {
         timeMin = null;
         timeMax = null;
         timeTimes = [];
+        timeSampled = false;
+        timeTotal = 0;
       }
     }
   }
@@ -3885,6 +3894,8 @@
       {timeMin}
       {timeMax}
       {timeTimes}
+      {timeSampled}
+      {timeTotal}
       viewTime={viewMarkerTime}
       focusTime={focusMarkerTime}
       on:groupbychange={(e) => onGroupByChange(e.detail)}
