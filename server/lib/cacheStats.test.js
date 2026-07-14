@@ -42,7 +42,7 @@ describe("getCacheStats", () => {
     expect(stats).toEqual({ totalBytes: 150, totalFiles: 2 });
   });
 
-  it("returns zeros for an empty cache", () => {
+  it("returns zeros for an empty cache", async () => {
     expect(getCacheStats()).toEqual({ totalBytes: 0, totalFiles: 0 });
   });
 });
@@ -71,7 +71,7 @@ describe("getCacheBreakdown", () => {
     );
     await writeFile(join(dir, `${key}.jpg`), Buffer.alloc(77));
 
-    const breakdown = getCacheBreakdown(db);
+    const breakdown = await getCacheBreakdown(db);
     expect(breakdown.folders).toEqual([
       {
         id: folder.id,
@@ -82,9 +82,9 @@ describe("getCacheBreakdown", () => {
     ]);
   });
 
-  it("returns an empty list when nothing is indexed", () => {
+  it("returns an empty list when nothing is indexed", async () => {
     const db = getDb();
-    expect(getCacheBreakdown(db)).toEqual({ folders: [] });
+    expect(await getCacheBreakdown(db)).toEqual({ folders: [] });
   });
 });
 

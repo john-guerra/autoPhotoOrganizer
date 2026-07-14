@@ -1270,8 +1270,15 @@ export function registerApi(app) {
     res.json(getCacheStats());
   });
 
-  app.get("/api/cache/breakdown", (_req, res) => {
-    res.json(getCacheBreakdown(getDb()));
+  // async: Express 4 does NOT catch a throw in an async handler — it kills the
+  // process (learned the hard way when a "too many SQL variables" throw took the
+  // whole server down). Catch it here.
+  app.get("/api/cache/breakdown", async (_req, res) => {
+    try {
+      res.json(await getCacheBreakdown(getDb()));
+    } catch (e) {
+      res.status(500).json({ error: `cache breakdown failed: ${e.message}` });
+    }
   });
 
   app.post("/api/cache/clear", (_req, res) => {

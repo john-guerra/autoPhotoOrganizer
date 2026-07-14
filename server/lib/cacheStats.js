@@ -50,7 +50,7 @@ export function getCacheStats() {
  * @param {import("better-sqlite3").Database} db
  * @returns {{folders: Array<{id:number, path:string, cachedBytes:number, cachedFiles:number}>}}
  */
-export function getCacheBreakdown(db) {
+export async function getCacheBreakdown(db) {
   const rows = db
     .prepare(
       `SELECT photos.filename, photos.size, photos.mtime,
@@ -59,9 +59,29 @@ export function getCacheBreakdown(db) {
     )
     .all();
 
-  const dir = thumbsDir();
+  // Read the cache directory ONCE, into key -> bytes.
+  //
+  // The old shape asked the filesystem a question per photo per bucket:
+  // existsSync + statSync, 5 buckets x every indexed photo. On a 123k-photo
+  // library that is ~615,000 synchronous syscalls ON THE EVENT LOOP — measured
+  // at 2.0s for the breakdown itself, during which an ordinary feed page went
+  // from ~1ms to 1.81s. Opening "Manage library" wedged the whole server.
+  //
+  // Statting the cache directory instead is bounded by how many thumbnails
+  // EXIST (~16k), not by photos x buckets, and every lookup below is then a
+  // Map hit. Same numbers, one pass.
+  const sizeByKey = cacheFileSizes();
+
   const byFolder = new Map();
+  // Yield the event loop every CHUNK rows. better-sqlite3 is synchronous, so a
+  // 114k-row attribution pass still holds the loop for ~0.4s even with the
+  // syscalls gone — and while it does, every thumbnail and feed page in flight
+  // waits behind it. Breathing between chunks costs nothing and keeps the app
+  // answering (CLAUDE.md: heavy IO belongs off the main event loop).
+  const CHUNK = 5000;
+  let seen = 0;
   for (const r of rows) {
+    if (++seen % CHUNK === 0) await new Promise(setImmediate);
     const photo = {
       path: join(r.folderPath, r.filename),
       mtime: r.mtime,
@@ -78,14 +98,31 @@ export function getCacheBreakdown(db) {
       byFolder.set(r.folderId, entry);
     }
     for (const key of expectedCacheKeys(photo)) {
-      const cachePath = join(dir, `${key}.jpg`);
-      if (existsSync(cachePath)) {
-        entry.cachedBytes += statSync(cachePath).size;
+      const bytes = sizeByKey.get(key);
+      if (bytes !== undefined) {
+        entry.cachedBytes += bytes;
         entry.cachedFiles += 1;
       }
     }
   }
   return { folders: [...byFolder.values()] };
+}
+
+/** Every cached thumbnail's key -> its size in bytes, in one directory pass.
+ *  @returns {Map<string, number>} */
+function cacheFileSizes() {
+  const dir = thumbsDir();
+  const sizeByKey = new Map();
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".jpg")) continue;
+    try {
+      sizeByKey.set(f.slice(0, -".jpg".length), statSync(join(dir, f)).size);
+    } catch {
+      // Raced with a prune/clear — a file that vanished mid-pass simply isn't
+      // cached any more, which is exactly what an absent key means here.
+    }
+  }
+  return sizeByKey;
 }
 
 /** @returns {{freedBytes:number, freedFiles:number}} */

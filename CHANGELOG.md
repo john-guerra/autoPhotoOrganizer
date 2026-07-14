@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.17
+
+- **Opening "Manage library" no longer freezes the app.** The cache breakdown was
+  asking the disk ~615,000 questions (five per photo) and holding up everything
+  else while it did — for two full seconds on a 114k library, during which the
+  grid, thumbnails and scrolling all stalled. Now it reads the cache once: the
+  breakdown is 4x faster, and the app keeps responding while it runs (a feed page
+  during it went from 1.81s to 0.08s).
+
 ## 2.12.16
 
 - **Three things that used to fail in silence now tell you.** A folder tree that
