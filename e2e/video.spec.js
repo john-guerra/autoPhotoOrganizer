@@ -114,6 +114,49 @@ test.describe("@p0 video playback", () => {
     expect(errors).toEqual([]);
   });
 
+  test("the video NEXT to the one you're looking at starts converting before you get there", async ({
+    page,
+  }) => {
+    // The wait was the complaint: an .avi can't be handed to a browser at all, so
+    // it must be converted first — seconds for a small clip, MINUTES for a big
+    // camcorder file — and we only started that work once the user had already
+    // arrived and was staring at a spinner. The work is entirely predictable, it
+    // was just started too late. Standing on the photo before it, we now ask the
+    // server to get it ready.
+    const errors = trackPageErrors(page);
+    await openApp(page, { groupBy: "folder" });
+
+    // Every /api/video/:id the page asks for. The photo we open is NOT a video, so
+    // the only way one of these can appear is the prefetch.
+    const prepared = [];
+    page.on("request", (r) => {
+      const m = new URL(r.url()).pathname.match(/^\/api\/video\/(\d+)$/);
+      if (m) prepared.push(m[1]);
+    });
+
+    // Stand on the JPEG immediately before the .avi.
+    const aviIndex = await firstTileMatching(page, (n) =>
+      n.includes(VIDEO.name)
+    );
+    const titles = await page
+      .locator(".thumb")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("title") ?? ""));
+    const neighbour = aviIndex - 1;
+    expect(
+      titles[neighbour]?.endsWith(".jpg"),
+      "the spec needs a PHOTO next to the video, so any /api/video call is the prefetch"
+    ).toBe(true);
+
+    await loupe.open(page, neighbour);
+    await expect(page.locator(".loupe img").first()).toBeVisible();
+
+    // We are looking at a photo — and the video beside it is already being made
+    // ready. Nothing about the current photo would ever request this.
+    await expect.poll(() => prepared.length).toBeGreaterThan(0);
+
+    expect(errors).toEqual([]);
+  });
+
   test("an HEVC clip this browser cannot decode is converted, and plays anyway", async ({
     page,
   }) => {

@@ -154,8 +154,19 @@
         videoState = { status: "ready", url: r.url, native: !!r.verify };
         return;
       }
-      videoState = { status: "preparing", reason: r.reason };
-      const job = await waitForJob(r.jobId);
+      videoState = { status: "preparing", reason: r.reason, pct: null };
+      const job = await waitForJob(r.jobId, (j) => {
+        // A percentage, not a spinner. The conversion of a big camcorder AVI runs
+        // for minutes, and "converting…" held for minutes is indistinguishable
+        // from a hang. (A job with no countable total — a clip whose duration we
+        // never read — keeps the spinner: a made-up number would be worse.)
+        if (item?.id === id && j.total > 0) {
+          videoState = {
+            ...videoState,
+            pct: Math.min(100, Math.round((j.done / j.total) * 100)),
+          };
+        }
+      });
       if (item?.id !== id) return;
       if (job.status === "done") {
         videoState = { status: "ready", url: job.result.url };
@@ -190,6 +201,37 @@
       }
     }
     for (const id of warm.keys()) if (!wanted.has(id)) warm.delete(id);
+    prefetchVideos(i);
+  }
+
+  /**
+   * Start converting the video you are ABOUT to reach.
+   *
+   * A clip the browser can't decode (every .avi — Chromium won't even open the
+   * container) has to be converted first, and that conversion runs for seconds on
+   * a small clip and minutes on a big one. Waiting for it AFTER you arrive is the
+   * whole complaint: the work is perfectly predictable, it just wasn't started
+   * early enough. Asking the server to prepare the neighbours is exactly the same
+   * bet the image prefetch above already makes, and it is idempotent — the server
+   * hands back the already-running job rather than starting a second ffmpeg, and
+   * an already-converted clip answers instantly from cache.
+   *
+   * Only the IMMEDIATE neighbours (±1), not the ±3 the images use: each miss
+   * costs an ffmpeg process and a file on disk, not a decoded JPEG, so the window
+   * is the one that pays for itself — where you go next.
+   */
+  const videoPrefetched = new Set(); // ids we've already asked the server about
+  function prefetchVideos(i) {
+    for (const d of [1, -1]) {
+      const it = items[i + d];
+      if (!isRealPhoto(it) || it.kind !== "video") continue;
+      if (videoPrefetched.has(it.id)) continue;
+      videoPrefetched.add(it.id);
+      // Fire and forget: this is a HINT. If it fails, the real request the user's
+      // own navigation makes will surface the error — a prefetch must never put a
+      // message on screen for a photo the user isn't looking at.
+      prepareVideo(it.id).catch(() => videoPrefetched.delete(it.id));
+    }
   }
 </script>
 
@@ -245,12 +287,25 @@
                 {videoState.message}
               </p>
             {:else}
-              <p class="video-msg">
-                <span class="thumb-spinner" aria-hidden="true"></span>
-                {videoState?.reason
-                  ? `Converting for playback — ${videoState.reason}.`
-                  : "Loading video…"}
-              </p>
+              <div class="video-msg">
+                <p>
+                  <span class="thumb-spinner" aria-hidden="true"></span>
+                  {videoState?.reason
+                    ? `Converting for playback — ${videoState.reason}.`
+                    : "Loading video…"}
+                </p>
+                <!-- A real bar once the server knows how long the clip is. A big
+                     camcorder AVI converts for minutes, and a spinner held for
+                     minutes reads as a hang. -->
+                {#if videoState?.pct != null}
+                  <progress
+                    class="video-progress"
+                    max="100"
+                    value={videoState.pct}
+                  ></progress>
+                  <span class="video-pct">{videoState.pct}%</span>
+                {/if}
+              </div>
             {/if}
           {:else}
             <img src={imageUrl(item.id, item.mtimeMs)} alt={item.name} />
@@ -293,6 +348,8 @@
   .video-msg {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 0.6rem;
     color: #bbb;
     font-size: 0.9rem;
@@ -303,9 +360,24 @@
     max-width: 32rem;
     text-align: center;
   }
+  .video-msg p {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0;
+  }
   .video-msg.error {
     color: #ff8a80;
     border-color: #5a2a2a;
+  }
+  .video-progress {
+    flex: 1 1 12rem;
+    height: 6px;
+    accent-color: #4c9aff;
+  }
+  .video-pct {
+    font-variant-numeric: tabular-nums;
+    color: #8a8f98;
   }
   .thumb-spinner {
     width: 16px;

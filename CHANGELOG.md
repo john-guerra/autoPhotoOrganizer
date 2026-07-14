@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.13.4
+
+- **Videos that need converting start before you get to them.** Standing on the
+  photo next to a clip the browser can't play (every .avi), the app now gets it
+  ready in the background — so by the time you arrow onto it, it just plays.
+- **The conversion shows a real progress bar**, not an endless spinner. A big
+  camcorder AVI takes minutes, and "converting…" held for minutes is
+  indistinguishable from a hang.
+
 ## 2.13.3
 
 - **HEVC videos play natively when your machine can decode them.** Most Macs (and
