@@ -15,18 +15,32 @@ verification), and decisions already made.
    The app reads and writes real folders; users can move files with Finder and the
    app catches up on rescan.
 2. **The SQLite index is a rebuildable, persistent cache on the INTERNAL disk**
-   (`~/.autogallery/`), keyed by content hash and tracking the source volume per
-   folder. It is a speed layer AND an offline mirror: with the external drive
-   unmounted, previews/metadata/ratings still browse from cache (Lightroom
-   smart-previews style, with an "offline" badge). Ratings live in SQLite so
-   rating works offline; only export/moves/resizes require the drive mounted.
+   (`~/.autogallery/`), tracking the source volume per folder. It is a speed layer
+   AND an offline mirror: with the external drive unmounted, previews/metadata/
+   ratings still browse from cache (Lightroom smart-previews style, with an
+   "offline" badge). Ratings live in SQLite so rating works offline; only
+   export/moves/resizes require the drive mounted.
+
+   Identity is **path + mtime + size**, not content hash. `content_hash` exists in
+   the schema but `hashPendingPhotos` runs once per scan with `limit: 50` and both
+   callers drop its `remaining` flag, so on the real library **100 of 114,125 rows
+   are hashed** and `backupCoverage` is effectively inert. Don't reason as if
+   content-hash identity holds — either finish it (loop on `remaining` behind
+   `whenIdle()`) or drop the column.
 
 ## Performance thesis
 
-- **Never fully decode a RAW during culling.** Extract the camera's embedded JPEG
-  preview (RAW) or the EXIF/embedded preview (JPEG) via exiftool daemon mode.
+- **Never fully decode a RAW during culling** — the goal. **NOT IMPLEMENTED.**
+  `extractPreview` uses `exifr.thumbnail()` (the ~160px EXIF IFD1 thumbnail), which
+  _throws_ for RAW; `exiftool-vendored` is not a dependency and the embedded
+  `PreviewImage`/`JpgFromRaw` extraction was never built. The loupe points its
+  `<img>` at `/api/image/:id` — the original file — so a RAW is currently
+  downloaded whole and cannot be decoded by the browser at all. Trust the code
+  over this bullet; see `docs/AUDIT-2026-07-13.md` (P1/3) for the fix.
 - **Incremental rescans** key on path + mtime + size; unchanged files are skipped.
-- **Grid appears while scanning continues** (progressive render).
+- **Grid appears while scanning continues** (progressive render) — implemented in
+  2.12.13 (`waitForJob`'s `onProgress` + `crossedStep`), and only while the feed is
+  empty, so a scan never reloads the grid under a browsing user.
 - **Loupe keeps a ±N decoded prefetch window** so back/forth navigation is instant.
 
 ## Architecture
@@ -34,7 +48,10 @@ verification), and decisions already made.
 - **Backend: Node.js.** All decode/extract/measure work sits behind the
   `ProcessingService` interface (`server/processing/`) so engines can be swapped
   (Node native → WASM → Python ML sidecar) without touching scanner/index/UI.
-  MVP engine uses exiftool-vendored (daemon), sharp/libvips, ffmpeg.
+  The engine uses **exifr** (metadata + EXIF thumbnail), sharp/libvips (resize),
+  and ffmpeg/ffprobe (video thumbs, probe, playback transcode). It does **not**
+  use exiftool — an earlier version of this file said "exiftool-vendored (daemon)"
+  and that was never true of the shipped code.
 - **Frontend: Svelte + d3 (Vite).** Virtualized grid, loupe, keyboard-first stars
   1–5 (single keystroke + auto-advance), d3 timeline for album boundaries.
 - **Album clustering** is a pure, framework-free module (`server/albums/`) ported
