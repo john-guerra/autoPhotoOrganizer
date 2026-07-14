@@ -51,9 +51,18 @@ test.describe("@p1 the toolbar", () => {
     // (not "did it wrap") is what a user actually sees, and it stays true however
     // the wrapping is implemented.
     const rowH = await row.evaluate((el) => el.getBoundingClientRect().height);
-    const tallest = await row.evaluate((el) =>
-      Math.max(...[...el.children].map((c) => c.getBoundingClientRect().height))
-    );
+    const tallest = await row.evaluate((el) => {
+      // The row's real flex items — descending through ToolGroup's
+      // `display: contents` wrapper, which has no box of its own and would
+      // otherwise report a height of 0 and make this assertion trivially true.
+      const items = [];
+      for (const c of el.children) {
+        if (getComputedStyle(c).display === "contents")
+          items.push(...c.children);
+        else items.push(c);
+      }
+      return Math.max(...items.map((c) => c.getBoundingClientRect().height));
+    });
     expect(rowH).toBeLessThanOrEqual(tallest + 2);
 
     // And nothing inside it is clipped or overflowing.

@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.19
+
+- **The toolbar folds instead of overflowing.** Make the window narrow enough and
+  the toolbar's groups used to slide off the right edge, taking Sort and the zoom
+  slider with them. Now a group that no longer fits collapses into a labelled
+  dropdown — click it and you get the same controls, in the same state, in a
+  panel. They come back on their own when you widen the window. A folded Filter
+  group stays lit while it's hiding photos, so the reason you can only see 300 of
+  them is still visible even when the control is not.
+
 ## 2.14.18
 
 - **Folders now come in the order you asked for.** Grouped by folder, the feed and

@@ -41,6 +41,7 @@
   import GridControls from "./GridControls.svelte";
   import SortControl from "./SortControl.svelte";
   import ToolGroup from "./ToolGroup.svelte";
+  import ToolbarRow from "./ToolbarRow.svelte";
 
   export let appVersion = "";
 
@@ -83,8 +84,10 @@
 </script>
 
 <header class="topbar">
-  <!-- ROW 1 -->
-  <div class="topbar-row primary">
+  <!-- ROW 1. Filter is the only thing here that may fold: the ＋ menu is the one
+       door into the library, and a door you have to open a dropdown to find is a
+       door you can't find. -->
+  <ToolbarRow variant="primary" order={["filter"]}>
     <h1>
       AutoGallery
       <span class="app-version" title="App version">v{appVersion}</span>
@@ -126,11 +129,13 @@
     >
       ?
     </button>
-  </div>
+  </ToolbarRow>
 
-  <!-- ROW 2 -->
-  <div class="topbar-row secondary">
-    <ToolGroup label="Group">
+  <!-- ROW 2. Group folds first: its pills grow with every dimension you add, so
+       it is both the widest and the one you touch least often once you've chosen
+       how to carve the library up. -->
+  <ToolbarRow variant="secondary" order={["group", "view"]} watch={groupBy}>
+    <ToolGroup id="group" label="Group">
       <!-- The switch used to be padded out to the sidebar's exact width so it sat
            directly above the column it drives. Inside a labelled, bordered group
            that alignment stopped paying for itself: it just left ~200px of empty
@@ -144,7 +149,7 @@
          own border and label just drew two more boxes without adding a thought.
          Sort keeps its place at the far right of the group, where the last
          question you ask belongs. -->
-    <ToolGroup label="View" flavor="view">
+    <ToolGroup id="view" label="View" flavor="view">
       <ViewControls
         {cyclingAll}
         {globalViewMode}
@@ -158,7 +163,7 @@
       <div class="spacer"></div>
       <SortControl {sort} on:sortchange />
     </ToolGroup>
-  </div>
+  </ToolbarRow>
 
   <slot name="manage-library" />
 </header>
@@ -174,18 +179,6 @@
     position: relative;
     z-index: 20;
     flex-shrink: 0;
-  }
-  /* Each row is ONE line, on purpose. The toolbar used to be a single wrapping
-     flex row, so its only relief valve when it ran out of width was to wrap — add
-     a third grouping dimension and the pills dropped onto a second line and shoved
-     everything else around. The shrink order lives in ToolGroup: the Filter group
-     gives, and inside it the search box and the timeline give; nothing else does. */
-  .topbar-row {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-wrap: nowrap;
-    min-width: 0;
   }
   h1 {
     margin: 0;

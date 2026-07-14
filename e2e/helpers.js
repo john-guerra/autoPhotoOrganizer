@@ -228,6 +228,20 @@ export const toolbar = {
     page
       .locator(".source-menu")
       .getByRole("menuitem", { name: label, exact: true }),
+  /** The button a group folds into when the row runs out of width. Absent while
+   * the group is still in the toolbar. */
+  foldTrigger: (page, label) =>
+    page.locator(".tg-trigger").filter({ hasText: label }),
+  /** Is this group's box actually being PAINTED where it sits? A folded panel is
+   * `display:none` until you open it, and a group still in the row is simply
+   * visible — so this answers "can the user reach these controls right now?"
+   * without caring which of the two ways it is on screen. */
+  groupReachable: async (page, label) => {
+    const box = toolbar.group(page, label);
+    if (!(await box.isVisible())) return false;
+    const { width, height } = await box.boundingBox();
+    return width > 0 && height > 0;
+  },
 };
 
 // --- background jobs (the status-bar widget) ---------------------------------

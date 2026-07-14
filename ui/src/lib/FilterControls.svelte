@@ -37,7 +37,12 @@
   const dispatch = createEventDispatcher();
 </script>
 
-<ToolGroup label="Filter" flavor="filters" active={filterIsActive(filter)}>
+<ToolGroup
+  id="filter"
+  label="Filter"
+  flavor="filters"
+  active={filterIsActive(filter)}
+>
   <!-- Clearing the filters belongs to the GROUP, not to the row of controls: it
        undoes all of them at once. On the legend it is where you are already
        looking when you ask "why can't I see my photos?" — and it only exists when
