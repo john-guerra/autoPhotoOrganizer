@@ -455,6 +455,12 @@ export function registerApi(app) {
     res.json({ ok: true });
   });
 
+  // Clear the finished rows in one go. Running jobs are left alone — this is
+  // "dismiss all", not "cancel all".
+  app.post("/api/jobs/dismiss-all", (_req, res) => {
+    res.json({ ok: true, dismissed: registry.dismissAll() });
+  });
+
   app.post("/api/jobs/:id/dismiss", (req, res) => {
     const j = registry.get(req.params.id);
     if (!j) return res.status(404).json({ error: "no such job" });

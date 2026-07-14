@@ -125,6 +125,124 @@ describe("JobRegistry", () => {
     expect(registry.get(job.id)).toBeDefined();
   });
 
+  describe("self-clearing jobs", () => {
+    /** Collect every snapshot the registry emits while `fn` runs. */
+    function snapshotsDuring(fn) {
+      const seen = [];
+      const onChange = (jobs) => seen.push(jobs);
+      registry.on("change", onChange);
+      try {
+        fn();
+      } finally {
+        registry.off("change", onChange);
+      }
+      return seen;
+    }
+
+    it("a finished transcode takes its own row away", () => {
+      const job = registry.create("transcode", {
+        label: "Converting clip.MOV",
+      });
+      registry.finish(job.id, { url: "/api/video/1/file" });
+      expect(registry.list().find((j) => j.id === job.id)).toBeUndefined();
+    });
+
+    it("but it is SEEN as done first — a client waiting on it must not hang", () => {
+      // The bug this exists to prevent: the loupe awaits the transcode job by
+      // watching for it to leave "running". Delete the row on completion without
+      // announcing the completion, and the video it just converted never plays —
+      // the spinner spins forever. The done snapshot must go out BEFORE the row
+      // disappears.
+      const job = registry.create("transcode", {
+        label: "Converting clip.MOV",
+      });
+      const snapshots = snapshotsDuring(() =>
+        registry.finish(job.id, { url: "/api/video/7/file" })
+      );
+
+      const sawDone = snapshots.some((list) => {
+        const j = list.find((x) => x.id === job.id);
+        return j?.status === "done" && j.result?.url === "/api/video/7/file";
+      });
+      expect(sawDone).toBe(true);
+
+      // ...and by the last snapshot it is gone.
+      const last = snapshots.at(-1);
+      expect(last.find((j) => j.id === job.id)).toBeUndefined();
+    });
+
+    it("stays answerable by id after it clears, so a POLLING caller still sees it finish", () => {
+      // The other half of the same hazard. A job that removes itself the instant
+      // it succeeds is invisible to anyone who SAMPLES the registry instead of
+      // subscribing: the done state can land entirely between two polls, so the
+      // job goes straight from "running" to "gone" and the caller waits forever.
+      // It leaves the LIST (which is what the UI draws); it does not leave the
+      // registry.
+      const job = registry.create("enrich", { label: "Read metadata" });
+      registry.finish(job.id, { read: 12, failed: 0 });
+
+      expect(registry.list().find((j) => j.id === job.id)).toBeUndefined();
+      const found = registry.get(job.id);
+      expect(found?.status).toBe("done");
+      expect(found.result).toEqual({ read: 12, failed: 0 });
+    });
+
+    it("a FAILED transcode stays — a failure is news, and waits for a human", () => {
+      const job = registry.create("transcode", {
+        label: "Converting clip.MOV",
+      });
+      registry.fail(job.id, new Error("ffmpeg exploded"));
+      const entry = registry.list().find((j) => j.id === job.id);
+      expect(entry?.status).toBe("failed");
+      expect(entry.error).toContain("ffmpeg exploded");
+    });
+
+    it("a finished scan stays — its result is the whole point", () => {
+      const job = registry.create("scan", { label: "Scan /cards" });
+      registry.finish(job.id, { folders: 2, count: 300 });
+      expect(registry.list().find((j) => j.id === job.id)?.status).toBe("done");
+    });
+  });
+
+  describe("dismissAll()", () => {
+    it("drops the finished jobs, keeps the running one, and says how many went", () => {
+      const running = registry.create("scan", { label: "Scanning…" });
+      const done = registry.create("export", { label: "Export" });
+      const failed = registry.create("export", { label: "Export 2" });
+      registry.finish(done.id, { copied: 3 });
+      registry.fail(failed.id, new Error("disk full"));
+
+      expect(registry.dismissAll()).toBeGreaterThanOrEqual(2);
+
+      const ids = registry.list().map((j) => j.id);
+      expect(ids).toContain(running.id);
+      expect(ids).not.toContain(done.id);
+      expect(ids).not.toContain(failed.id);
+
+      registry.cancel(running.id);
+      registry.fail(running.id, new Error("canceled"));
+      registry.dismissAll();
+    });
+
+    it("emits nothing when there is nothing to dismiss", () => {
+      registry.dismissAll();
+      const running = registry.create("scan", { label: "Scanning…" });
+      let emits = 0;
+      const onChange = () => (emits += 1);
+      registry.on("change", onChange);
+      try {
+        expect(registry.dismissAll()).toBe(0);
+      } finally {
+        registry.off("change", onChange);
+      }
+      expect(emits).toBe(0);
+
+      registry.cancel(running.id);
+      registry.fail(running.id, new Error("canceled"));
+      registry.dismissAll();
+    });
+  });
+
   it("list() omits the controller field", () => {
     const job = registry.create("export", { label: "Export" });
     const list = registry.list();

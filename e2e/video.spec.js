@@ -18,46 +18,6 @@ import { VIDEO, HEVC_VIDEO } from "./fixture.mjs";
  * COMPLETELY UNRELATED component (JobsPanel), whose crash froze the loupe
  * mid-render. Only the browser sees that.
  */
-/** Index of the first tile whose filename satisfies `pred`. The feed's order
- *  depends on dates, so no spec should assume a tile is at a fixed position.
- *
- *  SCROLLS, because the grid is virtualized: a tile below the fold has no DOM
- *  node at all, so scanning what is rendered right now only ever searches the
- *  first screenful. (This spec's first video happened to sit inside it; the
- *  second one didn't, and "no tile matched (searched 7)" in a 19-photo library is
- *  what that looks like.) */
-async function firstTileMatching(page, pred) {
-  const tiles = page.locator(".thumb");
-  // The feed scrolls the COLUMN, not the grid — scrolling `.grid` is a silent
-  // no-op that leaves you re-reading the same first screenful forever.
-  const scroller = page.locator(".main-column");
-  let lastTop = -1;
-  for (;;) {
-    const names = await tiles.evaluateAll((els) =>
-      els.map((e) => e.getAttribute("title") ?? "")
-    );
-    const hit = names.findIndex(pred);
-    if (hit !== -1) return hit;
-
-    // Nothing here: page down and look again, until the feed stops moving.
-    const top = await scroller.evaluate((el) => {
-      el.scrollTop += el.clientHeight;
-      return el.scrollTop;
-    });
-    if (top === lastTop) throw new Error("no tile matched (searched the feed)");
-    lastTop = top;
-    // Let the virtual window re-render before looking again — two frames, not a
-    // sleep: the grid renders on rAF, so this waits for exactly the thing we need
-    // and no longer.
-    await page.evaluate(
-      () =>
-        new Promise((r) =>
-          requestAnimationFrame(() => requestAnimationFrame(r))
-        )
-    );
-  }
-}
-
 test.describe("@p0 video playback", () => {
   test("an AVI the browser cannot decode is converted, then plays", async ({
     page,
@@ -65,7 +25,7 @@ test.describe("@p0 video playback", () => {
     const errors = trackPageErrors(page);
     await openApp(page, { groupBy: "folder" });
 
-    const index = await firstTileMatching(page, (n) => n.includes(VIDEO.name));
+    const index = await grid.tileMatching(page, (n) => n.includes(VIDEO.name));
     await loupe.open(page, index);
 
     // While it converts, the user is TOLD so — not shown a black box.
@@ -103,7 +63,7 @@ test.describe("@p0 video playback", () => {
 
     // NOT tile 0: the video has no EXIF date, so it takes its file-creation date
     // (2.12.3) and can sort anywhere — including first. Pick a real .jpg.
-    const index = await firstTileMatching(page, (name) =>
+    const index = await grid.tileMatching(page, (name) =>
       name.endsWith(".jpg")
     );
     await loupe.open(page, index);
@@ -135,7 +95,7 @@ test.describe("@p0 video playback", () => {
     });
 
     // Stand on the JPEG immediately before the .avi.
-    const aviIndex = await firstTileMatching(page, (n) =>
+    const aviIndex = await grid.tileMatching(page, (n) =>
       n.includes(VIDEO.name)
     );
     const titles = await page
@@ -187,7 +147,7 @@ test.describe("@p0 video playback", () => {
       "this browser must NOT decode HEVC for this spec to mean anything"
     ).toBe(false);
 
-    const index = await firstTileMatching(page, (n) =>
+    const index = await grid.tileMatching(page, (n) =>
       n.includes(HEVC_VIDEO.name)
     );
     await loupe.open(page, index);

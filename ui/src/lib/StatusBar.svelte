@@ -30,6 +30,11 @@
         >{selectedCount.toLocaleString()} <em>selected</em></span
       >
     </div>
+    <!-- The scope ("keep only" / folder) chip belongs beside the SHOWING count,
+         not up in the toolbar: it is the reason that number is smaller than the
+         library count, and reading the two side by side is what makes the
+         narrowed view legible instead of alarming. -->
+    <slot name="scope" />
     <!-- Selection actions (Clear / Keep only / Export) sit RIGHT NEXT TO the
          selected count — that's what makes "Clear" mean "clear the selection".
          Passed as a slot so App keeps ownership of the selection + export state
@@ -45,6 +50,11 @@
         {thumbProgress}
       </span>
     {/if}
+  </div>
+
+  <!-- Background jobs live down here, in the corner furthest from the photos. -->
+  <div class="sb-right">
+    <slot name="jobs" />
   </div>
 </footer>
 
@@ -63,6 +73,15 @@
     align-items: center;
     gap: 0.75rem;
     min-width: 0;
+  }
+  /* Pushed to the far corner, and allowed to keep its width: the jobs pill is
+     small and elides its own text, so the left half is what should give. */
+  .sb-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-left: auto;
+    flex-shrink: 0;
   }
   /* Three-level counts: library / showing / selected (lifted from topbar). */
   .counts {

@@ -1,10 +1,25 @@
 <script>
-  // Bottom status-bar strip for background jobs (scan/export/materialize/
-  // undo-move) — fed live by the SSE-backed `jobs` store. Renders nothing
-  // when there are no jobs; each row lets a running job be canceled, and a
-  // terminal job be dismissed (or, for a move-materialize, undone).
+  /**
+   * Background jobs (scan / export / materialize / undo-move / transcode /
+   * enrich), as a status-bar affordance rather than a wall of notices.
+   *
+   * It used to be an in-flow strip above the status bar, `flex-shrink: 0` and up
+   * to 40vh tall, with one row per job and nothing that ever removed them. Play
+   * three videos and three "Converting…" rows stacked up, took a third of the
+   * window from the grid, and stayed there — the photos you came to look at were
+   * being pushed off screen by notifications about the photos.
+   *
+   * Now it is a summary pill in the status bar's lower right, and the rows live
+   * in a scrollable popover you open when you want them. Nothing is stolen from
+   * the grid, however many jobs are running. Two other things do the real work of
+   * keeping this quiet: a successful transcode/enrich clears its own row on the
+   * server (see SELF_CLEARING in jobs/registry.js), and what's left can be swept
+   * with Dismiss all.
+   */
   import { jobs, undoFailureMessage } from "./jobs.js";
-  import { cancelJob, dismissJob, undoMove } from "./api.js";
+  import { cancelJob, dismissJob, dismissAllJobs, undoMove } from "./api.js";
+
+  let open = false;
 
   // Per-row error, keyed by job id — for undo, and for the same reason for
   // cancel and dismiss. `undoMove()` throws on a *synchronous* failure (a 413
@@ -14,6 +29,42 @@
   // sitting there claiming to be "running" forever, with no hint that the button
   // did nothing. Await them and surface the message on the row itself.
   let undoErrors = {};
+  /** A failed Dismiss all — same rule: the button must not silently do nothing. */
+  let sweepError = "";
+
+  $: running = $jobs.filter((j) => j.status === "running");
+  $: broken = $jobs.filter(
+    (j) => j.status === "failed" || j.status === "canceled"
+  );
+  $: finished = $jobs.filter((j) => j.status !== "running");
+
+  // What the pill says, in priority order: something is wrong > something is
+  // working > something is waiting to be acknowledged. Only ONE line, because the
+  // whole point is that it stays small.
+  $: pill = broken.length
+    ? { kind: "err", icon: "✗", text: `${broken.length} failed` }
+    : running.length
+      ? {
+          kind: "busy",
+          icon: "◐",
+          text:
+            running.length === 1
+              ? running[0].label
+              : `${running.length} jobs running`,
+        }
+      : { kind: "ok", icon: "✓", text: `${finished.length} done` };
+
+  // A single bar for everything in flight. Jobs that can't count their own work
+  // (a transcode: ffmpeg reports no step total) contribute nothing to either
+  // side, so a lone uncountable job leaves the bar indeterminate rather than
+  // pinning it at 0% and looking stuck.
+  $: countable = running.filter((j) => j.total > 0);
+  $: totalWork = countable.reduce((n, j) => n + j.total, 0);
+  $: doneWork = countable.reduce((n, j) => n + (j.done ?? 0), 0);
+
+  // The popover is pointless once every job it was showing is gone; close it so
+  // the user isn't left staring at an empty box that they now have to dismiss.
+  $: if (!$jobs.length && open) open = false;
 
   async function handleCancel(job) {
     undoErrors = { ...undoErrors, [job.id]: null };
@@ -36,6 +87,15 @@
         ...undoErrors,
         [job.id]: `Couldn't dismiss: ${e.message}`,
       };
+    }
+  }
+
+  async function handleDismissAll() {
+    sweepError = "";
+    try {
+      await dismissAllJobs();
+    } catch (e) {
+      sweepError = `Couldn't clear the finished jobs: ${e.message} — try dismissing them one at a time.`;
     }
   }
 
@@ -90,6 +150,18 @@
         ? `restored ${r.restored} · skipped ${r.skipped}`
         : `restored ${r.restored}`;
     }
+    // These two clear themselves on success, so a row only reaches here when the
+    // job was CANCELED — which still leaves a result. They had no branch at all
+    // before, which rendered an empty summary next to the ✓.
+    if (job.type === "enrich") {
+      const read = r.read ?? 0;
+      return r.failed
+        ? `read ${read.toLocaleString()} · ${r.failed} unreadable`
+        : `read ${read.toLocaleString()}`;
+    }
+    if (job.type === "transcode") {
+      return r.url ? "ready to play" : "done";
+    }
     return "";
   }
 
@@ -100,101 +172,245 @@
   function canUndo(job) {
     return !!job.result?.move && !!job.result?.manifest?.length;
   }
+
+  /** Close on Escape, and don't let it bubble out and close the loupe too. */
+  function onKeydown(event) {
+    if (event.key === "Escape" && open) {
+      event.stopPropagation();
+      open = false;
+    }
+  }
 </script>
 
-{#if $jobs.length}
-  <div class="jobs-panel">
-    {#each $jobs as job (job.id)}
-      <div
-        class="job-row"
-        class:failed={job.status === "failed"}
-        class:canceled={job.status === "canceled"}
-      >
-        <span class="job-label">{job.label}</span>
+<svelte:window on:keydown={onKeydown} />
 
-        {#if job.status === "running"}
-          <!-- Two elements, not one with undefined props. A job with no countable
-               total (a transcode: ffmpeg reports no step count) wants an
-               INDETERMINATE bar, and the only way to get one is to omit `value`
-               entirely. Passing `undefined` doesn't omit it — Svelte still
-               assigns the DOM property, and `progress.value = undefined` throws
-               "The provided double value is non-finite", inside Svelte's flush.
-               That took the whole component update down with it: the loupe froze
-               mid-render on an unrelated video. A crash in a progress bar must
-               not be able to break the rest of the app. -->
-          {#if job.total}
-            <progress class="job-progress" value={job.done ?? 0} max={job.total}
-            ></progress>
-          {:else}
-            <progress class="job-progress"></progress>
-          {/if}
-          <span class="job-phase">
-            {#if job.total}<strong class="job-count"
-                >{(job.done ?? 0).toLocaleString()} / {job.total.toLocaleString()}</strong
-              >{/if}
-            {job.phase}
-          </span>
-          <button class="job-btn" on:click={() => handleCancel(job)}
-            >Cancel</button
+{#if $jobs.length}
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div
+    class="jobs-widget"
+    on:focusout={(e) => {
+      // Close when focus leaves the widget entirely — a click elsewhere in the
+      // app shouldn't leave the popover hanging over the photos, which is the
+      // whole complaint this change exists to answer.
+      if (!e.currentTarget.contains(e.relatedTarget)) open = false;
+    }}
+  >
+    {#if open}
+      <div class="jobs-pop" role="dialog" aria-label="Background jobs">
+        <header class="pop-head">
+          <span class="pop-title">Background jobs</span>
+          <button
+            class="job-btn"
+            disabled={!finished.length}
+            title={finished.length
+              ? "Clear every finished job (running jobs keep going)"
+              : "Nothing finished to clear"}
+            on:click={handleDismissAll}>Dismiss all</button
           >
-          {#if undoErrors[job.id]}
-            <span class="job-summary err" role="alert"
-              >{undoErrors[job.id]}</span
-            >
-          {/if}
-        {:else if job.status === "done"}
-          <span class="job-icon ok" aria-hidden="true">✓</span>
-          <span class="job-summary">{summarize(job)}</span>
-          {#if canUndo(job)}
-            <button class="job-btn" on:click={() => handleUndo(job)}
-              >Undo</button
-            >
-          {/if}
-          {#if undoErrors[job.id]}
-            <span class="job-summary err" role="alert"
-              >{undoErrors[job.id]}</span
-            >
-          {/if}
           <button
             class="job-dismiss"
-            title="Dismiss"
-            on:click={() => handleDismiss(job)}>×</button
+            title="Close"
+            aria-label="Close"
+            on:click={() => (open = false)}>×</button
           >
-        {:else}
-          <span class="job-icon err" aria-hidden="true">✗</span>
-          <span class="job-summary">{job.error}</span>
-          {#if canUndo(job)}
-            <button class="job-btn" on:click={() => handleUndo(job)}
-              >Undo</button
-            >
-          {/if}
-          {#if undoErrors[job.id]}
-            <span class="job-summary err" role="alert"
-              >{undoErrors[job.id]}</span
-            >
-          {/if}
-          <button
-            class="job-dismiss"
-            title="Dismiss"
-            on:click={() => handleDismiss(job)}>×</button
-          >
+        </header>
+
+        {#if sweepError}
+          <p class="job-summary err" role="alert">{sweepError}</p>
         {/if}
+
+        <div class="pop-list">
+          {#each $jobs as job (job.id)}
+            <div
+              class="job-row"
+              class:failed={job.status === "failed"}
+              class:canceled={job.status === "canceled"}
+            >
+              <span class="job-label">{job.label}</span>
+
+              {#if job.status === "running"}
+                <!-- Two elements, not one with undefined props. A job with no
+                     countable total (a transcode: ffmpeg reports no step count)
+                     wants an INDETERMINATE bar, and the only way to get one is to
+                     omit `value` entirely. Passing `undefined` doesn't omit it —
+                     Svelte still assigns the DOM property, and
+                     `progress.value = undefined` throws "The provided double
+                     value is non-finite", inside Svelte's flush. That took the
+                     whole component update down with it: the loupe froze
+                     mid-render on an unrelated video. A crash in a progress bar
+                     must not be able to break the rest of the app. -->
+                {#if job.total}
+                  <progress
+                    class="job-progress"
+                    value={job.done ?? 0}
+                    max={job.total}
+                  ></progress>
+                {:else}
+                  <progress class="job-progress"></progress>
+                {/if}
+                <span class="job-phase">
+                  {#if job.total}<strong class="job-count"
+                      >{(job.done ?? 0).toLocaleString()} / {job.total.toLocaleString()}</strong
+                    >{/if}
+                  {job.phase}
+                </span>
+                <button class="job-btn" on:click={() => handleCancel(job)}
+                  >Cancel</button
+                >
+              {:else if job.status === "done"}
+                <span class="job-icon ok" aria-hidden="true">✓</span>
+                <span class="job-summary">{summarize(job)}</span>
+                {#if canUndo(job)}
+                  <button class="job-btn" on:click={() => handleUndo(job)}
+                    >Undo</button
+                  >
+                {/if}
+                <button
+                  class="job-dismiss"
+                  title="Dismiss"
+                  on:click={() => handleDismiss(job)}>×</button
+                >
+              {:else}
+                <span class="job-icon err" aria-hidden="true">✗</span>
+                <span class="job-summary">{job.error}</span>
+                {#if canUndo(job)}
+                  <button class="job-btn" on:click={() => handleUndo(job)}
+                    >Undo</button
+                  >
+                {/if}
+                <button
+                  class="job-dismiss"
+                  title="Dismiss"
+                  on:click={() => handleDismiss(job)}>×</button
+                >
+              {/if}
+
+              {#if undoErrors[job.id]}
+                <span class="job-summary err" role="alert"
+                  >{undoErrors[job.id]}</span
+                >
+              {/if}
+            </div>
+          {/each}
+        </div>
       </div>
-    {/each}
+    {/if}
+
+    <button
+      class="jobs-pill {pill.kind}"
+      aria-expanded={open}
+      title="Background jobs — click for details"
+      on:click={() => (open = !open)}
+    >
+      <span
+        class="pill-icon"
+        class:spin={pill.kind === "busy"}
+        aria-hidden="true">{pill.icon}</span
+      >
+      <span class="pill-text">{pill.text}</span>
+      {#if running.length}
+        {#if totalWork}
+          <progress class="pill-progress" value={doneWork} max={totalWork}
+          ></progress>
+        {:else}
+          <progress class="pill-progress"></progress>
+        {/if}
+      {/if}
+    </button>
   </div>
 {/if}
 
 <style>
-  .jobs-panel {
-    /* In-flow strip in the app's flex column (was position:fixed bottom:0,
-       which painted over the status bar). flex-shrink:0 so it keeps its
-       height and the grid above shrinks instead. */
-    flex-shrink: 0;
+  /* Anchor for the popover, which opens UPWARD out of the status bar. Nothing
+     here is in the grid's flow any more, so a job can no longer take space from
+     the photos however many of them pile up. */
+  .jobs-widget {
+    position: relative;
+    display: flex;
+    align-items: center;
+    font-size: 0.8rem;
+  }
+  .jobs-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 320px;
+    background: #222;
+    border: 1px solid #3a3a3a;
+    color: #cfcfcf;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .jobs-pill:hover {
+    background: #2f2f2f;
+  }
+  .jobs-pill.err {
+    border-color: #7a3535;
+    color: #ff8a80;
+  }
+  .jobs-pill.busy {
+    border-color: #35507a;
+    color: #cfe3ff;
+  }
+  .pill-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pill-progress {
+    flex: 0 0 auto;
+    width: 56px;
+    height: 6px;
+    accent-color: #4c9aff;
+  }
+  .pill-icon.spin {
+    display: inline-block;
+    animation: spin 1.4s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  /* Respect the user's motion setting — a permanently spinning glyph in the
+     corner is exactly the thing that setting exists to stop. */
+  @media (prefers-reduced-motion: reduce) {
+    .pill-icon.spin {
+      animation: none;
+    }
+  }
+
+  .jobs-pop {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    z-index: 60;
+    width: min(520px, calc(100vw - 2rem));
     display: flex;
     flex-direction: column;
     background: #101010;
-    border-top: 1px solid #2a2a2a;
-    font-size: 0.8rem;
+    border: 1px solid #2f2f2f;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  }
+  .pop-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid #232323;
+  }
+  .pop-title {
+    flex: 1;
+    color: #e8e8e8;
+    font-weight: 600;
+  }
+  /* The list scrolls; the widget itself never grows. */
+  .pop-list {
+    display: flex;
+    flex-direction: column;
     max-height: 40vh;
     overflow-y: auto;
   }
@@ -202,7 +418,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 6px 12px;
+    padding: 6px 10px;
     border-bottom: 1px solid #1c1c1c;
   }
   .job-row:last-child {
@@ -210,13 +426,16 @@
   }
   .job-label {
     flex: 0 0 auto;
+    max-width: 220px;
     color: #e8e8e8;
     font-weight: 600;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .job-progress {
-    flex: 1 1 160px;
-    max-width: 240px;
+    flex: 1 1 120px;
+    max-width: 200px;
     accent-color: #4c9aff;
   }
   .job-count {
@@ -249,6 +468,8 @@
   .job-summary.err {
     color: #ff8a80;
     white-space: normal;
+    padding: 0 10px;
+    margin: 6px 0 0;
   }
   .job-icon.ok {
     color: #8fd18f;
@@ -266,8 +487,12 @@
     font-size: 0.78rem;
     cursor: pointer;
   }
-  .job-btn:hover {
+  .job-btn:hover:not(:disabled) {
     background: #2f2f2f;
+  }
+  .job-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .job-dismiss {
     flex: 0 0 auto;

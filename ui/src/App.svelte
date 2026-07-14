@@ -4172,13 +4172,6 @@
         on:detectalbums={detectAlbums}
       />
 
-      {#if chip}
-        <button class="scope-chip" on:click={exitScope} title={chip.title}>
-          {chip.icon}
-          {chip.text} ✕
-        </button>
-      {/if}
-
       <button
         class="help-btn"
         title="Keyboard shortcuts (?)"
@@ -4572,12 +4565,6 @@
     </div>
   </div>
 
-  <!-- In the app's flex column, directly above the status bar: the jobs strip
-       takes its own space (up to 40vh) and the grid shrinks to fit, so an
-       active job never paints over the status bar (it used to be fixed at
-       bottom:0 and cover it). -->
-  <JobsPanel />
-
   <StatusBar
     {libraryTotal}
     {showingCount}
@@ -4587,6 +4574,20 @@
     {thumbProgress}
     {thumbCounts}
   >
+    <!-- The scope chip explains the "showing" count it sits next to. -->
+    <svelte:fragment slot="scope">
+      {#if chip}
+        <button class="scope-chip" on:click={exitScope} title={chip.title}>
+          {chip.icon}
+          {chip.text} ✕
+        </button>
+      {/if}
+    </svelte:fragment>
+
+    <!-- Background jobs: a pill in the corner that opens a scrollable list, not
+         a strip that takes height from the grid for every video you play. -->
+    <JobsPanel slot="jobs" />
+
     <!-- Clear / Keep only / Export live next to the selected count now: that is
          what makes "Clear" read as "clear the selection" rather than "clear
          something, somewhere". -->

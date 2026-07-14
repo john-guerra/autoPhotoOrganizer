@@ -6,6 +6,20 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.9
+
+- **Job notices no longer pile up over your photos.** Converting a video used to
+  leave a "Converting…" row behind forever, one per clip, in a strip that took
+  its height straight out of the grid. A conversion that succeeds now clears its
+  own notice, and the rest live in a small pill in the status bar's corner that
+  opens a scrollable list — the grid keeps its full height however many jobs run.
+- **Dismiss all.** One click clears every finished job. Anything still running
+  keeps running.
+- **The "keep only" chip moved next to the showing count**, which is the number
+  it explains.
+- A finished video conversion or metadata read used to show a blank summary next
+  to its ✓. It now says what it did.
+
 ## 2.14.8
 
 - **The toolbar stays on one line.** Adding a third grouping dimension used to

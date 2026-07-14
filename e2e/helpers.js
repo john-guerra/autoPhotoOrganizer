@@ -91,6 +91,47 @@ export async function reload(page) {
 export const grid = {
   tile: (page, i = 0) => page.locator(".thumb").nth(i),
   tileCount: (page) => page.locator(".thumb").count(),
+  /**
+   * Index of the first tile whose filename satisfies `pred`. The feed's order
+   * depends on dates, so no spec should assume a tile is at a fixed position.
+   *
+   * SCROLLS, because the grid is virtualized: a tile below the fold has no DOM
+   * node at all, so scanning what is rendered right now only ever searches the
+   * first screenful. (One spec's first video happened to sit inside it; the
+   * second one didn't, and "no tile matched" in a 19-photo library is what that
+   * looks like.)
+   */
+  tileMatching: async (page, pred) => {
+    const tiles = page.locator(".thumb");
+    // The feed scrolls the COLUMN, not the grid — scrolling `.grid` is a silent
+    // no-op that leaves you re-reading the same first screenful forever.
+    const scroller = page.locator(".main-column");
+    let lastTop = -1;
+    for (;;) {
+      const names = await tiles.evaluateAll((els) =>
+        els.map((e) => e.getAttribute("title") ?? "")
+      );
+      const hit = names.findIndex(pred);
+      if (hit !== -1) return hit;
+
+      const top = await scroller.evaluate((el) => {
+        el.scrollTop += el.clientHeight;
+        return el.scrollTop;
+      });
+      if (top === lastTop)
+        throw new Error("no tile matched (searched the feed)");
+      lastTop = top;
+      // Let the virtual window re-render before looking again — two frames, not
+      // a sleep: the grid renders on rAF, so this waits for exactly the thing we
+      // need and no longer.
+      await page.evaluate(
+        () =>
+          new Promise((r) =>
+            requestAnimationFrame(() => requestAnimationFrame(r))
+          )
+      );
+    }
+  },
   /** The star badge on a tile; absent entirely when unrated.
    *  Keyed on the accessible label ("3 stars"), not on .badge — Thumb wraps a
    *  .badge span around Stars, which renders its own .badge, so that class
@@ -148,6 +189,28 @@ export const statusBar = {
    * bar, deliberately not a modal. */
   confirmSelectAll: (page) =>
     page.locator(".statusbar button", { hasText: /^Select all$/ }),
+  /** The scope ("keep only" / folder) chip — it lives next to the counts it
+   * explains, not up in the toolbar. */
+  scopeChip: (page) => page.locator(".statusbar .scope-chip"),
+};
+
+// --- background jobs (the status-bar widget) ---------------------------------
+
+export const jobs = {
+  /** The whole widget. Absent — not merely empty — when there are no jobs. */
+  widget: (page) => page.locator(".jobs-widget"),
+  /** The summary pill in the status bar's corner. Click to open the list. */
+  pill: (page) => page.locator(".jobs-pill"),
+  popover: (page) => page.locator(".jobs-pop"),
+  rows: (page) => page.locator(".jobs-pop .job-row"),
+  dismissAll: (page) =>
+    page.locator(".jobs-pop button", { hasText: /^Dismiss all$/ }),
+  /** Open the list and return its rows. */
+  open: async (page) => {
+    await jobs.pill(page).click();
+    await jobs.popover(page).waitFor();
+    return jobs.rows(page);
+  },
 };
 
 // --- the loupe --------------------------------------------------------------

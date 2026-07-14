@@ -766,6 +766,17 @@ export async function dismissJob(id) {
   return res.json();
 }
 
+/** Clear every finished job at once. Running jobs are untouched.
+ * @returns {Promise<{ok: true, dismissed: number}>} */
+export async function dismissAllJobs() {
+  const res = await fetch(`/api/jobs/dismiss-all`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `dismiss failed (${res.status})`);
+  }
+  return res.json();
+}
+
 /**
  * @param {string[]} groupBy
  * @param {{minRating?:number, orientations?:string[]}|null} [filter=null]
