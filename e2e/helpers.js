@@ -119,6 +119,9 @@ export const statusBar = {
     const m = text.match(/([\d,]+)\s+selected/);
     return m ? Number(m[1].replace(/,/g, "")) : 0;
   },
+  /** The transient line, but only when it is carrying a FAILURE (`.err`) — so a
+   *  spec can't accidentally pass on an ordinary "loading…" status. */
+  error: (page) => page.locator(".statusbar .status.err"),
   clear: (page) => page.locator(".statusbar .sel-btn", { hasText: /^Clear$/ }),
   keepOnly: (page) =>
     page.locator(".statusbar .sel-btn", { hasText: /^Keep only$/ }),

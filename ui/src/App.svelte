@@ -3140,14 +3140,33 @@
     });
   }
 
+  /**
+   * Rate a photo optimistically, and PUT THE STAR BACK if the write fails.
+   *
+   * The optimistic update is what makes culling feel instant, but on its own it
+   * lies: a failed write used to leave the star lit, so you would keep culling
+   * against a rating the database never took, and the export would ship the
+   * wrong set. Silent data loss, wearing the UI of success. Reverting is the
+   * whole point — the message alone is not enough, because a status line you
+   * scroll past does not un-light a star.
+   */
   function rate(index, rating) {
     const entry = displayEntries[index];
     if (!entry) return;
     const it = resolvePhoto(entry);
     if (!it) return;
+    const previous = it.rating;
     it.rating = rating;
     items = items; // trigger reactivity
-    apiSetRating(it.id, rating).catch((e) => (error = e.message));
+    apiSetRating(it.id, rating).catch((e) => {
+      // Re-find by id: the feed window may have been replaced while the request
+      // was in flight, in which case `it` is an orphan and writing to it would
+      // revert nothing the user can see.
+      const current = items.find((i) => i.id === it.id);
+      if (current) current.rating = previous;
+      items = items;
+      error = `Rating not saved (${e.message}) — the star was put back.`;
+    });
   }
 
   /**
@@ -3172,8 +3191,16 @@
       if (!it) continue;
       const shouldBeCover = makingManual && id === target.id;
       if (it.preferredCover !== shouldBeCover) {
+        const previous = it.preferredCover;
         it.preferredCover = shouldBeCover;
-        apiSetCover(it.id, shouldBeCover).catch((e) => (error = e.message));
+        // Same contract as rate(): a write that failed must not leave the UI
+        // claiming it succeeded (see rate()).
+        apiSetCover(it.id, shouldBeCover).catch((e) => {
+          const current = items.find((i) => i.id === id);
+          if (current) current.preferredCover = previous;
+          items = items;
+          error = `Cover not saved (${e.message}) — the stack's cover was put back.`;
+        });
       }
     }
     items = items; // trigger reactivity
@@ -3302,7 +3329,10 @@
     });
     const runway = Math.max(MIN_RUNWAY_PX, mainColumnEl.clientHeight * 2);
 
-    if (renderEnd >= displayEntries.length - FETCH_THRESHOLD || below < runway) {
+    if (
+      renderEnd >= displayEntries.length - FETCH_THRESHOLD ||
+      below < runway
+    ) {
       loadMore("after");
     }
     if (

@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.10
+
+- **A rating that fails to save no longer looks like it saved.** If the write was
+  rejected, the star stayed lit — so you'd keep culling against a rating the
+  database never took, and the export would ship the wrong set. Now the star goes
+  back and the status bar says so. Same for a manual burst cover.
+
 ## 2.12.9
 
 - **Auto Albums now shows a timeline of what it analyzed.** A strip above the

@@ -5,6 +5,7 @@ import {
   reload,
   resetRatings,
   grid,
+  statusBar,
   loupe,
 } from "./helpers.js";
 
@@ -122,6 +123,38 @@ test.describe("@p0 culling", () => {
     await expect(grid.ratingBadge(page, 1)).toHaveCount(0);
 
     expect(errors).toEqual([]);
+  });
+
+  test("a rating the server rejects does not stay lit: the star goes back, and you are told", async ({
+    page,
+  }) => {
+    // The failure mode this exists for: the star was lit optimistically and NEVER
+    // reverted when the write failed. You keep culling against a rating SQLite
+    // never took, and the export ships the wrong set — data loss wearing the UI
+    // of success. Only the browser can see this: the store, the server and every
+    // unit test are individually fine.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    await page.route("**/api/rating", (route) =>
+      route.fulfill({ status: 500, body: "no" })
+    );
+
+    await grid.focus(page, 0);
+    await page.keyboard.press("3");
+
+    // The star is the assertion that matters — a message you scroll past does
+    // not un-light a star, so check the revert BEFORE the wording.
+    await expect(grid.ratingBadge(page, 0)).toHaveCount(0); // put back, not lit
+    await expect(statusBar.error(page)).toContainText("Rating not saved");
+
+    // …and the star that came back is the truth: nothing reached the database.
+    await page.unroute("**/api/rating");
+    await reload(page);
+    await expect(grid.ratingBadge(page, 0)).toHaveCount(0);
+
+    // The 500 we injected is logged by the browser itself; that one is expected.
+    expect(errors.filter((e) => !/rating|500/i.test(e))).toEqual([]);
   });
 
   test("typing a digit into a text field does NOT rate a photo", async ({
