@@ -101,13 +101,57 @@
   $: if (item?.kind === "video") loadVideo(item.id);
   $: if (item && item.kind !== "video") videoState = null;
 
-  async function loadVideo(id) {
+  /**
+   * Can THIS machine decode that? The one question the server can't answer.
+   *
+   * HEVC support is a property of the computer, not of the file: Chromium ships
+   * no software decoder and enables HEVC only where the OS/GPU provides one — so
+   * the same clip plays natively on most Macs, plays on Windows only once the
+   * HEVC Video Extension is installed, and usually cannot play on Linux. Rather
+   * than transcode every HEVC clip on every machine (minutes of CPU, and a second
+   * copy of the file, to work around a decoder that is often already there), the
+   * server offers the original and we ask our own <video> element about it.
+   *
+   * Note this is a QUESTION, not a wait: canPlayType answers synchronously, from
+   * the browser's own codec registry. No probing, no timeout, no "give it a
+   * second and see". And a false yes still can't hurt us — the element's `error`
+   * event catches it and falls back (see onVideoError).
+   */
+  function canDecode(mimeType) {
+    return document.createElement("video").canPlayType(mimeType) !== "";
+  }
+
+  /**
+   * The <video> gave up. If we were trying the original on the strength of
+   * canDecode() (an HEVC file whose profile/level turned out to be more than this
+   * machine's decoder could take), that guess is now disproven: convert it, which
+   * always works. Otherwise the file is genuinely unplayable and the user must be
+   * TOLD — a dead player with no message is the black-rectangle bug all over again.
+   */
+  function onVideoError() {
+    if (videoState?.native && item) {
+      loadVideo(item.id, { transcode: true });
+      return;
+    }
+    videoState = {
+      status: "error",
+      message: "This video could not be played.",
+    };
+  }
+
+  async function loadVideo(id, { transcode = false } = {}) {
     videoState = null;
     try {
-      const r = await prepareVideo(id);
+      const r = await prepareVideo(id, { transcode });
       if (item?.id !== id) return; // navigated away while we asked
       if (r.ready) {
-        videoState = { status: "ready", url: r.url };
+        // `verify` means the server is GUESSING this machine can decode the
+        // original. Ask our decoder; if it says no, come straight back for the
+        // conversion instead of showing a black frame.
+        if (r.verify && !canDecode(r.verify)) {
+          return loadVideo(id, { transcode: true });
+        }
+        videoState = { status: "ready", url: r.url, native: !!r.verify };
         return;
       }
       videoState = { status: "preparing", reason: r.reason };
@@ -192,6 +236,7 @@
                 preload="metadata"
                 use:autoplay
                 on:volumechange={rememberAudio}
+                on:error={onVideoError}
               >
                 <track kind="captions" />
               </video>

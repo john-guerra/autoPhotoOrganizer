@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { openApp, trackPageErrors, grid, loupe, video } from "./helpers.js";
-import { VIDEO } from "./fixture.mjs";
+import { VIDEO, HEVC_VIDEO } from "./fixture.mjs";
 
 /**
  * The reported bug: "videos still don't reproduce in windows. the audio plays
@@ -19,15 +19,43 @@ import { VIDEO } from "./fixture.mjs";
  * mid-render. Only the browser sees that.
  */
 /** Index of the first tile whose filename satisfies `pred`. The feed's order
- *  depends on dates, so no spec should assume a tile is at a fixed position. */
+ *  depends on dates, so no spec should assume a tile is at a fixed position.
+ *
+ *  SCROLLS, because the grid is virtualized: a tile below the fold has no DOM
+ *  node at all, so scanning what is rendered right now only ever searches the
+ *  first screenful. (This spec's first video happened to sit inside it; the
+ *  second one didn't, and "no tile matched (searched 7)" in a 19-photo library is
+ *  what that looks like.) */
 async function firstTileMatching(page, pred) {
   const tiles = page.locator(".thumb");
-  const count = await tiles.count();
-  for (let i = 0; i < count; i++) {
-    const name = (await tiles.nth(i).getAttribute("title")) ?? "";
-    if (pred(name)) return i;
+  // The feed scrolls the COLUMN, not the grid — scrolling `.grid` is a silent
+  // no-op that leaves you re-reading the same first screenful forever.
+  const scroller = page.locator(".main-column");
+  let lastTop = -1;
+  for (;;) {
+    const names = await tiles.evaluateAll((els) =>
+      els.map((e) => e.getAttribute("title") ?? "")
+    );
+    const hit = names.findIndex(pred);
+    if (hit !== -1) return hit;
+
+    // Nothing here: page down and look again, until the feed stops moving.
+    const top = await scroller.evaluate((el) => {
+      el.scrollTop += el.clientHeight;
+      return el.scrollTop;
+    });
+    if (top === lastTop) throw new Error("no tile matched (searched the feed)");
+    lastTop = top;
+    // Let the virtual window re-render before looking again — two frames, not a
+    // sleep: the grid renders on rAF, so this waits for exactly the thing we need
+    // and no longer.
+    await page.evaluate(
+      () =>
+        new Promise((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(r))
+        )
+    );
   }
-  throw new Error(`no tile matched (searched ${count})`);
 }
 
 test.describe("@p0 video playback", () => {
@@ -83,6 +111,61 @@ test.describe("@p0 video playback", () => {
     await expect(page.locator(".loupe img").first()).toBeVisible();
     await expect(video.player(page)).toHaveCount(0);
     await expect(video.message(page)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("an HEVC clip this browser cannot decode is converted, and plays anyway", async ({
+    page,
+  }) => {
+    // HEVC is not unplayable — it is unplayable ON SOME MACHINES. Chromium ships
+    // no software decoder and enables the codec only where the OS/GPU has one, so
+    // the same file plays natively on most Macs and shows NOTHING on a Windows box
+    // without the HEVC Video Extension. We now offer the browser the original
+    // rather than transcoding it everywhere (a transcode is CPU-minutes and a
+    // second copy of every clip, wasted on every machine that could just play it).
+    //
+    // The safety net is what this spec pins: the app must ASK ITS OWN DECODER, and
+    // convert when the answer is no. Playwright's Chromium HAS no HEVC — so this
+    // browser IS the Windows user, and if we ever start trusting the server's
+    // guess instead of the decoder's answer, this goes black right here.
+    const errors = trackPageErrors(page);
+    await openApp(page, { groupBy: "folder" });
+
+    // Assert the premise, or the test could pass by playing HEVC natively and
+    // prove nothing at all.
+    const hasHevc = await page.evaluate(
+      () =>
+        document
+          .createElement("video")
+          .canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') !== ""
+    );
+    expect(
+      hasHevc,
+      "this browser must NOT decode HEVC for this spec to mean anything"
+    ).toBe(false);
+
+    const index = await firstTileMatching(page, (n) =>
+      n.includes(HEVC_VIDEO.name)
+    );
+    await loupe.open(page, index);
+
+    const player = video.player(page);
+    await expect(player).toBeVisible({ timeout: 60000 });
+    // The converted proxy — NOT /api/image/:id, which is the original the browser
+    // just told us it cannot decode.
+    await expect(player).toHaveAttribute("src", /\/api\/video\/\d+\/file/, {
+      timeout: 60000,
+    });
+
+    // And it DECODES. videoWidth stays 0 for a file the browser can't render,
+    // which is exactly what a black rectangle is.
+    await expect
+      .poll(() => player.evaluate((v) => v.videoWidth), {
+        timeout: 30000,
+        message: "the converted HEVC video should decode frames",
+      })
+      .toBeGreaterThan(0);
+
     expect(errors).toEqual([]);
   });
 });

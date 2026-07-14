@@ -191,3 +191,59 @@ describe("enrichBatch", () => {
     expect(pendingMetaCount(db)).toBe(2);
   });
 });
+
+describe("the video-codec backfill", () => {
+  /** Seed one video, the way a scan does. */
+  function seedVideo(db, name = "clip.mp4") {
+    db.prepare(`INSERT INTO volumes (id, label) VALUES (1, 'vol1')`).run();
+    return upsertScan(db, "/photos/trip", 1, [
+      { name, size: 1, mtimeMs: 1, kind: "video" },
+    ])[0];
+  }
+
+  it("re-reads a video that was enriched BEFORE video_codec existed", () => {
+    // The bug: video_codec and pix_fmt were added to the schema long after the
+    // videos were indexed. Those rows already had a width, and the sweep only
+    // asked for `width IS NULL` — so they could never come back through it. On
+    // the real library that stranded 1,171 of 1,173 videos with no codec, which
+    // means playback had to ffprobe each one on demand, with the loupe open and
+    // the user waiting.
+    const db = getDb();
+    const v = seedVideo(db);
+    db.prepare(
+      `UPDATE photos SET width = 1920, height = 1080, video_codec = NULL WHERE id = ?`
+    ).run(v.id);
+
+    expect(pendingMetaCount(db)).toBe(1);
+    expect(pendingMetaPhotos(db).map((p) => p.id)).toEqual([v.id]);
+  });
+
+  it("stops asking once the video HAS been probed", () => {
+    const db = getDb();
+    const v = seedVideo(db);
+    writeMeta(db, v.id, { width: 1920, height: 1080, videoCodec: "hevc" });
+    expect(pendingMetaCount(db)).toBe(0);
+  });
+
+  it("stops asking for a video ffprobe could not read, too", () => {
+    // "" is the sentinel for "we looked, there was no video stream" — the same
+    // shape as width 0 for a RAW. Without it, an unreadable clip would come back
+    // pending on every sweep, forever, and the sweep would never finish.
+    const db = getDb();
+    const v = seedVideo(db);
+    writeMeta(db, v.id, { width: 0, height: 0 }); // ffprobe found nothing
+    expect(
+      db.prepare(`SELECT video_codec FROM photos WHERE id = ?`).get(v.id)
+    ).toEqual({ video_codec: "" });
+    expect(pendingMetaCount(db)).toBe(0);
+  });
+
+  it("does not drag every already-read PHOTO back into the sweep", () => {
+    // The pending condition must key on kind — an image has no video_codec and
+    // never will, and re-reading 113k of them would be a catastrophe.
+    const db = getDb();
+    const [a] = seed(db, ["a.jpg"]);
+    writeMeta(db, a.id, { width: 100, height: 50 });
+    expect(pendingMetaCount(db)).toBe(0);
+  });
+});

@@ -203,12 +203,17 @@ export function videoUrl(id, v = 0) {
  * rather than a missing codec.
  *
  * @param {number} id
- * @returns {Promise<{ready: true, url: string} | {preparing: true, jobId: string, reason: string}>}
- *   ready → play `url` (the original, or an already-built proxy).
+ * @param {{transcode?: boolean}} [opts] transcode: convert it, don't offer me the
+ *   original — the caller asked its OWN decoder about a `verify` type and was
+ *   turned down (HEVC, whose support is a property of the machine, not the file).
+ * @returns {Promise<{ready: true, url: string, verify?: string} | {preparing: true, jobId: string, reason: string}>}
+ *   ready → play `url` (the original, or an already-built proxy). If it carries a
+ *     `verify` MIME type, the server is GUESSING that this machine can decode it:
+ *     check canPlayType(verify) first and come back with {transcode: true} if not.
  *   preparing → a transcode is running; wait on `jobId`, then play its result.
  */
-export async function prepareVideo(id) {
-  const res = await fetch(`/api/video/${id}`);
+export async function prepareVideo(id, { transcode = false } = {}) {
+  const res = await fetch(`/api/video/${id}${transcode ? "?transcode=1" : ""}`);
   if (!res.ok && res.status !== 202) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `video failed (${res.status})`);

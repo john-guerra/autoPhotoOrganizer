@@ -27,6 +27,14 @@ const PLAYABLE_CONTAINERS = new Set([".mp4", ".m4v", ".mov", ".webm"]);
 /** Video codecs Chromium can decode (given a playable container). */
 const PLAYABLE_CODECS = new Set(["h264", "vp8", "vp9", "av1"]);
 
+/** Codecs whose support DEPENDS ON THE MACHINE, so the server cannot answer for
+ *  them (see playbackPlan). HEVC is the whole list: Chromium refuses to ship a
+ *  software decoder for it, and enables it only where the OS/GPU can do it —
+ *  present on most Macs, present on Windows only once the (free) HEVC Video
+ *  Extension is installed, usually absent on Linux. Same app, same file, three
+ *  answers. */
+const MACHINE_DEPENDENT_CODECS = new Set(["hevc"]);
+
 /** Chroma subsamplings its H.264 decoder handles. 4:2:2/4:4:4 are out; the "j"
  *  variants are the same subsampling at full range, and decode fine. */
 const PLAYABLE_PIX_FMTS = new Set(["yuv420p", "yuvj420p"]);
@@ -61,4 +69,67 @@ export function whyTranscode({ ext, codec, pixFmt } = {}) {
   if (!codec) return "unknown video format";
   if (!PLAYABLE_CODECS.has(codec)) return `${codec} video isn't playable`;
   return `${pixFmt} colour (4:2:2/4:4:4) isn't playable`;
+}
+
+/**
+ * The MIME type to ASK THE BROWSER about, for an HEVC stream.
+ *
+ * `canPlayType('video/mp4; codecs="hvc1"')` answers "" even on a machine with a
+ * perfectly good HEVC decoder — Chromium only recognises a FULL codec string, so
+ * the profile/compat/tier-level parameters are mandatory, not decoration.
+ *
+ * The level we claim is deliberately the LOWEST plausible one (L93 = 3.1) rather
+ * than the file's real level, and that is the point: this string is not a
+ * description of the file, it is the question "does this machine do HEVC at all?"
+ * A decoder that can't manage 3.1 can't manage anything. Over-claiming the level
+ * would make a capable machine answer "" and transcode a file it could have
+ * played; under-claiming can only produce a false yes, and a false yes is caught
+ * for free by the <video> element's own `error` event, which falls back to the
+ * transcode. Wrong-and-recoverable beats right-and-pessimistic.
+ *
+ * The profile, on the other hand, is real: 8-bit is Main (profile 1, compat 6),
+ * 10-bit is Main 10 (profile 2, compat 4), and hardware that does one but not
+ * the other exists.
+ *
+ * @param {string|null} [pixFmt]
+ * @returns {string}
+ */
+export function hevcMimeType(pixFmt) {
+  const tenBit = /10/.test(String(pixFmt ?? ""));
+  const profile = tenBit ? "2.4" : "1.6";
+  return `video/mp4; codecs="hvc1.${profile}.L93.B0"`;
+}
+
+/**
+ * What should the client do with this video?
+ *
+ *   { mode: "direct" }                  → play the original; the browser can decode it.
+ *   { mode: "native-first", mimeType }  → ONLY THE CLIENT CAN SAY. Ask
+ *                                         canPlayType(mimeType); play the original
+ *                                         if it says yes, else ask us to transcode.
+ *   { mode: "transcode", reason }       → the browser cannot decode it anywhere.
+ *
+ * The middle mode exists because the server is the wrong place to answer for
+ * HEVC: a transcode is a CPU-minutes wait and a temporary copy of every clip, and
+ * it is pure waste on the (many) machines whose GPU decodes HEVC natively and
+ * instantly. But answering "yes" for all of them would show a black frame on the
+ * machines that can't — the exact failure this module was written to kill. So we
+ * hand the client the question and let it answer with its own decoder.
+ *
+ * @param {{ext?: string, codec?: string|null, pixFmt?: string|null}} info
+ * @returns {{mode: "direct"} | {mode: "native-first", mimeType: string, reason: string} | {mode: "transcode", reason: string}}
+ */
+export function playbackPlan({ ext, codec, pixFmt } = {}) {
+  if (browserCanPlay({ ext, codec, pixFmt })) return { mode: "direct" };
+  const e = String(ext ?? "").toLowerCase();
+  if (PLAYABLE_CONTAINERS.has(e) && MACHINE_DEPENDENT_CODECS.has(codec)) {
+    return {
+      mode: "native-first",
+      mimeType: hevcMimeType(pixFmt),
+      // Carried along so that IF the client falls back, the transcode it asks
+      // for can explain itself in the same words as any other conversion.
+      reason: whyTranscode({ ext, codec, pixFmt }),
+    };
+  }
+  return { mode: "transcode", reason: whyTranscode({ ext, codec, pixFmt }) };
 }
