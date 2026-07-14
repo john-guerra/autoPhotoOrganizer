@@ -844,6 +844,13 @@ export function registerApi(app) {
     const it = getPhotoById(db, Number(req.params.id));
     if (!it) return res.status(404).end();
 
+    // A video has no embedded EXIF preview to extract — its poster frame IS its
+    // thumbnail, and exifr THROWS when handed one. "There is no preview here" is
+    // a 404, not a server error: this used to 500 whenever a slow video thumbnail
+    // made the grid fall back to the preview URL (a CI-only flake, because it
+    // takes a loaded machine to push the poster frame past the fallback delay).
+    if (it.kind === "video") return res.status(404).end();
+
     res.set("Cache-Control", "public, max-age=31536000, immutable");
     res.type("image/jpeg");
 

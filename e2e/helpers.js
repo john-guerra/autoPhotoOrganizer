@@ -22,6 +22,15 @@ export function trackPageErrors(page) {
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
   });
+  // The browser's own console message for a failed request is "Failed to load
+  // resource: the server responded with a status of 500" — and it does NOT say
+  // WHICH resource. A CI-only flake reported that way is undebuggable: you get a
+  // red build and no thread to pull. Name the request.
+  page.on("response", (r) => {
+    if (r.status() >= 500) {
+      errors.push(`HTTP ${r.status()} from ${new URL(r.url()).pathname}`);
+    }
+  });
   return errors;
 }
 

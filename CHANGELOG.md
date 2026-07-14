@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.2
+
+- **A video whose thumbnail is slow to appear no longer logs a server error.** The
+  grid was falling back to an embedded-photo preview that a video hasn't got.
+
+## 2.14.1
+
+- **A search typed while the library is still loading now actually filters the
+  grid.** It could show you the whole library — or an empty grid reading "No
+  photos match your current filters" — while the count next to it said how many
+  it had found.
+
 ## 2.14.0
 
 Packaged build of everything since 2.13.0 — search, HEVC playback, and the video

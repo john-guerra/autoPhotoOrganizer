@@ -2813,6 +2813,24 @@ describe("GET /api/video/:id — playable in the browser, or transcoded", () => 
     await rm(dir, { recursive: true, force: true });
   }, 40000);
 
+  it("404s a preview request for a video instead of blowing up with a 500", async () => {
+    // A video has no embedded EXIF preview — exifr THROWS when handed one — and
+    // the grid falls back to /api/preview for any tile whose thumbnail is slow.
+    // A video's thumbnail is an ffmpeg poster frame, so on a loaded machine it is
+    // exactly the tile most likely to be slow: the fallback fired, the route 500'd,
+    // and the page logged an error. It only ever showed up on CI, which is the
+    // only machine slow enough — the failure was real, the timing was not.
+    const dir = await mkdtemp(join(tmpdir(), "ag-vid-"));
+    await makeVideo(dir, "camcorder.avi", ["-c:v", "mpeg4"]);
+    const body = await scan(srv.base, dir);
+    const id = body.items[0].id;
+
+    const res = await fetch(`${srv.base}/api/preview/${id}`);
+    expect(res.status).toBe(404); // "there is no preview here", not "we broke"
+
+    await rm(dir, { recursive: true, force: true });
+  }, 20000);
+
   it("plays an ordinary H.264 4:2:0 MP4 straight from disk — no transcode", async () => {
     const dir = await mkdtemp(join(tmpdir(), "ag-vid-"));
     await makeVideo(
