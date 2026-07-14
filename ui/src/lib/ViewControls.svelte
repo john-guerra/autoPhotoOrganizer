@@ -8,6 +8,7 @@
    * directly above the column it switches.
    */
   import { createEventDispatcher } from "svelte";
+  import { cycleAllLabel } from "./groupRenderers.js";
 
   export let cyclingAll = false;
   export let globalViewMode = "full";
@@ -18,19 +19,18 @@
 </script>
 
 <div class="cluster view">
+  <!-- The label is a PROMISE, not a badge: it says what the next click will do,
+       not what state you are already in. It used to read "▦ Full view" while
+       everything was already in full view — a status report on something shaped
+       like a button, so the only way to find out what it did was to press it, and
+       pressing it was the thing you were trying to decide about. -->
   <button
     class="reveal-btn cycle-all"
     on:click={() => dispatch("cycleall")}
     disabled={cyclingAll}
     title="Cycle every group: full view → snapshot all → collapse all"
   >
-    {cyclingAll
-      ? "…"
-      : globalViewMode === "snapshot"
-        ? "◐ Snapshot all"
-        : globalViewMode === "collapsed"
-          ? "▸ Collapsed all"
-          : "▦ Full view"}
+    {cyclingAll ? "…" : cycleAllLabel(globalViewMode)}
   </button>
   <!-- Icon only. It is a nicety, not a headline — you mostly know where you are —
        and it was spending as much of the toolbar as Auto Albums, which is a whole

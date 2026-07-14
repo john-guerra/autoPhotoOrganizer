@@ -85,3 +85,27 @@ export function nextRendererId(id) {
 export function isServerCollapsed(id) {
   return !getRenderer(id).needsFeedPhotos;
 }
+
+/** What the cycle-all button PROMISES, keyed by the state it would move you to.
+ * A verb, because the button is a thing you do — not a badge for the state you
+ * are already in. */
+const CYCLE_ALL_PROMISE = {
+  grid: "▦ Expand all",
+  snapshot: "◐ Snapshot all",
+  collapsed: "▸ Collapse all",
+};
+
+/**
+ * The cycle-all button's label: what the NEXT click will do.
+ *
+ * It used to name the state you were ALREADY in ("▦ Full view" while everything
+ * was, in fact, in full view), which reads as a status badge on something shaped
+ * like a button — so you had to press it to find out what it did, and pressing it
+ * was the thing you were trying to decide about. A button says what happens if you
+ * press it.
+ *
+ * @param {string|undefined} current the current global renderer id
+ */
+export function cycleAllLabel(current) {
+  return CYCLE_ALL_PROMISE[nextRendererId(current)];
+}

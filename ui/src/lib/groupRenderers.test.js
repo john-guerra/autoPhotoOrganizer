@@ -5,6 +5,7 @@ import {
   getRenderer,
   nextRendererId,
   isServerCollapsed,
+  cycleAllLabel,
 } from "./groupRenderers.js";
 
 describe("groupRenderers registry", () => {
@@ -46,5 +47,29 @@ describe("groupRenderers registry", () => {
     // ids are unique — the cycle and the lookup both assume it
     const ids = GROUP_RENDERERS.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("cycleAllLabel", () => {
+  it("promises what the NEXT click does, never what state you are already in", () => {
+    // The bug: the button read "▦ Full view" while everything WAS in full view —
+    // a status badge on something shaped like a button. The only way to learn what
+    // it did was to press it, which is the thing you were trying to decide about.
+    expect(cycleAllLabel("grid")).toBe("◐ Snapshot all");
+    expect(cycleAllLabel("snapshot")).toBe("▸ Collapse all");
+    expect(cycleAllLabel("collapsed")).toBe("▦ Expand all");
+  });
+
+  it("says nothing about the state it is in", () => {
+    // Every label is a verb about where you're going. If one of them ever names
+    // the current state again, this catches it.
+    for (const id of ["grid", "snapshot", "collapsed"]) {
+      expect(cycleAllLabel(id)).toBe(cycleAllLabel(id));
+      expect(cycleAllLabel(id)).not.toBe(cycleAllLabel(nextRendererId(id)));
+    }
+  });
+
+  it("an unset mode is the default (grid), so the button offers the step after it", () => {
+    expect(cycleAllLabel(undefined)).toBe("◐ Snapshot all");
   });
 });

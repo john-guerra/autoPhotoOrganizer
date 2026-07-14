@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.14
+
+- **The cycle-all button says what it will DO**, not what it already is. It read
+  "Full view" while everything was in full view — so the only way to find out what
+  pressing it did was to press it. It now offers the next step: Snapshot all →
+  Collapse all → Expand all.
+
 ## 2.14.13
 
 - **Every toolbar control now sits in a named, bordered group** — Library, Filter,
