@@ -745,6 +745,20 @@
    * @returns {Promise<T | undefined>}
    */
   async function withFeedTransaction(body, { onError } = {}) {
+    // FLUSH FIRST. `displayFilter` is a `$:` derived value, so it does NOT exist
+    // yet at the moment a handler sets `filter` — Svelte recomputes it at the end
+    // of the tick. Every caller here sets the state and rebuilds the feed in the
+    // same handler, so a body that reads `displayFilter` synchronously reads the
+    // PREVIOUS filter and fetches the wrong photos.
+    //
+    // It hid for so long because most rebuilds fetch twice (a before-seek and an
+    // after-seek around the focused photo): the second fetch happens after an
+    // await, by which time Svelte has flushed, so the right filter arrives and
+    // papers over the wrong one. The path with no focus id fetches ONCE — and
+    // that one lost outright, replacing the window with the whole unfiltered
+    // library (or nothing at all, if the first load hadn't landed yet, which is
+    // how it was reported: "1 showing" over an empty grid).
+    await tick();
     error = "";
     status = "loading…";
     const epoch = ++feedEpoch;

@@ -255,4 +255,53 @@ test.describe("@p1 search", () => {
 
     expect(errors).toEqual([]);
   });
+
+  test("a search that lands while the library is STILL LOADING still filters the grid", async ({
+    page,
+  }) => {
+    // Reported as "it says 1 showing and the grid is empty". The status bar had
+    // the right number and the grid had the wrong photos — or none.
+    //
+    // `displayFilter` is a `$:` derived value, so it does not exist yet in the
+    // handler that sets `filter`: Svelte recomputes it at the end of the tick. A
+    // feed rebuild started in that same handler therefore fetched with the
+    // PREVIOUS filter. Most rebuilds fetch twice (a seek before and after the
+    // focused photo) and the second fetch — after an await, so post-flush — quietly
+    // corrected it. The path with NO focused photo fetches once, and that one lost:
+    // the window was replaced with the whole unfiltered library.
+    //
+    // No focused photo is exactly what "the first load hasn't landed yet" means, so
+    // this only bit a search typed into a library still loading — a 17-photo fixture
+    // loads too fast to ever be in that state. Holding the first feed response is
+    // what puts the app in it, deterministically, on any machine.
+    const errors = trackPageErrors(page);
+
+    let held = 0;
+    await page.route("**/api/feed*", async (route) => {
+      if (held++ === 0) await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+
+    await page.addInitScript(() => window.localStorage.clear());
+    await page.goto("/");
+
+    // Type into the search box the moment it exists — while the feed is still out.
+    await page.locator(".search-input").fill("Party");
+
+    // The grid must show the Party folder and NOTHING else. Before the fix this
+    // rendered the entire library (every folder), while the count said otherwise.
+    await expect(page.locator(".section-header")).toHaveCount(1, {
+      timeout: 15000,
+    });
+    await expect(page.locator(".section-header").first()).toContainText(
+      "Party"
+    );
+
+    // And the two numbers agree: what the status bar counts is what you can see.
+    const showing = await statusBar.showingCount(page);
+    const rendered = await page.locator(".thumb").count();
+    expect(rendered).toBe(showing);
+
+    expect(errors).toEqual([]);
+  });
 });
