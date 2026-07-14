@@ -3570,6 +3570,12 @@
    * expand just `groupPath` when known (feed snapshot), else clear all
    * collapse state (album jump has no group context). Then re-center via the
    * canonical helper and open the loupe if it landed in the window. */
+  /** The group's view state at the moment the loupe was opened from it — a
+   * snapshot strip, or a collapsed row — so closing the loupe puts it back
+   * instead of leaving the group expanded behind you.
+   * @type {null|{path: Array<{dimension:string,value:string}>, rendererId: string}} */
+  let loupeRestore = null;
+
   async function openPhotoById(id, groupPath = null) {
     // NOTE: we intentionally do NOT exit album mode here. When you click a photo
     // in the Auto-albums snapshot strips, the loupe opens as an overlay on top
@@ -3577,12 +3583,24 @@
     // you to the album review with all your split/naming/materialize state
     // intact (previously this set albumMode=false, unmounting AlbumsView and
     // discarding that work — the in-feed redesign in #81 supersedes this).
+    // Opening a photo has to EXPAND the group it lives in: a snapshot (or
+    // collapsed) group is collapsed server-side, so its photos aren't in the feed
+    // window at all and there is nothing to open. But that expansion was
+    // permanent — click a photo in a strip, press Esc, and you were dropped into
+    // the group's full grid instead of back into the strip you were looking at.
+    // Remember what it was, and put it back when the loupe closes.
     if (groupPath) {
       const key = pathKey(groupPath);
+      const was = rendererIdFor(groupPath, collapsedKeys, snapshotGroupKeys);
+      loupeRestore =
+        was === DEFAULT_RENDERER_ID
+          ? null
+          : { path: groupPath, rendererId: was };
       collapsedPaths = collapsedPaths.filter((p) => pathKey(p) !== key);
       snapshotGroupKeys.delete(key);
       snapshotGroupKeys = snapshotGroupKeys;
     } else {
+      loupeRestore = null;
       collapsedPaths = [];
       snapshotGroupKeys = new Set();
     }
@@ -3593,6 +3611,16 @@
 
   async function closeLoupe() {
     loupeOpen = false;
+
+    // Back to the view you came from. Restoring BEFORE the focus/scroll below is
+    // deliberate: re-collapsing the group changes the feed, so focusing first
+    // would scroll to a tile that is about to stop existing.
+    if (loupeRestore) {
+      const { path, rendererId } = loupeRestore;
+      loupeRestore = null;
+      await setGroupRenderer(path, rendererId);
+    }
+
     await tick();
     // Return focus to the grid, scrolled to the current item. (Key on
     // resolvePhoto(entry).id, matching Thumb's data-id — see focusPending.)

@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.17
+
+- **Closing a photo puts you back where you opened it from.** Open a photo from a
+  snapshot strip and press Esc, and you get the strip back — not the group's full
+  grid with the feed scrolled somewhere else.
+
 ## 2.14.16
 
 - **Grouping by folder name is flat again, matching the tree.** The feed was
