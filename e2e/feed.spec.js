@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loupe as loupeHelper } from "./helpers.js";
+import { loupe as loupeHelper, openApp } from "./helpers.js";
 
 /**
  * These cover the interactions that actually regressed during the 2.9.x usability
@@ -171,4 +171,43 @@ test("the loupe opens on a tile click and closes with its ✕", async ({
   await expect(loupe).toHaveCount(0);
 
   expect(errors).toEqual([]);
+});
+
+test.describe("@p1 loupe filmstrip", () => {
+  test("reuses the grid's cached thumbnails instead of a cold 64px size (#90 again)", async ({
+    page,
+  }) => {
+    // The thumb cache is keyed by exact pixel size. The filmstrip used to ask for
+    // `size=64` — a size no other view requests — so opening the loupe generated
+    // up to 81 brand-new thumbnails at the exact moment the user was waiting for
+    // the full-size photo and its ±3 prefetch. Issue #90 was this same mistake in
+    // the snapshot strip; the fix there (follow the grid's bucket) is the fix here.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    const thumbRequests = [];
+    page.on("request", (r) => {
+      const u = new URL(r.url(), "http://localhost");
+      if (u.pathname.startsWith("/api/thumb/")) {
+        thumbRequests.push(Number(u.searchParams.get("size")));
+      }
+    });
+
+    await loupeHelper.open(page, 0);
+    await expect(loupeHelper.filmstripImgs(page).first()).toBeVisible();
+
+    const src = await loupeHelper
+      .filmstripImgs(page)
+      .first()
+      .getAttribute("src");
+    const size = Number(
+      new URL(src, "http://localhost").searchParams.get("size")
+    );
+
+    // A real grid bucket, not the bespoke 64 nothing else populates.
+    expect([160, 320, 480, 640, 1024]).toContain(size);
+    expect(thumbRequests.some((s) => s === 64)).toBe(false);
+
+    expect(errors).toEqual([]);
+  });
 });

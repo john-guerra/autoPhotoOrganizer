@@ -21,6 +21,9 @@
   export let selectedIds = new Set(); // for the filmstrip's ✓ markers
   export let showDetails = true;
   export let showFilmstrip = true;
+  /** Thumb size the filmstrip should REQUEST — the grid's current size, so the
+   *  strip reuses thumbnails that are already cached (see LoupeFilmstrip). */
+  export let thumbSize = 64;
 
   // `items` is App.svelte's resolvedPhotos — 1:1 with displayEntries, so a
   // collapsed section's placeholder (string id like "collapsed:...") can appear
@@ -189,6 +192,7 @@
       {items}
       {index}
       {selectedIds}
+      requestSize={thumbSize}
       on:select={(e) => (index = e.detail.index)}
     />
   {/if}

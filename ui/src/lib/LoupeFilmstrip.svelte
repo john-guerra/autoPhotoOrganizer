@@ -9,9 +9,22 @@
   export let items = [];
   export let index = 0;
   export let selectedIds = new Set();
+  /**
+   * The thumbnail size to REQUEST — the grid's current one, not the 64px this
+   * strip draws at.
+   *
+   * The thumb cache is keyed by exact pixel size, so asking for 64 (a size no
+   * other view uses) meant every loupe open generated up to 81 brand-new
+   * thumbnails, at the very moment the loupe also wants its full-size image and
+   * its ±3 prefetch. Asking for the size the GRID just used makes every one of
+   * them a cache hit — server-side, and in the browser (the thumb URL is
+   * immutable and already fetched). Bigger bytes, but bytes we already have,
+   * versus decoding the photo again. Drawn at 64px by CSS either way.
+   */
+  export let requestSize = 64;
 
   const RADIUS = 40; // ±40 rendered around the current index
-  const THUMB = 64; // px
+  const THUMB = 64; // px — the drawn size
 
   const isReal = (it) => it && typeof it.id === "number";
 
@@ -44,7 +57,17 @@
         title={item.name}
         on:click={() => dispatch("select", { index: i })}
       >
-        <img src={thumbUrl(item.id, THUMB, item.mtimeMs)} alt={item.name} />
+        <!-- lazy: the strip renders ±40 cells but only ~15 are ever on screen.
+             Eagerly fetching all 81 put a thundering herd in front of the one
+             image the user is actually waiting for — the full-size photo. -->
+        <img
+          src={thumbUrl(item.id, requestSize, item.mtimeMs)}
+          alt={item.name}
+          loading="lazy"
+          decoding="async"
+          width={THUMB}
+          height={THUMB}
+        />
         {#if item.kind === "video"}<span class="badge">▶</span>{/if}
         {#if selectedIds.has(item.id)}<span class="sel">✓</span>{/if}
         {#if item.rating > 0}<span class="rating"

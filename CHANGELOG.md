@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.14
+
+- **The loupe opens faster.** Its filmstrip was asking for a thumbnail size no
+  other view uses, so every time you opened a photo the app generated up to 81
+  brand-new thumbnails — while you were waiting for the photo itself. It now
+  reuses the ones the grid already has, and only loads the strip cells you can
+  actually see.
+- The full-size photo and video you're looking at now take priority over a
+  background metadata sweep, instead of queueing behind it.
+
 ## 2.12.13
 
 - **Photos show up while the scan is still running.** Adding a big folder used to

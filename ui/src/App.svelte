@@ -180,6 +180,12 @@
   // always-cold 160 and never over-fetches 1024 for a ~104px slot. Both
   // endpoints are real buckets, so reuse holds at common zooms.
   $: snapshotThumbSize = Math.min(640, Math.max(320, thumbSize));
+  // The loupe filmstrip, same lesson (#90 again): it used to ask for a bare 64px
+  // — a size NOTHING else requests — so every loupe open generated up to 81 cold
+  // thumbnails while the user was waiting on the full-size photo. Follow the
+  // grid's bucket instead: those files already exist, and the browser has them
+  // (the thumb URL is immutable). It is drawn at 64px regardless.
+  $: filmstripThumbSize = thumbSize;
 
   let dir = localStorage.getItem(LS_KEY) || "";
   // Recursive "soup folder" scan: pull in every subfolder. Default on — the
@@ -4282,6 +4288,7 @@
     {selectedIds}
     showDetails={showLoupeDetails}
     showFilmstrip={showLoupeFilmstrip}
+    thumbSize={filmstripThumbSize}
     on:contextmenu={(e) => openContextMenu(e.detail.x, e.detail.y, selected)}
     on:close={closeLoupe}
     on:rate={(e) => rate(selected, e.detail)}

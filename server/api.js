@@ -894,7 +894,7 @@ export function registerApi(app) {
     createReadStream(path).on("error", onStreamError).pipe(res);
   }
 
-  app.get("/api/image/:id", async (req, res) => {
+  app.get("/api/image/:id", interactiveRoute, async (req, res) => {
     const db = getDb();
     const it = getPhotoById(db, Number(req.params.id));
     if (!it) return res.status(404).end();
@@ -931,7 +931,7 @@ export function registerApi(app) {
     return { codec: meta?.videoCodec ?? null, pixFmt: meta?.pixFmt ?? null };
   }
 
-  app.get("/api/video/:id", async (req, res) => {
+  app.get("/api/video/:id", interactiveRoute, async (req, res) => {
     const db = getDb();
     const it = getPhotoById(db, Number(req.params.id));
     if (!it) return res.status(404).json({ error: "unknown id" });
@@ -994,7 +994,7 @@ export function registerApi(app) {
   });
 
   /** The transcoded proxy itself, with ranges so the scrub bar still works. */
-  app.get("/api/video/:id/file", async (req, res) => {
+  app.get("/api/video/:id/file", interactiveRoute, async (req, res) => {
     const db = getDb();
     const it = getPhotoById(db, Number(req.params.id));
     if (!it) return res.status(404).end();

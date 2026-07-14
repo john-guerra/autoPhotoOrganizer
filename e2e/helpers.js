@@ -137,6 +137,7 @@ export const statusBar = {
 
 export const loupe = {
   root: (page) => page.locator(".loupe"),
+  filmstripImgs: (page) => page.locator(".loupe .filmstrip img"),
   close: (page) => page.locator(".loupe .loupe-close"),
   selectCircle: (page) => page.locator(".loupe .loupe-select"),
   /** The interactive 5-star row in the details panel. */
