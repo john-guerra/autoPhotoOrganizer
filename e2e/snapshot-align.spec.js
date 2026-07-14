@@ -39,15 +39,19 @@ test.describe("@p1 snapshot / full view alignment", () => {
     const band = group.bands(page).first();
     await expect(band).toBeVisible();
 
+    // offset*, not getBoundingClientRect: the strip UNFURLS (a scale transform —
+    // see snapshot-animation.spec.js), and a client rect includes that transform,
+    // so mid-animation this measured a band that was 92% of its real size and the
+    // assertions below failed at random. The offset metrics are the LAID-OUT
+    // geometry, which is what "is the strip where the photos were" actually means.
     const measure = () =>
       band.evaluate((el) => {
-        const b = el.getBoundingClientRect();
-        const t = el.querySelector(".snap-thumb").getBoundingClientRect();
+        const t = el.querySelector(".snap-thumb");
         return {
           left: el.style.left,
-          bandHeight: Math.round(b.height),
-          firstPhotoInset: Math.round(t.left - b.left),
-          firstPhotoHeight: Math.round(t.height),
+          bandHeight: el.offsetHeight,
+          firstPhotoInset: t.offsetLeft, // .group-band is the offset parent
+          firstPhotoHeight: t.offsetHeight,
         };
       });
 

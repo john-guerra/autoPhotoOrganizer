@@ -1,5 +1,6 @@
 <script>
   import { onMount, tick } from "svelte";
+  import { scale } from "svelte/transition";
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange, runwayPx } from "./lib/layouts/windowing.js";
   import { ZOOM_LEVELS, resolveZoom, gapFor } from "./lib/zoom.js";
@@ -2521,6 +2522,7 @@
    * local change rather than a 24-site rewrite.
    */
   async function setGroupRenderer(path, rendererId) {
+    beginFold();
     const key = pathKey(path);
     const wasCollapsed = collapsedKeys.has(key);
     const nowCollapsed = isServerCollapsed(rendererId);
@@ -2541,6 +2543,51 @@
     // Only touch the server when the group's "does the feed stream its photos"
     // answer actually flips; a snapshot→collapsed change is client-side only.
     if (nowCollapsed !== wasCollapsed) await toggleSectionCollapse(path);
+
+    endFold();
+  }
+
+  /**
+   * The snapshot strip UNFURLS in place: it opens from exactly the spot, and at
+   * exactly the photo size, that the group's first row of photos occupied, while
+   * the photos below glide up (that glide is Thumb's own transition, and predates
+   * this). Together they read as the grid folding shut, rather than as photos
+   * blinking out and an unrelated widget blinking in.
+   *
+   * `folding` is why this doesn't misfire. The feed is VIRTUALIZED: a band scrolled
+   * out of view is destroyed and re-created when you come back, and an unguarded
+   * entry animation would replay the unfurl every single time a snapshot group came
+   * back on screen. The animation runs only while a fold is actually landing.
+   *
+   * A fold has THREE writers, and all three have to say so — setGroupRenderer (one
+   * group), cycleLeafPaths (a virtual ancestor, or a Shift-click, folding its
+   * leaves) and cycleAllGroups (the whole feed). Hooking only the first is how this
+   * came to be written twice: the fixture's first header is a virtual ancestor, so
+   * the animation never fired at all in the one place it was being tested.
+   */
+  const FOLD_MS = 260;
+  let folding = false;
+  let foldTimer = null;
+
+  /** Halve nothing for someone who has asked the OS not to animate things. */
+  $: foldMs =
+    folding && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      ? FOLD_MS
+      : 0;
+
+  function beginFold() {
+    clearTimeout(foldTimer);
+    folding = true;
+  }
+
+  /** Called once the new layout is actually ON SCREEN — a fold that has to ask the
+   *  server for a new feed window lands whenever it lands, so the clock starts when
+   *  the strip appears, not when the click happened. The timeout is the animation's
+   *  own length; it is not a guess at how long anything takes to settle. */
+  async function endFold() {
+    await tick();
+    clearTimeout(foldTimer);
+    foldTimer = setTimeout(() => (folding = false), FOLD_MS);
   }
 
   // --- Shift+click a parent = fold its LEAVES (VS Code function folding) -----
@@ -2658,12 +2705,15 @@
         if (next === SNAPSHOT_ID) nextSnaps.add(pathKey(lp));
       }
     }
+    beginFold();
     collapsedPaths = nextCollapsed;
     snapshotGroupKeys = nextSnaps;
     try {
       await loadInitialFeed();
     } catch (e) {
       error = e.message;
+    } finally {
+      endFold();
     }
   }
 
@@ -2711,6 +2761,7 @@
     if (cyclingAll) return;
     const next = nextRendererId(globalViewMode);
     cyclingAll = true;
+    beginFold();
     try {
       await applyViewModeToGroups(next);
       globalViewMode = next;
@@ -2719,6 +2770,7 @@
       error = e.message;
     } finally {
       cyclingAll = false;
+      endFold();
     }
   }
 
@@ -4508,9 +4560,26 @@
                        and the band wasn't. That put every snapshot strip 12px
                        left of, and 12px above, where the same group's photos sit
                        in full view, so a group visibly JUMPED as you toggled it. -->
+                  <!-- The strip UNFURLS in place: it opens from the exact spot,
+                       and at the exact photo size, that the group's first row of
+                       photos occupied, while the photos below it glide up. `foldMs`
+                       is 0 unless a fold is actually landing — the feed is
+                       virtualized, so without that guard every scroll past a
+                       snapshot group would re-mount the band and replay the
+                       animation (and prefers-reduced-motion zeroes it too).
+
+                       |global is load-bearing: a bare `in:` is LOCAL, and a local
+                       transition is suppressed when an ancestor block is created in
+                       the same update — which is exactly what a feed refresh does,
+                       so the animation silently never ran at all. -->
                   <div
                     class="group-band"
                     data-group-key={pathKey(entry.item.path)}
+                    in:scale|global={{
+                      duration: foldMs,
+                      start: 0.92,
+                      opacity: 0,
+                    }}
                     style="top:{boxes[i].y + PAD}px; left:{boxes[i].x +
                       PAD}px; width:{boxes[i].width}px; height:{boxes[i]
                       .height}px;"
@@ -4898,7 +4967,19 @@
     position: absolute;
     box-sizing: border-box;
     overflow: hidden;
+    /* The strip unrolls from its left edge — which, since the band now starts at
+       exactly the same x as the group's first photo in full view, means it appears
+       to grow out of that photo rather than swelling out of thin air. */
+    transform-origin: 0 50%;
   }
+
+  /* NOTE the transition that ISN'T here: `.thumb-wrap` already carries a
+     permanent top/left/width/height transition of its own (Thumb.svelte), so the
+     photos below a folding group have always glided to their new places. The
+     piece that was missing is the strip itself — see the `in:scale` on the band,
+     and `folding` in the script, which is what keeps a virtualized re-mount from
+     replaying that unfurl every time you scroll past. */
+
   .section-wrapper {
     /* --ind is set inline from GROUP_INDENT (the same constant the LAYOUT uses to
        inset a nested group's photos) so the dendrogram and the photos can never

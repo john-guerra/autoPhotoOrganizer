@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.20
+
+- **Folding a group into a snapshot is animated.** The strip now unrolls from
+  exactly the spot, and at exactly the photo size, that the group's first row of
+  photos occupied, while the photos below it glide up — so a fold reads as the grid
+  closing rather than as photos blinking out and a widget blinking in.
+
 ## 2.14.19
 
 - **The toolbar folds instead of overflowing.** Make the window narrow enough and
