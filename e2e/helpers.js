@@ -180,6 +180,59 @@ export const group = {
     ).includes("not-grid"),
 };
 
+// --- auto albums + the timeline ---------------------------------------------
+
+export const albums = {
+  /** Enter Auto Albums and dismiss the first-run explainer, leaving the review
+   *  screen ready. The modal opens automatically because `openApp` clears
+   *  localStorage, which is exactly the state a first-time user is in. */
+  async open(page) {
+    await page.locator("button", { hasText: "Auto Albums" }).click();
+    // The explainer is a <dialog>, so it is MODAL: it intercepts pointer events
+    // for the whole page. Waiting only for the timeline to be *visible* is not
+    // enough — it is plainly visible behind the dialog while every click on it
+    // silently goes to the dialog instead. Wait for the dialog to be gone.
+    const modal = page.locator('dialog.modal[aria-label="Auto Albums"]');
+    await modal.locator("button", { hasText: "Cancel" }).click();
+    await expect(modal).toBeHidden();
+    await expect(page.locator(".album-timeline")).toBeVisible();
+  },
+  timeline: (page) => page.locator(".album-timeline"),
+  /** One rect per album, in album order. */
+  band: (page, i) => page.locator(".album-timeline .band").nth(i),
+  bands: (page) => page.locator(".album-timeline .band"),
+  scroll: (page) => page.locator(".albums-scroll"),
+  divider: (page, i) => page.locator(".album-divider").nth(i),
+  dividers: (page) => page.locator(".album-divider"),
+  /** The colour chip that ties a divider to its band. */
+  chip: (page, i) =>
+    page.locator(".album-divider").nth(i).locator(".album-chip"),
+
+  /** How far the album list has been scrolled, in px. */
+  scrollTop: (page) =>
+    page.locator(".albums-scroll").evaluate((el) => el.scrollTop),
+
+  /**
+   * Did the list actually LAND on album `i`? That is what "the timeline jumped me
+   * to this album" means to a user — not that some scrolling happened, but that
+   * this album is now what they are looking at.
+   *
+   * Landing means its divider is parked at the top — OR the list is scrolled as
+   * far as it can go, which is as close as the browser can get for the last album
+   * (its content is shorter than the viewport, so nothing can pull it to the top).
+   * That clamp is correct behaviour, and an assertion that forbids it would be
+   * failing the browser, not the app.
+   */
+  async landedOn(page, i) {
+    const list = await albums.scroll(page).boundingBox();
+    const divider = await albums.divider(page, i).boundingBox();
+    if (Math.abs(divider.y - list.y) <= 2) return true;
+    return albums
+      .scroll(page)
+      .evaluate((el) => el.scrollTop >= el.scrollHeight - el.clientHeight - 2);
+  },
+};
+
 // --- the tree sidebar -------------------------------------------------------
 
 export const tree = {
