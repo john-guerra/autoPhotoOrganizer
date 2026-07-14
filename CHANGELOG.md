@@ -6,6 +6,20 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.10
+
+- **Selecting a folder now selects what's inside it** — including the photos in
+  the folders under it. Clicking a parent used to leave the checkbox saying
+  "nothing selected" while its children were full, and a folder that holds only
+  sub-folders could never be selected at all.
+- **A parent shows a partial mark** when only some of the photos beneath it are
+  selected, so you can see where a selection reaches without opening every folder.
+- **Shift-click a folder's checkbox to take it all back out** of the selection,
+  whatever state it's in — the mouse equivalent of ⌘⇧A, and undoable.
+- **Selecting more than 1,000 photos in one click asks first**, naming the folder
+  and the count. One click on a folder near the root of a big library is worth
+  the whole library.
+
 ## 2.14.9
 
 - **Job notices no longer pile up over your photos.** Converting a video used to

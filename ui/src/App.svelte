@@ -128,7 +128,11 @@
   import GridControls from "./lib/GridControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
   import GroupLabelActions from "./lib/GroupLabelActions.svelte";
-  import { selectState, intersectionCount } from "./lib/groupSelection.js";
+  import {
+    selectState,
+    intersectionCount,
+    needsSelectConfirm,
+  } from "./lib/groupSelection.js";
   import StatusBar from "./lib/StatusBar.svelte";
   import {
     DEFAULT_FILTER,
@@ -965,15 +969,11 @@
   }
 
   /** Kick off a one-shot id fetch for a group whose ids aren't cached yet. */
-  async function ensureGroupIds(path, key, sig) {
+  async function ensureGroupIds(path, paths, key, sig) {
     if (groupIdInFlight.has(key)) return;
     groupIdInFlight.add(key);
     try {
-      const ids = await fetchPhotoIds(
-        filterIsActive(displayFilter) ? displayFilter : null,
-        path,
-        sort
-      );
+      const ids = await fetchGroupIds(path, paths);
       groupIdCache.set(key, { ids, sig });
       groupIdCacheVersion++; // trigger the reactive re-derive
     } catch {
@@ -985,12 +985,19 @@
 
   /** Derive a group's select indicator. Reads reactive `_sel`/`_ver`/`_sig` as
    * args so Svelte re-runs this in the template when selection or cache change.
+   *
+   * `paths` is the group's SUBTREE (see fetchGroupIds), and it has to be the same
+   * subtree the click acts on. It didn't used to be: the indicator counted only
+   * the folder's own photos while the click selected the whole subtree, so a
+   * parent could sit there reading "none" with every photo under it selected —
+   * and a virtual ancestor, which owns no photos at all, counted zero of zero and
+   * never lit up.
    * @returns {"none"|"some"|"all"|"loading"} */
-  function groupSelectState(path, _sel, _ver, _sig) {
+  function groupSelectState(path, paths, _sel, _ver, _sig) {
     const key = pathKey(path);
     const entry = groupIdCache.get(key);
     if (!entry || entry.sig !== _sig) {
-      ensureGroupIds(path, key, _sig);
+      ensureGroupIds(path, paths, key, _sig);
       return "loading";
     }
     return selectState(intersectionCount(entry.ids, _sel), entry.ids.length);
@@ -1026,6 +1033,10 @@
   /** @type {null|"select"|"deselect"} */
   let pendingBulk = null;
   $: pendingBulkCount = pendingBulk ? showingCount : 0;
+
+  /** The pending "select this whole folder?" question (the threshold lives in
+   * groupSelection.js). @type {null|{ids:number[], label:string}} */
+  let pendingGroupSelect = null;
 
   /** Every photo the filters currently show — the whole set, not just the
    * loaded window. The same server query select-all and export already use. */
@@ -1145,8 +1156,19 @@
     return [...new Set(lists.flat())];
   }
 
-  /** Click the group's select icon: select-all, or deselect-all if already all. */
-  async function toggleGroupSelectAll(path, paths) {
+  /**
+   * Click the group's select icon: take every photo in the group — and, for a
+   * folder, everything in the folders UNDER it (see fetchGroupIds).
+   *
+   * Shift-click always REMOVES the group from the selection, whatever state it is
+   * in, mirroring ⌘⇧A. Without it, clearing a partially-selected parent took two
+   * clicks (one to fill it, one to empty it) and the first of those was the
+   * opposite of what you wanted.
+   *
+   * A plain click on a fully-selected group still toggles it off, which is what
+   * makes the checkbox read as a checkbox.
+   */
+  async function toggleGroupSelectAll(path, paths, event) {
     const key = pathKey(path);
     let entry = groupIdCache.get(key);
     if (!entry || entry.sig !== groupSelSig) {
@@ -1161,13 +1183,38 @@
       }
     }
     const n = intersectionCount(entry.ids, selectedIds);
-    if (selectState(n, entry.ids.length) === "all") {
-      const next = new Set(selectedIds);
-      for (const id of entry.ids) next.delete(id);
-      selectedIds = next;
-    } else {
-      selectedIds = new Set([...selectedIds, ...entry.ids]);
+    const deselect =
+      event?.shiftKey || selectState(n, entry.ids.length) === "all";
+
+    if (deselect) {
+      removeFromSelection(entry.ids, groupLabel(path));
+      return;
     }
+    // Taking a whole subtree is one click, and a big library makes that click
+    // worth thousands of photos — easy to hit by accident on a parent you only
+    // meant to look at. Ask, in the status bar, the same way ⌘A does (never a
+    // blocking confirm() — see #97).
+    if (needsSelectConfirm(entry.ids.length)) {
+      pendingGroupSelect = { ids: entry.ids, label: groupLabel(path) };
+      return;
+    }
+    applyGroupSelect(entry.ids, groupLabel(path));
+  }
+
+  /** Add a group's photos to the selection, undoably. */
+  function applyGroupSelect(ids, label) {
+    snapshotSelection();
+    selectedIds = new Set([...selectedIds, ...ids]);
+    status = `Selected ${ids.length.toLocaleString()} photo${
+      ids.length === 1 ? "" : "s"
+    } in ${label} — Undo to restore`;
+  }
+
+  /** Answer the "select this whole folder?" question. */
+  function confirmPendingGroupSelect() {
+    const p = pendingGroupSelect;
+    pendingGroupSelect = null;
+    if (p) applyGroupSelect(p.ids, p.label);
   }
 
   /** Remove an album (folder group) from the library index — a two-click
@@ -2295,12 +2342,11 @@
         canJump: !!detail.jumpPath,
         on: {
           jump: () => detail.jumpPath && jumpToPath(detail.jumpPath),
-          // A virtual ancestor owns no photos — its actions run over the subtree.
-          selectAll: () =>
-            toggleGroupSelectAll(
-              detail.path,
-              detail.isVirtual ? detail.groupPaths : undefined
-            ),
+          // Over the SUBTREE, not just this folder — the same thing the feed
+          // header's checkbox does. (It has to be, or the tree and the feed would
+          // disagree about what "select this folder" means. A virtual ancestor
+          // owns no photos at all, so for it the subtree is the only answer.)
+          selectAll: () => toggleGroupSelectAll(detail.path, detail.groupPaths),
           keepOnly: () =>
             keepOnlyGroup(
               detail.path,
@@ -3867,13 +3913,14 @@
       return;
     }
 
-    // Escape in the grid: dismiss the ⌘A / ⌘⇧A question if one is up (it must
-    // be as easy to back out of as it was to raise), else collapse an expanded
-    // stack if the selection is currently inside one.
+    // Escape in the grid: dismiss whichever selection question is up (it must be
+    // as easy to back out of as it was to raise), else collapse an expanded stack
+    // if the selection is currently inside one.
     if (key === "Escape") {
-      if (pendingBulk) {
+      if (pendingBulk || pendingGroupSelect) {
         e.preventDefault();
         pendingBulk = null;
+        pendingGroupSelect = null;
         return;
       }
       const entry = displayEntries[selected];
@@ -4434,6 +4481,7 @@
                     <GroupLabelActions
                       selectState={groupSelectState(
                         header.path,
+                        header.groupPaths,
                         selectedIds,
                         groupIdCacheVersion,
                         groupSelSig
@@ -4441,8 +4489,12 @@
                       isFolder={!header.isVirtual &&
                         isRemovableFolder(header.path)}
                       removeArmed={removeArmedKey === pathKey(header.path)}
-                      on:toggleselect={() =>
-                        toggleGroupSelectAll(header.path, header.groupPaths)}
+                      on:toggleselect={(e) =>
+                        toggleGroupSelectAll(
+                          header.path,
+                          header.groupPaths,
+                          e.detail
+                        )}
                       on:keeponly={() =>
                         keepOnlyGroup(header.path, header.groupPaths)}
                       on:jumpprev={() => jumpFromGroup(header.path, "prev")}
@@ -4604,8 +4656,14 @@
       bind:exportMove
       {pendingBulk}
       pendingCount={pendingBulkCount}
+      pendingGroup={pendingGroupSelect && {
+        count: pendingGroupSelect.ids.length,
+        label: pendingGroupSelect.label,
+      }}
       on:bulkconfirm={confirmPendingBulk}
       on:bulkcancel={() => (pendingBulk = null)}
+      on:groupconfirm={confirmPendingGroupSelect}
+      on:groupcancel={() => (pendingGroupSelect = null)}
       {rereading}
       on:clear={clearSelection}
       on:keeponly={keepOnlySelection}

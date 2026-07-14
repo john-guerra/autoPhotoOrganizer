@@ -293,6 +293,27 @@ export const group = {
       .filter({ has: page.locator(".section-header") })
       .last()
       .locator(".section-header"),
+
+  /** The header for a folder whose path ENDS in `name` (e.g. "Cam 10"). Folder
+   * groups are keyed by absolute path, which no spec should hardcode. */
+  folderHeader: (page, name) =>
+    page
+      .locator(".section-wrapper")
+      .filter({ hasText: name })
+      .locator(".section-header")
+      .filter({ hasText: name })
+      .first(),
+
+  /** The group's tri-state select checkbox. */
+  selectBox: (header) => header.locator(".gla-select"),
+  /** "none" | "some" | "all" | "loading" — read off the checkbox's own class,
+   * which is what the user sees (empty / – / ✓). */
+  selectStateOf: async (header) => {
+    const cls = await header.locator(".gla-select").getAttribute("class");
+    return ["all", "some", "loading", "none"].find((s) =>
+      cls.split(/\s+/).includes(s)
+    );
+  },
 };
 
 // --- auto albums + the timeline ---------------------------------------------

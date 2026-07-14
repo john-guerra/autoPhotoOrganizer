@@ -21,10 +21,16 @@
 
   const dispatch = createEventDispatcher();
 
+  // The subtree, not just this folder: clicking a parent takes what's under it.
+  // Shift is called out because a partially-selected group is exactly when you
+  // can't tell what a plain click will do, and it's the state you most often want
+  // to empty.
   $: selectTitle =
     selectState === "all"
       ? "Deselect every photo in this group"
-      : "Select every photo in this group";
+      : selectState === "some"
+        ? "Select every photo in this group (and the folders under it) — Shift-click to deselect them all"
+        : "Select every photo in this group, and the folders under it";
 </script>
 
 <span class="gla">
@@ -34,7 +40,7 @@
     title={selectTitle}
     aria-label={selectTitle}
     aria-pressed={selectState === "all"}
-    on:click|stopPropagation={() => dispatch("toggleselect")}
+    on:click|stopPropagation={(e) => dispatch("toggleselect", e)}
   >
     {#if selectState === "all"}✓{:else if selectState === "some"}–{:else if selectState === "loading"}⋯{/if}
   </button>

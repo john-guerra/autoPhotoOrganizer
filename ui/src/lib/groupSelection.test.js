@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { selectState, intersectionCount } from "./groupSelection.js";
+import {
+  selectState,
+  intersectionCount,
+  needsSelectConfirm,
+  BIG_GROUP_SELECT,
+} from "./groupSelection.js";
 
 describe("selectState", () => {
   it("is 'none' for an empty group", () => {
@@ -48,5 +53,25 @@ describe("intersectionCount", () => {
   it("does not double-count duplicate ids beyond their presence", () => {
     // ids should be unique in practice; duplicates each still count as present
     expect(intersectionCount([1, 1, 2], new Set([1, 2]))).toBe(3);
+  });
+});
+
+describe("needsSelectConfirm", () => {
+  it("does not ask for the sizes a real click usually means — a card, a shoot, a day", () => {
+    expect(needsSelectConfirm(1)).toBe(false);
+    expect(needsSelectConfirm(300)).toBe(false);
+    expect(needsSelectConfirm(BIG_GROUP_SELECT)).toBe(false);
+  });
+
+  it("asks once a single click would take more than the threshold", () => {
+    // Clicking a folder takes the folders under it too, so one click near the
+    // root of a real library is worth tens of thousands of photos — and it sits
+    // right next to the folder's name, where you click to LOOK at it.
+    expect(needsSelectConfirm(BIG_GROUP_SELECT + 1)).toBe(true);
+    expect(needsSelectConfirm(114_125)).toBe(true);
+  });
+
+  it("is not asked of an empty group", () => {
+    expect(needsSelectConfirm(0)).toBe(false);
   });
 });

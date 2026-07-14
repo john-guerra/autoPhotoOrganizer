@@ -31,6 +31,11 @@
   export let pendingBulk = null;
   /** How many photos the answer would touch (everything the filters show). */
   export let pendingCount = 0;
+  /** The pending "select this whole folder?" question — clicking a group's
+   * select-all when the group is very large. Same inline surface as ⌘A's, for the
+   * same reason: a blocking confirm() froze the whole UI (#97).
+   * @type {null|{count: number, label: string}} */
+  export let pendingGroup = null;
   /** A re-read job is in flight — the button says so instead of looking dead. */
   export let rereading = false;
 
@@ -42,7 +47,7 @@
      selection, so the "undoable" clear had no way to be undone (#97).
      It also stays up for the ⌘A / ⌘⇧A question, which can be asked from an
      empty selection. -->
-{#if selectedCount > 0 || lastClearedSelection || pendingBulk}
+{#if selectedCount > 0 || lastClearedSelection || pendingBulk || pendingGroup}
   <div class="cluster selection">
     <!-- The inline answer to "⌘A again": asking in the status bar rather than a
          blocking confirm() (#97 — the native dialog froze the whole UI). Press
@@ -65,6 +70,23 @@
         >{pendingBulk === "select" ? "Select all" : "Remove all"}</button
       >
       <button class="sel-btn" on:click={() => dispatch("bulkcancel")}>
+        Cancel
+      </button>
+    {/if}
+    <!-- The same question, asked of one folder instead of the whole view. It
+         names the folder, because "select all 12,431 photos?" without saying
+         WHERE is not something anyone can answer. -->
+    {#if pendingGroup}
+      <span class="ask">
+        Select all {pendingGroup.count.toLocaleString()} photos in {pendingGroup.label}?
+      </span>
+      <button
+        class="sel-btn confirm"
+        on:click={() => dispatch("groupconfirm")}
+        title="Select every photo in this folder and the folders under it"
+        >Select all</button
+      >
+      <button class="sel-btn" on:click={() => dispatch("groupcancel")}>
         Cancel
       </button>
     {/if}
