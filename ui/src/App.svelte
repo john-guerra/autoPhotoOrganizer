@@ -123,6 +123,9 @@
   import { combo } from "./lib/platform.js";
   import OrganizeControls from "./lib/OrganizeControls.svelte";
   import ViewControls from "./lib/ViewControls.svelte";
+  import TimelineFilter from "./lib/TimelineFilter.svelte";
+  import SidebarModeToggle from "./lib/SidebarModeToggle.svelte";
+  import GridControls from "./lib/GridControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
   import GroupLabelActions from "./lib/GroupLabelActions.svelte";
   import { selectState, intersectionCount } from "./lib/groupSelection.js";
@@ -4105,90 +4108,137 @@
 
 <div class="app">
   <header class="topbar">
-    <h1>
-      AutoGallery
-      <span class="app-version" title="App version">v{APP_VERSION}</span>
-    </h1>
+    <!-- ROW 1: source, organize/filter, view. Explicitly NOT wrapping — see the
+         .topbar-row CSS for what shrinks instead. -->
+    <div class="topbar-row primary">
+      <h1>
+        AutoGallery
+        <span class="app-version" title="App version">v{APP_VERSION}</span>
+      </h1>
 
-    <!-- ① SOURCE -->
-    <SourceControls
-      {scanning}
-      {hasNativePicker}
-      {alreadyIndexed}
-      {subdirs}
-      {subdirsLoading}
-      {subdirsError}
-      {subdirSelection}
-      bind:addFolderOpen
-      bind:dir
-      bind:recursiveScan
-      bind:focusAfterAdd
-      bind:subdirsOpen
-      on:choosefolder={chooseFolder}
-      on:submit={submitAddFolder}
-      on:managelibrary={() => {
-        manageLibraryOpen = true;
-        refreshPendingMeta(); // the count moves as you browse — never show a stale one
-      }}
-      on:loadsubdirs={loadSubdirs}
-      on:toggledir={(e) =>
-        (subdirSelection = toggleSubdir(
-          subdirSelection,
-          e.detail.path,
-          subdirs
-        ))}
-      on:selectalldirs={() => (subdirSelection = selectAll(subdirs))}
-      on:selectnodirs={() => (subdirSelection = selectNone())}
-    />
+      <!-- ① SOURCE -->
+      <SourceControls
+        {scanning}
+        {hasNativePicker}
+        {alreadyIndexed}
+        {subdirs}
+        {subdirsLoading}
+        {subdirsError}
+        {subdirSelection}
+        bind:addFolderOpen
+        bind:dir
+        bind:recursiveScan
+        bind:focusAfterAdd
+        bind:subdirsOpen
+        on:choosefolder={chooseFolder}
+        on:submit={submitAddFolder}
+        on:managelibrary={() => {
+          manageLibraryOpen = true;
+          refreshPendingMeta(); // the count moves as you browse — never show a stale one
+        }}
+        on:loadsubdirs={loadSubdirs}
+        on:toggledir={(e) =>
+          (subdirSelection = toggleSubdir(
+            subdirSelection,
+            e.detail.path,
+            subdirs
+          ))}
+        on:selectalldirs={() => (subdirSelection = selectAll(subdirs))}
+        on:selectnodirs={() => (subdirSelection = selectNone())}
+      />
 
-    <div class="divider"></div>
+      <div class="divider"></div>
 
-    <!-- ② ORGANIZE & FILTER -->
-    <OrganizeControls
-      {groupBy}
-      {filter}
-      {filterMode}
-      {timeMin}
-      {timeMax}
-      {timeTimes}
-      {timeSampled}
-      {timeTotal}
-      viewTime={viewMarkerTime}
-      focusTime={focusMarkerTime}
-      on:groupbychange={(e) => onGroupByChange(e.detail)}
-      on:filtermodechange={(e) => onFilterModeChange(e.detail)}
-      on:filterchange={(e) => onFilterChange(e.detail)}
-    />
+      <!-- ② ORGANIZE & FILTER -->
+      <OrganizeControls
+        {groupBy}
+        {filter}
+        {filterMode}
+        on:groupbychange={(e) => onGroupByChange(e.detail)}
+        on:filtermodechange={(e) => onFilterModeChange(e.detail)}
+        on:filterchange={(e) => onFilterChange(e.detail)}
+      />
 
-    <div class="divider push"></div>
+      <div class="divider push"></div>
 
-    <!-- ③ VIEW -->
-    <ViewControls
-      bind:sidebarMode
-      {cyclingAll}
-      {globalViewMode}
-      bind:albumMode
-      {detectingAlbums}
-      on:revealcurrent={revealCurrentLocation}
-      on:cycleall={cycleAllGroups}
-      on:detectalbums={detectAlbums}
-    />
+      <!-- ③ VIEW -->
+      <ViewControls
+        {cyclingAll}
+        {globalViewMode}
+        bind:albumMode
+        {detectingAlbums}
+        on:revealcurrent={revealCurrentLocation}
+        on:cycleall={cycleAllGroups}
+        on:detectalbums={detectAlbums}
+      />
 
-    {#if chip}
-      <button class="scope-chip" on:click={exitScope} title={chip.title}>
-        {chip.icon}
-        {chip.text} ✕
+      {#if chip}
+        <button class="scope-chip" on:click={exitScope} title={chip.title}>
+          {chip.icon}
+          {chip.text} ✕
+        </button>
+      {/if}
+
+      <button
+        class="help-btn"
+        title="Keyboard shortcuts (?)"
+        aria-label="Keyboard shortcuts"
+        on:click={() => (shortcutsHelpOpen = true)}
+      >
+        ?
       </button>
-    {/if}
+    </div>
 
-    <button
-      class="help-btn"
-      title="Keyboard shortcuts (?)"
-      aria-label="Keyboard shortcuts"
-      on:click={() => (shortcutsHelpOpen = true)}
-    >
-      ?
-    </button>
+    <!-- ROW 2. A second row on PURPOSE, rather than the first one wrapping into
+         one by accident. The sidebar switch sits in a box the exact width of the
+         sidebar, so it sits directly above the column it controls; the grid's own
+         controls (size, burst, order) sit opposite. -->
+    <div class="topbar-row secondary">
+      <div class="sidebar-slot" style="width:{sidebarWidth}px">
+        <SidebarModeToggle bind:sidebarMode />
+      </div>
+
+      <!-- The timeline was the widest control in row 1, and with three grouping
+           dimensions row 1 ran out of width: it was squeezed to its floor and its
+           axis painted straight over the View buttons. It is a continuous RANGE
+           control — the same family as size and burst, which now sit beside it —
+           and here it takes all the width the row has left over instead of the
+           260px it was rationed. Brushing an album gap is easier with a longer
+           axis, so this is a promotion, not a demotion. -->
+      {#if timeMin != null && timeMax != null && timeMax > timeMin}
+        <div
+          class="time-filter"
+          title="Filter by capture time — drag the handles"
+        >
+          <TimelineFilter
+            min={timeMin}
+            max={timeMax}
+            times={timeTimes}
+            sampled={timeSampled}
+            total={timeTotal}
+            viewTime={viewMarkerTime}
+            focusTime={focusMarkerTime}
+            value={[filter.dateFrom ?? null, filter.dateTo ?? null]}
+            on:range={(e) =>
+              onFilterChange({
+                ...filter,
+                dateFrom: e.detail[0],
+                dateTo: e.detail[1],
+              })}
+          />
+        </div>
+      {/if}
+
+      <GridControls
+        bind:zoom
+        zoomMax={ZOOM_LEVELS.length - 1}
+        bind:burstEnabled
+        bind:burstGapMs
+        {sort}
+        on:sortchange={(e) => onSortChange(e.detail)}
+      />
+    </div>
+
     {#if manageLibraryOpen}
       <ManageLibrary
         {library}
@@ -4536,12 +4586,6 @@
     {error}
     {thumbProgress}
     {thumbCounts}
-    bind:zoom
-    zoomMax={ZOOM_LEVELS.length - 1}
-    bind:burstEnabled
-    bind:burstGapMs
-    {sort}
-    on:sortchange={(e) => onSortChange(e.detail)}
   >
     <!-- Clear / Keep only / Export live next to the selected count now: that is
          what makes "Clear" read as "clear the selection" rather than "clear
@@ -4713,24 +4757,58 @@
        that comfortably while staying below Loupe.svelte's full-screen
        overlay (z-index:100), which still needs to cover the topbar. */
     z-index: 20;
+    /* TWO ROWS, on purpose. The toolbar used to be one wrapping flex line, and
+       "wrap" was its only relief valve: every cluster inside it is flex-shrink:0,
+       so when the row ran out of width nothing compressed — the group-by pills
+       simply fell onto a second line, and where they landed changed as you added
+       a dimension. A row that reflows under you is not a layout. */
     display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.75rem;
+    flex-direction: column;
+    align-items: stretch;
     row-gap: 0.45rem;
     padding: 0.6rem 1rem;
     background: #1c1c1c;
     border-bottom: 1px solid #2a2a2a;
-  } /* pills wrap WITHIN the cluster, not pushing siblings */
+  }
+  .topbar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    /* Never wrap. What gives instead is the organize cluster (see
+       OrganizeControls: the timeline and the search box shrink, the group-by
+       pills do not) — a deliberate shrink order rather than an accidental reflow. */
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+  /* Row 2's sidebar switch is boxed to the sidebar's own width, so it sits
+     directly above the column it controls and moves with the resizer. */
+  .sidebar-slot {
+    display: flex;
+    flex-shrink: 0;
+  }
+  /* Takes whatever row 2 has left. min-width is what actually lets a flex item
+     shrink — without it, it refuses to go below its content's intrinsic width,
+     which is how the timeline came to paint straight over the View buttons when
+     it lived in row 1.
+
+     The side padding is not cosmetic: the widget centres a date badge on each
+     handle, and the handles sit at the very ends of the axis, so both badges
+     overhang the axis by ~12px. Without room for them, `overflow: hidden` ate the
+     "J" of "Jan 1, 1980" at one end and the year at the other. */
+  .time-filter {
+    flex: 1;
+    min-width: 220px;
+    padding: 0 16px;
+    overflow: hidden;
+  }
   .divider {
     width: 1px;
     align-self: stretch;
     background: #2a2a2a;
     margin: 2px 0;
   }
-  /* Push the View cluster to the right ONLY when everything still fits on one
-     row; once the toolbar wraps, the auto-margin collapses and View wraps as a
-     normal unit (no odd right-shove on its own row). */
+  /* Push the View cluster to the right. The row no longer wraps, so this is now
+     unconditional. */
   .divider.push {
     margin-left: auto;
   }

@@ -11,7 +11,6 @@
   import SearchFilter from "./SearchFilter.svelte";
   import OrientationFilter from "./OrientationFilter.svelte";
   import KindFilter from "./KindFilter.svelte";
-  import TimelineFilter from "./TimelineFilter.svelte";
   import { DEFAULT_FILTER, isActive as filterIsActive } from "./filterSpec.js";
   import { ALL_DIMENSIONS } from "./dimensions.js";
   import MultiAutoSelect from "multi-auto-select";
@@ -19,14 +18,6 @@
   export let groupBy = ["folder"];
   export let filter = { ...DEFAULT_FILTER };
   export let filterMode = "display";
-  // Time-range filter facet (a compact sparkline that sits with stars/orientation).
-  export let timeMin = null; // epoch ms domain start (null = no time data yet)
-  export let timeMax = null; // epoch ms domain end
-  export let timeTimes = []; // sampled timestamps for the density sparkline
-  export let timeSampled = false; // is timeTimes a down-sample? (disclosed on the axis)
-  export let timeTotal = 0; // size of the working set it was sampled FROM
-  export let viewTime = null; // "current view" marker — first row on screen (epoch ms)
-  export let focusTime = null; // "focused photo" marker — the selected photo (epoch ms)
 
   const dispatch = createEventDispatcher();
 
@@ -121,28 +112,6 @@
     on:change={(e) => dispatch("filterchange", e.detail)}
   />
   <KindFilter {filter} on:change={(e) => dispatch("filterchange", e.detail)} />
-  {#if timeMin != null && timeMax != null && timeMax > timeMin}
-    <div class="time-filter" title="Filter by capture time — drag the handles">
-      <TimelineFilter
-        min={timeMin}
-        max={timeMax}
-        times={timeTimes}
-        sampled={timeSampled}
-        total={timeTotal}
-        {viewTime}
-        {focusTime}
-        value={[filter.dateFrom ?? null, filter.dateTo ?? null]}
-        on:range={(e) =>
-          dispatch("filterchange", {
-            ...filter,
-            dateFrom: e.detail[0],
-            dateTo: e.detail[1],
-          })}
-        on:clear={() =>
-          dispatch("filterchange", { ...filter, dateFrom: null, dateTo: null })}
-      />
-    </div>
-  {/if}
   {#if filterIsActive(filter)}
     <button
       class="clear-filter"
@@ -167,9 +136,39 @@
     min-width: 0;
     flex-shrink: 0;
   }
+  /* THE SHRINK ORDER. This cluster used to be `flex-wrap: wrap`, and every child
+     was unshrinkable — so when the toolbar ran out of room the group-by pills
+     dropped onto a second line, and the whole bar reflowed as you added a
+     grouping dimension. Nothing wraps now: the cluster itself shrinks, and inside
+     it the one thing that CAN lose width without losing meaning does so — the search
+     box (you can still read the tail of what you typed). The group-by pills keep
+     their width (they are what the toolbar is about), and the filter icons are
+     already as small as they get.
+
+     The timeline used to live here and was the widest thing in the row; it moved
+     to the toolbar's SECOND row, where it gets more width than it ever had. */
   .cluster.organize {
-    flex-wrap: wrap;
-  } /* pills wrap WITHIN the cluster, not pushing siblings */
+    flex-wrap: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+  /* NOTHING in this cluster shrinks by default. flex items are flex-shrink:1 out
+     of the box, so once the cluster itself became shrinkable, every child started
+     giving up width at once: the group-by widget wrapped its own pills onto a
+     second and third line, and the Type filter had its last button sliced off by
+     the neighbour beside it. Both are the same reflow this change exists to kill,
+     just relocated.
+     Exactly ONE child is allowed to give, below. */
+  .cluster.organize > :global(*) {
+    flex-shrink: 0;
+  }
+  /* The search box. It is the only control here that loses width without losing
+     meaning — the text scrolls, and you can still read the tail of what you
+     typed. Everything else is icons and pills, which just get clipped. */
+  .cluster.organize > :global(.search) {
+    flex-shrink: 1;
+    min-width: 0;
+  }
   .seg-toggle {
     display: flex;
     gap: 2px;
@@ -211,13 +210,6 @@
     align-self: stretch;
     background: #2a2a2a;
     margin: 2px 0;
-  }
-  /* Compact home for the timeline sparkline so it sits inline with the other
-     filter widgets instead of a full-width strip. Fixed width keeps the toolbar
-     stable; the widget measures this box for its axis length + marker. */
-  .time-filter {
-    width: 260px;
-    flex-shrink: 0;
   }
   .clear-filter {
     background: transparent;

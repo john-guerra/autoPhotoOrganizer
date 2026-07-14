@@ -6,6 +6,19 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.8
+
+- **The toolbar stays on one line.** Adding a third grouping dimension used to
+  push the group-by pills onto a second row and shove everything else around.
+  Now the row compresses instead of wrapping, and the search box is the only
+  thing that gives up width — the pills and the filters keep theirs.
+- **The timeline is nearly four times wider.** It moved to a second toolbar row
+  of its own, where the date labels at each end are readable instead of clipped.
+- **Size, burst and order are back in the toolbar**, next to the other view
+  controls, instead of down in the status bar.
+- **Tree / Fisheye sits above the sidebar it switches**, on the left of the
+  second row, rather than lost among the view buttons.
+
 ## 2.14.7
 
 - **Right-click a folder in the tree.** Jump to it, select or keep only its

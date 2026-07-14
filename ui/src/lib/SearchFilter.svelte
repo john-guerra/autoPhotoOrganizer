@@ -115,8 +115,13 @@
     height: 12px;
     flex: none;
   }
+  /* 150px preferred, but it may shrink: after the timeline, the search box is the
+     next thing in the toolbar that loses width without losing meaning (you can
+     still read the tail of what you typed). The group-by pills never shrink. */
   .search-input {
     width: 150px;
+    min-width: 70px;
+    flex-shrink: 1;
     border: 0;
     outline: none;
     background: transparent;

@@ -1,14 +1,15 @@
 <script>
   /**
-   * Toolbar cluster ③: sidebar view toggle (Tree/Fisheye), "Locate current",
-   * the global cycle-all-groups control, and the Albums toggle.
-   * Presentational — sidebarMode state is two-way bound (App reads it to
-   * drive the sidebar); Locate / cycle-all / detect-albums are emitted as
-   * events.
+   * Toolbar cluster ③: "Locate current", the global cycle-all-groups control,
+   * and the Albums toggle. Presentational — every action is emitted as an event.
+   *
+   * The Tree/Fisheye toggle used to live here. It moved to SidebarModeToggle, on
+   * its own toolbar row directly above the sidebar it controls: in the middle of
+   * this cluster it read as just another view button, rather than as the switch
+   * for the whole left column.
    */
   import { createEventDispatcher } from "svelte";
 
-  export let sidebarMode = "tree";
   export let cyclingAll = false;
   export let globalViewMode = "full";
   export let albumMode = false;
@@ -18,33 +19,6 @@
 </script>
 
 <div class="cluster view">
-  <div
-    class="sidebar-toggle"
-    role="group"
-    aria-label="Sidebar view"
-    style="display:flex;gap:2px;background:#101010;border:1px solid #333;border-radius:6px;padding:2px;"
-  >
-    <button
-      type="button"
-      on:click={() => (sidebarMode = "tree")}
-      style="border:none;border-radius:4px;padding:3px 9px;font-size:0.8rem;cursor:pointer;{sidebarMode ===
-      'tree'
-        ? 'background:#4c9aff;color:#06121f;font-weight:600;'
-        : 'background:transparent;color:#9a9a9a;'}"
-    >
-      Tree
-    </button>
-    <button
-      type="button"
-      on:click={() => (sidebarMode = "fisheye")}
-      style="border:none;border-radius:4px;padding:3px 9px;font-size:0.8rem;cursor:pointer;{sidebarMode ===
-      'fisheye'
-        ? 'background:#4c9aff;color:#06121f;font-weight:600;'
-        : 'background:transparent;color:#9a9a9a;'}"
-    >
-      Fisheye
-    </button>
-  </div>
   <button
     class="reveal-btn"
     on:click={() => dispatch("revealcurrent")}
