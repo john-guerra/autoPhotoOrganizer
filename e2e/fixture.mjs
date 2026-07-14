@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, existsSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import sharp from "sharp";
@@ -62,12 +62,31 @@ export const VIDEO = {
   name: "clip.avi",
 };
 
+/** An HEVC clip — a modern iPhone/Android video, and the OPPOSITE problem to the
+ * .avi above: it is not unplayable, it is unplayable HERE. Chromium ships no HEVC
+ * software decoder and turns the codec on only where the OS/GPU has one, so the
+ * same file plays natively on most Macs and cannot be decoded at all on a Windows
+ * box without the HEVC Video Extension.
+ *
+ * Playwright's Chromium is one of the machines WITHOUT it — which is precisely
+ * what makes it the right place to test this: the app offers the browser the
+ * original, the browser's own decoder says no, and the app must notice and
+ * convert instead of leaving a black rectangle. That is the Windows user's path,
+ * reproduced exactly. */
+export const HEVC_VIDEO = {
+  folder: FOLDERS[0].name,
+  name: "clip-hevc.mp4",
+};
+
 /** Items in a folder — photos PLUS any video. A folder's `count` is its JPEGs;
  *  the grid, the selection and the tree all count the video too, so a spec that
  *  reads `count` where it means "everything here" is quietly wrong (and was:
  *  ⌘A took 7 and the spec expected 6). */
 export function itemsIn(folder) {
-  return folder.count + (folder.name === VIDEO.folder ? 1 : 0);
+  const videos = [VIDEO, HEVC_VIDEO].filter(
+    (v) => v.folder === folder.name
+  ).length;
+  return folder.count + videos;
 }
 
 /** How many ITEMS the fixture library holds (photos + the video), derived —
@@ -117,26 +136,57 @@ export async function buildFixture() {
   }
 
   await buildUnplayableVideo(join(PHOTOS_DIR, VIDEO.folder, VIDEO.name));
-  return { PHOTOS_DIR, HOME_DIR, FOLDERS, VIDEO };
+
+  const hevcPath = join(PHOTOS_DIR, HEVC_VIDEO.folder, HEVC_VIDEO.name);
+  await buildHevcVideo(hevcPath);
+  // Push the two clips APART in time. Neither has EXIF, so both fall back to the
+  // file's own timestamp — written seconds apart, which is exactly what burst
+  // clustering is for: they stacked, the second one disappeared behind the
+  // first's cover, and a spec looking for its tile scrolled the whole feed
+  // without ever finding it. Days apart, they are two ordinary tiles.
+  const dayApart = new Date("2024-01-08T09:30:00Z");
+  utimesSync(hevcPath, dayApart, dayApart);
+
+  return { PHOTOS_DIR, HOME_DIR, FOLDERS, VIDEO, HEVC_VIDEO };
 }
 
 /** Generate the AVI/MPEG-4 clip described on VIDEO, with ffmpeg. */
 async function buildUnplayableVideo(dest) {
+  return runFfmpeg([
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc=size=65x49:rate=10:duration=1",
+    "-c:v",
+    "mpeg4",
+    "-y",
+    dest,
+  ]);
+}
+
+/** Generate the HEVC clip described on HEVC_VIDEO. `-tag:v hvc1` is the tag Apple
+ *  and every phone write, and the one browsers expect in an MP4. */
+async function buildHevcVideo(dest) {
+  return runFfmpeg([
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc=size=64x48:rate=10:duration=1",
+    "-c:v",
+    "libx265",
+    "-tag:v",
+    "hvc1",
+    "-pix_fmt",
+    "yuv420p",
+    "-y",
+    dest,
+  ]);
+}
+
+async function runFfmpeg(args) {
   const { default: ffmpeg } = await import("ffmpeg-static");
   await new Promise((resolve, reject) => {
-    const p = spawn(ffmpeg, [
-      "-nostdin",
-      "-loglevel",
-      "error",
-      "-f",
-      "lavfi",
-      "-i",
-      "testsrc=size=65x49:rate=10:duration=1",
-      "-c:v",
-      "mpeg4",
-      "-y",
-      dest,
-    ]);
+    const p = spawn(ffmpeg, ["-nostdin", "-loglevel", "error", ...args]);
     p.on("error", reject);
     p.on("close", (code) =>
       code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`))

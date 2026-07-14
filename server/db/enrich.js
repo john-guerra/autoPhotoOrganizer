@@ -15,9 +15,24 @@
  *    can't read most RAW headers). Only NULL means "try again" — storing NULL
  *    for a failed RAW would re-extract it forever.
  *  - `lens`/`camera` "" = EXIF attempted, nothing found.
+ *  - `video_codec` NULL = never probed. "" = probed, no video stream. Same shape
+ *    as `width`, and for the same reason: without the "" a video ffprobe can't
+ *    read would come back pending on every sweep, forever.
  * Together they are why an un-read photo is distinguishable from a genuinely
  * date-less one, which is the whole basis of TAKEN_AT_EXPR's guard.
  */
+
+/** The rows the sweep still owes work to.
+ *
+ * `width IS NULL` alone was not enough, and the gap was invisible: video_codec
+ * and pix_fmt were added to the schema LATER than the videos themselves, so every
+ * clip enriched before that already had a width and could never come back through
+ * here. On the real library that left 1,171 of 1,173 videos unprobed — and an
+ * unprobed video is one playback has to probe on demand, while the user waits
+ * with the loupe open. A column added late needs a way to be filled late. */
+const PENDING_CONDITION = `photos.stale = 0
+    AND (photos.width IS NULL
+         OR (photos.kind = 'video' AND photos.video_codec IS NULL))`;
 
 /** Photos that have never had their metadata read, oldest id first.
  * @param {import("better-sqlite3").Database} db
@@ -30,8 +45,7 @@ export function pendingMetaPhotos(db, { limit = 500, folderId = null } = {}) {
       `SELECT photos.id AS id,
               folders.abs_path || '/' || photos.filename AS path
          FROM photos JOIN folders ON folders.id = photos.folder_id
-        WHERE photos.stale = 0
-          AND photos.width IS NULL
+        WHERE ${PENDING_CONDITION}
           ${folderId == null ? "" : "AND photos.folder_id = @folderId"}
         ORDER BY photos.id ASC
         LIMIT @limit`
@@ -86,8 +100,8 @@ export function pendingMetaCount(db, folderId = null) {
   return db
     .prepare(
       `SELECT COUNT(*) AS n FROM photos
-        WHERE stale = 0 AND width IS NULL
-          ${folderId == null ? "" : "AND folder_id = @folderId"}`
+        WHERE ${PENDING_CONDITION}
+          ${folderId == null ? "" : "AND photos.folder_id = @folderId"}`
     )
     .get({ folderId }).n;
 }
@@ -114,9 +128,12 @@ export function writeMeta(db, id, m) {
     iso: m.iso ?? null,
     focal_length: m.focalLength ?? null,
     lens: m.lens ?? "",
-    // Videos only: what the stream actually is, so playback can tell whether the
-    // browser can decode it (see lib/videoPlayback.js). NULL for images.
-    video_codec: m.videoCodec ?? null,
+    // What the stream actually is, so playback can tell whether the browser can
+    // decode it (see lib/videoPlayback.js). "" — not NULL — when there was no
+    // video stream to read: NULL means "never probed", and the sweep uses that to
+    // decide who still owes it work. An image, or a video ffprobe chokes on, must
+    // come out of the pending set once we've looked (see PENDING_CONDITION).
+    video_codec: m.videoCodec ?? "",
     pix_fmt: m.pixFmt ?? null,
   };
   db.prepare(

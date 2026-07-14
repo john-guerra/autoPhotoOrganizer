@@ -48,7 +48,7 @@ import {
 } from "./db/photos.js";
 import { hashPendingPhotos } from "./db/hashing.js";
 import { interactiveRoute, whenIdle } from "./lib/interactive.js";
-import { browserCanPlay, whyTranscode } from "./lib/videoPlayback.js";
+import { whyTranscode, playbackPlan } from "./lib/videoPlayback.js";
 import {
   pendingMetaPhotos,
   pendingMetaCount,
@@ -932,13 +932,16 @@ export function registerApi(app) {
   /** Codec/pix_fmt from the index, probing once if this video predates the
    *  columns (and remembering the answer, so it's probed at most once). */
   async function videoFormatOf(db, it) {
-    if (it.video_codec) return { codec: it.video_codec, pixFmt: it.pix_fmt };
-    const [meta] = await processing.metadata([it.path]);
-    if (meta?.videoCodec) {
-      db.prepare(
-        `UPDATE photos SET video_codec = ?, pix_fmt = ? WHERE id = ?`
-      ).run(meta.videoCodec, meta.pixFmt ?? null, it.id);
+    // NULL = never probed; "" = probed, no video stream (the sentinel writeMeta
+    // stores). Only NULL is worth an ffprobe — testing truthiness here would
+    // re-probe an unreadable file on every single open.
+    if (it.video_codec != null) {
+      return { codec: it.video_codec || null, pixFmt: it.pix_fmt };
     }
+    const [meta] = await processing.metadata([it.path]);
+    db.prepare(
+      `UPDATE photos SET video_codec = ?, pix_fmt = ? WHERE id = ?`
+    ).run(meta?.videoCodec ?? "", meta?.pixFmt ?? null, it.id);
     return { codec: meta?.videoCodec ?? null, pixFmt: meta?.pixFmt ?? null };
   }
 
@@ -953,12 +956,30 @@ export function registerApi(app) {
     try {
       const ext = extname(it.path).toLowerCase();
       const { codec, pixFmt } = await videoFormatOf(db, it);
+      const plan = playbackPlan({ ext, codec, pixFmt });
 
-      if (browserCanPlay({ ext, codec, pixFmt })) {
+      // The client comes back with ?transcode=1 when it ASKED ITS OWN DECODER
+      // about a native-first plan and was told no (an HEVC machine without the
+      // codec, or a <video> that errored anyway). Its answer is authoritative —
+      // it is the thing that has to render the frames — so we skip straight to
+      // the conversion rather than offering it the same original again.
+      const forced = req.query.transcode === "1";
+
+      if (!forced && plan.mode === "direct") {
         return res.json({ ready: true, url: `/api/image/${it.id}` });
       }
 
       const proxy = proxyPathFor(it);
+
+      // Native-first: offer the original, but only if we haven't already built a
+      // proxy for this file (if we have, it is the surer bet and it is free).
+      if (!forced && plan.mode === "native-first" && !existsSync(proxy)) {
+        return res.json({
+          ready: true,
+          url: `/api/image/${it.id}`,
+          verify: plan.mimeType,
+        });
+      }
       if (existsSync(proxy)) {
         return res.json({ ready: true, url: `/api/video/${it.id}/file` });
       }
@@ -979,7 +1000,7 @@ export function registerApi(app) {
           .json({ preparing: true, jobId: running.id, reason: running.reason });
       }
 
-      const reason = whyTranscode({ ext, codec, pixFmt });
+      const reason = plan.reason || whyTranscode({ ext, codec, pixFmt });
       const job = registry.create("transcode", {
         label: `Converting ${it.filename} for playback`,
         total: 0, // ffmpeg progress isn't wired up; this is a spinner, not a bar
