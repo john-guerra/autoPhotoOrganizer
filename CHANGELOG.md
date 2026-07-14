@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.3
+
+- **Editing a `.svelte` file no longer shows a bogus "No Svelte configuration found
+  in vite config" error.** Developer-facing only — the app itself was never affected
+  (the shipped bundle is byte-for-byte unchanged).
+
 ## 2.14.2
 
 - **A video whose thumbnail is slow to appear no longer logs a server error.** The
