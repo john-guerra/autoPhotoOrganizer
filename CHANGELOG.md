@@ -6,6 +6,20 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.7
+
+- **Auto Albums now shows a timeline of what it analyzed.** A strip above the
+  album list draws the full time range, a dot per photo, and a colored band per
+  album — so the break points are visible as the gaps they actually are, instead
+  of something you infer from the album count. Drag the split-gap slider and the
+  bands re-flow live.
+- **The timeline and the album list are linked.** Each album's color chip matches
+  its band; hovering either one highlights the other; clicking a band scrolls the
+  list to that album; and a marker tracks where you are as you scroll.
+- **Zoom into a busy week.** Drag the axis handles to zoom the timeline (the
+  density curve and ticks follow); double-click or hit "Reset zoom" to go back to
+  the full range.
+
 ## 2.12.6
 
 - **Videos that used to play sound but show nothing now play properly.** Old

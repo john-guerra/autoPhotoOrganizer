@@ -3,7 +3,7 @@
   // shows them as break points (dividers) down the feed. The slider re-clusters
   // instantly (all client-side — see albums.js) so you can preview boundaries
   // before materializing them to dated folders on disk.
-  import { createEventDispatcher, onMount } from "svelte";
+  import { createEventDispatcher, onMount, tick } from "svelte";
   import {
     startMaterialize,
     fetchSystemPaths,
@@ -22,6 +22,8 @@
   } from "./albums.js";
   import SnapshotStrip from "./SnapshotStrip.svelte";
   import AlbumsSetupModal from "./AlbumsSetupModal.svelte";
+  import AlbumTimeline from "./AlbumTimeline.svelte";
+  import { albumColor } from "./albumColors.js";
 
   export let photos = []; // [{id,t,mtimeMs}] time-ordered working set
   export let truncated = false;
@@ -167,6 +169,55 @@
     e.preventDefault();
     target.focus();
     target.select();
+  }
+
+  // --- the timeline link ----------------------------------------------------
+  // The chart above and the list below are the same albums twice. Three things
+  // tie them together: the shared colour (albumColor(i) — the chip and the band
+  // call the same function with the same index), a two-way hover, and a marker
+  // tracking where in the timeline you have scrolled to.
+  let scrollEl = null;
+  let dividerEls = [];
+  let hoveredIndex = -1; // hovered in EITHER view
+  let viewportIndex = -1; // the album currently at the top of the list
+
+  /** Which divider is stuck to the top of `.albums-scroll` right now.
+   *  Each `.album-divider` is already `position: sticky; top: 0`, so "the album
+   *  you are looking at" is simply the last divider whose top has reached the
+   *  container's top — no offset bookkeeping, no scroll-height maths. */
+  function syncViewport() {
+    if (!scrollEl) return;
+    const top = scrollEl.getBoundingClientRect().top;
+    let idx = -1;
+    for (let i = 0; i < albums.length; i++) {
+      const el = dividerEls[i];
+      if (!el) continue;
+      if (el.getBoundingClientRect().top - top <= 1) idx = i;
+      else break; // dividers are in document order: the first one below the fold ends it
+    }
+    viewportIndex = idx;
+  }
+
+  let scrollRaf = 0;
+  function onScroll() {
+    if (scrollRaf) return; // one sync per frame, not one per scroll event
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      syncViewport();
+    });
+  }
+
+  // Re-clustering moves every boundary, so the marker has to be recomputed after
+  // Svelte has flushed the new dividers to the DOM — not from the old ones.
+  $: if (albums) tick().then(syncViewport);
+
+  function scrollToAlbum(i) {
+    // Instant, not smooth. A smooth scroll across 150 albums is a long flight
+    // through content you didn't ask to see — and worse, it is fragile: the
+    // strips being mounted along the way interrupt the animation, so the jump
+    // silently stalls a few pixels in (observed: a click landing on album 156
+    // moved the list by 7px). A jump should jump.
+    dividerEls[i]?.scrollIntoView({ block: "start" });
   }
 
   function startEditThresh() {
@@ -430,17 +481,38 @@
       {result.destParent}
     </p>
   {/if}
-  {#if truncated}
+  {#if truncated && photos.length}
     <p class="albums-msg warn">
-      Showing the first {photos.length.toLocaleString()} photos (Max {limit.toLocaleString()}).
-      Raise “Max” above, or use “Keep only” to narrow the working set, then
-      detect again.
+      Showing the first {photos.length.toLocaleString()} photos (Max {limit.toLocaleString()})
+      — nothing after {fmtDate(photos[photos.length - 1].t)} was clustered, so the
+      timeline below ends there. Raise “Max” above, or use “Keep only” to narrow the
+      working set, then detect again.
     </p>
   {/if}
 
-  <div class="albums-scroll">
+  <AlbumTimeline
+    {photos}
+    {albums}
+    {names}
+    {hoveredIndex}
+    {viewportIndex}
+    on:hover={(e) => (hoveredIndex = e.detail)}
+    on:select={(e) => scrollToAlbum(e.detail)}
+  />
+
+  <div class="albums-scroll" bind:this={scrollEl} on:scroll={onScroll}>
     {#each albums as album, i (album.index)}
-      <div class="album-divider">
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
+      <div
+        class="album-divider"
+        class:on={hoveredIndex === i}
+        bind:this={dividerEls[i]}
+        on:pointerenter={() => (hoveredIndex = i)}
+        on:pointerleave={() => (hoveredIndex = -1)}
+      >
+        <!-- The chip and the timeline band are the same colour because both call
+             albumColor(i). That IS the link between the two views. -->
+        <span class="album-chip" style="background:{albumColor(i)}"></span>
         <input
           class="album-name-edit"
           bind:this={nameInputs[i]}
@@ -634,6 +706,16 @@
     background: linear-gradient(#141414, #141414 70%, transparent);
     border-bottom: 2px solid #2e8b57;
     margin-bottom: 8px;
+  }
+  .album-divider.on {
+    border-bottom-color: #fff;
+  }
+  .album-chip {
+    align-self: center;
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
   }
   .album-name-edit {
     font: inherit;
