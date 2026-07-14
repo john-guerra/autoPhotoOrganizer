@@ -16,7 +16,6 @@
   import { createEventDispatcher } from "svelte";
   import { clickOutside, onEscape } from "./actions.js";
   import { subtreeState } from "./subfolderSelection.js";
-  import ToolGroup from "./ToolGroup.svelte";
 
   /** The ＋ menu (Add folder… / Manage library). Both doors, one handle. */
   let menuOpen = false;
@@ -62,7 +61,11 @@
   $: busyVerb = verb === "Open" ? "Opening…" : "Scanning…";
 </script>
 
-<ToolGroup label="Library">
+<!-- No label, no border. A ＋ needs no legend telling you it adds things, and a
+     box around a single button is chrome about chrome. It earns its place by
+     being the one PRIMARY control in the toolbar instead — the blue it inherited
+     from the "Folders" button it replaced. -->
+<div class="source">
   <div class="add-folder" use:clickOutside={closeAll} use:onEscape={closeAll}>
     <button
       class="add-toggle"
@@ -209,7 +212,7 @@
       </div>
     {/if}
   </div>
-</ToolGroup>
+</div>
 
 <style>
   .source-menu {
@@ -243,18 +246,32 @@
   .add-folder {
     position: relative;
   }
+  .source {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  /* The toolbar's one primary button. Everything else in the bar is a filter, a
+     toggle or a slider — this is the only thing that brings photos INTO the app,
+     and it was a dim ＋ hiding beside a big blue button for managing folders you
+     had already added. */
   .add-toggle {
-    background: #101010;
-    border: 1px solid #333;
-    color: #cfcfcf;
-    border-radius: 6px;
-    padding: 3px 9px;
-    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    background: #4c9aff;
+    border: none;
+    color: #06121f;
+    border-radius: 8px;
+    font-size: 1.15rem;
+    font-weight: 600;
     line-height: 1;
     cursor: pointer;
   }
   .add-toggle:hover {
-    background: #1c1c1c;
+    background: #5ba8ff;
   }
   .add-panel {
     position: absolute;

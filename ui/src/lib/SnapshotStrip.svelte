@@ -113,10 +113,16 @@
 </div>
 
 <style>
+  /* flex-start, not center. The band is now exactly one grid row tall and the
+     thumbs exactly fill it, so centring is a no-op at best — but the moment the
+     count/gap glyphs make the line taller than a thumb, centring nudges the
+     photos down by a few pixels and the strip no longer starts where the group's
+     first photo starts in full view. The whole point is that toggling a group
+     doesn't move its first photo. */
   .snapshot-strip {
     display: flex;
     flex-wrap: nowrap;
-    align-items: center;
+    align-items: flex-start;
     overflow: hidden;
     width: 100%;
   }

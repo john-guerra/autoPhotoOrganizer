@@ -38,6 +38,26 @@
 </script>
 
 <ToolGroup label="Filter" flavor="filters" active={filterIsActive(filter)}>
+  <!-- Clearing the filters belongs to the GROUP, not to the row of controls: it
+       undoes all of them at once. On the legend it is where you are already
+       looking when you ask "why can't I see my photos?" — and it only exists when
+       there is something to clear, so it never reads as a dead link. -->
+  <svelte:fragment slot="legend-action">
+    {#if filterIsActive(filter)}
+      <button
+        class="clear-link"
+        title="Clear every filter"
+        on:click={() =>
+          dispatch("filterchange", {
+            ...DEFAULT_FILTER,
+            dateAttr: filter.dateAttr,
+          })}
+      >
+        Clear
+      </button>
+    {/if}
+  </svelte:fragment>
+
   <div class="seg-toggle icons" role="group" aria-label="Filter mode">
     <button
       type="button"
@@ -157,6 +177,25 @@
     width: 15px;
     height: 15px;
     display: block;
+  }
+  /* Quieter than the legend it sits beside: this is an escape hatch, not a call
+     to action. No underline, no uppercase, no accent colour until you hover it —
+     it only exists at all when a filter is actually hiding something, which is
+     the loudest thing about it. */
+  .clear-link {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    font-size: 0.68rem;
+    letter-spacing: normal;
+    text-transform: none;
+    color: #8a8a8a;
+    cursor: pointer;
+  }
+  .clear-link:hover {
+    color: #cfcfcf;
+    text-decoration: underline;
   }
   .clear-filter {
     background: transparent;

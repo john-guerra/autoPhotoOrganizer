@@ -521,7 +521,13 @@
   // this set only decides how the client renders that collapsed placeholder.
   // Keyed by pathKey(path), reset on hierarchy change alongside collapsedPaths.
   let snapshotGroupKeys = new Set();
-  const SNAPSHOT_ROW_HEIGHT = 148; // group label row on top + the strip beneath
+  // A snapshot band is exactly ONE GRID ROW tall — it follows the zoom, like the
+  // photos it stands in for. It used to be a fixed 148px ("group label row on top
+  // + the strip beneath"), which stopped being true when the label moved into the
+  // section header and renderers stopped drawing chrome: the number stayed, and
+  // the strip's photos ended up a different size from the same group's photos in
+  // full view, at every zoom level.
+  $: snapshotRowHeight = rowHeight;
   // Last global view action (the top-of-toolbar "cycle all" control); the
   // per-group toggles may diverge from it, but the button just applies the
   // next whole-view state each click: full view → snapshot all → collapse all.
@@ -3372,7 +3378,7 @@
                 id: entryDomId(e),
                 placeholder: true,
                 height: r.bandHeight({
-                  snapshotRowHeight: SNAPSHOT_ROW_HEIGHT,
+                  snapshotRowHeight,
                 }),
               };
             }
@@ -4468,11 +4474,17 @@
                   )
                 )}
                 {#if renderer.component && boxes[i].height > 0}
+                  <!-- + PAD on BOTH axes, exactly as Thumb does (`box.x + pad`).
+                       Absolutely-positioned children ignore the grid's CSS
+                       padding, so every box has to add the frame inset itself —
+                       and the band wasn't. That put every snapshot strip 12px
+                       left of, and 12px above, where the same group's photos sit
+                       in full view, so a group visibly JUMPED as you toggled it. -->
                   <div
                     class="group-band"
                     data-group-key={pathKey(entry.item.path)}
-                    style="top:{boxes[i].y}px; left:{boxes[i]
-                      .x}px; width:{boxes[i].width}px; height:{boxes[i]
+                    style="top:{boxes[i].y + PAD}px; left:{boxes[i].x +
+                      PAD}px; width:{boxes[i].width}px; height:{boxes[i]
                       .height}px;"
                   >
                     <svelte:component
@@ -4482,7 +4494,8 @@
                       filter={displayFilter}
                       {sort}
                       {groupBy}
-                      thumbPx={boxes[i].height - 12}
+                      thumbPx={boxes[i].height}
+                      gapPx={gridGap}
                       size={snapshotThumbSize}
                       on:select={(e) =>
                         openPhotoById(e.detail.id, entry.item.path)}
@@ -4760,7 +4773,12 @@
      "Jan 1, 1980" at one end and the year at the other. */
   .time-filter {
     padding: 0 16px;
-    overflow: hidden;
+    /* NOT `overflow: hidden`. That was here to stop the axis spilling out of the
+       row, but it also clipped the widget's own settings popover — the gear
+       opened into nothing. The padding is what the end-date badges need (they are
+       centred on the handles and overhang each end); the clipping was never the
+       thing keeping the row tidy, the flex shrink order is. */
+    overflow: visible;
   }
 
   /* The one scope chip. Both kinds of scope (a folder, a hand-picked id set)

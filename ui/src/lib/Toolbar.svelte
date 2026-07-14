@@ -167,8 +167,8 @@
   .topbar {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
-    padding: 0.5rem 1rem;
+    gap: 0.3rem;
+    padding: 0.35rem 1rem 0.45rem;
     border-bottom: 1px solid #2a2a2a;
     background: #141414;
     position: relative;
@@ -183,7 +183,7 @@
   .topbar-row {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.6rem;
     flex-wrap: nowrap;
     min-width: 0;
   }

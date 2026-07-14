@@ -108,8 +108,10 @@ test.describe("@p1 the toolbar", () => {
     const errors = trackPageErrors(page);
     await openApp(page, { groupBy: ["folder"] });
 
+    // The ＋ has no group of its own: a legend telling you that ＋ adds things is
+    // chrome about chrome, and a border around a single button is a panel. It
+    // earns its place by being the toolbar's one PRIMARY button instead.
     expect(await toolbar.groupLabels(page)).toEqual([
-      "Library",
       "Filter",
       "Group",
       "View",

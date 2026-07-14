@@ -26,7 +26,14 @@
 </script>
 
 <fieldset class="tool-group {flavor}" class:active>
-  <legend>{label}</legend>
+  <!-- The legend can carry an action of its own — e.g. Filter's "clear". It rides
+       IN the legend rather than in the group's body so it sits on the border,
+       reads as being about the whole group, and doesn't take a slot in the row of
+       controls. -->
+  <legend>
+    {label}
+    <slot name="legend-action" />
+  </legend>
   <slot />
 </fieldset>
 
@@ -34,9 +41,12 @@
   .tool-group {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.5rem;
     margin: 0;
-    padding: 2px 10px 4px;
+    /* Tight. The border is there to SAY where the group ends, not to frame it —
+       a fieldset's default padding is generous enough to push the toolbar's rows
+       apart and make six groups look like six panels. */
+    padding: 0 6px 2px;
     border: 1px solid #2f2f2f;
     border-radius: 8px;
     min-width: 0;
@@ -51,7 +61,11 @@
     border-color: #3c5f8a;
   }
   legend {
-    padding: 0 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 3px;
+    margin-left: 2px;
     font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;

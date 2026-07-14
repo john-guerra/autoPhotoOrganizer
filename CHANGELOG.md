@@ -6,6 +6,19 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.15
+
+- **A group no longer jumps when you toggle it to a snapshot.** The strip now
+  starts exactly where the group's photos started, and its photos are the same
+  size as the ones in full view — they follow the zoom, instead of being stuck at
+  a fixed size.
+- **The timeline's settings popover opens again.** It was being clipped when the
+  timeline moved into the Filter box.
+- **The ＋ is the toolbar's one primary button**, and adding a folder and managing
+  your library both live behind it.
+- **Clear the filters from the Filter group's own label**, and the toolbar's
+  groups sit tighter.
+
 ## 2.14.14
 
 - **The cycle-all button says what it will DO**, not what it already is. It read
