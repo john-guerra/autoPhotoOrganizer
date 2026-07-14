@@ -73,8 +73,18 @@
 
   // shortLeafLabel only knows folder/year/month/day and returns undefined for
   // anything else (camera, kind, …) — so always fall back to the raw value.
+  //
+  // A folder row is marked as one here too, so a group reads as a real folder in
+  // every navigator. It is a GLYPH, not the <FolderIcon> the feed and the tree
+  // draw: FisheyeNav takes `label` as a plain string and renders the text itself,
+  // so markup cannot reach it without a change to the widget package. Every
+  // fisheye row is a leaf group (the flat tree returns only folders that hold
+  // photos), so there is no virtual ancestor here to distinguish.
+  const FOLDER_DIMS = new Set(["folder", "folderName"]);
+  const FOLDER_GLYPH = "🗀 ";
   const label = (value, key) =>
-    shortLeafLabel(key, value) ?? String(value ?? "");
+    (FOLDER_DIMS.has(key) ? FOLDER_GLYPH : "") +
+    (shortLeafLabel(key, value) ?? String(value ?? ""));
 </script>
 
 <nav class="fisheye" aria-label="Library fisheye">

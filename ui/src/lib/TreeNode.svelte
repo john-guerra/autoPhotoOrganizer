@@ -6,6 +6,7 @@
   import { labelParts, EMPTY_STATS } from "./folderLabel.js";
   import { descendantGroups } from "./folderTree.js";
   import GroupStateIcon from "./GroupStateIcon.svelte";
+  import FolderIcon from "./FolderIcon.svelte";
   import { getRenderer, nextRendererId } from "./groupRenderers.js";
 
   export let groupBy; // string[]
@@ -136,10 +137,16 @@
   // it moves (you are trying to see the hidden head of the name, not be startled
   // by it), with a floor so a short name isn't sluggish and a ceiling so a very
   // long one doesn't turn into a ticker.
-  const REVEAL_PX_PER_S = 85;
-  const REVEAL_MIN_S = 0.25;
-  const REVEAL_MAX_S = 0.9;
-  const RETURN_S = 0.2;
+  //
+  // Third pass, and the direction has been the same each time: SLOWER. 200px/s
+  // read as a snap, 85px/s was still faster than the eye can track a name it is
+  // trying to read. ~50px/s over a ~1.7s ceiling is a reveal you can follow —
+  // a 200px-long hidden head takes about a second, which is roughly how long it
+  // takes to read one.
+  const REVEAL_PX_PER_S = 50;
+  const REVEAL_MIN_S = 0.3;
+  const REVEAL_MAX_S = 1.7;
+  const RETURN_S = 0.25;
 
   /** Svelte action: the row shows the END of the name (see the CSS); hovering
    * slides it back to the RIGHT to reveal the clipped head, then returns.
@@ -156,10 +163,10 @@
       clearTimeout(leaving);
       const d = distance();
       if (d <= 0) return;
-      // A reveal, not a ticker — but not a flinch either. The first pass at this
+      // A reveal, not a ticker — but not a flinch either. An early pass
       // over-corrected a 40px/s crawl into ~200px/s capped at 0.35s, which reads
       // as a snap: the eye has to re-find the text after it has already stopped.
-      // ~85px/s over a longer ceiling lets you actually FOLLOW the name as it
+      // A slow rate over a long ceiling lets you actually FOLLOW the name as it
       // slides, which is the point of moving it at all.
       const seconds = Math.min(
         REVEAL_MAX_S,
@@ -220,6 +227,14 @@
     >
       <GroupStateIcon state={iconState} />
     </button>
+    <!-- OUTSIDE .tree-label on purpose: hoverScroll measures the label span's
+         scrollWidth against its PARENT's clientWidth, so an icon inside the
+         button would eat into that width and the reveal would mis-measure what
+         is actually clipped. Hollow = a virtual ancestor (a directory, but no
+         row in the index, so nothing to rename or remove). -->
+    {#if isFolderLevel}
+      <FolderIcon virtual={isVirtual} />
+    {/if}
     <button
       class="tree-label"
       class:virtual={isVirtual}

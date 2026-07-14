@@ -72,6 +72,7 @@
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import JobsPanel from "./lib/JobsPanel.svelte";
   import GroupStateIcon from "./lib/GroupStateIcon.svelte";
+  import FolderIcon from "./lib/FolderIcon.svelte";
   import {
     getRenderer,
     isServerCollapsed,
@@ -2256,7 +2257,12 @@
     });
   }
 
-  /** Header parts for any dimension: only folders need the treatment. */
+  /** Is this group a folder on disk? Both folder dims count — the icon, and the
+   *  actions it advertises, apply to either. */
+  function isFolderDim(header) {
+    return REMOVABLE_FOLDER_DIMS.has(header?.path?.at(-1)?.dimension);
+  }
+
   /** Header parts for any dimension: only folders need the treatment.
    *
    * `_stats` / `_roots` are unused INSIDE the function — they are there so the
@@ -4190,6 +4196,16 @@
                       ).icon}
                     />
                   </button>
+                  <!-- OUTSIDE .section-label, which is `direction: rtl` so it can
+                       clip the HEAD of a long path — that flips the visual order
+                       of its inline children, and an icon placed inside it lands
+                       to the RIGHT of the name. Says "this group is a real folder"
+                       (so reveal / rescan / rename / remove all apply); hollow
+                       means a virtual ancestor, which has no row in the index and
+                       therefore cannot be renamed or removed. -->
+                  {#if isFolderDim(header)}
+                    <FolderIcon virtual={header.isVirtual} />
+                  {/if}
                   {#if header.path && renamingKey === pathKey(header.path)}
                     <!-- svelte-ignore a11y-autofocus -->
                     <input

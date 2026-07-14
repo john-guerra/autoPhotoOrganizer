@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.6
+
+- **A folder group now looks like a folder** — in the feed, the tree and the
+  fisheye. A hollow icon means a folder that holds no photos of its own (only
+  sub-folders), which is why it offers no rename or remove.
+- **The tree's folder-name reveal is slower again**, so a long name can be read
+  as it slides rather than snapping past.
+
 ## 2.14.5
 
 - **Grouping by folder now shows your folder subtrees in the feed.** Sub-folders
