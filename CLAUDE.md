@@ -83,7 +83,11 @@ verification), and decisions already made.
   explicitly later.
 - **Tests: vitest**, colocated as `*.test.js` next to sources under `server/`.
 - **Prettier** for formatting.
-- **Svelte + d3** on the frontend.
+- **Svelte + d3** on the frontend. **Migrating to Svelte 5 (runes) + latest
+  dependencies is in progress — see `docs/svelte-5-migration.md`** for runes best
+  practices, the measured migration surface, the dependency-update map, and the
+  staged plan. Until a component is converted it stays Svelte 4 (`export let`, `$:`,
+  `createEventDispatcher`); a component is all-runes or all-legacy, never half.
 - Every file-serving endpoint MUST route user paths through
   `server/lib/safeResolve.js` (path-traversal guard — the legacy app was flagged).
 
