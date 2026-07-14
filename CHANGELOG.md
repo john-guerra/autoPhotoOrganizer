@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.8
+
+- **The feed loads ahead of a fast fling, not behind it.** The grid used to ask
+  for the next page once you got within 20 tiles of the edge — which, at a big
+  zoom or with bursts stacked, is only a few hundred pixels of road, less than
+  one round trip at flinging speed. It now measures the runway in pixels and
+  fetches while two screens of photos are still ahead of you.
+
 ## 2.12.7
 
 - **The feed keeps up with your scroll wheel now.** Every date-grouped page was

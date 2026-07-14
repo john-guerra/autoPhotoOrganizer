@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from "svelte";
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
-  import { visibleRange } from "./lib/layouts/windowing.js";
+  import { visibleRange, runwayPx } from "./lib/layouts/windowing.js";
   import { ZOOM_LEVELS, resolveZoom, gapFor } from "./lib/zoom.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
   import {
@@ -558,7 +558,13 @@
   let inFlightParents = new Set(); // pathKey(parentPath) mid-fetch (dedup)
   let countsEpoch = 0;
   const PAGE_SIZE = 60;
-  const FETCH_THRESHOLD = 20; // start fetching more when within this many items of an edge
+  const FETCH_THRESHOLD = 20; // floor: fetch when within this many entries of an edge
+  // The real trigger (see updateVisibleRange): keep at least two viewports of
+  // loaded content beyond each edge, so a fast scroll still has runway left while
+  // the next page is in flight. 1200px is the floor for a short window — at a
+  // fling's 3,000-6,000 px/s even that is only ~300ms, which a ~1ms feed query
+  // (2.12.7) plus render comfortably fits inside.
+  const MIN_RUNWAY_PX = 1200;
   let status = "";
   let error = "";
   let scanning = false;
@@ -3283,10 +3289,27 @@
     renderStart = range.start;
     renderEnd = range.end;
 
-    if (renderEnd >= displayEntries.length - FETCH_THRESHOLD) {
+    // How far can the user still scroll before hitting blank space? Prefetch has
+    // to fire while that runway is longer than a fetch takes to fly, or they
+    // outrun the loader — the reported "the album loading is slower than I can
+    // scroll". FETCH_THRESHOLD alone can't express this: 20 display entries is a
+    // few hundred pixels of burst stacks and several screens of small thumbs, and
+    // the user scrolls in pixels. Keep it as a floor (it guarantees a trigger at
+    // the very end of the array) and add the real one.
+    const { above, below } = runwayPx(boxes, {
+      scrollTop: -rect.top,
+      viewportHeight: mainColumnEl.clientHeight,
+    });
+    const runway = Math.max(MIN_RUNWAY_PX, mainColumnEl.clientHeight * 2);
+
+    if (renderEnd >= displayEntries.length - FETCH_THRESHOLD || below < runway) {
       loadMore("after");
     }
-    if (renderStart <= FETCH_THRESHOLD && !jumpRevealPending && !expandPin) {
+    if (
+      (renderStart <= FETCH_THRESHOLD || above < runway) &&
+      !jumpRevealPending &&
+      !expandPin
+    ) {
       // Don't prepend previous-group content while a group-jump landing is
       // still being pinned: the prepend shifts everything below it, and the
       // pin + loadMore's scroll compensation then fight over the landing
