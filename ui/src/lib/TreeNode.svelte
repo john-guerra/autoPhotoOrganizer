@@ -132,6 +132,15 @@
   // The whole truth is always one hover away.
   $: fullTitle = isFolderLevel ? node.value : node.label;
 
+  // How fast a clipped folder name slides aside on hover. Slow enough to READ as
+  // it moves (you are trying to see the hidden head of the name, not be startled
+  // by it), with a floor so a short name isn't sluggish and a ceiling so a very
+  // long one doesn't turn into a ticker.
+  const REVEAL_PX_PER_S = 85;
+  const REVEAL_MIN_S = 0.25;
+  const REVEAL_MAX_S = 0.9;
+  const RETURN_S = 0.2;
+
   /** Svelte action: the row shows the END of the name (see the CSS); hovering
    * slides it back to the RIGHT to reveal the clipped head, then returns.
    * Measures the real overflow — CSS alone can't know it — and only animates, and
@@ -147,17 +156,24 @@
       clearTimeout(leaving);
       const d = distance();
       if (d <= 0) return;
-      // A reveal, not a ticker: reading a moving target is slow, so the text
-      // should feel like it snapped aside. ~200px/s, capped hard — the old
-      // 40px/s crawl took 2s+ to show the end of a long name.
-      const seconds = Math.min(0.35, Math.max(0.12, d / 200));
+      // A reveal, not a ticker — but not a flinch either. The first pass at this
+      // over-corrected a 40px/s crawl into ~200px/s capped at 0.35s, which reads
+      // as a snap: the eye has to re-find the text after it has already stopped.
+      // ~85px/s over a longer ceiling lets you actually FOLLOW the name as it
+      // slides, which is the point of moving it at all.
+      const seconds = Math.min(
+        REVEAL_MAX_S,
+        Math.max(REVEAL_MIN_S, d / REVEAL_PX_PER_S)
+      );
       el.style.transition = `transform ${seconds}s cubic-bezier(0.2, 0.8, 0.2, 1)`;
       el.style.transform = `translateX(${d}px)`;
     }
     function leave() {
-      el.style.transition = "transform 0.15s ease-out";
+      // Coming back is a return, not a reveal — nothing to read on the way, so it
+      // stays quicker than the outward slide.
+      el.style.transition = `transform ${RETURN_S}s ease-out`;
       el.style.transform = "translateX(0)";
-      leaving = setTimeout(() => (el.style.transition = ""), 150);
+      leaving = setTimeout(() => (el.style.transition = ""), RETURN_S * 1000);
     }
     mark();
     el.parentElement.addEventListener("mouseenter", enter);

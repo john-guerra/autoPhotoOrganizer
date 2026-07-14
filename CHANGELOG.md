@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.13.1
+
+- **Video sound stays on.** Un-mute one clip and the next one plays with sound
+  too — the player was hardcoded to start muted, so every single video had to be
+  un-muted by hand. Your volume is remembered as well.
+- **The folder-name reveal in the tree is slower**, so you can actually read a
+  long name as it slides aside instead of it snapping past you.
+
 ## 2.13.0
 
 **Packaged build** of the performance + correctness round (2.12.1–2.12.17).

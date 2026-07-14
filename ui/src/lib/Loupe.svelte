@@ -4,6 +4,7 @@
   import { waitForJob } from "./jobs.js";
   import LoupeDetails from "./LoupeDetails.svelte";
   import LoupeFilmstrip from "./LoupeFilmstrip.svelte";
+  import { loadVideoPrefs, saveVideoPrefs } from "./videoPrefs.js";
 
   const dispatch = createEventDispatcher();
 
@@ -64,6 +65,39 @@
   // the worst possible failure, since it looks like a broken FILE, not a
   // missing codec. The server hands back a URL, or transcodes one for us.
   let videoState = null; // { status: "ready"|"preparing"|"error", url?, reason?, message? }
+
+  // Audio is a property of the person watching, not of the file: the <video> used
+  // to be hardcoded `muted`, so every clip started silent and had to be un-muted
+  // by hand, every time. Remember what you chose and apply it to the next one.
+  let { muted: videoMuted, volume: videoVolume } = loadVideoPrefs();
+  function rememberAudio(e) {
+    const el = e.currentTarget;
+    videoMuted = el.muted;
+    videoVolume = el.volume;
+    saveVideoPrefs({ muted: videoMuted, volume: videoVolume });
+  }
+
+  /**
+   * Start playing, and fall back to muted if the browser refuses.
+   *
+   * Autoplay WITH sound can be blocked (NotAllowedError) depending on how much
+   * the browser trusts the origin. Muting and retrying keeps the picture moving —
+   * a video that silently refuses to start looks broken. The saved preference is
+   * deliberately NOT overwritten: the user still wants sound, and the next clip
+   * (or the next launch, in the packaged app, where autoplay is permitted) should
+   * try again rather than inherit a workaround as a setting.
+   */
+  function autoplay(el) {
+    el.muted = videoMuted;
+    el.volume = videoVolume;
+    el.play().catch(() => {
+      el.muted = true;
+      el.play().catch(() => {
+        // Still refused (no codec, aborted navigation) — the controls are right
+        // there; the user can press play.
+      });
+    });
+  }
   $: if (item?.kind === "video") loadVideo(item.id);
   $: if (item && item.kind !== "video") videoState = null;
 
@@ -143,19 +177,21 @@
       {#if item}
         {#key item.id}
           {#if item.kind === "video"}
-            <!-- muted so the browser doesn't block autoplay; controls give the
-                 scrub bar that drives the server's Range requests. The {#key}
-                 tears down/rebuilds the element on navigation, stopping playback.
-                 src comes from the server (see loadVideo): the original when the
+            <!-- Audio follows the remembered preference (videoPrefs), not a
+                 hardcoded `muted` — with a muted retry if the browser blocks an
+                 unmuted autoplay (see autoplay()). Controls give the scrub bar
+                 that drives the server's Range requests. The {#key} tears
+                 down/rebuilds the element on navigation, stopping playback. src
+                 comes from the server (see loadVideo): the original when the
                  browser can decode it, a transcoded proxy when it can't. -->
             {#if videoState?.status === "ready"}
               <video
                 src={videoState.url}
                 controls
-                autoplay
-                muted
                 playsinline
                 preload="metadata"
+                use:autoplay
+                on:volumechange={rememberAudio}
               >
                 <track kind="captions" />
               </video>
