@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.16
+
+- **Grouping by folder name is flat again, matching the tree.** The feed was
+  nesting it into a hierarchy while the sidebar listed it flat, so the two
+  navigators disagreed about the shape of the same library.
+
 ## 2.14.15
 
 - **A group no longer jumps when you toggle it to a snapshot.** The strip now

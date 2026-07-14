@@ -27,7 +27,23 @@
 import { chainTo, descendantGroups } from "./folderTree.js";
 import { pathKey } from "./feed.js";
 
-const FOLDER_DIMS = new Set(["folder", "folderName"]);
+/**
+ * Only `folder` nests. NOT `folderName`.
+ *
+ * The two carry the same value server-side (the absolute path — that is the
+ * group's identity, and it is what makes Remove and Reveal work for both), and
+ * they differ only in how it is DISPLAYED: `folder` shows the path, `folderName`
+ * shows the basename. That made it tempting to nest both, since the trie is built
+ * from the value and the value is a path either way.
+ *
+ * But a hierarchy of names isn't even well-defined: grouping by NAME says two
+ * folders called "Selects" under different parents are the same kind of thing, so
+ * there is no parent to hang them under. The sidebar has always known this — it
+ * builds the trie only for `folder` (TreeSidebar's `childRows`) — and the feed
+ * nesting `folderName` while the tree listed it flat meant the two navigators
+ * disagreed about the shape of the same library.
+ */
+const FOLDER_DIMS = new Set(["folder"]);
 
 /** The trie keys folders by their split-and-rejoined path, so a stored path with
  *  a trailing slash never matches its own node. Exactly one folder in the real

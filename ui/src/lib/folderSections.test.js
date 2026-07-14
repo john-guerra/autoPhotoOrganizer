@@ -219,3 +219,48 @@ describe("nestFolderHeaders", () => {
     expect(out.map((h) => h.visualDepth)).toEqual([0, 1]);
   });
 });
+
+describe("folderName is FLAT", () => {
+  /** Same shape as folderHeader, but the `folderName` dimension. It carries the
+   *  same absolute path (that is the group's identity server-side); only the
+   *  DISPLAY differs. */
+  const nameHeader = (index, value) =>
+    header(index, 0, "folderName", value, [{ dimension: "folderName", value }]);
+
+  it("does not nest, however path-like its values look", () => {
+    // The trap: the value IS a path, so the trie would happily build a hierarchy
+    // out of it. But grouping by NAME says two folders called "Day1" under
+    // different parents are the same group — so there is no parent to nest under,
+    // and the sidebar has always listed folderName flat. The feed nesting it while
+    // the tree didn't meant the two navigators disagreed about the same library.
+    const roots = rootsFor([
+      { value: "/L/Trip", count: 2 },
+      { value: "/L/Trip/Day1", count: 3 },
+    ]);
+    const out = nestFolderHeaders(
+      [nameHeader(0, "/L/Trip"), nameHeader(2, "/L/Trip/Day1")],
+      { groupBy: ["folderName"], rootsByParentKey: roots }
+    );
+
+    // Every header stays at the depth it came in at, and none is invented.
+    expect(out.map((h) => [h.value, h.visualDepth])).toEqual([
+      ["/L/Trip", 0],
+      ["/L/Trip/Day1", 0],
+    ]);
+    expect(out.some((h) => h.isVirtual)).toBe(false);
+    expect(out.some((h) => h.nested)).toBe(false);
+  });
+
+  it("still acts on the group it names — one path, its own", () => {
+    // Flat does not mean inert: a folderName group is a real folder on disk, so
+    // select-all / keep-only / remove still have exactly one group to work on.
+    const roots = rootsFor([{ value: "/L/Trip", count: 2 }]);
+    const [h] = nestFolderHeaders([nameHeader(0, "/L/Trip")], {
+      groupBy: ["folderName"],
+      rootsByParentKey: roots,
+    });
+    expect(h.groupPaths).toEqual([
+      [{ dimension: "folderName", value: "/L/Trip" }],
+    ]);
+  });
+});
