@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.18
+
+- **Folders now come in the order you asked for.** Grouped by folder, the feed and
+  the tree used to list folders alphabetically no matter how you sorted. Now they
+  follow the sort: with "Taken, ascending" the first folder is the one holding your
+  oldest matching photo, and it re-ranks when you change the filter — filter to 5
+  stars and you get the folder with the oldest five-star shot. Folders still nest,
+  and a parent is still ranked by the best photo anywhere beneath it.
+
 ## 2.14.17
 
 - **Closing a photo puts you back where you opened it from.** Open a photo from a

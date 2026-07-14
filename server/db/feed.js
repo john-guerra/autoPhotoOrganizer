@@ -1,4 +1,5 @@
 import { buildFilter } from "./filters.js";
+import { applyFolderOrder } from "./folderOrder.js";
 import {
   parseSort,
   sortSeekDim,
@@ -506,7 +507,15 @@ export function getFeedPage(
   }
 ) {
   const filter = buildFilter(filterSpec);
-  const dims = applySortToDims(resolveDimensions(groupBy), sort);
+  // Folder groups are ranked by the feed's own sort (see db/folderOrder.js), so
+  // "date taken, ascending" puts the folder holding your oldest photo first —
+  // while a folder is still followed by its own subtree, which is what lets the
+  // feed nest them.
+  const dims = applyFolderOrder(
+    db,
+    applySortToDims(resolveDimensions(groupBy), sort),
+    { filterSpec, sort }
+  );
   const sortDim = sortSeekDim(sort);
   const seekDims = [
     ...dims,
@@ -698,7 +707,13 @@ export function fetchGroupRowsAtOffsets(
 ) {
   if (!offsets.length) return [];
   const filter = buildFilter(filterSpec);
-  const dims = applySortToDims(resolveDimensions(groupBy), sort);
+  // Same ranking as getFeedPage — this function's ORDER BY must stay identical to
+  // it, or the rows it samples come from a different feed than the one on screen.
+  const dims = applyFolderOrder(
+    db,
+    applySortToDims(resolveDimensions(groupBy), sort),
+    { filterSpec, sort }
+  );
   const sortDim = sortSeekDim(sort);
   const { sql: pathSql, params: pathParams } = collapsedPathCondition(
     path,
@@ -930,7 +945,11 @@ export function findGroupBoundary(
     sort = { by: "date_taken", dir: "desc" },
   }
 ) {
-  const dims = applySortToDims(resolveDimensions(groupBy), sort);
+  const dims = applyFolderOrder(
+    db,
+    applySortToDims(resolveDimensions(groupBy), sort),
+    { filterSpec, sort }
+  );
   const filter = buildFilter(filterSpec);
   const sortDim = sortSeekDim(sort);
   // The seek tuple MUST match getFeedPage's exactly: group dims, then the

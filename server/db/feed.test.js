@@ -860,10 +860,15 @@ describe("getFeedPage — in-place collapsed placeholder", () => {
       ],
       after: 10,
     });
+    // b-folder first: folders are ranked by the sort attribute, and the default
+    // sort is date-taken descending, so the folder holding the 2020 photo comes
+    // before the one whose only photo falls back to its 1970 mtime (see
+    // db/folderOrder.js). The point of the assertion is the placeholders' order
+    // relative to each other and to a real row across DIFFERENT depths.
     expect(items.map((i) => i.name ?? i.id)).toEqual([
-      "collapsed:folder=/photos/a-folder",
       "collapsed:folder=/photos/b-folder>year=2020",
       "b2019.jpg",
+      "collapsed:folder=/photos/a-folder",
     ]);
   });
 });

@@ -1,4 +1,5 @@
 import { resolveDimensions, sortExprOf } from "./feed.js";
+import { applyFolderOrder } from "./folderOrder.js";
 import { buildFilter } from "./filters.js";
 import { applySortToDims } from "./sort.js";
 
@@ -16,9 +17,14 @@ export function getTreeNode(
   db,
   { groupBy, path = [], filter: filterSpec = {}, sort } = {}
 ) {
-  const dims = applySortToDims(
-    resolveDimensions(groupBy),
-    sort ?? { by: "date_taken", dir: "desc" }
+  // The tree lists a level in exactly the order the feed renders it — including
+  // the folder ranking, so with an ascending date sort the top folder is the one
+  // holding the oldest photos that match the current filters.
+  const effSort = sort ?? { by: "date_taken", dir: "desc" };
+  const dims = applyFolderOrder(
+    db,
+    applySortToDims(resolveDimensions(groupBy), effSort),
+    { filterSpec, sort: effSort }
   );
   if (path.length >= dims.length) {
     throw new Error("path is already at the deepest grouping level");
@@ -113,9 +119,14 @@ export function getFlatTree(
   db,
   { groupBy, filter: filterSpec = {}, sort } = {}
 ) {
-  const dims = applySortToDims(
-    resolveDimensions(groupBy),
-    sort ?? { by: "date_taken", dir: "desc" }
+  // The tree lists a level in exactly the order the feed renders it — including
+  // the folder ranking, so with an ascending date sort the top folder is the one
+  // holding the oldest photos that match the current filters.
+  const effSort = sort ?? { by: "date_taken", dir: "desc" };
+  const dims = applyFolderOrder(
+    db,
+    applySortToDims(resolveDimensions(groupBy), effSort),
+    { filterSpec, sort: effSort }
   );
 
   const filter = buildFilter(filterSpec);
