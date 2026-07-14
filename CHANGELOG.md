@@ -6,6 +6,22 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.0
+
+Packaged build of everything since 2.13.0 — search, HEVC playback, and the video
+conversion work below.
+
+- **Search your library.** Type part of a file name or a folder into the search
+  box (or press `/` from anywhere, `Esc` to clear) and the library narrows to the
+  matches. It composes with the stars, the kinds and the timeline.
+- **HEVC videos play natively where your machine can decode them** — instantly,
+  instead of being converted first. Where it can't (a Windows PC without the free
+  HEVC Video Extension), it converts, as before.
+- **Clips convert before you reach them, with a real progress bar** instead of an
+  endless spinner.
+- **Video sound stays on**, the tree's label reveal is readable, and typing in a
+  filter box no longer hands your keystrokes to the photo grid.
+
 ## 2.13.4
 
 - **Videos that need converting start before you get to them.** Standing on the
