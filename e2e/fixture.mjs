@@ -78,6 +78,10 @@ export const HEVC_VIDEO = {
   name: "clip-hevc.mp4",
 };
 
+/** The HEVC clip's capture date — days away from the .avi, so the two videos
+ *  can't burst-cluster into one stack (see buildHevcVideo). */
+const HEVC_TAKEN_AT = new Date("2024-01-08T09:30:00Z");
+
 /** Items in a folder — photos PLUS any video. A folder's `count` is its JPEGs;
  *  the grid, the selection and the tree all count the video too, so a spec that
  *  reads `count` where it means "everything here" is quietly wrong (and was:
@@ -139,13 +143,12 @@ export async function buildFixture() {
 
   const hevcPath = join(PHOTOS_DIR, HEVC_VIDEO.folder, HEVC_VIDEO.name);
   await buildHevcVideo(hevcPath);
-  // Push the two clips APART in time. Neither has EXIF, so both fall back to the
-  // file's own timestamp — written seconds apart, which is exactly what burst
-  // clustering is for: they stacked, the second one disappeared behind the
-  // first's cover, and a spec looking for its tile scrolled the whole feed
-  // without ever finding it. Days apart, they are two ordinary tiles.
-  const dayApart = new Date("2024-01-08T09:30:00Z");
-  utimesSync(hevcPath, dayApart, dayApart);
+  // Belt and braces on the clip's date (the container already carries one): the
+  // two videos must land DAYS apart, not seconds. Written back-to-back they were
+  // burst-clustered into a single stack, and the second one disappeared behind
+  // the first one's cover — a spec looking for its tile scrolled the entire feed
+  // and never found it.
+  utimesSync(hevcPath, HEVC_TAKEN_AT, HEVC_TAKEN_AT);
 
   return { PHOTOS_DIR, HOME_DIR, FOLDERS, VIDEO, HEVC_VIDEO };
 }
@@ -165,7 +168,15 @@ async function buildUnplayableVideo(dest) {
 }
 
 /** Generate the HEVC clip described on HEVC_VIDEO. `-tag:v hvc1` is the tag Apple
- *  and every phone write, and the one browsers expect in an MP4. */
+ *  and every phone write, and the one browsers expect in an MP4.
+ *
+ *  It carries a real `creation_time`, and that is not decoration. Without one, a
+ *  video's date falls back to the FILE's timestamps — and macOS and Linux do not
+ *  agree on which timestamp that is (birthtime exists on one and not the other).
+ *  Both clips then landed on the same instant, burst-clustered into a stack, and
+ *  the second one vanished behind the first one's cover: green on a Mac, red on
+ *  CI, for a reason that has nothing to do with what the spec is testing. A date
+ *  inside the container is the same on every machine. */
 async function buildHevcVideo(dest) {
   return runFfmpeg([
     "-f",
@@ -178,6 +189,8 @@ async function buildHevcVideo(dest) {
     "hvc1",
     "-pix_fmt",
     "yuv420p",
+    "-metadata",
+    `creation_time=${HEVC_TAKEN_AT.toISOString()}`,
     "-y",
     dest,
   ]);
