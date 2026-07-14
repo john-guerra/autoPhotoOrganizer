@@ -1283,7 +1283,36 @@ export function registerApi(app) {
   });
 
   // --- Grouped endless feed --------------------------------------------------
-  app.get("/api/feed", (req, res) => {
+  /**
+   * Promote a JSON body onto req.query so ONE handler serves both the GET and
+   * the POST twin of a read endpoint.
+   *
+   * The feed's collapsed-group set has to reach the server somehow, and as a
+   * query param it does not fit: collapsing every group of a real library
+   * (1,183 folders) is a 195KB URL against Node's 16KB header cap, so the
+   * request died with a 431 before Express ever saw it — "Collapse all" was a
+   * dead button on exactly the libraries big enough to want it. A body has no
+   * such cap. GET stays for small requests, bookmarks and every existing
+   * caller; the client posts when the state it must send is genuinely large.
+   */
+  const bodyAsQuery = (req, _res, next) => {
+    const body = req.body ?? {};
+    const promoted = {};
+    for (const [k, v] of Object.entries(body)) {
+      // The handlers below parse these params out of strings (`JSON.parse` for
+      // collapsed/startPath, `split(",")` for groupBy), so a caller may send
+      // either the string form or the real value and get the same result — with
+      // the one exception that groupBy is comma-separated, not JSON, so an
+      // array of dimensions has to be joined rather than stringified.
+      if (typeof v === "string") promoted[k] = v;
+      else if (k === "groupBy" && Array.isArray(v)) promoted[k] = v.join(",");
+      else promoted[k] = JSON.stringify(v);
+    }
+    req.query = { ...req.query, ...promoted };
+    next();
+  };
+
+  const feedHandler = (req, res) => {
     const groupBy = String(req.query.groupBy ?? "")
       .split(",")
       .map((s) => s.trim())
@@ -1354,9 +1383,11 @@ export function registerApi(app) {
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
-  });
+  };
+  app.get("/api/feed", feedHandler);
+  app.post("/api/feed", bodyAsQuery, feedHandler);
 
-  app.get("/api/feed/boundary", (req, res) => {
+  const boundaryHandler = (req, res) => {
     const groupBy = String(req.query.groupBy ?? "")
       .split(",")
       .map((s) => s.trim())
@@ -1408,7 +1439,9 @@ export function registerApi(app) {
     } catch (e) {
       res.status(404).json({ error: e.message });
     }
-  });
+  };
+  app.get("/api/feed/boundary", boundaryHandler);
+  app.post("/api/feed/boundary", bodyAsQuery, boundaryHandler);
 
   // --- Fisheye snapshot: first/middle/last of a group, without paging
   // through the whole thing --------------------------------------------------

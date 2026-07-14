@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.11
+
+- **"Collapse all" works on a big library.** With folders as the top grouping, a
+  real library has 1,183 of them — and collapsing them all used to fail outright,
+  twice over: the request was too long for the server to even accept, and the
+  query behind it exceeded SQLite's limits. You now get what the button always
+  promised: every group as one line with its count, on a 114k-photo library, in
+  about a tenth of a second.
+
 ## 2.12.10
 
 - **A rating that fails to save no longer looks like it saved.** If the write was

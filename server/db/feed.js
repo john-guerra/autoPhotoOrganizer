@@ -48,41 +48,77 @@ export function resolveDimensions(groupBy) {
   });
 }
 
-/**
+/** The dimension objects a collapsed path names, in path order.
  * @param {Array<{dimension:string, value:string}>} path
- * @param {Array<{name:string, expr:string}>} dims
- * @returns {{sql:string, params:any[]}}
- */
-function collapsedPathCondition(path, dims) {
-  const clauses = [];
-  const params = [];
-  for (const { dimension, value } of path) {
+ * @param {Array<{name:string, expr:string}>} dims */
+function pathDims(path, dims) {
+  return path.map(({ dimension }) => {
     const dim = dims.find((d) => d.name === dimension);
     if (!dim) {
       throw new Error(
         `collapsed path references unknown dimension: ${dimension}`
       );
     }
-    clauses.push(`${dim.expr} = ?`);
-    params.push(value);
-  }
-  return { sql: `NOT (${clauses.join(" AND ")})`, params };
+    return dim;
+  });
 }
 
 /**
+ * @param {Array<{dimension:string, value:string}>} path
+ * @param {Array<{name:string, expr:string}>} dims
+ * @returns {{sql:string, params:any[]}} the POSITIVE condition ("this row is
+ *   inside that collapsed group"), used for its count.
+ */
+function collapsedPathCondition(path, dims) {
+  const clauses = pathDims(path, dims).map((d) => `${d.expr} = ?`);
+  const params = path.map((p) => p.value);
+  return { sql: clauses.join(" AND "), params };
+}
+
+/** A collapsed path's "shape": which dimensions it pins, in order. Two paths of
+ *  the same shape differ only in their values, so they can share one NOT IN. */
+function shapeOf(path) {
+  return path.map((p) => p.dimension).join(">");
+}
+
+/**
+ * Photos NOT inside any collapsed group.
+ *
+ * Written as one row-value `NOT IN (VALUES …)` per path SHAPE rather than an
+ * AND'd `NOT (dim = ?)` per path. That is not a micro-optimisation: SQLite caps
+ * expression-tree depth at 1000, and each AND'd term is another level, so
+ * collapsing every top-level group of a real library (1,183 folders) failed
+ * outright with "Expression tree is too large" — i.e. "Collapse all" was a
+ * hard error on any library big enough to want it. An IN list is flat, so its
+ * depth is O(1) in the number of collapsed groups; the only ceiling left is
+ * SQLITE_MAX_VARIABLE_NUMBER (32,766), which is far past any plausible group
+ * count.
+ *
  * @param {Array<Array<{dimension:string, value:string}>>} collapsedPaths
  * @param {Array<{name:string, expr:string}>} dims
  * @returns {{sql:string, params:any[]}}
  */
 function exclusionClause(collapsedPaths, dims) {
   if (!collapsedPaths.length) return { sql: "1=1", params: [] };
+
+  /** @type {Map<string, Array<Array<{dimension:string, value:string}>>>} */
+  const byShape = new Map();
+  for (const path of collapsedPaths) {
+    const shape = shapeOf(path);
+    if (!byShape.has(shape)) byShape.set(shape, []);
+    byShape.get(shape).push(path);
+  }
+
   const parts = [];
   const params = [];
-  for (const path of collapsedPaths) {
-    const { sql, params: p } = collapsedPathCondition(path, dims);
-    parts.push(sql);
-    params.push(...p);
+  for (const paths of byShape.values()) {
+    const exprs = pathDims(paths[0], dims).map((d) => d.expr);
+    const tuple = `(${exprs.join(", ")})`;
+    const rows = paths.map(() => `(${exprs.map(() => "?").join(", ")})`);
+    parts.push(`${tuple} NOT IN (VALUES ${rows.join(", ")})`);
+    for (const path of paths) params.push(...path.map((p) => p.value));
   }
+  // One term per shape — in practice one or two, never one per group.
   return { sql: parts.join(" AND "), params };
 }
 
@@ -235,17 +271,67 @@ function keyPassesSeek(key, focusValues, dims, wantAfter) {
   return false;
 }
 
-function countCollapsedPath(db, path, dims, filter) {
-  const { sql, params } = collapsedPathCondition(path, dims);
-  const positiveSql = sql.replace(/^NOT /, "");
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) AS count
-       FROM photos JOIN folders ON folders.id = photos.folder_id
-       WHERE photos.stale = 0 AND (${filter.sql}) AND ${positiveSql}`
-    )
-    .get(...filter.params, ...params);
-  return row.count;
+/**
+ * How many photos sit inside each of `paths`, as a Map keyed by placeholderId.
+ *
+ * One grouped query per path SHAPE, not one COUNT per path: collapsing every
+ * group of a real library meant 1,183 separate COUNT queries on every single
+ * feed page, and better-sqlite3 is synchronous, so that ran on the event loop
+ * with thumbnails queued behind it.
+ *
+ * @param {Array<Array<{dimension:string, value:string}>>} paths
+ */
+function countCollapsedPaths(db, paths, dims, filter) {
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  if (!paths.length) return counts;
+
+  /** @type {Map<string, Array<Array<{dimension:string,value:string}>>>} */
+  const byShape = new Map();
+  for (const path of paths) {
+    const shape = shapeOf(path);
+    if (!byShape.has(shape)) byShape.set(shape, []);
+    byShape.get(shape).push(path);
+  }
+
+  for (const shapePaths of byShape.values()) {
+    const shapeDims = pathDims(shapePaths[0], dims);
+    const exprs = shapeDims.map((d) => d.expr);
+    const cols = exprs.map((e, i) => `${e} AS k${i}`).join(", ");
+    const groupBy = exprs.join(", ");
+    // Restricted to the paths actually asked for — a bare GROUP BY over the
+    // whole table would count every group in the library, not just this page's.
+    const tuple = `(${exprs.join(", ")})`;
+    const rows = shapePaths.map(() => `(${exprs.map(() => "?").join(", ")})`);
+    const values = shapePaths.flatMap((p) => p.map((s) => s.value));
+
+    const found = db
+      .prepare(
+        `SELECT ${cols}, COUNT(*) AS count
+           FROM photos JOIN folders ON folders.id = photos.folder_id
+          WHERE photos.stale = 0 AND (${filter.sql})
+            AND ${tuple} IN (VALUES ${rows.join(", ")})
+          GROUP BY ${groupBy}`
+      )
+      .all(...filter.params, ...values);
+
+    // Join on a unit separator, not "": ["a","bc"] and ["ab","c"] would
+    // otherwise collide into one key and report each other's counts.
+    const SEP = "\u001f";
+    const byKey = new Map(
+      found.map((r) => [
+        shapeDims.map((_, i) => String(r[`k${i}`])).join(SEP),
+        r.count,
+      ])
+    );
+    for (const path of shapePaths) {
+      const key = path.map((p) => String(p.value)).join(SEP);
+      // A group whose photos are all filtered out simply doesn't come back from
+      // the GROUP BY — that's a real 0, not a missing count.
+      counts.set(placeholderId(path), byKey.get(key) ?? 0);
+    }
+  }
+  return counts;
 }
 
 /**
@@ -283,32 +369,32 @@ function selectPlaceholders(
     ? dims.map((d) => boundaryRow.groupValues[d.name])
     : null;
 
-  return collapsed
-    .filter((path) => {
-      const key = path.map((p) => p.value); // length = path.length, NOT dims.length
-      if (focusValues) {
-        if (!keyPassesSeek(key, focusValues, dims, wantAfter)) return false;
-      } else if (!wantAfter) {
-        return false;
-      }
-      if (!hitEdge && boundaryKey) {
-        const cmp = compareKeyTuples(
-          key,
-          boundaryKey.slice(0, key.length),
-          dims
-        );
-        const withinBound = wantAfter ? cmp <= 0 : cmp >= 0;
-        if (!withinBound) return false;
-      }
-      return true;
-    })
-    .map((path) => ({
-      collapsed: true,
-      id: placeholderId(path),
-      path,
-      groupValues: pathGroupValues(path),
-      count: countCollapsedPath(db, path, dims, filter),
-    }));
+  const inPage = collapsed.filter((path) => {
+    const key = path.map((p) => p.value); // length = path.length, NOT dims.length
+    if (focusValues) {
+      if (!keyPassesSeek(key, focusValues, dims, wantAfter)) return false;
+    } else if (!wantAfter) {
+      return false;
+    }
+    if (!hitEdge && boundaryKey) {
+      const cmp = compareKeyTuples(key, boundaryKey.slice(0, key.length), dims);
+      const withinBound = wantAfter ? cmp <= 0 : cmp >= 0;
+      if (!withinBound) return false;
+    }
+    return true;
+  });
+
+  // Count them all at once — the paths that survived the page bounds, not the
+  // whole collapsed set, and one grouped query rather than one COUNT each.
+  const counts = countCollapsedPaths(db, inPage, dims, filter);
+
+  return inPage.map((path) => ({
+    collapsed: true,
+    id: placeholderId(path),
+    path,
+    groupValues: pathGroupValues(path),
+    count: counts.get(placeholderId(path)) ?? 0,
+  }));
 }
 
 /** How many leading dimensions an item's groupValues actually has real
@@ -516,7 +602,7 @@ export function countGroupPath(
 ) {
   const filter = buildFilter(filterSpec);
   const dims = applySortToDims(resolveDimensions(groupBy), sort);
-  return countCollapsedPath(db, path, dims, filter);
+  return countCollapsedPaths(db, [path], dims, filter).get(placeholderId(path));
 }
 
 /**
@@ -552,11 +638,10 @@ export function fetchGroupRowsAtOffsets(
   const filter = buildFilter(filterSpec);
   const dims = applySortToDims(resolveDimensions(groupBy), sort);
   const sortDim = sortSeekDim(sort);
-  const { sql: notPathSql, params: pathParams } = collapsedPathCondition(
+  const { sql: pathSql, params: pathParams } = collapsedPathCondition(
     path,
     dims
   );
-  const pathSql = notPathSql.replace(/^NOT /, "");
   const selectDimAndSortCols = [
     ...dims.map((d, i) => `${d.expr} AS dim${i}`),
     `${sortDim.expr} AS sortval`,
@@ -819,16 +904,19 @@ export function findGroupBoundary(
     focusValues,
     wantAfter
   );
-  // "Not the focus row's own full group" — collapsedPathCondition already
-  // builds exactly this NOT(...) shape for an arbitrary dimension/value
-  // path; the focus row's own current groupBy values are just another
-  // path to exclude, reused verbatim rather than duplicating the SQL.
+  // "Not the focus row's own full group" — collapsedPathCondition builds the
+  // POSITIVE "row is inside this path" test for an arbitrary dimension/value
+  // path; the focus row's own current groupBy values are just another such
+  // path, so negate it here rather than duplicating the SQL.
   const currentGroupPath = groupBy.map((name, i) => ({
     dimension: name,
     value: focusRow[`dim${i}`],
   }));
-  const { sql: notCurrentSql, params: notCurrentParams } =
-    collapsedPathCondition(currentGroupPath, dims);
+  const { sql: currentSql, params: notCurrentParams } = collapsedPathCondition(
+    currentGroupPath,
+    dims
+  );
+  const notCurrentSql = `NOT (${currentSql})`;
 
   const orderCols = seekDims
     .map((d, i) => {
@@ -862,11 +950,10 @@ export function findGroupBoundary(
     dimension: name,
     value: row[`dim${i}`],
   }));
-  const { sql: notMatchSql, params: matchParams } = collapsedPathCondition(
+  const { sql: matchSql, params: matchParams } = collapsedPathCondition(
     targetGroupPath,
     dims
   );
-  const matchSql = notMatchSql.replace(/^NOT /, "");
   const forwardOrderCols = seekDims
     .map((d, i) => `${seekCol(d, i)} ${d.direction}`)
     .join(", ");

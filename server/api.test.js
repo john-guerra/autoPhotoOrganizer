@@ -1076,6 +1076,48 @@ describe("GET /api/feed", () => {
     expect(res.status).toBe(400);
   });
 
+  it("accepts the same query as a POST body, for a collapsed set too big for a URL", async () => {
+    // Node rejects a request whose headers exceed 16KB with a 431, and the query
+    // string is a header — so "Collapse all" on a real library (1,183 folders =
+    // a 195KB URL) never reached Express at all. The POST twin has no such cap.
+    // The set below is deliberately far past 16KB.
+    await scan(srv.base, photosDir);
+    const collapsed = [
+      [{ dimension: "folder", value: photosDir }],
+      ...Array.from({ length: 800 }, (_, i) => [
+        {
+          dimension: "folder",
+          value: `/nonexistent/folder-${i}-${"x".repeat(40)}`,
+        },
+      ]),
+    ];
+    const asUrl = new URLSearchParams({
+      groupBy: "folder",
+      collapsed: JSON.stringify(collapsed),
+      after: "50",
+    }).toString();
+    expect(asUrl.length).toBeGreaterThan(16 * 1024); // past the cliff
+
+    // The GET this REPLACES: Node kills it before any handler runs.
+    const getRes = await fetch(`${srv.base}/api/feed?${asUrl}`);
+    expect(getRes.status).toBe(431);
+
+    const res = await fetch(`${srv.base}/api/feed`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ groupBy: "folder", collapsed, after: 50 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // No photos: the one real folder is collapsed, so it comes back as a
+    // placeholder carrying its count. (The padding paths match no photos and
+    // contribute empty placeholders — a real collapsed set only ever names
+    // groups that exist.)
+    expect(body.items.every((i) => i.collapsed)).toBe(true);
+    const real = body.items.find((i) => i.groupValues.folder === photosDir);
+    expect(real.count).toBeGreaterThan(0);
+  });
+
   it("serves a flat feed of every photo when groupBy is empty", async () => {
     await scan(srv.base, photosDir);
     const res = await fetch(`${srv.base}/api/feed?after=50`);

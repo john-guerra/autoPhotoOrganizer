@@ -544,6 +544,45 @@ describe("getFeedPage — collapse-exclusion", () => {
       "b1.jpg",
     ]);
   });
+
+  it("survives collapsing every group of a real-sized library (1,183 folders)", () => {
+    // "Collapse all" on the real 114k library collapses 1,183 top-level folders,
+    // and the exclusion used to be one AND'd `NOT (folder = ?)` per group. SQLite
+    // caps expression-tree depth at 1000, so the whole feed died with "Expression
+    // tree is too large" — the button was a hard error on exactly the libraries
+    // big enough to want it. 1,183 is the real number, and it is on the far side
+    // of the cliff; anything under 1000 would sail past this test.
+    const db = getDb();
+    seedVolume(db, 1);
+    const FOLDERS = 1183;
+    for (let i = 0; i < FOLDERS; i++) {
+      upsertScan(db, `/photos/f${String(i).padStart(4, "0")}`, 1, [
+        { name: `p${i}.jpg`, size: 1, mtimeMs: 1000 + i, kind: "image" },
+      ]);
+    }
+    // Every folder collapsed, one photo left visible in its own uncollapsed one.
+    upsertScan(db, "/photos/zz-visible", 1, [
+      { name: "keep.jpg", size: 1, mtimeMs: 9999, kind: "image" },
+    ]);
+    const collapsed = Array.from({ length: FOLDERS }, (_, i) => [
+      { dimension: "folder", value: `/photos/f${String(i).padStart(4, "0")}` },
+    ]);
+
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      collapsed,
+      after: 50,
+    });
+
+    // Not a crash: the collapsed folders come back as placeholders carrying their
+    // counts, and the one expanded folder still shows its photo.
+    expect(items.filter((i) => !i.collapsed).map((i) => i.name)).toEqual([
+      "keep.jpg",
+    ]);
+    const placeholders = items.filter((i) => i.collapsed);
+    expect(placeholders).toHaveLength(FOLDERS);
+    expect(placeholders.every((p) => p.count === 1)).toBe(true);
+  });
 });
 
 describe("getFeedPage — in-place collapsed placeholder", () => {

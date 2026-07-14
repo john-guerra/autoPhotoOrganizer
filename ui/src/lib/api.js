@@ -307,6 +307,40 @@ export async function pruneCache() {
 }
 
 /**
+ * A URL longer than this is sent as a POST body instead of a query string.
+ *
+ * Node caps request HEADERS (which is where the query string lives) at 16KB and
+ * answers anything longer with a 431 — before Express, so no handler and no
+ * error message of ours ever runs. The feed's `collapsed` param is unbounded:
+ * collapsing every group of a 114k-photo library is 195KB of URL, so the feed
+ * simply stopped responding. 8KB leaves room for the other params and is well
+ * inside every proxy's limit; below it, nothing changes.
+ */
+const MAX_URL_BYTES = 8 * 1024;
+
+/**
+ * GET when the query fits in a URL, POST the same params as a JSON body when it
+ * doesn't. The server serves both verbs from one handler, so the response is
+ * identical either way — this is purely about what the transport can carry.
+ */
+async function getOrPost(path, params, what) {
+  const qs = params.toString();
+  const res =
+    qs.length <= MAX_URL_BYTES
+      ? await fetch(`${path}?${qs}`)
+      : await fetch(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(Object.fromEntries(params)),
+        });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `${what} failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
  * @param {{groupBy: string[], collapsed?: Array<Array<{dimension:string,value:string}>>, focusId?: number|null, startPath?: Array<{dimension:string,value:string}>|null, before?: number, after?: number, filter?: object|null}} opts
  * @returns {Promise<{items: object[], focusItem: object|null}>}
  */
@@ -333,12 +367,7 @@ export async function fetchFeed({
   if (collapsed.length) params.set("collapsed", JSON.stringify(collapsed));
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
-  const res = await fetch(`/api/feed?${params}`);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `feed failed (${res.status})`);
-  }
-  return res.json();
+  return getOrPost("/api/feed", params, "feed");
 }
 
 /**
@@ -362,12 +391,7 @@ export async function fetchGroupBoundary({
   if (collapsed.length) params.set("collapsed", JSON.stringify(collapsed));
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
-  const res = await fetch(`/api/feed/boundary?${params}`);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `feed boundary failed (${res.status})`);
-  }
-  return res.json();
+  return getOrPost("/api/feed/boundary", params, "feed boundary");
 }
 
 /**
