@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.12
+
+- The browser tests and a production build now run on every push, not just when
+  someone remembers. (No user-visible change — this is the net that catches the
+  kind of bug the unit tests structurally can't see.)
+
 ## 2.12.11
 
 - **"Collapse all" works on a big library.** With folders as the top grouping, a

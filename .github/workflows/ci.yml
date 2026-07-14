@@ -1,8 +1,18 @@
 name: CI
 
-# Fast checks on every push and PR to main: the test suite plus a Prettier
-# format gate (keeps the #76 baseline clean — a stray unformatted file fails
-# here rather than drifting the tree back to "only format your own files").
+# Fast checks on every push and PR to main: the test suite, a Prettier format
+# gate (keeps the #76 baseline clean — a stray unformatted file fails here
+# rather than drifting the tree back to "only format your own files"), a
+# production build, and the browser tier.
+#
+# The e2e job is not decoration. The vitest suite covers PURE modules, so it
+# stayed green through every one of the 2.9.x bugs that reached a user — they
+# were all click-level, DOM-level or load-order bugs, which pure-function tests
+# structurally cannot catch. The Playwright specs exist for exactly that, and a
+# suite that only runs when someone remembers to run it is a suite that is green
+# for the wrong reason. It runs as its own job so a slow browser run never
+# delays the fast unit feedback.
+#
 # The heavier native/electron packaging lives in release.yml (tag-triggered).
 
 on:
@@ -23,3 +33,30 @@ jobs:
       - run: npm ci
       - run: npm run format:check
       - run: npm test
+      # A build failure is a shipped-app failure: vitest imports modules
+      # directly and never compiles a Svelte template, so a broken import or a
+      # bad binding can pass the unit suite and still die in the packaged app.
+      - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Chromium only — the app ships inside Electron, which is Chromium.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      # A red e2e run is worth nothing if you can't see WHAT the page looked
+      # like: the config already keeps a trace and a screenshot on failure.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
