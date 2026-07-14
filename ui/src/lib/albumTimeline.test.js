@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { analyzedDomain, nearestPhoto, albumAtTime } from "./albumTimeline.js";
+import {
+  analyzedDomain,
+  nearestPhoto,
+  albumAtTime,
+  albumOfPhotos,
+  hitAt,
+} from "./albumTimeline.js";
 import { albumColor, ALBUM_SCHEME_SIZE } from "./albumColors.js";
 import { clusterByGap } from "./albums.js";
 
@@ -122,6 +128,122 @@ describe("albumAtTime", () => {
     for (const p of photos) {
       expect(albumAtTime(clustered, p.t), `photo at ${p.t}`).not.toBe(-1);
     }
+  });
+});
+
+describe("albumOfPhotos", () => {
+  it("labels every photo with its album", () => {
+    const photos = [{ t: 0 }, { t: HOUR }, { t: 9 * DAY }];
+    const albums = [
+      { startAt: 0, endAt: HOUR },
+      { startAt: 9 * DAY, endAt: 9 * DAY },
+    ];
+    expect(Array.from(albumOfPhotos(photos, albums))).toEqual([0, 0, 1]);
+  });
+
+  it("agrees with albumAtTime on real clustered data", () => {
+    const photos = Array.from({ length: 40 }, (_, i) => ({
+      id: i,
+      t: i * HOUR + Math.floor(i / 5) * 5 * DAY, // five-photo bursts, days apart
+    }));
+    const albums = clusterByGap(photos, DAY);
+    const of = albumOfPhotos(photos, albums);
+    photos.forEach((p, i) => {
+      expect(of[i], `photo ${i}`).toBe(albumAtTime(albums, p.t));
+      expect(of[i]).not.toBe(-1); // clustering leaves no photo homeless
+    });
+  });
+
+  it("marks a photo no album covers, rather than guessing one", () => {
+    const of = albumOfPhotos([{ t: 5 * DAY }], [{ startAt: 0, endAt: HOUR }]);
+    expect(of[0]).toBe(-1);
+  });
+});
+
+describe("hitAt", () => {
+  // The shipped bug, reproduced at its real scale. A 20-year library drawn in
+  // 1438px: one pixel is about five days, so an album spanning a few hours is far
+  // narrower than the cursor. The user sees a dot, clicks it — and an exact-time
+  // hit test finds only the GAP between two bands.
+  const START = Date.UTC(2003, 0, 1);
+  const SPAN = 20 * 365 * DAY;
+  const WIDTH = 1438;
+
+  // Two hour-long albums, twelve years apart. Both are sub-pixel.
+  const photos = [
+    { id: 1, t: START },
+    { id: 2, t: START + HOUR },
+    { id: 3, t: START + 12 * 365 * DAY },
+    { id: 4, t: START + 12 * 365 * DAY + HOUR },
+  ];
+  const albums = clusterByGap(photos, DAY);
+  const times = photos.map((p) => p.t);
+  const albumOfPhoto = albumOfPhotos(photos, albums);
+
+  const xOf = (t) => ((t - START) / SPAN) * WIDTH;
+  const timeAt = (px) => START + (px / WIDTH) * SPAN;
+  const hit = (px) => hitAt({ px, times, albums, albumOfPhoto, xOf, timeAt });
+
+  it("has set up a genuinely sub-pixel album (or it is testing nothing)", () => {
+    expect(albums).toHaveLength(2);
+    const widthPx = xOf(albums[1].endAt) - xOf(albums[1].startAt);
+    expect(widthPx).toBeLessThan(1);
+  });
+
+  it("clicking a visible dot hits its album, even when the band is sub-pixel", () => {
+    // An INTEGER pixel, because that is what a cursor gives you. Feeding the
+    // photo's exact fractional pixel here would make this test pass even with the
+    // bug present — the inverse maps it straight back onto the photo's own
+    // instant. Rounding to the pixel the user can actually point at shifts the
+    // time by up to half a pixel, which at this scale is two and a half DAYS: the
+    // cursor is now in the gap while the dot is still under it.
+    const px = Math.round(xOf(photos[2].t));
+    expect(hit(px).album).toBe(1);
+    // WHICH of that album's two photos gets previewed is not something to pin
+    // down: both sit inside the same pixel, so either is a correct "nearest". The
+    // contract is that the preview belongs to the album you clicked.
+    expect(albumOfPhoto[hit(px).photo]).toBe(1);
+  });
+
+  it("snaps within a few pixels of the dot — a cursor is not exact", () => {
+    const px = xOf(photos[2].t) + 4; // ~20 days off in data terms, 4px to the user
+    expect(hit(px).album).toBe(1);
+  });
+
+  it("still reports NOTHING in a real gap, so an empty stretch stays empty", () => {
+    const px = xOf(START + 6 * 365 * DAY); // six years from any photo
+    expect(hit(px)).toEqual({ album: -1, photo: -1 });
+  });
+
+  it("never disagrees with itself: a previewed photo is always clickable", () => {
+    // The invariant that ties hover to click. If the timeline offers you a photo,
+    // clicking must act on that photo's album — never on nothing.
+    for (let px = 0; px <= WIDTH; px += 1) {
+      const { album, photo } = hit(px);
+      if (photo >= 0) expect(album, `px ${px}`).toBe(albumOfPhoto[photo]);
+      if (photo >= 0) expect(album).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("prefers the album under the cursor when the band IS wide", () => {
+    // Zoomed in, bands are wide: the cursor's own instant is the honest answer,
+    // and the snap must not override it with a neighbouring album's photo.
+    const wide = [{ startAt: 0, endAt: 100 * DAY }];
+    const ps = [
+      { id: 1, t: 0 },
+      { id: 2, t: 100 * DAY },
+    ];
+    const x = (t) => (t / (100 * DAY)) * 1000;
+    const got = hitAt({
+      px: 500, // mid-album, far from either photo
+      times: ps.map((p) => p.t),
+      albums: wide,
+      albumOfPhoto: albumOfPhotos(ps, wide),
+      xOf: x,
+      timeAt: (px) => (px / 1000) * 100 * DAY,
+    });
+    expect(got.album).toBe(0);
+    expect(got.photo).toBe(-1); // no photo near the cursor: nothing to preview
   });
 });
 

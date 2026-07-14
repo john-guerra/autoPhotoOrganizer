@@ -94,3 +94,84 @@ export function albumAtTime(albums, t) {
   }
   return -1;
 }
+
+/**
+ * Which album each photo belongs to, as one array parallel to `photos`.
+ *
+ * A merge, not a lookup per photo: both sequences are ordered, so one walk over
+ * each suffices. -1 means "no album covers it", which the clustering should never
+ * produce — but this does not pretend otherwise if it does.
+ *
+ * @param {Array<{t: number}>} photos  ascending by `t`
+ * @param {Array<{startAt: number, endAt: number}>} albums  ordered, disjoint
+ * @returns {Int32Array} albumIndex per photo, -1 where none
+ */
+export function albumOfPhotos(photos, albums) {
+  const n = photos?.length ?? 0;
+  const out = new Int32Array(n).fill(-1);
+  const m = albums?.length ?? 0;
+  let a = 0;
+  for (let i = 0; i < n; i++) {
+    const t = photos[i].t;
+    while (a < m && albums[a].endAt < t) a++;
+    if (a < m && t >= albums[a].startAt) out[i] = a;
+  }
+  return out;
+}
+
+/** How far the cursor may sit from a photo and still be taken to mean it. */
+export const SNAP_PX = 6;
+
+/**
+ * What the cursor is pointing AT: the album to act on, and the photo to preview.
+ *
+ * One function so that hovering and clicking can never disagree — if the timeline
+ * shows you a photo, clicking must go to that photo's album.
+ *
+ * The exact-time answer (`albumAtTime` alone) is NOT enough, and this is the bug
+ * this function exists to prevent: zoomed out to twenty years, an album spanning a
+ * few hours is far narrower than one pixel. The cursor lands in the GAP between
+ * two bands while sitting visually right on top of a dot, so an exact-time hit
+ * test silently reports "nothing here" — and the click is dropped on precisely
+ * the albums a user most needs to click. Observed live: a click on a visible,
+ * 112-photo album did nothing at all.
+ *
+ * So: prefer the album under the cursor's instant; failing that, fall back to the
+ * album of the nearest photo, but only when that photo is genuinely within
+ * `snapPx`. A real gap stays empty — click far from any photo and nothing happens,
+ * which is the truth — while every visible dot becomes clickable.
+ *
+ * Pure: `xOf` maps a time to a pixel, so the caller owns the scale and this owns
+ * the decision.
+ *
+ * @param {object} o
+ * @param {number} o.px  cursor x, in the same pixel space `xOf` returns
+ * @param {number[]} o.times  photo times, ascending
+ * @param {Array<{startAt:number, endAt:number}>} o.albums
+ * @param {Int32Array|number[]} o.albumOfPhoto  from `albumOfPhotos`
+ * @param {(t:number)=>number} o.xOf  time -> pixel
+ * @param {(px:number)=>number|null} o.timeAt  pixel -> time
+ * @param {number} [o.snapPx]
+ * @returns {{album: number, photo: number}} indices; -1 for "nothing there"
+ */
+export function hitAt({
+  px,
+  times,
+  albums,
+  albumOfPhoto,
+  xOf,
+  timeAt,
+  snapPx = SNAP_PX,
+}) {
+  const none = { album: -1, photo: -1 };
+  const t = timeAt(px);
+  if (t == null || !Number.isFinite(t)) return none;
+
+  const pi = nearestPhoto(times, t);
+  const nearPhoto = pi >= 0 && Math.abs(xOf(times[pi]) - px) <= snapPx;
+
+  let ai = albumAtTime(albums, t);
+  if (ai < 0 && nearPhoto) ai = albumOfPhoto[pi];
+
+  return { album: ai, photo: nearPhoto ? pi : -1 };
+}

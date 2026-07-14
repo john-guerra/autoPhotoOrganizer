@@ -26,11 +26,7 @@
   import { scaleTime, timeFormat } from "d3";
   import { zoomableAxisInput } from "@john-guerra/d3-zoomable-axis/input";
   import { albumColor } from "./albumColors.js";
-  import {
-    analyzedDomain,
-    nearestPhoto,
-    albumAtTime,
-  } from "./albumTimeline.js";
+  import { analyzedDomain, albumOfPhotos, hitAt } from "./albumTimeline.js";
   import { thumbUrl } from "./api.js";
 
   export let photos = []; // [{id,t}] ascending by t — the clustered working set
@@ -101,18 +97,8 @@
       ? null
       : view[0] + ((px - AXIS_MARGIN) / length) * (view[1] - view[0]);
 
-  // Every photo's album, in one pass — both arrays are ordered, so this is a
-  // merge, not a lookup per photo. Drives the dot colours.
-  $: albumOfPhoto = (() => {
-    const out = new Int32Array(photos.length).fill(-1);
-    let a = 0;
-    for (let i = 0; i < photos.length; i++) {
-      const t = photos[i].t;
-      while (a < albums.length && albums[a].endAt < t) a++;
-      if (a < albums.length && t >= albums[a].startAt) out[i] = a;
-    }
-    return out;
-  })();
+  // Every photo's album — drives the dot colours and the click target.
+  $: albumOfPhoto = albumOfPhotos(photos, albums);
 
   // --- the dots (canvas) ----------------------------------------------------
   // 20,000 photos is the DEFAULT working set here. That many <circle> elements,
@@ -147,44 +133,17 @@
 
   // --- pointer --------------------------------------------------------------
 
-  const SNAP_PX = 6; // how far the cursor may sit from a photo and still mean it
-
-  /**
-   * What the cursor is pointing AT, in one place, so hovering and clicking can
-   * never disagree.
-   *
-   * The exact-time answer (`albumAtTime`) is not enough on its own. Zoomed out to
-   * twenty years, an album spanning a few hours is far narrower than one pixel:
-   * the cursor lands in the GAP between two bands while sitting visually right on
-   * top of a dot. Strictly honouring the exact time meant the click was silently
-   * dropped on precisely the albums you most needed to click — a dead control.
-   *
-   * So: prefer the album under the cursor's instant; failing that, the album of
-   * the nearest photo, but only if that photo is genuinely within a few pixels.
-   * That keeps a real gap empty (click far from any photo and nothing happens,
-   * which is the truth) while making every visible dot clickable.
-   *
-   * @returns {{album: number, photo: number}} indices, or -1 for "nothing there"
-   */
-  function hitAt(px) {
-    const t = timeAt(px);
-    if (t == null) return { album: -1, photo: -1 };
-
-    const pi = nearestPhoto(times, t);
-    const nearPhoto = pi >= 0 && Math.abs(pxOf(times[pi]) - px) <= SNAP_PX;
-
-    let ai = albumAtTime(albums, t);
-    if (ai < 0 && nearPhoto) ai = albumOfPhoto[pi];
-
-    return { album: ai, photo: nearPhoto ? pi : -1 };
-  }
+  // The hit test itself lives in albumTimeline.js (pure, tested). It is the one
+  // place that decides what the cursor means, so hover and click cannot disagree.
+  $: hit = (px) =>
+    hitAt({ px, times, albums, albumOfPhoto, xOf: pxOf, timeAt });
 
   function onMove(e) {
     if (!hasSpan) return;
     const rect = e.currentTarget.getBoundingClientRect();
     hoverPx = e.clientX - rect.left;
 
-    const { album, photo } = hitAt(hoverPx);
+    const { album, photo } = hit(hoverPx);
     dispatch("hover", album); // -1 in a real gap: the list clears its highlight
     tip =
       photo >= 0 ? { x: hoverPx, id: photos[photo].id, t: times[photo] } : null; // no photo near the cursor ⇒ no thumbnail claiming one is there
@@ -198,7 +157,7 @@
 
   function onClick() {
     if (!hasSpan || hoverPx == null) return;
-    const { album } = hitAt(hoverPx);
+    const { album } = hit(hoverPx);
     if (album >= 0) dispatch("select", album); // scroll the list to this album
   }
 
