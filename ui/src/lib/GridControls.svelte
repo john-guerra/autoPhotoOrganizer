@@ -19,11 +19,32 @@
   export let burstEnabled = true;
   export let burstGapMs = 3000;
   export let sort = { by: "date_taken", dir: "asc" };
+  /** The cycle-all-groups control, which used to sit among the View buttons in
+   * row 1. It sets how every group is DRAWN (full grid → snapshot strip →
+   * collapsed) — the same kind of thing as size and burst, and not the same kind
+   * of thing as Locate or Auto Albums, which DO something. */
+  export let cyclingAll = false;
+  export let globalViewMode = "full";
 
   const dispatch = createEventDispatcher();
 </script>
 
 <div class="grid-controls">
+  <button
+    class="cycle-all"
+    on:click={() => dispatch("cycleall")}
+    disabled={cyclingAll}
+    title="Cycle every group: full view → snapshot all → collapse all"
+  >
+    {cyclingAll
+      ? "…"
+      : globalViewMode === "snapshot"
+        ? "◐ Snapshot all"
+        : globalViewMode === "collapsed"
+          ? "▸ Collapsed all"
+          : "▦ Full view"}
+  </button>
+
   <label class="zoom" title="Thumbnail size (also + / - keys)">
     <span class="zoom-icon small">▦</span>
     <input type="range" min="0" max={zoomMax} step="1" bind:value={zoom} />
@@ -77,6 +98,23 @@
     align-items: center;
     gap: 0.75rem;
     flex-shrink: 0;
+  }
+  .cycle-all {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    color: inherit;
+    font: inherit;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .cycle-all:hover:not(:disabled) {
+    background: #2a2a2a;
+  }
+  .cycle-all:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
   .zoom {
     display: flex;

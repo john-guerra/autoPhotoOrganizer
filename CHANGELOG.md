@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.11
+
+- **The timeline sits with the filters**, where it belongs — it narrows the
+  library by capture time exactly as the stars and the kinds do, so the whole of
+  what's currently narrowing your view reads as one row.
+- **"Full view" moved to the second row**, next to size, burst and order. It sets
+  how every group is drawn, which is what those do; Locate and Auto Albums, which
+  actually do something, stay on top.
+
 ## 2.14.10
 
 - **Selecting a folder now selects what's inside it** — including the photos in

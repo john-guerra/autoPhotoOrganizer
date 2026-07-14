@@ -4206,45 +4206,12 @@
         on:filterchange={(e) => onFilterChange(e.detail)}
       />
 
-      <div class="divider push"></div>
-
-      <!-- ③ VIEW -->
-      <ViewControls
-        {cyclingAll}
-        {globalViewMode}
-        bind:albumMode
-        {detectingAlbums}
-        on:revealcurrent={revealCurrentLocation}
-        on:cycleall={cycleAllGroups}
-        on:detectalbums={detectAlbums}
-      />
-
-      <button
-        class="help-btn"
-        title="Keyboard shortcuts (?)"
-        aria-label="Keyboard shortcuts"
-        on:click={() => (shortcutsHelpOpen = true)}
-      >
-        ?
-      </button>
-    </div>
-
-    <!-- ROW 2. A second row on PURPOSE, rather than the first one wrapping into
-         one by accident. The sidebar switch sits in a box the exact width of the
-         sidebar, so it sits directly above the column it controls; the grid's own
-         controls (size, burst, order) sit opposite. -->
-    <div class="topbar-row secondary">
-      <div class="sidebar-slot" style="width:{sidebarWidth}px">
-        <SidebarModeToggle bind:sidebarMode />
-      </div>
-
-      <!-- The timeline was the widest control in row 1, and with three grouping
-           dimensions row 1 ran out of width: it was squeezed to its floor and its
-           axis painted straight over the View buttons. It is a continuous RANGE
-           control — the same family as size and burst, which now sit beside it —
-           and here it takes all the width the row has left over instead of the
-           260px it was rationed. Brushing an album gap is easier with a longer
-           axis, so this is a promotion, not a demotion. -->
+      <!-- The timeline IS a filter — it narrows the working set by capture time
+           exactly as the stars and the kinds do, and the counts follow it. So it
+           belongs with them, not off with the display controls: reading the
+           filter row should tell you everything that is currently narrowing what
+           you see. It takes whatever width the row has left over (flex: 1), which
+           is what makes brushing an album gap workable. -->
       {#if timeMin != null && timeMax != null && timeMax > timeMin}
         <div
           class="time-filter"
@@ -4269,12 +4236,48 @@
         </div>
       {/if}
 
+      <div class="divider push"></div>
+
+      <!-- ③ VIEW -->
+      <ViewControls
+        bind:albumMode
+        {detectingAlbums}
+        on:revealcurrent={revealCurrentLocation}
+        on:detectalbums={detectAlbums}
+      />
+
+      <button
+        class="help-btn"
+        title="Keyboard shortcuts (?)"
+        aria-label="Keyboard shortcuts"
+        on:click={() => (shortcutsHelpOpen = true)}
+      >
+        ?
+      </button>
+    </div>
+
+    <!-- ROW 2. A second row on PURPOSE, rather than the first one wrapping into
+         one by accident. Row 1 is what NARROWS the library (grouping, filters,
+         the timeline) plus the two actions; row 2 is how what's left is DRAWN.
+         The sidebar switch sits in a box the exact width of the sidebar, so it
+         sits directly above the column it controls; the display controls (full
+         view, size, burst, order) sit opposite. -->
+    <div class="topbar-row secondary">
+      <div class="sidebar-slot" style="width:{sidebarWidth}px">
+        <SidebarModeToggle bind:sidebarMode />
+      </div>
+
+      <div class="row2-spacer"></div>
+
       <GridControls
         bind:zoom
         zoomMax={ZOOM_LEVELS.length - 1}
         bind:burstEnabled
         bind:burstGapMs
         {sort}
+        {cyclingAll}
+        {globalViewMode}
+        on:cycleall={cycleAllGroups}
         on:sortchange={(e) => onSortChange(e.detail)}
       />
     </div>
@@ -4854,11 +4857,22 @@
      handle, and the handles sit at the very ends of the axis, so both badges
      overhang the axis by ~12px. Without room for them, `overflow: hidden` ate the
      "J" of "Jan 1, 1980" at one end and the year at the other. */
+  /* Takes the row's leftover width, and gives it back before anything else does:
+     it is the one control here that stays usable at any size (a shorter axis is
+     still an axis). The 220px floor is where the two end-date badges stop
+     overlapping; the 16px of padding is for the badges themselves, which the
+     widget centres on the handles and which `overflow: hidden` otherwise eats. */
   .time-filter {
-    flex: 1;
+    flex: 1 1 260px;
     min-width: 220px;
     padding: 0 16px;
     overflow: hidden;
+  }
+  /* Pushes the display controls to the far right of row 2, opposite the sidebar
+     switch. (Row 1 uses `.divider.push` for the same job; row 2 has no divider
+     to hang it on.) */
+  .row2-spacer {
+    flex: 1;
   }
   .divider {
     width: 1px;
@@ -4868,8 +4882,13 @@
   }
   /* Push the View cluster to the right. The row no longer wraps, so this is now
      unconditional. */
+  /* `margin-left: auto` used to right-align the View cluster by swallowing ALL of
+     the row's free space — which meant the timeline, sitting just before it,
+     could never grow past its 260px basis no matter how wide the window got. The
+     timeline takes the slack now (flex: 1), and the View cluster ends up hard
+     against the right edge anyway, because there is nothing left to push it with. */
   .divider.push {
-    margin-left: auto;
+    margin-left: 0;
   }
 
   /* The one scope chip. Both kinds of scope (a folder, a hand-picked id set)

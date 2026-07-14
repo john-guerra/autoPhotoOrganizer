@@ -1,17 +1,16 @@
 <script>
   /**
-   * Toolbar cluster ③: "Locate current", the global cycle-all-groups control,
-   * and the Albums toggle. Presentational — every action is emitted as an event.
+   * Toolbar cluster ③: "Locate current" and the Albums toggle. Presentational —
+   * every action is emitted as an event.
    *
-   * The Tree/Fisheye toggle used to live here. It moved to SidebarModeToggle, on
-   * its own toolbar row directly above the sidebar it controls: in the middle of
-   * this cluster it read as just another view button, rather than as the switch
-   * for the whole left column.
+   * Two things have left this cluster, both because they are not ACTIONS. The
+   * Tree/Fisheye toggle went to SidebarModeToggle, directly above the column it
+   * switches. Cycle-all ("Full view") went to GridControls on row 2: it sets how
+   * every group is DRAWN, which is what size, burst and order do — where Locate
+   * and Auto Albums DO something. What is left here is the doing.
    */
   import { createEventDispatcher } from "svelte";
 
-  export let cyclingAll = false;
-  export let globalViewMode = "full";
   export let albumMode = false;
   export let detectingAlbums = false;
 
@@ -25,20 +24,6 @@
     title="Reveal the current photo's location in the tree"
   >
     ⌖ Locate
-  </button>
-  <button
-    class="reveal-btn"
-    on:click={() => dispatch("cycleall")}
-    disabled={cyclingAll}
-    title="Cycle every group: full view → snapshot all → collapse all"
-  >
-    {cyclingAll
-      ? "…"
-      : globalViewMode === "snapshot"
-        ? "◐ Snapshot all"
-        : globalViewMode === "collapsed"
-          ? "▸ Collapsed all"
-          : "▦ Full view"}
   </button>
   <button
     class="reveal-btn"

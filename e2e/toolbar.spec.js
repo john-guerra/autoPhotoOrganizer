@@ -97,13 +97,31 @@ test.describe("@p1 the toolbar", () => {
     expect(errors).toEqual([]);
   });
 
-  test("size, burst and order live in the toolbar, not the status bar", async ({
+  test("the two rows split what NARROWS the library from how it is DRAWN", async ({
     page,
   }) => {
-    // They moved up so the status bar's right half is free for the jobs widget.
+    // Row 1 narrows: grouping, the filters, and the timeline — which is a filter
+    // like any other (it cuts the working set by capture time, and the counts
+    // follow it), so it sits WITH the filters rather than off among the display
+    // controls. Row 2 draws: full-view/snapshot/collapse, size, burst, order.
+    // Getting this backwards is what made the timeline read as a display widget.
     const errors = trackPageErrors(page);
     await openApp(page, { groupBy: ["folder"] });
 
+    await expect(
+      page.locator(".topbar-row.primary .time-filter")
+    ).toBeVisible();
+    await expect(
+      page.locator(".topbar-row.secondary .time-filter")
+    ).toHaveCount(0);
+
+    await expect(
+      page.locator(".topbar-row.secondary .cycle-all")
+    ).toBeVisible();
+    await expect(page.locator(".topbar-row.primary .cycle-all")).toHaveCount(0);
+
+    // Size/burst/order moved out of the status bar so its right half is free for
+    // the jobs widget.
     await expect(page.locator(".topbar .grid-controls")).toBeVisible();
     await expect(page.locator(".statusbar .grid-controls")).toHaveCount(0);
 
