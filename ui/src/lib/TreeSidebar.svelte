@@ -21,6 +21,10 @@
 
   let rootTotal = null;
   let rootNodes = [];
+  /** Why the tree is empty, when it is empty because something FAILED rather
+   *  than because the library is. Rendered — an empty tree that stays silent is
+   *  the app telling the user they have no photos. */
+  let rootError = "";
   let childrenByKey = new Map(); // treeKey(path) -> { nodes, error? }
   let expandedKeys = new Set();
   let loadingKeys = new Set();
@@ -35,6 +39,7 @@
 
   async function loadRoot() {
     try {
+      rootError = "";
       const { total, nodes } = await fetchTreeNode({
         groupBy,
         path: [],
@@ -43,9 +48,13 @@
       });
       rootTotal = total;
       rootNodes = shapeLevel(nodes, 0);
-    } catch {
+    } catch (e) {
+      // A swallowed failure here rendered as an EMPTY TREE — indistinguishable
+      // from "you have no photos", which is a lie about the user's library and
+      // sends them looking for a scan bug that doesn't exist. Say what happened.
       rootTotal = null;
       rootNodes = [];
+      rootError = e?.message || "couldn't load the folder tree";
     }
   }
 
@@ -317,6 +326,12 @@
       Collapse all
     </button>
   </div>
+  {#if rootError}
+    <p class="tree-error" role="alert">
+      Couldn't load the folder tree: {rootError}
+      <button class="tree-action" on:click={loadRoot}>Retry</button>
+    </p>
+  {/if}
   {#if expandAllNote}
     <p class="tree-note" role="status">{expandAllNote}</p>
   {/if}
@@ -375,6 +390,12 @@
   .tree-action:disabled {
     opacity: 0.45;
     cursor: default;
+  }
+  .tree-error {
+    margin: 4px 8px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #ff8a80;
   }
   .tree-note {
     margin: 0 0 6px;

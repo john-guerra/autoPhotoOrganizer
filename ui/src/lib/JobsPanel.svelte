@@ -6,11 +6,38 @@
   import { jobs, undoFailureMessage } from "./jobs.js";
   import { cancelJob, dismissJob, undoMove } from "./api.js";
 
-  // Per-row undo error, keyed by job id. `undoMove()` throws on a *synchronous*
-  // failure (a 413 before the undo job exists, a network drop, a server
-  // reject); firing it bare left that rejection console-only — the silent
-  // failure issue #89 is about. Await it and surface the message inline.
+  // Per-row error, keyed by job id — for undo, and for the same reason for
+  // cancel and dismiss. `undoMove()` throws on a *synchronous* failure (a 413
+  // before the undo job exists, a network drop, a server reject); firing it bare
+  // left that rejection console-only — the silent failure issue #89 is about.
+  // Cancel and Dismiss were STILL fire-and-forget: a rejected cancel left the row
+  // sitting there claiming to be "running" forever, with no hint that the button
+  // did nothing. Await them and surface the message on the row itself.
   let undoErrors = {};
+
+  async function handleCancel(job) {
+    undoErrors = { ...undoErrors, [job.id]: null };
+    try {
+      await cancelJob(job.id);
+    } catch (e) {
+      undoErrors = {
+        ...undoErrors,
+        [job.id]: `Couldn't cancel: ${e.message} — the job is still running.`,
+      };
+    }
+  }
+
+  async function handleDismiss(job) {
+    undoErrors = { ...undoErrors, [job.id]: null };
+    try {
+      await dismissJob(job.id);
+    } catch (e) {
+      undoErrors = {
+        ...undoErrors,
+        [job.id]: `Couldn't dismiss: ${e.message}`,
+      };
+    }
+  }
 
   async function handleUndo(job) {
     undoErrors = { ...undoErrors, [job.id]: null };
@@ -107,9 +134,14 @@
               >{/if}
             {job.phase}
           </span>
-          <button class="job-btn" on:click={() => cancelJob(job.id)}
+          <button class="job-btn" on:click={() => handleCancel(job)}
             >Cancel</button
           >
+          {#if undoErrors[job.id]}
+            <span class="job-summary err" role="alert"
+              >{undoErrors[job.id]}</span
+            >
+          {/if}
         {:else if job.status === "done"}
           <span class="job-icon ok" aria-hidden="true">✓</span>
           <span class="job-summary">{summarize(job)}</span>
@@ -126,7 +158,7 @@
           <button
             class="job-dismiss"
             title="Dismiss"
-            on:click={() => dismissJob(job.id)}>×</button
+            on:click={() => handleDismiss(job)}>×</button
           >
         {:else}
           <span class="job-icon err" aria-hidden="true">✗</span>
@@ -144,7 +176,7 @@
           <button
             class="job-dismiss"
             title="Dismiss"
-            on:click={() => dismissJob(job.id)}>×</button
+            on:click={() => handleDismiss(job)}>×</button
           >
         {/if}
       </div>

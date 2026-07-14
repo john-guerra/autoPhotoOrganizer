@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.16
+
+- **Three things that used to fail in silence now tell you.** A folder tree that
+  fails to load says so (and offers Retry) instead of rendering as an empty
+  library — which read as "you have no photos"; a Cancel or Dismiss the server
+  rejects now says why, instead of leaving a job sitting there claiming to run
+  forever; and an update that fails to install says so instead of leaving the
+  button stuck on "Restarting…".
+
 ## 2.12.15
 
 - **The timeline now says when it's showing you a sample.** Above ~12,000 photos

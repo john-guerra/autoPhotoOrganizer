@@ -141,3 +141,24 @@ test("a virtual ancestor folds every group beneath it", async ({ page }) => {
 
   expect(errors).toEqual([]);
 });
+
+test("a tree that fails to load says so, instead of looking like an empty library", async ({
+  page,
+}) => {
+  // The failure this exists for: loadRoot() swallowed its error and rendered an
+  // EMPTY TREE — which reads as "you have no photos". The user goes hunting for a
+  // scan bug that isn't there, while the actual failure is invisible.
+  const errors = trackPageErrors(page);
+  await page.route("**/api/tree**", (route) =>
+    route.fulfill({ status: 500, body: '{"error":"boom"}' })
+  );
+  await openApp(page);
+
+  const failure = page.locator(".tree-error");
+  await expect(failure).toBeVisible();
+  await expect(failure).toContainText("Couldn't load the folder tree");
+  // …and it offers a way out, not just bad news.
+  await expect(failure.locator("button")).toHaveText("Retry");
+
+  expect(errors.filter((e) => !/500|tree/i.test(e))).toEqual([]);
+});

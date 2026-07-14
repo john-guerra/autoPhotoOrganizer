@@ -43,9 +43,19 @@
   }
 
   let installing = false;
+  let installError = "";
   async function restart() {
     installing = true;
-    await updates?.install();
+    installError = "";
+    try {
+      await updates?.install();
+      // On success the app quits and relaunches, so we never get here.
+    } catch (e) {
+      // Without this the button sat at "Restarting…" forever and the user was
+      // left staring at an app that was never going to restart.
+      installError = `Couldn't install the update: ${e?.message ?? e}. Try downloading it from the releases page.`;
+      installing = false;
+    }
   }
 </script>
 
@@ -78,6 +88,10 @@
       <button class="install" on:click={restart} disabled={installing}>
         {installing ? "Restarting…" : "Restart & Install"}
       </button>
+    {/if}
+
+    {#if installError}
+      <span class="install-error" role="alert">{installError}</span>
     {/if}
 
     <button
@@ -146,6 +160,11 @@
   .install:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+  .install-error {
+    font-size: 11px;
+    color: #ff8a80;
+    max-width: 46ch;
   }
   .close {
     flex: 0 0 auto;
