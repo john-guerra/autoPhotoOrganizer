@@ -6,6 +6,43 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.13.0
+
+**Packaged build** of the performance + correctness round (2.12.1–2.12.17).
+
+- **The feed keeps up with your scroll.** Every date-grouped page used to scan all
+  114,125 photos and sort them from scratch (64ms a page, 224ms with albums
+  collapsed); now it seeks straight to the page in ~1ms. And it fetches the next
+  page while two screens of photos are still ahead of you, so a hard fling no
+  longer outruns the loader.
+- **"Collapse all" works on a real library.** With folders as the top grouping it
+  was a dead button — 1,183 folders made a request the server refused outright and
+  a query SQLite couldn't run. You now get every group as one line with its count.
+- **A rating that fails to save no longer looks saved.** The star used to stay lit
+  against a rating the database never took, so a cull could quietly ship the wrong
+  set. It now goes back, and says why.
+- **Videos that played sound but showed nothing now play.** Old camcorder clips
+  (AVI/DivX, MJPEG, H.263) and 4:2:2 footage are converted to a playable copy on
+  first open — 317 of the 1,173 videos in a real library. Your originals are never
+  touched.
+- **Photos with no EXIF date get one** from the file itself, instead of piling up
+  under "Unknown" (93,622 of them did), and **"Read all metadata"** fills in date,
+  camera and lens for everything you've never scrolled past — in the background,
+  without slowing down browsing.
+- **Opening "Manage library" no longer freezes the app** (it was asking the disk
+  615,000 questions), and **the loupe opens faster** (it was generating up to 81
+  brand-new thumbnails every single time).
+- **Photos appear while a scan is still running**, instead of an empty grid until
+  the whole folder tree has been walked.
+- **The timeline admits when it's a sample** ("sampled 12,001 of 114,125") — it
+  always was, above 12k photos, and that's the curve you brush to find album gaps.
+- **Auto Albums gets a timeline**: the range analyzed, a dot per photo, a colored
+  band per album, linked to the list and zoomable.
+- **The grid zooms out two steps further**, and the fisheye navigator is now its
+  own package with proper nesting.
+- Failures that used to be silent now speak up: a folder tree that won't load, a
+  job that won't cancel, an update that won't install.
+
 ## 2.12.17
 
 - **Opening "Manage library" no longer freezes the app.** The cache breakdown was
