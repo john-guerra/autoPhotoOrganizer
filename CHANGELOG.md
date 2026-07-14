@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.12.7
+
+- **The feed keeps up with your scroll wheel now.** Every date-grouped page was
+  scanning all 114,125 photos and sorting them from scratch — and it got worse the
+  more albums you collapsed (224ms per page with 20 collapsed, which is slower than
+  you can flick). Now it seeks straight to the page: **64ms → 1ms** on a real
+  library, and the collapsed-album case is 13x faster still. Nothing to do; the
+  index builds itself the next time the app starts.
+- The "Read all metadata" sweep no longer re-scans the whole library to find its
+  next batch.
+
 ## 2.12.6
 
 - **Videos that used to play sound but show nothing now play properly.** Old

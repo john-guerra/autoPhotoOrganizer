@@ -145,3 +145,74 @@ export function applySortToDims(dims, sort) {
       : d
   );
 }
+
+// --- Index support ----------------------------------------------------------
+//
+// Every date-grouped feed page used to be a FULL SCAN of the photos table plus a
+// temp B-tree sort — the date dimensions are `strftime(COALESCE(...))`
+// expressions, and no plain column index can serve those. Measured on a real
+// 114k library: 33ms for the first page, 61ms per loadMore, and 224ms once ~20
+// albums were collapsed (each collapsed group adds its own full-scan COUNT). At
+// 224ms/page the feed sustains ~270 photos/s — far below a fling, which is
+// exactly the reported "the album loading is slower than I can scroll".
+//
+// SQLite CAN index an expression, and it matches on the resolved expression, so
+// an index over these same exprs turns the scan into a seek: 33ms → 0.2ms,
+// 224ms → 17ms, tree counts 18ms → 0.4ms.
+//
+// THE INDEX MUST BE BUILT FROM THE VERY EXPRESSIONS THE QUERIES USE. If the two
+// ever drift by a character, SQLite silently stops using the index and the feed
+// quietly returns to full scans — no error, no test failure, just a slow app
+// again. So the DDL is GENERATED here from SORT_ATTRS/GROUP_DATE_COL rather than
+// hand-written, and the index name carries a fingerprint of its own definition
+// (see indexNameFor): change an expression and the old index no longer matches
+// its name, so applySchema drops it and builds the new one. Drift becomes a
+// rebuild instead of a silent regression.
+
+/** CREATE INDEX cannot use qualified names — "photos.taken_at" is a syntax error
+ *  inside an index expression, though the QUERY may (and does) qualify them;
+ *  SQLite compares resolved expressions, so the two still match. */
+const unqualify = (expr) => expr.replace(/\bphotos\./g, "");
+
+/** Cheap, stable fingerprint of a definition (djb2). Not security, just drift
+ *  detection — it only has to change when the expression does. */
+function fingerprint(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
+/** Index columns for one date sort: the three group dims (outermost first, the
+ *  order the feed's ORDER BY uses), then the photo-level sort key, then id — the
+ *  seek tuple's tiebreak. A prefix of this serves groupBy [year], [year,month],
+ *  [year,month,day] and the bare sort alike. */
+function indexExprsFor(attr) {
+  const col = GROUP_DATE_COL[attr];
+  return [
+    dateDimExpr("year", col),
+    dateDimExpr("month", col),
+    dateDimExpr("day", col),
+    SORT_ATTRS[attr].expr,
+    "photos.id",
+  ].map(unqualify);
+}
+
+/**
+ * The feed's expression indexes, one per date sort — DDL and name, generated.
+ *
+ * Partial on `stale = 0` because every feed query carries that predicate: it
+ * keeps the index smaller and lets soft-deleted rows fall out of it entirely.
+ * @returns {Array<{name: string, sql: string}>}
+ */
+export function feedIndexes() {
+  return DATE_SORTS.map((attr) => {
+    const exprs = indexExprsFor(attr);
+    const body = `ON photos (\n  ${exprs.join(",\n  ")}\n) WHERE stale = 0`;
+    const name = `idx_photos_feed_${attr}_${fingerprint(body)}`;
+    return { name, sql: `CREATE INDEX IF NOT EXISTS ${name} ${body}` };
+  });
+}
+
+/** Prefix every generated feed index shares, so applySchema can find (and drop)
+ *  the ones left behind by an older expression. */
+export const FEED_INDEX_PREFIX = "idx_photos_feed_";

@@ -1,3 +1,5 @@
+import { feedIndexes, FEED_INDEX_PREFIX } from "./sort.js";
+
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS volumes (
   id INTEGER PRIMARY KEY,
@@ -102,6 +104,43 @@ export function applySchema(db) {
   // indexed before this column existed; playback probes those on demand.
   ensureColumn(db, "photos", "video_codec", "TEXT");
   ensureColumn(db, "photos", "pix_fmt", "TEXT");
+  // The metadata sweep's to-do list is "width IS NULL" (see db/enrich.js). It
+  // runs once per batch over the whole table, so without this it re-scans 100k+
+  // rows on every one of the ~2,000 batches a full sweep takes.
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_photos_pending_meta
+       ON photos (id) WHERE width IS NULL AND stale = 0`
+  );
+  ensureFeedIndexes(db);
+}
+
+/**
+ * Expression indexes for the feed's date grouping/sorting (see sort.js — the DDL
+ * is generated there, from the very expressions the queries use).
+ *
+ * Rebuilds rather than rots: each index name carries a fingerprint of its own
+ * definition, so if an expression in sort.js changes, the index built from the
+ * OLD expression no longer answers to a wanted name and is dropped here. Without
+ * that, a drifted index just stops being used — silently, with no error and no
+ * failing test, and the feed slides back to full scans.
+ *
+ * @param {import("better-sqlite3").Database} db
+ */
+function ensureFeedIndexes(db) {
+  const wanted = feedIndexes();
+  const wantedNames = new Set(wanted.map((i) => i.name));
+
+  const existing = db
+    .prepare(
+      `SELECT name FROM sqlite_master
+        WHERE type = 'index' AND name LIKE ?`
+    )
+    .all(`${FEED_INDEX_PREFIX}%`);
+
+  for (const { name } of existing) {
+    if (!wantedNames.has(name)) db.exec(`DROP INDEX IF EXISTS "${name}"`);
+  }
+  for (const { sql } of wanted) db.exec(sql);
 }
 
 /** Idempotent ADD COLUMN — the app ships no migration runner, and
