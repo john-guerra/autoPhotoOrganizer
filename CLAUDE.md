@@ -87,6 +87,28 @@ verification), and decisions already made.
 - Every file-serving endpoint MUST route user paths through
   `server/lib/safeResolve.js` (path-traversal guard — the legacy app was flagged).
 
+### Three traps that each cost an afternoon
+
+Svelte 4 + the DOM, in this app specifically. None of these fail loudly; each one
+silently does nothing, or hangs the tab.
+
+- **A `$:` statement must never depend on a `bind:this` element.** Svelte's
+  `safe_not_equal` reports every OBJECT as changed even when it is the identical
+  object, so a reactive block whose dependencies include a DOM node re-fires on
+  every flush, forever, each run scheduling the next — the tab locks up hard.
+  Drive that work imperatively from the handler instead (see `ToolGroup.svelte`'s
+  popover). Only primitives belong in a `$:` condition.
+- **`in:`/`out:` transitions are LOCAL**, so they are suppressed when an ancestor
+  block is created in the same update — which is exactly what a feed refresh does.
+  A transition on anything inside the feed needs `|global`, or it never plays at
+  all. (And then it needs a guard: the grid is virtualized, so a `|global` intro
+  replays every time the element scrolls back into view. See `foldMs` in
+  `App.svelte`.)
+- **Never re-lay-out from inside a `ResizeObserver` callback.** It raises
+  "ResizeObserver loop completed with undelivered notifications" — an uncaught
+  error that (rightly) fails `trackPageErrors`. Defer the work a frame
+  (`requestAnimationFrame`), as `ToolbarRow.svelte` does.
+
 ## A fixed bug gets a test that would have caught it
 
 Full guide: `docs/TESTING.md`. The rules that matter most:
@@ -228,10 +250,24 @@ This is a keyboard-first app: a shortcut nobody can find does not exist.
   convention (see `docs/ROADMAP.md`) exists for this reason — a passing test
   suite plus a plausible-looking screenshot is not sufficient for anything
   touching feed-window ordering or state.
-- **New logic that replaces/merges the feed window (`items`) must not
+- **New logic that replaces or extends the feed window (`items`) must not
   hand-roll another copy of the `fetchingBefore`/`fetchingAfter`/`feedEpoch`
-  guard pattern.** Six near-identical copies of this pattern already caused
-  two shipped bugs (issues #35, #36, #39) — route through whatever shared
-  helper exists from the modularization work tracked in issue #42 (or, if
-  that hasn't landed yet, flag the duplication in review rather than adding a
-  seventh copy).
+  guard pattern.** The guard exists because a scroll-triggered fetch started
+  against the OLD window can resolve _after_ a rebuild and splice its stale
+  page into the NEW `items` — duplicate rows, therefore duplicate Svelte keys,
+  therefore `{#each}` throws and the grid "freezes". Six hand-copied versions
+  of it caused two shipped bugs (issues #35, #36, #39).
+
+  It has since been consolidated (issue #42) into **two** transactions, and
+  every feed-window change belongs in one of them:
+
+  - **Replace** the window (filter/sort/groupBy change, fold, jump-to-group) →
+    `withFeedTransaction(body)` in `App.svelte`. It flushes (`await tick()`,
+    because `displayFilter` is a `$:` derived value that does not exist yet when
+    the handler sets `filter`), bumps the epoch, and holds BOTH fetching flags
+    for the whole duration. `body` gets the epoch it owns and **must re-check
+    `epoch !== feedEpoch` after every await** before touching shared state.
+  - **Extend** the window (infinite scroll) → `loadMore(direction)`, which owns
+    its own guard because it appends rather than replaces.
+
+  If a new case fits neither, extend one of those two — do not open a third.
