@@ -1,5 +1,43 @@
 import { describe, it, expect } from "vitest";
+import Database from "better-sqlite3";
 import { buildFilter, ALLOWED_ORIENTATIONS, ALLOWED_KINDS } from "./filters.js";
+
+/** A tiny real database — the text facet is about what SQLite MATCHES, so
+ *  asserting on the SQL string would prove nothing about the search box. */
+function seeded() {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE folders (id INTEGER PRIMARY KEY, abs_path TEXT);
+    CREATE TABLE photos (
+      id INTEGER PRIMARY KEY, filename TEXT, folder_id INTEGER, stale INTEGER DEFAULT 0
+    );
+  `);
+  const folder = db.prepare("INSERT INTO folders (id, abs_path) VALUES (?, ?)");
+  folder.run(1, "/photos/tayrona");
+  folder.run(2, "/photos/misc");
+  const photo = db.prepare(
+    "INSERT INTO photos (filename, folder_id) VALUES (?, ?)"
+  );
+  photo.run("a.jpg", 1);
+  photo.run("b.jpg", 1);
+  photo.run("sunset.jpg", 2);
+  photo.run("100%_done.jpg", 2); // a literal % — LIKE's wildcard, as a filename
+  return db;
+}
+
+/** The filenames a spec actually selects. */
+function namesMatching(db, spec) {
+  const f = buildFilter(spec);
+  return db
+    .prepare(
+      `SELECT photos.filename AS name
+         FROM photos JOIN folders ON folders.id = photos.folder_id
+        WHERE photos.stale = 0 AND (${f.sql})
+        ORDER BY photos.id`
+    )
+    .all(...f.params)
+    .map((r) => r.name);
+}
 
 describe("buildFilter", () => {
   it("returns a no-op for an empty spec", () => {
@@ -203,5 +241,35 @@ describe("buildFilter", () => {
       sql: "1=1",
       params: [],
     });
+  });
+});
+
+describe("buildFilter — free-text search", () => {
+  it("matches a photo by its filename, case-insensitively", () => {
+    const db = seeded();
+    expect(namesMatching(db, { text: "SUNSET" })).toEqual(["sunset.jpg"]);
+  });
+
+  it("matches every photo in a folder whose PATH contains the query", () => {
+    // What you actually remember is the trip, not the file: "tayrona" has to
+    // find the photos inside /photos/tayrona even though no filename says it.
+    const db = seeded();
+    expect(namesMatching(db, { text: "tayrona" }).sort()).toEqual([
+      "a.jpg",
+      "b.jpg",
+    ]);
+  });
+
+  it("treats a literal % as a character to find, not a wildcard", () => {
+    // Unescaped, "%" is LIKE's match-everything — the search box would silently
+    // return the whole library for a keystroke that should return one file.
+    const db = seeded();
+    expect(namesMatching(db, { text: "%" })).toEqual(["100%_done.jpg"]);
+  });
+
+  it("is off when the query is empty or only whitespace", () => {
+    const db = seeded();
+    expect(namesMatching(db, { text: "   " }).length).toBe(4);
+    expect(namesMatching(db, {}).length).toBe(4);
   });
 });

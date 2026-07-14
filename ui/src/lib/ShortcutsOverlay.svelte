@@ -77,6 +77,14 @@
       ],
     },
     {
+      heading: "Search & filter",
+      rows: [
+        { keys: ["/"], label: "Jump to the search box (name or folder)" },
+        { keys: ["Enter"], label: "Search now, without waiting" },
+        { keys: ["Esc"], label: "Clear the search" },
+      ],
+    },
+    {
       heading: "Library tree",
       rows: [
         {

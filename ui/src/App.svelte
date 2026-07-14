@@ -65,6 +65,7 @@
     takeNewlyFinished,
     crossedStep,
   } from "./lib/jobs.js";
+  import { isTypingTarget } from "./lib/focus.js";
   import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
   import ContextMenu from "./lib/ContextMenu.svelte";
@@ -2490,8 +2491,14 @@
 
   /** Give roving keyboard focus to a photo id's grid tile, if it's rendered.
    * `preventScroll` keeps the browser's native focus-scroll from fighting our
-   * own reveal/pin scrolling (issue #74); no-op when the tile isn't in the DOM. */
+   * own reveal/pin scrolling (issue #74); no-op when the tile isn't in the DOM.
+   *
+   * Never steals the keyboard from a text field. Every feed reload ends in a
+   * refocus, and a search keystroke IS a feed reload — so this used to rip the
+   * caret out of the search box mid-word, sending the rest of what you typed to
+   * the grid, where digits rate photos. */
   function focusTile(id, { preventScroll = false } = {}) {
+    if (isTypingTarget(document.activeElement)) return;
     tileEl(id)?.focus({ preventScroll });
   }
 
@@ -3436,9 +3443,7 @@
     // Handled before the blanket meta/ctrl bail below, but only when focus isn't
     // in a text field — there, Cmd/Ctrl+A must still select the field's text.
     if ((e.metaKey || e.ctrlKey) && (e.key === "a" || e.key === "A")) {
-      const tag = e.target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)
-        return;
+      if (isTypingTarget(e.target)) return;
       e.preventDefault();
       if (e.shiftKey) await bulkDeselect();
       else await bulkSelect();
@@ -3483,9 +3488,21 @@
 
     // Never steal keystrokes from a focused input (e.g. typing a folder
     // path with digits in it must not rate photos).
-    const tag = e.target?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)
-      return;
+    if (isTypingTarget(e.target)) return;
+
+    // '/' jumps to the search box — the convention everywhere from Gmail to
+    // GitHub, and this is a keyboard-first app: a search you have to reach for
+    // with the mouse is a search you don't use mid-cull. (The guard above means
+    // this never fires while you're already typing somewhere.)
+    if (e.key === "/") {
+      const box = document.querySelector(".search-input");
+      if (box) {
+        e.preventDefault();
+        box.focus();
+        box.select?.();
+        return;
+      }
+    }
 
     // '?' opens the keyboard-shortcuts overlay (before the empty-library
     // guard, so it works even with nothing scanned yet).

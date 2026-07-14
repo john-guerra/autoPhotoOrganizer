@@ -92,6 +92,27 @@ export function buildFilter(spec = {}) {
     params.push(spec.folderPath, escaped + "/%");
   }
 
+  // Free-text search: the file's NAME or the folder path it lives in. Those two
+  // are what a photographer actually remembers ("that Tayrona folder", "PXL_2024
+  // -something"), and they are the only text this index holds for every photo —
+  // camera/lens are EXIF, and 97k photos have never had their EXIF read.
+  //
+  // Case-insensitive by SQLite's default LIKE (ASCII). LIKE metacharacters in
+  // the QUERY are escaped, so typing a literal % or _ searches for that
+  // character instead of silently matching everything. Phrased against
+  // photos.folder_id IN (subquery) rather than folders.abs_path so it also works
+  // in the feed-seek and tree queries, which don't JOIN folders (the same reason
+  // folderPath above is written that way — a direct abs_path comparison threw
+  // "no such column" there).
+  const text = typeof spec?.text === "string" ? spec.text.trim() : "";
+  if (text) {
+    const like = `%${text.replace(/([\\%_])/g, "\\$1")}%`;
+    clauses.push(
+      `(photos.filename LIKE ? ESCAPE '\\' OR photos.folder_id IN (SELECT id FROM folders WHERE abs_path LIKE ? ESCAPE '\\'))`
+    );
+    params.push(like, like);
+  }
+
   // Time-range facet (timeline filter). Filters on the SAME date attribute the
   // timeline plots — driven by `dateAttr` (which follows the feed's sort date;
   // defaults to date_taken = EXIF-created) — so the brush, the density, the
