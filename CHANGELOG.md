@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.12
+
+- **The timeline gets a row of its own**, directly under the filters it belongs
+  with. It is about five times wider than it was: the whole span of the library
+  is legible at once, and brushing the gap between two shoots is no longer a game
+  of pixels.
+- **Locate and Auto Albums moved down** to sit with the view controls, which is
+  what made the room.
+
 ## 2.14.11
 
 - **The timeline sits with the filters**, where it belongs — it narrows the

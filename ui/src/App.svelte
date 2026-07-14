@@ -4205,14 +4205,18 @@
         on:filtermodechange={(e) => onFilterModeChange(e.detail)}
         on:filterchange={(e) => onFilterChange(e.detail)}
       />
+    </div>
 
-      <!-- The timeline IS a filter — it narrows the working set by capture time
-           exactly as the stars and the kinds do, and the counts follow it. So it
-           belongs with them, not off with the display controls: reading the
-           filter row should tell you everything that is currently narrowing what
-           you see. It takes whatever width the row has left over (flex: 1), which
-           is what makes brushing an album gap workable. -->
-      {#if timeMin != null && timeMax != null && timeMax > timeMin}
+    <!-- ROW 2 — THE TIMELINE, and nothing else.
+         It is a filter (it narrows the working set by capture time exactly as the
+         stars and the kinds do, and the counts follow it), so it sits directly
+         under the filters. But it is not a slider: it draws a histogram, hangs a
+         date badge off each handle and puts a sampled-count above. Sharing a row,
+         it was rationed a couple of hundred pixels and the two badges landed on
+         top of each other. Given the full width it is ~1,200px, and brushing the
+         gap between two shoots stops being a game of pixels. -->
+    {#if timeMin != null && timeMax != null && timeMax > timeMin}
+      <div class="topbar-row timeline">
         <div
           class="time-filter"
           title="Filter by capture time — drag the handles"
@@ -4234,11 +4238,36 @@
               })}
           />
         </div>
-      {/if}
+      </div>
+    {/if}
 
-      <div class="divider push"></div>
+    <!-- ROW 3. Every row is deliberate, rather than the first one wrapping into
+         the others by accident. Rows 1 and 2 are what NARROWS the library
+         (grouping, the filters, the timeline); row 3 is everything else — how the
+         result is DRAWN (full view, size, burst, order) and the two things you can
+         DO with it (Locate, Auto Albums).
 
-      <!-- ③ VIEW -->
+         The sidebar switch sits in a box the exact width of the sidebar, so it
+         sits directly above the column it controls. -->
+    <div class="topbar-row secondary">
+      <div class="sidebar-slot" style="width:{sidebarWidth}px">
+        <SidebarModeToggle bind:sidebarMode />
+      </div>
+
+      <GridControls
+        bind:zoom
+        zoomMax={ZOOM_LEVELS.length - 1}
+        bind:burstEnabled
+        bind:burstGapMs
+        {sort}
+        {cyclingAll}
+        {globalViewMode}
+        on:cycleall={cycleAllGroups}
+        on:sortchange={(e) => onSortChange(e.detail)}
+      />
+
+      <div class="row2-spacer"></div>
+
       <ViewControls
         bind:albumMode
         {detectingAlbums}
@@ -4254,32 +4283,6 @@
       >
         ?
       </button>
-    </div>
-
-    <!-- ROW 2. A second row on PURPOSE, rather than the first one wrapping into
-         one by accident. Row 1 is what NARROWS the library (grouping, filters,
-         the timeline) plus the two actions; row 2 is how what's left is DRAWN.
-         The sidebar switch sits in a box the exact width of the sidebar, so it
-         sits directly above the column it controls; the display controls (full
-         view, size, burst, order) sit opposite. -->
-    <div class="topbar-row secondary">
-      <div class="sidebar-slot" style="width:{sidebarWidth}px">
-        <SidebarModeToggle bind:sidebarMode />
-      </div>
-
-      <div class="row2-spacer"></div>
-
-      <GridControls
-        bind:zoom
-        zoomMax={ZOOM_LEVELS.length - 1}
-        bind:burstEnabled
-        bind:burstGapMs
-        {sort}
-        {cyclingAll}
-        {globalViewMode}
-        on:cycleall={cycleAllGroups}
-        on:sortchange={(e) => onSortChange(e.detail)}
-      />
     </div>
 
     {#if manageLibraryOpen}
@@ -4857,14 +4860,19 @@
      handle, and the handles sit at the very ends of the axis, so both badges
      overhang the axis by ~12px. Without room for them, `overflow: hidden` ate the
      "J" of "Jan 1, 1980" at one end and the year at the other. */
-  /* Takes the row's leftover width, and gives it back before anything else does:
-     it is the one control here that stays usable at any size (a shorter axis is
-     still an axis). The 220px floor is where the two end-date badges stop
-     overlapping; the 16px of padding is for the badges themselves, which the
-     widget centres on the handles and which `overflow: hidden` otherwise eats. */
+  /* The timeline's own row: it takes the whole width, because it is not a slider.
+     It draws a histogram, hangs a date badge off each handle and puts a
+     sampled-count above, and sharing a row with the filters it was rationed ~200px
+     — at which point the two badges land ON TOP OF each other and the axis is
+     unreadable. The row costs ~45px of vertical chrome and buys the widget about
+     1,200px. The 16px of padding is for those badges, which are centred on the
+     handles and overhang each end; `overflow: hidden` ate them otherwise. */
+  .topbar-row.timeline {
+    padding-top: 0;
+  }
   .time-filter {
-    flex: 1 1 260px;
-    min-width: 220px;
+    flex: 1;
+    min-width: 0;
     padding: 0 16px;
     overflow: hidden;
   }
@@ -4882,14 +4890,6 @@
   }
   /* Push the View cluster to the right. The row no longer wraps, so this is now
      unconditional. */
-  /* `margin-left: auto` used to right-align the View cluster by swallowing ALL of
-     the row's free space — which meant the timeline, sitting just before it,
-     could never grow past its 260px basis no matter how wide the window got. The
-     timeline takes the slack now (flex: 1), and the View cluster ends up hard
-     against the right edge anyway, because there is nothing left to push it with. */
-  .divider.push {
-    margin-left: 0;
-  }
 
   /* The one scope chip. Both kinds of scope (a folder, a hand-picked id set)
      are the same idea to the user — "you're seeing a subset" — so they share a

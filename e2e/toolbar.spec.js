@@ -97,20 +97,28 @@ test.describe("@p1 the toolbar", () => {
     expect(errors).toEqual([]);
   });
 
-  test("the two rows split what NARROWS the library from how it is DRAWN", async ({
+  test("the three rows split what NARROWS the library from how it is DRAWN", async ({
     page,
   }) => {
-    // Row 1 narrows: grouping, the filters, and the timeline — which is a filter
-    // like any other (it cuts the working set by capture time, and the counts
-    // follow it), so it sits WITH the filters rather than off among the display
-    // controls. Row 2 draws: full-view/snapshot/collapse, size, burst, order.
-    // Getting this backwards is what made the timeline read as a display widget.
+    // Rows 1 and 2 narrow the library: grouping, the filters, and the timeline —
+    // which is a filter like any other (it cuts the working set by capture time,
+    // and the counts follow it). Row 3 draws: full-view/snapshot/collapse, size,
+    // burst, order — plus the two things that DO something, Locate and Auto
+    // Albums. Getting this backwards is what made the timeline read as a display
+    // widget.
     const errors = trackPageErrors(page);
     await openApp(page, { groupBy: ["folder"] });
 
+    // The timeline has a row to ITSELF, between the filters it belongs with and
+    // the display controls it does not. It is not a slider — it draws a histogram
+    // and hangs a date badge off each handle — so sharing a row rationed it ~200px
+    // and the two badges landed on top of each other.
     await expect(
-      page.locator(".topbar-row.primary .time-filter")
+      page.locator(".topbar-row.timeline .time-filter")
     ).toBeVisible();
+    await expect(page.locator(".topbar-row.primary .time-filter")).toHaveCount(
+      0
+    );
     await expect(
       page.locator(".topbar-row.secondary .time-filter")
     ).toHaveCount(0);
