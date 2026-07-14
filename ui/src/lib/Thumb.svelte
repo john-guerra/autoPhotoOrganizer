@@ -79,10 +79,16 @@
       if (src === url) settle(false);
     }, STALL_MS);
     previewTimer = setTimeout(() => {
-      if (src === url && !loaded)
+      if (src === url && !loaded && hasPreview(item))
         previewSrc = previewUrl(item.id, item.mtimeMs);
     }, PREVIEW_DELAY_MS);
   }
+
+  /** The preview fallback is a photo's EMBEDDED EXIF thumbnail. A video hasn't
+   *  got one — its poster frame is the thumbnail we are already waiting for — so
+   *  asking for one is a request that can only fail, made at the exact moment the
+   *  machine is already too busy to have produced the poster in time. */
+  const hasPreview = (it) => it?.kind !== "video";
 
   function settle(ok) {
     clearTimeout(stallTimer);
@@ -93,7 +99,8 @@
     // Retry button is suppressed, since there's nothing to retry) would be
     // left permanently blank. Falling back immediately on any failure that
     // beats the delay covers that case, and any other fast failure too.
-    if (!ok && !previewSrc) previewSrc = previewUrl(item.id, item.mtimeMs);
+    if (!ok && !previewSrc && hasPreview(item))
+      previewSrc = previewUrl(item.id, item.mtimeMs);
     loaded = ok;
     failed = !ok;
     dispatch("settled", { id: item.id, ok });

@@ -6,6 +6,11 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.2
+
+- **A video whose thumbnail is slow to appear no longer logs a server error.** The
+  grid was falling back to an embedded-photo preview that a video hasn't got.
+
 ## 2.14.1
 
 - **A search typed while the library is still loading now actually filters the
