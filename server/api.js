@@ -1001,9 +1001,15 @@ export function registerApi(app) {
       }
 
       const reason = plan.reason || whyTranscode({ ext, codec, pixFmt });
+      // A real bar, not a spinner: ffmpeg reports how far into the clip it has
+      // encoded, and the index already knows how long the clip is. A 337MB
+      // camcorder AVI takes minutes — "converting…" for that long is
+      // indistinguishable from "hung". (duration is NULL for a video whose probe
+      // failed; total 0 keeps the spinner for those, which is honest.)
+      const total = Math.round(it.duration ?? 0);
       const job = registry.create("transcode", {
         label: `Converting ${it.filename} for playback`,
-        total: 0, // ffmpeg progress isn't wired up; this is a spinner, not a bar
+        total,
       });
       registry.update(job.id, { photoId: it.id, reason, phase: reason });
       res.status(202).json({ preparing: true, jobId: job.id, reason });
@@ -1012,6 +1018,13 @@ export function registerApi(app) {
         try {
           await processing.transcodeForPlayback(it.path, proxy, {
             signal: job.controller.signal,
+            onProgress: (seconds) => {
+              // Clamp: ffmpeg can overshoot the probed duration by a frame or two,
+              // and a bar that reads 101% looks broken.
+              registry.update(job.id, {
+                done: total ? Math.min(Math.round(seconds), total) : 0,
+              });
+            },
           });
           registry.finish(job.id, { url: `/api/video/${it.id}/file` });
         } catch (e) {

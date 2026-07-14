@@ -6,6 +6,7 @@ import exifr from "exifr";
 import ffmpegPathRaw from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { ProcessingService } from "./ProcessingService.js";
+import { createProgressParser } from "../lib/ffmpegProgress.js";
 
 // In a packaged Electron build the static binaries are pulled out of the asar
 // archive (build.asarUnpack) so they can be spawned, but the resolved path still
@@ -422,15 +423,28 @@ export class NodeProcessingService extends ProcessingService {
    * @override
    * @param {string} file source path
    * @param {string} dest destination .mp4 path
-   * @param {{signal?: AbortSignal, maxHeight?: number}} [opts]
+   * @param {{signal?: AbortSignal, maxHeight?: number, onProgress?: (seconds: number) => void}} [opts]
+   *   onProgress: how far into the clip ffmpeg has encoded, in SECONDS. Compare
+   *   it to the clip's duration for a fraction — a 337MB camcorder AVI takes
+   *   minutes, and a spinner can't tell the user 10% from 90%, or a slow encode
+   *   from a hung one.
    * @returns {Promise<void>}
    */
-  async transcodeForPlayback(file, dest, { signal, maxHeight = 1080 } = {}) {
+  async transcodeForPlayback(
+    file,
+    dest,
+    { signal, maxHeight = 1080, onProgress } = {}
+  ) {
     const tmp = `${dest}.${process.pid}.tmp.mp4`;
     const args = [
       "-nostdin",
       "-loglevel",
       "error",
+      // Machine-readable progress on stdout. (stderr stays the error channel —
+      // mixing them would mean parsing progress out of diagnostics.)
+      "-progress",
+      "pipe:1",
+      "-nostats",
       "-i",
       file,
       // Scale down only if taller than maxHeight, and force BOTH dimensions
@@ -462,11 +476,18 @@ export class NodeProcessingService extends ProcessingService {
 
     await new Promise((resolve, reject) => {
       const child = spawn(ffmpegPath, args, {
-        stdio: ["ignore", "ignore", "pipe"],
+        stdio: ["ignore", onProgress ? "pipe" : "ignore", "pipe"],
       });
       const err = [];
       const onAbort = () => child.kill("SIGKILL");
       signal?.addEventListener("abort", onAbort, { once: true });
+      if (onProgress) {
+        const parser = createProgressParser();
+        child.stdout.on("data", (c) => {
+          const seconds = parser.push(String(c));
+          if (seconds != null) onProgress(seconds);
+        });
+      }
       child.stderr.on("data", (c) => err.push(c));
       child.on("error", reject);
       child.on("close", (code) => {
