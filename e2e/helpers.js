@@ -299,4 +299,22 @@ export const tree = {
   expandAll: (page) => page.locator(".tree-action", { hasText: "Expand all" }),
   collapseAll: (page) =>
     page.locator(".tree-action", { hasText: "Collapse all" }),
+  rowCount: (page) => page.locator(".tree-node-row").count(),
+};
+
+// --- the right-click menu (shared by the grid, the loupe and the tree) --------
+
+export const menu = {
+  root: (page) => page.locator(".context-menu"),
+  /** An item by its visible label.
+   *
+   *  getByRole, not a hasText regex: Svelte renders the label with the
+   *  surrounding whitespace of the template, so the button's raw text content is
+   *  "\n      Reveal in Finder\n    " and an anchored ^…$ regex never matches it.
+   *  The accessible name is whitespace-normalised, and `exact` keeps "Remove from
+   *  library…" from also matching a future "Remove from library and delete". */
+  item: (page, label) =>
+    page
+      .locator(".context-menu")
+      .getByRole("menuitem", { name: label, exact: true }),
 };

@@ -9,7 +9,13 @@
 
   export let x = 0;
   export let y = 0;
-  /** @type {Array<{label: string, action: () => void, enabled?: boolean}>} */
+  /** An item is either a row or a rule:
+   *   {label, action, enabled?, danger?}  — `danger` styles a destructive action
+   *   {separator: true}                   — a rule between groups of items
+   * NOTE every action auto-dismisses the menu (see onItem), so a two-click
+   * "arm the confirm" pattern cannot live in here — a destructive item must
+   * confirm somewhere that outlives the menu (the tree's Remove opens a Modal).
+   * @type {Array<{label?: string, action?: () => void, enabled?: boolean, danger?: boolean, separator?: boolean}>} */
   export let items = [];
 
   const dispatch = createEventDispatcher();
@@ -81,14 +87,19 @@
   style="left:{left}px; top:{top}px;"
 >
   {#each items as item}
-    <button
-      class="item"
-      role="menuitem"
-      disabled={item.enabled === false}
-      on:click={() => onItem(item)}
-    >
-      {item.label}
-    </button>
+    {#if item.separator}
+      <div class="sep" role="separator"></div>
+    {:else}
+      <button
+        class="item"
+        class:danger={item.danger}
+        role="menuitem"
+        disabled={item.enabled === false}
+        on:click={() => onItem(item)}
+      >
+        {item.label}
+      </button>
+    {/if}
   {/each}
 </div>
 
@@ -126,5 +137,20 @@
   .item:disabled {
     color: #666;
     cursor: default;
+  }
+  /* Destructive items read as destructive BEFORE the click, not after. Same
+     palette as the group header's Remove (GroupLabelActions), so one action
+     looks the same wherever it is offered. */
+  .item.danger {
+    color: #ffb4b4;
+  }
+  .item.danger:hover:not(:disabled) {
+    background: #7a2020;
+    color: #fff;
+  }
+  .sep {
+    height: 1px;
+    margin: 4px 6px;
+    background: #3a3a3a;
   }
 </style>

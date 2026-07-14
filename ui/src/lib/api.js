@@ -145,6 +145,30 @@ export async function revealInFinder(id) {
   }
 }
 
+/** Reveal a FOLDER in the OS file browser. Unlike revealInFinder (which takes a
+ * photo id), the folder is named by path — the server refuses any path that
+ * isn't a folder in this library, or an ancestor of one.
+ * @returns {Promise<{ok:boolean, error?:string}>} */
+export async function revealFolder(path) {
+  try {
+    const res = await fetch("/api/reveal-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: body.error || `reveal failed (${res.status})`,
+      };
+    }
+    return body;
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+}
+
 /** Reveal a whole selection in the OS file browser (best-effort per platform;
  * macOS highlights all, Windows the first, Linux opens the folder). */
 export async function revealSelection(ids) {

@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.7
+
+- **Right-click a folder in the tree.** Jump to it, select or keep only its
+  photos, show it as a strip or collapse it, expand or fold all its sub-folders,
+  reveal it in Finder, copy its path, rescan it, or remove it from the library.
+  Removing asks first, and says what it will and won't touch — the files on disk
+  are never affected.
+
 ## 2.14.6
 
 - **A folder group now looks like a folder** — in the feed, the tree and the

@@ -1105,6 +1105,64 @@ export function registerApi(app) {
     }
   });
 
+  // Reveal a FOLDER (the tree's right-click menu). The existing reveal routes
+  // take photo ids and resolve the path from the index; a folder has no id, so
+  // the path arrives from the client — and is therefore not trusted.
+  //
+  // The guard is the index itself, which is stronger than a root-prefix check:
+  // the path must BE a folder we have indexed, or be an ancestor of one. That
+  // second case is not slack — it is a VIRTUAL ancestor (a folder holding only
+  // sub-folders, so it has no `folders` row of its own, e.g. "Cards"), which the
+  // tree shows and the user can right-click. Anything else — a path outside the
+  // library, a traversal, a file — matches nothing and is refused.
+  app.post("/api/reveal-folder", async (req, res) => {
+    const folderPath = req.body?.path;
+    if (typeof folderPath !== "string" || !folderPath.length) {
+      return res.status(400).json({ ok: false, error: "path is required" });
+    }
+    const db = getDb();
+    const escaped = folderPath.replace(/([\\%_])/g, "\\$1");
+    const known = db
+      .prepare(
+        `SELECT 1 FROM folders
+          WHERE abs_path = ? OR abs_path LIKE ? ESCAPE '\\'
+          LIMIT 1`
+      )
+      .get(folderPath, `${escaped}/%`);
+    if (!known) {
+      return res
+        .status(404)
+        .json({ ok: false, error: "not a folder in this library" });
+    }
+    try {
+      const st = await stat(folderPath);
+      if (!st.isDirectory()) throw new Error("not a directory");
+    } catch {
+      // Removed in Finder, or on a drive that isn't mounted right now.
+      return res
+        .status(404)
+        .json({ ok: false, error: "folder not found on disk" });
+    }
+    const command = revealCommand(process.platform, folderPath);
+    if (!command) {
+      return res.status(501).json({
+        ok: false,
+        error: `unsupported platform: ${process.platform}`,
+      });
+    }
+    try {
+      await new Promise((resolveSpawn, reject) => {
+        execFile(command.cmd, command.args, (err) => {
+          if (err && process.platform !== "win32") reject(err);
+          else resolveSpawn();
+        });
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: String(err?.message ?? err) });
+    }
+  });
+
   // Reveal a whole selection at once (issue #18, multi-select). Best-effort per
   // OS: macOS highlights all of them in Finder (AppleScript), Windows highlights
   // the first (explorer /select is single-only), Linux opens the containing

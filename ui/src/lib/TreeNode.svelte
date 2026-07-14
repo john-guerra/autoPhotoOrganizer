@@ -123,6 +123,31 @@
   // jump to the first real group beneath it instead.
   $: jumpPath = isVirtual ? (groupPaths[0] ?? null) : path;
 
+  /** Right-click. Ships the facts App CANNOT recompute from the path alone —
+   * isVirtual, groupPaths and the row's own subfolders come out of folderTree's
+   * trie, and `expanded` lives in TreeSidebar's expandedKeys — so the menu can be
+   * built without App having to rebuild the tree's state. */
+  function onContextMenu(event) {
+    event.preventDefault();
+    dispatch("contextmenu", {
+      x: event.clientX,
+      y: event.clientY,
+      path,
+      jumpPath,
+      groupPaths,
+      isVirtual,
+      isFolder: isFolderLevel,
+      folderPath: isFolderLevel ? node.value : null,
+      hasChildren,
+      expanded,
+      rendererId,
+      // TreeSidebar seeds its expand-BFS from {node, path, depth} rows, so a
+      // subtree-scoped "expand everything under here" needs the node itself.
+      node,
+      depth,
+    });
+  }
+
   // --- Label ----------------------------------------------------------------
   // Folder names are mostly redundancy (the year the parent row already states,
   // the _peq every folder carries); folderLabel.js decides which tokens earn a
@@ -197,7 +222,8 @@
 </script>
 
 <li class="tree-node" class:highlighted={highlightedKey === key}>
-  <div class="tree-node-row">
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="tree-node-row" on:contextmenu={onContextMenu}>
     <!-- TREE structure: a disclosure triangle — shows/hides this node's CHILD
          folders here in the sidebar. -->
     {#if hasChildren}
@@ -270,6 +296,7 @@
           on:toggleExpand
           on:toggleCollapse
           on:jump
+          on:contextmenu
         />
       {/each}
       {#if wantsFetch}
@@ -294,6 +321,7 @@
               on:toggleExpand
               on:toggleCollapse
               on:jump
+              on:contextmenu
             />
           {/each}
         {/if}

@@ -58,7 +58,10 @@
     renameFolder,
     revealInFinder,
     revealSelection,
+    revealFolder,
   } from "./lib/api.js";
+  import { buildTreeMenuItems } from "./lib/treeMenu.js";
+  import Modal from "./lib/Modal.svelte";
   import {
     jobs,
     waitForJob,
@@ -2263,6 +2266,135 @@
     return REMOVABLE_FOLDER_DIMS.has(header?.path?.at(-1)?.dimension);
   }
 
+  // --- The tree's right-click menu -------------------------------------------
+  // A SECOND menu state, not a reuse of `contextMenu`: that one is keyed by
+  // targetIndex (a photo in displayEntries) and this one by a group path, and
+  // folding both into one object means every item has to re-derive which kind it
+  // is. Both render through the same ContextMenu component — the surface is
+  // shared, the state is not.
+  let treeMenu = { open: false, x: 0, y: 0, items: [] };
+  /** The folder a Remove is waiting on confirmation for (null = no dialog). */
+  let removeFolderPending = null;
+
+  function openTreeMenu(detail) {
+    treeMenu = {
+      open: true,
+      x: detail.x,
+      y: detail.y,
+      items: buildTreeMenuItems({
+        path: detail.path,
+        folderPath: detail.folderPath,
+        isVirtual: detail.isVirtual,
+        isFolder: detail.isFolder,
+        hasChildren: detail.hasChildren,
+        expanded: detail.expanded,
+        rendererId: detail.rendererId,
+        canJump: !!detail.jumpPath,
+        on: {
+          jump: () => detail.jumpPath && jumpToPath(detail.jumpPath),
+          // A virtual ancestor owns no photos — its actions run over the subtree.
+          selectAll: () =>
+            toggleGroupSelectAll(
+              detail.path,
+              detail.isVirtual ? detail.groupPaths : undefined
+            ),
+          keepOnly: () =>
+            keepOnlyGroup(
+              detail.path,
+              detail.isVirtual ? detail.groupPaths : undefined
+            ),
+          cycleView: () =>
+            detail.isVirtual
+              ? cycleLeafPaths(detail.groupPaths)
+              : cycleGroupState(detail.path),
+          // expandedKeys is TreeSidebar's own state, so the sidebar handed us a
+          // closure rather than us reaching into it.
+          toggleDescendants: detail.toggleDescendants,
+          reveal: () => revealFolderInFinder(detail.folderPath),
+          copyPath: () => copyFolderPath(detail.folderPath),
+          rescan: () => rescanFolder(detail.folderPath),
+          // ContextMenu closes on every action, so the two-click "arm" that the
+          // group header uses cannot survive in here — the confirm has to outlive
+          // the menu. A modal does.
+          remove: () => (removeFolderPending = detail),
+        },
+      }),
+    };
+  }
+
+  async function revealFolderInFinder(folderPath) {
+    if (!folderPath) return;
+    const res = await revealFolder(folderPath);
+    if (!res.ok) {
+      error = `Couldn't reveal that folder: ${res.error ?? "unknown error"}`;
+    }
+  }
+
+  /** Copy a folder's path to the clipboard. The first clipboard use in the app —
+   * and it can reject (a non-secure context, or the user denying permission), so
+   * it says so rather than failing into the void. */
+  async function copyFolderPath(folderPath) {
+    if (!folderPath) return;
+    try {
+      await navigator.clipboard.writeText(folderPath);
+      status = "Path copied";
+    } catch (e) {
+      error = `Couldn't copy the path: ${e?.message ?? e}. Select it from the row's tooltip instead.`;
+    }
+  }
+
+  /** Re-scan one folder — picks up whatever changed on disk since the last scan
+   * (files added, removed or edited in Finder). Recursive, so a card's whole
+   * subtree catches up in one go, and it runs as a cancelable background job so
+   * the JobsPanel shows progress instead of the UI freezing. Reuses doScan by
+   * pointing it at this folder, rather than growing a second scan path that
+   * would drift from it. */
+  async function rescanFolder(folderPath) {
+    if (!folderPath || scanning) return;
+    // Deliberately NOT routed through doScan: that reads the Add panel's own
+    // state (`dir`, `recursiveScan`, the subfolder picker), so driving it from
+    // here would mean writing to bound inputs — the folder path would appear in
+    // the Add box, and the panel's "last folder" would be overwritten, as a side
+    // effect of a menu click. It runs the same job and the same refresh.
+    error = "";
+    scanning = true;
+    status = `Rescanning ${folderPath.split("/").filter(Boolean).at(-1)}…`;
+    try {
+      const { jobId } = await startScan(folderPath, { recursive: true });
+      const job = await waitForJob(jobId, onScanProgress);
+      if (job.status === "canceled") {
+        status = "Rescan canceled";
+        return;
+      }
+      if (job.status !== "done") {
+        error = job.error || "Rescan failed";
+        status = "";
+        return;
+      }
+      refreshLibrary();
+      // The folder's photo set may have changed anywhere in the current sort, so
+      // reload rather than trying to patch the window (same reasoning as doScan).
+      await loadInitialFeed();
+      refreshCounts();
+      libraryVersion++; // the tree/fisheye refetch
+    } catch (e) {
+      error = `Couldn't rescan that folder: ${e?.message ?? e}`;
+      status = "";
+    } finally {
+      scanning = false;
+    }
+  }
+
+  async function confirmRemoveFolder() {
+    const detail = removeFolderPending;
+    removeFolderPending = null;
+    if (!detail) return;
+    // removeAlbum is the same handler the group header uses, and it arms on the
+    // first call — the modal IS the confirmation, so prime the arm and call it.
+    removeArmedKey = pathKey(detail.path);
+    await removeAlbum(detail.path);
+  }
+
   /** Header parts for any dimension: only folders need the treatment.
    *
    * `_stats` / `_roots` are unused INSIDE the function — they are there so the
@@ -4087,6 +4219,7 @@
           on:toggle={(e) =>
             onGroupToggle(e.detail.path, e.detail.event, e.detail.paths)}
           on:jump={(e) => jumpToPath(e.detail)}
+          on:contextmenu={(e) => openTreeMenu(e.detail)}
         />
       {:else}
         <FisheyeSidebar
@@ -4466,6 +4599,49 @@
   />
 {/if}
 
+{#if treeMenu.open}
+  <ContextMenu
+    x={treeMenu.x}
+    y={treeMenu.y}
+    items={treeMenu.items}
+    on:close={() => (treeMenu.open = false)}
+  />
+{/if}
+
+<!-- Remove is the one destructive item in the tree's menu, and ContextMenu closes
+     on every action — so the group header's two-click "arm" cannot survive in
+     there. The confirm lives here instead, where it outlives the menu, and says
+     exactly what will and will not happen: the folder's rows and RATINGS leave
+     the index; the photos on disk are not touched. -->
+{#if removeFolderPending}
+  <Modal
+    open={true}
+    title="Remove folder from library?"
+    size="sm"
+    on:close={() => (removeFolderPending = null)}
+  >
+    <p class="confirm-body">
+      <strong>{removeFolderPending.folderPath}</strong>
+    </p>
+    <p class="confirm-note">
+      This drops the folder's photos — and their ratings — from the index. The
+      files on disk are not touched, and a rescan brings the photos back
+      (unrated).
+    </p>
+    <div class="confirm-actions">
+      <button
+        class="confirm-cancel"
+        on:click={() => (removeFolderPending = null)}
+      >
+        Cancel
+      </button>
+      <button class="confirm-remove" on:click={confirmRemoveFolder}>
+        Remove from library
+      </button>
+    </div>
+  </Modal>
+{/if}
+
 {#if shortcutsHelpOpen}
   <ShortcutsOverlay on:close={() => (shortcutsHelpOpen = false)} />
 {/if}
@@ -4562,6 +4738,44 @@
   /* The one scope chip. Both kinds of scope (a folder, a hand-picked id set)
      are the same idea to the user — "you're seeing a subset" — so they share a
      chip and an exit; the leading icon (▣ / ●) says which kind it is. */
+  /* The tree menu's Remove confirmation. */
+  .confirm-body {
+    margin: 0 0 6px;
+    word-break: break-all;
+    color: #e8e8e8;
+  }
+  .confirm-note {
+    margin: 0 0 14px;
+    color: #9a9a9a;
+    font-size: 0.85rem;
+    line-height: 1.45;
+  }
+  .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .confirm-cancel,
+  .confirm-remove {
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+  }
+  .confirm-cancel {
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    color: #e8e8e8;
+  }
+  .confirm-remove {
+    background: #5a1a1a;
+    border: 1px solid #a33;
+    color: #ffd7d7;
+  }
+  .confirm-remove:hover {
+    background: #7a2020;
+    color: #fff;
+  }
   .scope-chip {
     display: inline-flex;
     align-items: center;

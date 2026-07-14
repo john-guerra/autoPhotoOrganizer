@@ -185,17 +185,28 @@
     return rows;
   }
 
-  async function expandAll() {
+  function expandAll() {
+    return expandFrom(
+      rootNodes.map((node) => ({
+        node,
+        path: [{ dimension: groupBy[0], value: node.value }],
+        depth: 0,
+      }))
+    );
+  }
+
+  /** Expand every level beneath `seed` (a {node, path, depth} row, the shape
+   * childRows speaks). Shared by the sidebar's "Expand all" and by the
+   * right-click menu's "Expand all sub-folders", so a subtree expand can't drift
+   * from the whole-tree one — same BFS, same fetch/row ceilings, same note when
+   * it stops early. */
+  async function expandFrom(seed) {
     if (expandingAll) return;
     expandingAll = true;
     expandAllNote = "";
     try {
       const next = new Set(expandedKeys);
-      let frontier = rootNodes.map((node) => ({
-        node,
-        path: [{ dimension: groupBy[0], value: node.value }],
-        depth: 0,
-      }));
+      let frontier = seed;
       let fetches = 0;
       let rows = frontier.length;
       let truncated = "";
@@ -261,6 +272,27 @@
 
   function handleJump({ detail: path }) {
     dispatch("jump", path);
+  }
+
+  /** Right-click on a row. The expand/collapse of a subtree is handled HERE, not
+   * in App: `expandedKeys` is sidebar-local state, and App has no way to reach
+   * it. Everything else is App's (it owns the feed), so the event goes up with a
+   * callback the menu can invoke for the part that is ours. */
+  function handleContextMenu({ detail }) {
+    dispatch("contextmenu", {
+      ...detail,
+      toggleDescendants: () => {
+        if (detail.expanded) {
+          // Fold this row's whole subtree, leaving the row itself open — the same
+          // thing shift-clicking its disclosure triangle does.
+          expandedKeys = collapseDescendants(expandedKeys, detail.path);
+        } else {
+          expandFrom([
+            { node: detail.node, path: detail.path, depth: detail.depth },
+          ]);
+        }
+      },
+    });
   }
 
   /** Walks `targetPath` from the root, fetching + expanding each level as
@@ -352,6 +384,7 @@
         on:toggleExpand={handleToggleExpand}
         on:toggleCollapse={handleToggleCollapse}
         on:jump={handleJump}
+        on:contextmenu={handleContextMenu}
       />
     {/each}
   </ul>
