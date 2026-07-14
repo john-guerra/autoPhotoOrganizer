@@ -199,6 +199,37 @@ export const group = {
     (
       await header.locator(".section-toggle-icon").getAttribute("class")
     ).includes("not-grid"),
+
+  /** The group path a header stands for, as [dimension, value] pairs. */
+  keyOf: (header) =>
+    header.evaluate(
+      (el) => el.closest(".section-wrapper")?.dataset.groupKey ?? null
+    ),
+
+  /** The header one level UP from `child` — its own path minus the last step.
+   *
+   * Addressed by group path, never by nth(): the feed now nests FOLDER subtrees,
+   * so a group's header is preceded by one header per ancestor folder, and how
+   * many of those exist depends on the fixture's directory layout. An index-based
+   * "parent" silently became a different header the moment nesting landed. The
+   * path is the thing that actually means "parent". */
+  parentHeaderOf: async (page, child) => {
+    const key = JSON.parse(await group.keyOf(child));
+    const parentKey = JSON.stringify(key.slice(0, -1));
+    return page
+      .locator(
+        `.section-wrapper[data-group-key='${parentKey}'] .section-header`
+      )
+      .first();
+  },
+
+  /** The deepest (most nested) header on screen — a leaf group. */
+  deepestHeader: (page) =>
+    page
+      .locator(".section-wrapper")
+      .filter({ has: page.locator(".section-header") })
+      .last()
+      .locator(".section-header"),
 };
 
 // --- auto albums + the timeline ---------------------------------------------

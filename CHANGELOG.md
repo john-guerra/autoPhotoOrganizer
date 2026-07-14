@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.5
+
+- **Grouping by folder now shows your folder subtrees in the feed.** Sub-folders
+  are indented under their parent, with the same dotted tree lines the sidebar
+  uses, instead of a flat list of long absolute paths. Folders with no photos of
+  their own (like a card's parent folder) appear as a heading with the total
+  underneath, and a run of single-child folders collapses into one row so a deep
+  path doesn't cost you five levels of indent. Every parent stays pinned to the
+  top as you scroll, so you can always see which folder you're inside.
+
 ## 2.14.4
 
 - **Folders now come back in tree order.** Grouping by folder walks a folder and

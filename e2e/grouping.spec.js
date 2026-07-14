@@ -91,14 +91,50 @@ test.describe("@p0 nested groups", () => {
     const errors = trackPageErrors(page);
     await openApp(page, { groupBy: NESTED });
 
+    // Addressed by PATH, not by nth(): folder subtrees now put one header per
+    // ancestor folder above a group, so "header 0" is no longer its parent.
+    const child = group.deepestHeader(page);
+    const parent = await group.parentHeaderOf(page, child);
+
     // Snapshot a child first…
-    await group.toggle(group.header(page, 1)).click();
+    await group.toggle(child).click();
     await expect(group.bands(page)).toHaveCount(1);
 
     // …then its parent. The parent subsumes the child; the child's strip must
     // not survive underneath it.
-    await group.toggle(group.header(page, 0)).click();
+    await group.toggle(parent).click();
     await expect(group.bands(page)).toHaveCount(1);
+
+    expect(errors).toEqual([]);
+  });
+
+  test("grouping by folder ALONE nests the folder subtree", async ({
+    page,
+  }) => {
+    // The whole point of the folder hierarchy: one grouping dimension used to
+    // mean one flat level (depth == index into groupBy), so every folder — even
+    // a sub-folder of the one above it — rendered flush left with its entire
+    // absolute path. The tree sidebar nested them; the feed did not.
+    const errors = trackPageErrors(page);
+    await openApp(page, { groupBy: ["folder"] });
+
+    const headers = page.locator(".section-header");
+    await expect(headers.first()).toBeVisible();
+
+    const pads = await headers.evaluateAll((els) =>
+      els.map((el) => parseFloat(getComputedStyle(el).paddingLeft))
+    );
+    // With ONE dimension there must still be more than one indent level.
+    expect(new Set(pads).size).toBeGreaterThan(1);
+
+    // "Cards" is a virtual ancestor — it holds no photos of its own, only
+    // Cam 1 and Cam 10 — so it exists in no feed item and must be invented.
+    // Its count is the roll-up of the subtree beneath it.
+    const cards = page
+      .locator(".section-wrapper")
+      .filter({ hasText: "Cards" })
+      .first();
+    await expect(cards.locator(".section-count")).toBeVisible();
 
     expect(errors).toEqual([]);
   });

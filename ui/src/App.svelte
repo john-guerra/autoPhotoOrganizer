@@ -89,6 +89,7 @@
     dirname,
   } from "./lib/folderLabel.js";
   import { buildFolderTree, relativeTo } from "./lib/folderTree.js";
+  import { nestFolderHeaders } from "./lib/folderSections.js";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import UpdateBanner from "./lib/UpdateBanner.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
@@ -577,6 +578,11 @@
   let headerCounts = {}; // pathKey(fullPath) -> number
   let fetchedParents = new Set(); // pathKey(parentPath) already resolved
   let inFlightParents = new Set(); // pathKey(parentPath) mid-fetch (dedup)
+  // The folder level's raw tree-API rows, per parent path — the SAME response
+  // loadHeaderCounts already fetches for the counts, kept so the feed can build
+  // the folder trie from it. Nesting the feed's folders therefore costs no extra
+  // request. Reassigned (never mutated) so the derivation below re-runs.
+  let folderNodesByParentKey = new Map(); // pathKey(parentPath) -> [{value,count}]
   let countsEpoch = 0;
   const PAGE_SIZE = 60;
   const FETCH_THRESHOLD = 20; // floor: fetch when within this many entries of an edge
@@ -1107,17 +1113,38 @@
       removeFromSelection(await fetchVisibleIds(), "everything shown");
   }
 
+  /** The photo ids of a group. `paths` (a virtual folder ancestor's real
+   * descendant groups) unions them: an ancestor like /L/Cards has no `folders`
+   * row of its own, so scoping by equality on its path matches nothing — the
+   * subtree IS the group. One path is the ordinary case and stays one request. */
+  async function fetchGroupIds(path, paths) {
+    const targets = paths?.length ? paths : [path];
+    if (targets.length === 1) {
+      return fetchPhotoIds(
+        filterIsActive(displayFilter) ? displayFilter : null,
+        targets[0],
+        sort
+      );
+    }
+    const lists = await Promise.all(
+      targets.map((p) =>
+        fetchPhotoIds(
+          filterIsActive(displayFilter) ? displayFilter : null,
+          p,
+          sort
+        )
+      )
+    );
+    return [...new Set(lists.flat())];
+  }
+
   /** Click the group's select icon: select-all, or deselect-all if already all. */
-  async function toggleGroupSelectAll(path) {
+  async function toggleGroupSelectAll(path, paths) {
     const key = pathKey(path);
     let entry = groupIdCache.get(key);
     if (!entry || entry.sig !== groupSelSig) {
       try {
-        const ids = await fetchPhotoIds(
-          filterIsActive(displayFilter) ? displayFilter : null,
-          path,
-          sort
-        );
+        const ids = await fetchGroupIds(path, paths);
         entry = { ids, sig: groupSelSig };
         groupIdCache.set(key, entry);
         groupIdCacheVersion++;
@@ -1348,11 +1375,16 @@
     }
   }
 
-  /** Keep only one group/section (all its photos) as the working set. */
-  async function keepOnlyGroup(path) {
+  /** Keep only one group/section (all its photos) as the working set. `paths`
+   * scopes a virtual folder ancestor to its whole subtree — see fetchGroupIds. */
+  async function keepOnlyGroup(path, paths) {
     if (!path || !path.length) return;
     try {
-      const ids = await fetchPhotoIds(null, path, sort);
+      const targets = paths?.length ? paths : [path];
+      const lists = await Promise.all(
+        targets.map((p) => fetchPhotoIds(null, p, sort))
+      );
+      const ids = [...new Set(lists.flat())];
       if (!ids.length) return;
       await applyScope(idsScope(ids));
     } catch (e) {
@@ -2235,6 +2267,16 @@
    * absolute path with nothing dimmed. (TreeNode.svelte carries a comment about
    * the same trap for collapsedPaths.) */
   function headerParts(header, _stats, _roots) {
+    // A NESTED folder row already says where it sits, so it shows only its own
+    // name (or the merged "a/b/c" chain of a unary run) — not the whole path.
+    // Same labelParts treatment the tree gives it, against its real on-disk
+    // siblings, so one folder reads identically in the feed and in the sidebar.
+    if (header.nested) {
+      return labelParts(header.label, {
+        stats: tokenStats,
+        siblings: siblingIndex.get(dirname(header.value)) ?? [],
+      });
+    }
     return header.path?.at(-1)?.dimension === "folder"
       ? folderHeaderParts(header.path.at(-1).value)
       : [{ text: header.label, kind: "keep" }];
@@ -3016,6 +3058,14 @@
   const GROUP_INDENT = 18;
   const HEADER_HEIGHT = 32;
   const PLACEHOLDER_HEIGHT = 40; // a bit taller than a header — needs room for an icon, label, and count on one line
+  /* Sticky headers stack, outermost on top, so each level sits one BELOW the
+     last: z = base - depth. The old base of 15 went NEGATIVE past depth 15 —
+     unreachable while depth was capped by groupBy.length, trivially reachable
+     now that a folder chain nests inside one groupBy slot. Everything here
+     resolves inside .grid's own stacking context (isolation: isolate), so this
+     scale is private and cannot collide with the topbar's z-index. The
+     dendrogram trunk sits at base + 1, above every header. */
+  const Z_HEADER_BASE = 1000;
 
   /**
    * Symmetric horizontal margin (px, at the target row height) reserved for
@@ -3060,8 +3110,23 @@
   // group's own header so the pill/strip could show a duplicate label of its own;
   // that's what made the snapshot ignore the header's indentation. See
   // docs/superpowers/specs/2026-07-12-group-photo-renderers.md (invariant 1).
-  $: sectionHeaders = computeHeaderPaths(
-    deriveSectionHeaders(resolvedPhotos, groupBy)
+  //
+  // Then nestFolderHeaders turns the flat folder groups into the folder SUBTREE
+  // — the same one the sidebar draws (same compaction, same virtual ancestors,
+  // same rolled-up counts, because it is literally the same folderTree.js). A
+  // header comes out carrying BOTH depths: `depth` (its groupBy index, which the
+  // path/count logic keys off) and `visualDepth` (how deep it sits in the folder
+  // tree, which the layout and the dendrogram draw). Conflating those two is the
+  // bug this split exists to prevent — see lib/folderSections.js.
+  $: rootsByParentKey = new Map(
+    [...folderNodesByParentKey].map(([key, nodes]) => [
+      key,
+      buildFolderTree(nodes),
+    ])
+  );
+  $: sectionHeaders = nestFolderHeaders(
+    computeHeaderPaths(deriveSectionHeaders(resolvedPhotos, groupBy)),
+    { groupBy, rootsByParentKey }
   );
   // Fetch each visible group's total photo count, one query per *parent*
   // path (the tree API returns every sibling's count in a single GROUP BY),
@@ -3098,6 +3163,16 @@
         next[pathKey([...parent, { dimension, value: n.value }])] = n.count;
       }
       headerCounts = next; // reassign to trigger the template's lookup
+      // This response IS the folder level — every folder under `parent`, with its
+      // count, in one GROUP BY. Keep it: the feed's folder trie (and therefore
+      // every virtual ancestor and every rolled-up count) is built from exactly
+      // this, so nesting the feed costs no request of its own.
+      if (dimension === "folder" || dimension === "folderName") {
+        folderNodesByParentKey = new Map(folderNodesByParentKey).set(
+          key,
+          node.nodes
+        );
+      }
     }
   }
   $: layoutResult =
@@ -3134,7 +3209,13 @@
               aspectRatio: baseRatio + (2 * marginPx) / rowHeight,
             };
           }),
-          sectionHeaders,
+          // The layout nests on `depth`, and it is already fully depth-generic
+          // (closeAtOrBelow / currentIndent assume nothing about groupBy) — so
+          // handing it `visualDepth` AS `depth` is the whole integration, and
+          // sectionedJustified.js needs no change at all. Downstream (the header
+          // template) therefore reads header.depth = the visual one, which is
+          // exactly what the indent, the sticky offset and the trunk want.
+          sectionHeaders.map((h) => ({ ...h, depth: h.visualDepth })),
           {
             containerWidth: gridWidth - 2 * PAD,
             gap: gridGap,
@@ -3153,7 +3234,14 @@
   // sticky-header band per grouping level, plus a PAD of breathing room. Used
   // both as the tile's CSS scroll-margin-top (--reveal-margin) and by the
   // jump-landing pin below.
-  $: revealMargin = HEADER_HEIGHT * groupBy.length + PAD;
+  // Every ancestor stays pinned, so the sticky stack is as tall as the DEEPEST
+  // nesting on screen — which, with folder subtrees, is no longer bounded by
+  // groupBy.length (a folder chain can be several rows deep inside one groupBy
+  // slot). Measure it instead of assuming it.
+  $: stickyDepth = sectionHeaders.length
+    ? 1 + Math.max(...sectionHeaders.map((h) => h.visualDepth))
+    : groupBy.length;
+  $: revealMargin = HEADER_HEIGHT * stickyDepth + PAD;
   // Re-pin the group-jump landing on every LAYOUT recompute while pinned, not
   // just on grid-height change (the ResizeObserver's blind spot): a metadata
   // reflow can shrink the rows above the landing while others grow, leaving
@@ -4067,8 +4155,8 @@
               >
                 <div
                   class="section-header"
-                  style="top:{header.depth * HEADER_HEIGHT}px; z-index:{15 -
-                    header.depth};"
+                  style="top:{header.depth *
+                    HEADER_HEIGHT}px; z-index:{Z_HEADER_BASE - header.depth};"
                 >
                   <button
                     class="section-toggle-icon"
@@ -4085,7 +4173,12 @@
                       )
                     )}
                     aria-label="Cycle this group: full grid → snapshot strip → collapsed"
-                    on:click={(e) => onGroupToggle(header.path, e)}
+                    on:click={(e) =>
+                      onGroupToggle(
+                        header.path,
+                        e,
+                        header.isVirtual ? header.groupPaths : undefined
+                      )}
                   >
                     <GroupStateIcon
                       state={getRenderer(
@@ -4113,12 +4206,14 @@
                   {:else}
                     <button
                       class="section-label"
-                      title={`${header.label}${
-                        header.path?.at(-1)?.dimension === "folder"
+                      title={`${header.value ?? header.label}${
+                        header.path?.at(-1)?.dimension === "folder" &&
+                        !header.isVirtual
                           ? " — double-click to rename this folder on disk"
                           : ""
                       }`}
-                      on:dblclick={() => startRename(header.path)}
+                      on:dblclick={() =>
+                        !header.isVirtual && startRename(header.path)}
                     >
                       <span
                         class="section-label-text"
@@ -4133,9 +4228,14 @@
                       >
                     </button>
                   {/if}
-                  {#if header.path && headerCounts[pathKey(header.path)] !== undefined}
+                  <!-- A virtual ancestor has no `folders` row, so no query can
+                       count it — its number comes from the trie's roll-up, the
+                       same one the sidebar shows. -->
+                  {#if header.count ?? headerCounts[pathKey(header.path)]}
                     <span class="section-count">
-                      {headerCounts[pathKey(header.path)].toLocaleString()} items
+                      {(
+                        header.count ?? headerCounts[pathKey(header.path)]
+                      ).toLocaleString()} items
                     </span>
                   {/if}
                   {#if header.path}
@@ -4146,10 +4246,13 @@
                         groupIdCacheVersion,
                         groupSelSig
                       )}
-                      isFolder={isRemovableFolder(header.path)}
+                      isFolder={!header.isVirtual &&
+                        isRemovableFolder(header.path)}
                       removeArmed={removeArmedKey === pathKey(header.path)}
-                      on:toggleselect={() => toggleGroupSelectAll(header.path)}
-                      on:keeponly={() => keepOnlyGroup(header.path)}
+                      on:toggleselect={() =>
+                        toggleGroupSelectAll(header.path, header.groupPaths)}
+                      on:keeponly={() =>
+                        keepOnlyGroup(header.path, header.groupPaths)}
                       on:jumpprev={() => jumpFromGroup(header.path, "prev")}
                       on:jumpnext={() => jumpFromGroup(header.path, "next")}
                       on:remove={() => removeAlbum(header.path)}
@@ -4502,6 +4605,15 @@
        height is set inline from the layout result. */
     position: relative;
     width: 100%;
+    /* Its own stacking context. Without this the grid is `position:relative;
+       z-index:auto`, which is NOT one — so the headers (z 15), the dendrogram
+       trunk (16) and the thumbnails (10) all resolved against .topbar's z 20 in
+       the shared root context. That capped the header scale at 20 (folder
+       nesting can go deeper than that) and, separately, meant a thumbnail was
+       only ever one z-index bump away from painting over the toolbar. Isolating
+       frees the internal scale and closes that hazard; the topbar and the loupe
+       both live OUTSIDE .grid, so nothing that must sit above it is affected. */
+    isolation: isolate;
   }
   .grid:focus {
     outline: none;
@@ -4537,11 +4649,12 @@
     left: var(--trunk);
     top: 0;
     bottom: 0;
-    /* Must beat the section headers (z-index 15): they are sticky with an OPAQUE
-       background, so at 'auto' the trunk was painted over wherever a header sat
-       and the elbows looked like floating stubs. It runs up the header's left
-       padding gutter, which the per-depth padding reserves. */
-    z-index: 16;
+    /* Must beat EVERY section header: they are sticky with an OPAQUE background,
+       so at 'auto' the trunk was painted over wherever a header sat and the
+       elbows looked like floating stubs. Headers run Z_HEADER_BASE - depth, so
+       one above the base clears all of them at any nesting depth. It runs up the
+       header's left padding gutter, which the per-depth padding reserves. */
+    z-index: 1001;
     border-left: 1px dotted #6a6a6a;
     pointer-events: none;
   }
@@ -4562,7 +4675,7 @@
     left: var(--trunk);
     width: calc(var(--ind) - 4px);
     top: 50%;
-    z-index: 16;
+    z-index: 1001;
     border-top: 1px dotted #6a6a6a;
     pointer-events: none;
   }
