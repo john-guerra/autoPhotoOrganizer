@@ -6,6 +6,8 @@ export const ORIENTATIONS = ["landscape", "portrait", "square"];
 export const KINDS = ["image", "raw", "video"];
 
 export const DEFAULT_FILTER = {
+  // Free-text search over filename + folder path. "" = off.
+  text: "",
   minRating: 0,
   orientations: [...ORIENTATIONS],
   kinds: [...KINDS],
@@ -26,7 +28,9 @@ export function isActive(spec) {
   const focused =
     typeof spec?.folderPath === "string" && spec.folderPath.length > 0;
   const timed = spec?.dateFrom != null || spec?.dateTo != null;
+  const searched = typeof spec?.text === "string" && spec.text.trim() !== "";
   return (
+    searched ||
     minRating > 0 ||
     (o.length > 0 && o.length < ORIENTATIONS.length) ||
     (k.length > 0 && k.length < KINDS.length) ||
@@ -43,6 +47,9 @@ export function isActive(spec) {
  * @param {{minRating?:number, orientations?:string[], scopeIds?:number[], keepScope?:boolean, folderPath?:string, dateAttr?:string}} spec */
 export function toQueryParam(spec) {
   const out = {};
+  if (typeof spec?.text === "string" && spec.text.trim()) {
+    out.text = spec.text.trim();
+  }
   if ((spec?.minRating ?? 0) > 0) out.minRating = spec.minRating;
   const o = spec?.orientations ?? [];
   if (o.length > 0 && o.length < ORIENTATIONS.length) out.orientations = o;

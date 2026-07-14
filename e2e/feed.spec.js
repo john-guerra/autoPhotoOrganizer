@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loupe as loupeHelper, openApp } from "./helpers.js";
+import { loupe as loupeHelper, openApp, statusBar } from "./helpers.js";
 
 /**
  * These cover the interactions that actually regressed during the 2.9.x usability
@@ -207,6 +207,51 @@ test.describe("@p1 loupe filmstrip", () => {
     // A real grid bucket, not the bespoke 64 nothing else populates.
     expect([160, 320, 480, 640, 1024]).toContain(size);
     expect(thumbRequests.some((s) => s === 64)).toBe(false);
+
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("@p1 search", () => {
+  test("narrows the feed by folder name, and clears back", async ({ page }) => {
+    // A filter facet only works if ALL THREE layers agree: the client spec, the
+    // SQL, and the API's allowlist — a facet missing from the allowlist is
+    // silently dropped and the app just shows everything, cheerfully.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    // The status bar's "showing" count is the working set. The grid is
+    // VIRTUALIZED, so counting rendered tiles or headers would measure the
+    // viewport instead — and pass or fail on where the feed happened to scroll.
+    const allPhotos = await statusBar.showingCount(page);
+    expect(allPhotos).toBeGreaterThan(1);
+
+    // "/" is the shortcut; typing goes to the box it focuses.
+    await page.keyboard.press("/");
+    await page.keyboard.type("Party");
+
+    // The feed is now only the Party folder — matched on its FOLDER, not on any
+    // filename (no photo is called "party"). Fewer photos, and every group left
+    // standing is that folder.
+    await expect
+      .poll(() => statusBar.showingCount(page))
+      .toBeLessThan(allPhotos);
+    await expect(page.locator(".section-header")).toHaveCount(1);
+    await expect(page.locator(".section-header").first()).toContainText(
+      "Party"
+    );
+
+    // ...and the caret is STILL in the search box. Every feed reload ends by
+    // refocusing the selected tile, and a keystroke here IS a feed reload: the
+    // refocus used to fire mid-word and hand the rest of your query to the grid,
+    // where a digit rates the focused photo. Searching "2024" would have put two
+    // stars on someone's photo.
+    await expect(page.locator(".search-input")).toBeFocused();
+
+    // Esc clears it and the whole library comes back.
+    await page.keyboard.press("Escape");
+    await expect.poll(() => statusBar.showingCount(page)).toBe(allPhotos);
+    await expect(page.locator(".search-input")).toHaveValue("");
 
     expect(errors).toEqual([]);
   });

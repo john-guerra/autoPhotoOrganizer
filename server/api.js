@@ -349,6 +349,17 @@ function parseFilterParam(req) {
     }
     spec.orientations = raw.orientations;
   }
+  if (raw.text !== undefined) {
+    // A facet missing from THIS allowlist is silently dropped, however correct
+    // the SQL and the UI are — so the search box lives or dies on this block.
+    if (typeof raw.text !== "string") {
+      return { spec: {}, error: "text must be a string" };
+    }
+    if (raw.text.length > 200) {
+      return { spec: {}, error: "text must be 200 characters or fewer" };
+    }
+    spec.text = raw.text;
+  }
   if (raw.kinds !== undefined) {
     if (
       !Array.isArray(raw.kinds) ||

@@ -8,6 +8,7 @@
    */
   import { createEventDispatcher } from "svelte";
   import RatingFilter from "./RatingFilter.svelte";
+  import SearchFilter from "./SearchFilter.svelte";
   import OrientationFilter from "./OrientationFilter.svelte";
   import KindFilter from "./KindFilter.svelte";
   import TimelineFilter from "./TimelineFilter.svelte";
@@ -107,6 +108,10 @@
       </svg>
     </button>
   </div>
+  <SearchFilter
+    {filter}
+    on:change={(e) => dispatch("filterchange", e.detail)}
+  />
   <RatingFilter
     {filter}
     on:change={(e) => dispatch("filterchange", e.detail)}

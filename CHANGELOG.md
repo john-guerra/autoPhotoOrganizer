@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.13.2
+
+- **Search.** A search box in the toolbar narrows the library to photos whose
+  file name or folder matches what you type — press `/` from anywhere to jump to
+  it, `Esc` to clear. It is a filter like the others, so it composes: search
+  `canon`, keep 3 stars and up, show only videos, and the counts, the tree and
+  the timeline all follow.
+- **Typing in a filter box no longer loses the caret.** The grid used to grab
+  focus back the moment the results reloaded, so the rest of what you were typing
+  went to the photos instead of the box — and a digit rates a photo.
+
 ## 2.13.1
 
 - **Video sound stays on.** Un-mute one clip and the next one plays with sound

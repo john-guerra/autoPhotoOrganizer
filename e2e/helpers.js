@@ -119,6 +119,14 @@ export const statusBar = {
     const m = text.match(/([\d,]+)\s+selected/);
     return m ? Number(m[1].replace(/,/g, "")) : 0;
   },
+  /** How many photos the current filters leave in play. THE number to assert a
+   *  filter against: the grid is virtualized, so counting rendered `.thumb`s (or
+   *  `.section-header`s) measures the viewport, not the working set. */
+  showingCount: async (page) => {
+    const text = await page.locator(".statusbar .counts").innerText();
+    const m = text.match(/([\d,]+)\s+showing/);
+    return m ? Number(m[1].replace(/,/g, "")) : null;
+  },
   /** The transient line, but only when it is carrying a FAILURE (`.err`) — so a
    *  spec can't accidentally pass on an ordinary "loading…" status. */
   error: (page) => page.locator(".statusbar .status.err"),
