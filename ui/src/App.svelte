@@ -96,11 +96,11 @@
   import { nestFolderHeaders } from "./lib/folderSections.js";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import UpdateBanner from "./lib/UpdateBanner.svelte";
+  import Toolbar from "./lib/Toolbar.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
   import AlbumsView from "./lib/AlbumsView.svelte";
   import { loadAlbumPrefs, saveAlbumPrefs } from "./lib/albumPrefs.js";
   import SnapshotStrip from "./lib/SnapshotStrip.svelte";
-  import SourceControls from "./lib/SourceControls.svelte";
   import {
     folderScope,
     idsScope,
@@ -121,11 +121,7 @@
     restoreSelection,
   } from "./lib/bulkSelection.js";
   import { combo } from "./lib/platform.js";
-  import OrganizeControls from "./lib/OrganizeControls.svelte";
-  import ViewControls from "./lib/ViewControls.svelte";
   import TimelineFilter from "./lib/TimelineFilter.svelte";
-  import SidebarModeToggle from "./lib/SidebarModeToggle.svelte";
-  import GridControls from "./lib/GridControls.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
   import GroupLabelActions from "./lib/GroupLabelActions.svelte";
   import {
@@ -4154,69 +4150,55 @@
 <ServerBanner />
 
 <div class="app">
-  <header class="topbar">
-    <!-- ROW 1: source, organize/filter, view. Explicitly NOT wrapping — see the
-         .topbar-row CSS for what shrinks instead. -->
-    <div class="topbar-row primary">
-      <h1>
-        AutoGallery
-        <span class="app-version" title="App version">v{APP_VERSION}</span>
-      </h1>
-
-      <!-- ① SOURCE -->
-      <SourceControls
-        {scanning}
-        {hasNativePicker}
-        {alreadyIndexed}
-        {subdirs}
-        {subdirsLoading}
-        {subdirsError}
-        {subdirSelection}
-        bind:addFolderOpen
-        bind:dir
-        bind:recursiveScan
-        bind:focusAfterAdd
-        bind:subdirsOpen
-        on:choosefolder={chooseFolder}
-        on:submit={submitAddFolder}
-        on:managelibrary={() => {
-          manageLibraryOpen = true;
-          refreshPendingMeta(); // the count moves as you browse — never show a stale one
-        }}
-        on:loadsubdirs={loadSubdirs}
-        on:toggledir={(e) =>
-          (subdirSelection = toggleSubdir(
-            subdirSelection,
-            e.detail.path,
-            subdirs
-          ))}
-        on:selectalldirs={() => (subdirSelection = selectAll(subdirs))}
-        on:selectnodirs={() => (subdirSelection = selectNone())}
-      />
-
-      <div class="divider"></div>
-
-      <!-- ② ORGANIZE & FILTER -->
-      <OrganizeControls
-        {groupBy}
-        {filter}
-        {filterMode}
-        on:groupbychange={(e) => onGroupByChange(e.detail)}
-        on:filtermodechange={(e) => onFilterModeChange(e.detail)}
-        on:filterchange={(e) => onFilterChange(e.detail)}
-      />
-    </div>
-
-    <!-- ROW 2 — THE TIMELINE, and nothing else.
-         It is a filter (it narrows the working set by capture time exactly as the
-         stars and the kinds do, and the counts follow it), so it sits directly
-         under the filters. But it is not a slider: it draws a histogram, hangs a
-         date badge off each handle and puts a sampled-count above. Sharing a row,
-         it was rationed a couple of hundred pixels and the two badges landed on
-         top of each other. Given the full width it is ~1,200px, and brushing the
-         gap between two shoots stops being a game of pixels. -->
-    {#if timeMin != null && timeMax != null && timeMax > timeMin}
-      <div class="topbar-row timeline">
+  <Toolbar
+    appVersion={APP_VERSION}
+    {scanning}
+    {hasNativePicker}
+    {alreadyIndexed}
+    {subdirs}
+    {subdirsLoading}
+    {subdirsError}
+    {subdirSelection}
+    bind:addFolderOpen
+    bind:dir
+    bind:recursiveScan
+    bind:focusAfterAdd
+    bind:subdirsOpen
+    {filter}
+    {filterMode}
+    {groupBy}
+    bind:sidebarMode
+    {cyclingAll}
+    {globalViewMode}
+    bind:albumMode
+    {detectingAlbums}
+    bind:zoom
+    zoomMax={ZOOM_LEVELS.length - 1}
+    bind:burstEnabled
+    bind:burstGapMs
+    {sort}
+    on:choosefolder={chooseFolder}
+    on:submit={submitAddFolder}
+    on:managelibrary={() => {
+      manageLibraryOpen = true;
+      refreshPendingMeta(); // the count moves as you browse — never show a stale one
+    }}
+    on:loadsubdirs={loadSubdirs}
+    on:toggledir={(e) =>
+      (subdirSelection = toggleSubdir(subdirSelection, e.detail.path, subdirs))}
+    on:selectalldirs={() => (subdirSelection = selectAll(subdirs))}
+    on:selectnodirs={() => (subdirSelection = selectNone())}
+    on:filtermodechange={(e) => onFilterModeChange(e.detail)}
+    on:filterchange={(e) => onFilterChange(e.detail)}
+    on:groupbychange={(e) => onGroupByChange(e.detail)}
+    on:cycleall={cycleAllGroups}
+    on:revealcurrent={revealCurrentLocation}
+    on:detectalbums={detectAlbums}
+    on:sortchange={(e) => onSortChange(e.detail)}
+    on:help={() => (shortcutsHelpOpen = true)}
+  >
+    <svelte:fragment slot="timeline">
+      {#if timeMin != null && timeMax != null && timeMax > timeMin}
         <div
           class="time-filter"
           title="Filter by capture time — drag the handles"
@@ -4238,65 +4220,23 @@
               })}
           />
         </div>
-      </div>
-    {/if}
+      {/if}
+    </svelte:fragment>
 
-    <!-- ROW 3. Every row is deliberate, rather than the first one wrapping into
-         the others by accident. Rows 1 and 2 are what NARROWS the library
-         (grouping, the filters, the timeline); row 3 is everything else — how the
-         result is DRAWN (full view, size, burst, order) and the two things you can
-         DO with it (Locate, Auto Albums).
-
-         The sidebar switch sits in a box the exact width of the sidebar, so it
-         sits directly above the column it controls. -->
-    <div class="topbar-row secondary">
-      <div class="sidebar-slot" style="width:{sidebarWidth}px">
-        <SidebarModeToggle bind:sidebarMode />
-      </div>
-
-      <GridControls
-        bind:zoom
-        zoomMax={ZOOM_LEVELS.length - 1}
-        bind:burstEnabled
-        bind:burstGapMs
-        {sort}
-        {cyclingAll}
-        {globalViewMode}
-        on:cycleall={cycleAllGroups}
-        on:sortchange={(e) => onSortChange(e.detail)}
-      />
-
-      <div class="row2-spacer"></div>
-
-      <ViewControls
-        bind:albumMode
-        {detectingAlbums}
-        on:revealcurrent={revealCurrentLocation}
-        on:detectalbums={detectAlbums}
-      />
-
-      <button
-        class="help-btn"
-        title="Keyboard shortcuts (?)"
-        aria-label="Keyboard shortcuts"
-        on:click={() => (shortcutsHelpOpen = true)}
-      >
-        ?
-      </button>
-    </div>
-
-    {#if manageLibraryOpen}
-      <ManageLibrary
-        {library}
-        {pendingMeta}
-        {sweeping}
-        on:close={() => (manageLibraryOpen = false)}
-        on:sweep={sweepMetadata}
-        on:folderRemoved={onFolderRemoved}
-        on:libraryReset={onLibraryReset}
-      />
-    {/if}
-  </header>
+    <svelte:fragment slot="manage-library">
+      {#if manageLibraryOpen}
+        <ManageLibrary
+          {library}
+          {pendingMeta}
+          {sweeping}
+          on:close={() => (manageLibraryOpen = false)}
+          on:sweep={sweepMetadata}
+          on:folderRemoved={onFolderRemoved}
+          on:libraryReset={onLibraryReset}
+        />
+      {/if}
+    </svelte:fragment>
+  </Toolbar>
 
   <div class="app-body">
     <!-- Resizable sidebar pane: owns the width (persisted) for BOTH sidebar
@@ -4809,87 +4749,19 @@
     min-width: 0;
     overflow-y: auto;
   }
-  .topbar {
-    position: sticky;
-    top: 0;
-    /* Must outrank the grid content scrolling underneath it. Thumb.svelte's
-       `.thumb` sets an explicit z-index:10 (its own stacking context,
-       needed for the selection border/peek layers to paint correctly) —
-       that value projects into this same ancestor stacking context as a
-       sibling-level number. At a tie, later DOM order wins the paint, and
-       the grid comes after .topbar in the document, so equal z-index let
-       thumbnails render over this sticky bar while scrolling. 20 clears
-       that comfortably while staying below Loupe.svelte's full-screen
-       overlay (z-index:100), which still needs to cover the topbar. */
-    z-index: 20;
-    /* TWO ROWS, on purpose. The toolbar used to be one wrapping flex line, and
-       "wrap" was its only relief valve: every cluster inside it is flex-shrink:0,
-       so when the row ran out of width nothing compressed — the group-by pills
-       simply fell onto a second line, and where they landed changed as you added
-       a dimension. A row that reflows under you is not a layout. */
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    row-gap: 0.45rem;
-    padding: 0.6rem 1rem;
-    background: #1c1c1c;
-    border-bottom: 1px solid #2a2a2a;
-  }
-  .topbar-row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    /* Never wrap. What gives instead is the organize cluster (see
-       OrganizeControls: the timeline and the search box shrink, the group-by
-       pills do not) — a deliberate shrink order rather than an accidental reflow. */
-    flex-wrap: nowrap;
-    min-width: 0;
-  }
-  /* Row 2's sidebar switch is boxed to the sidebar's own width, so it sits
-     directly above the column it controls and moves with the resizer. */
-  .sidebar-slot {
-    display: flex;
-    flex-shrink: 0;
-  }
-  /* Takes whatever row 2 has left. min-width is what actually lets a flex item
-     shrink — without it, it refuses to go below its content's intrinsic width,
-     which is how the timeline came to paint straight over the View buttons when
-     it lived in row 1.
+  /* The timeline, slotted into the toolbar's Filter group. It lives here because
+     App renders it (a dozen props of App's own state), so it is in App's style
+     scope — but the flex sizing that lets it take the row's slack lives in
+     ToolGroup, next to the rest of the toolbar's shrink order.
 
      The side padding is not cosmetic: the widget centres a date badge on each
      handle, and the handles sit at the very ends of the axis, so both badges
-     overhang the axis by ~12px. Without room for them, `overflow: hidden` ate the
-     "J" of "Jan 1, 1980" at one end and the year at the other. */
-  /* The timeline's own row: it takes the whole width, because it is not a slider.
-     It draws a histogram, hangs a date badge off each handle and puts a
-     sampled-count above, and sharing a row with the filters it was rationed ~200px
-     — at which point the two badges land ON TOP OF each other and the axis is
-     unreadable. The row costs ~45px of vertical chrome and buys the widget about
-     1,200px. The 16px of padding is for those badges, which are centred on the
-     handles and overhang each end; `overflow: hidden` ate them otherwise. */
-  .topbar-row.timeline {
-    padding-top: 0;
-  }
+     overhang by ~12px. Without room for them, `overflow: hidden` ate the "J" of
+     "Jan 1, 1980" at one end and the year at the other. */
   .time-filter {
-    flex: 1;
-    min-width: 0;
     padding: 0 16px;
     overflow: hidden;
   }
-  /* Pushes the display controls to the far right of row 2, opposite the sidebar
-     switch. (Row 1 uses `.divider.push` for the same job; row 2 has no divider
-     to hang it on.) */
-  .row2-spacer {
-    flex: 1;
-  }
-  .divider {
-    width: 1px;
-    align-self: stretch;
-    background: #2a2a2a;
-    margin: 2px 0;
-  }
-  /* Push the View cluster to the right. The row no longer wraps, so this is now
-     unconditional. */
 
   /* The one scope chip. Both kinds of scope (a folder, a hand-picked id set)
      are the same idea to the user — "you're seeing a subset" — so they share a
@@ -4950,41 +4822,6 @@
   }
   .scope-chip:hover {
     background: #263562;
-  }
-  h1 {
-    font-size: 1rem;
-    font-weight: 600;
-    margin: 0;
-    color: #fff;
-    white-space: nowrap;
-  }
-  .app-version {
-    font-size: 0.7rem;
-    font-weight: 500;
-    color: #7a7a7a;
-    margin-left: 2px;
-    vertical-align: 0.15em;
-  }
-  .help-btn {
-    flex-shrink: 0;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 1px solid #3a3a3a;
-    background: #262626;
-    color: #cfcfcf;
-    font-size: 0.85rem;
-    font-weight: 700;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-left: 0.25rem;
-  }
-  .help-btn:hover {
-    background: #333;
-    color: #fff;
-    border-color: #555;
   }
   .grid {
     /* Justified layout: children are absolutely positioned by computed boxes;

@@ -6,6 +6,22 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.14.13
+
+- **Every toolbar control now sits in a named, bordered group** — Library, Filter,
+  Group, View — so the bar tells you which control is the reason you can only see
+  300 of your 114,000 photos. The Filter box lights up when something in it is
+  actually hiding photos.
+- **The timeline is back with the filters**, where it belongs: it narrows by
+  capture time exactly as the stars and the kinds do, and it takes all the width
+  the row has left.
+- **Grouping moved next to Tree/Fisheye.** It isn't a filter — it hides nothing,
+  it decides how what's left is carved up, which is the same question the sidebar
+  switch answers.
+- **The big blue "Folders" button is gone.** Adding a folder and managing your
+  library both live behind the ＋, named.
+- Locate is an icon, and Sort is quieter — neither was earning the space it took.
+
 ## 2.14.12
 
 - **The timeline gets a row of its own**, directly under the filters it belongs

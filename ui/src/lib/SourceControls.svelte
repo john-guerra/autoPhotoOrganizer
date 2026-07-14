@@ -16,6 +16,16 @@
   import { createEventDispatcher } from "svelte";
   import { clickOutside, onEscape } from "./actions.js";
   import { subtreeState } from "./subfolderSelection.js";
+  import ToolGroup from "./ToolGroup.svelte";
+
+  /** The ＋ menu (Add folder… / Manage library). Both doors, one handle. */
+  let menuOpen = false;
+  /** Escape / a click outside must close whichever of the two is showing —
+   * closing only the panel left the menu hanging over the grid. */
+  function closeAll() {
+    menuOpen = false;
+    addFolderOpen = false;
+  }
 
   export let scanning = false;
   export let hasNativePicker = false;
@@ -52,20 +62,46 @@
   $: busyVerb = verb === "Open" ? "Opening…" : "Scanning…";
 </script>
 
-<div class="cluster source">
-  <div
-    class="add-folder"
-    use:clickOutside={() => (addFolderOpen = false)}
-    use:onEscape={() => (addFolderOpen = false)}
-  >
+<ToolGroup label="Library">
+  <div class="add-folder" use:clickOutside={closeAll} use:onEscape={closeAll}>
     <button
       class="add-toggle"
-      on:click={() => (addFolderOpen = !addFolderOpen)}
-      title="Add a folder — scan it in, and optionally focus on it"
-      aria-label="Add a folder"
+      on:click={() => (menuOpen = !menuOpen)}
+      title="Add a folder, or manage the ones you already have"
+      aria-label="Library"
+      aria-haspopup="menu"
+      aria-expanded={menuOpen}
     >
       ＋
     </button>
+
+    <!-- One door instead of two. The big blue "Folders" button spent a permanent
+         120px of the toolbar on something you press once a week, and it sat next
+         to a ＋ that did the other half of the same job. Both live behind the ＋
+         now, named. -->
+    {#if menuOpen}
+      <div class="source-menu" role="menu">
+        <button
+          role="menuitem"
+          on:click={() => {
+            menuOpen = false;
+            addFolderOpen = true;
+          }}
+        >
+          Add folder…
+        </button>
+        <button
+          role="menuitem"
+          on:click={() => {
+            menuOpen = false;
+            dispatch("managelibrary");
+          }}
+        >
+          Manage library
+        </button>
+      </div>
+    {/if}
+
     {#if addFolderOpen}
       <div class="add-panel">
         <button
@@ -173,34 +209,36 @@
       </div>
     {/if}
   </div>
-  <button
-    class="library-toggle"
-    on:click={() => dispatch("managelibrary")}
-    title="Your scanned folders — rename, remove, or rescan them"
-  >
-    Folders
-  </button>
-</div>
+</ToolGroup>
 
 <style>
-  .cluster {
+  .source-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 40;
     display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    min-width: 0;
-    flex-shrink: 0;
+    flex-direction: column;
+    min-width: 170px;
+    padding: 4px;
+    background: #161616;
+    border: 1px solid #2f2f2f;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   }
-  .library-toggle {
-    padding: 0.45rem 1rem;
-    background: #4c9aff;
-    color: #06121f;
+  .source-menu button {
+    text-align: left;
+    background: transparent;
     border: none;
-    border-radius: 6px;
-    font-weight: 600;
+    color: #e6e6e6;
+    font: inherit;
+    padding: 6px 10px;
+    border-radius: 5px;
     cursor: pointer;
+    white-space: nowrap;
   }
-  .library-toggle:hover {
-    background: #5ba8ff;
+  .source-menu button:hover {
+    background: #2a2a2a;
   }
   .add-folder {
     position: relative;

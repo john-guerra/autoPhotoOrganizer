@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { trackPageErrors, openApp } from "./helpers.js";
+import { trackPageErrors, openApp, toolbar } from "./helpers.js";
 
 /**
  * The toolbar must not reflow under the user.
@@ -97,45 +97,80 @@ test.describe("@p1 the toolbar", () => {
     expect(errors).toEqual([]);
   });
 
-  test("the three rows split what NARROWS the library from how it is DRAWN", async ({
+  test("every control sits in a named group, and the groups say what they do", async ({
     page,
   }) => {
-    // Rows 1 and 2 narrow the library: grouping, the filters, and the timeline —
-    // which is a filter like any other (it cuts the working set by capture time,
-    // and the counts follow it). Row 3 draws: full-view/snapshot/collapse, size,
-    // burst, order — plus the two things that DO something, Locate and Auto
-    // Albums. Getting this backwards is what made the timeline read as a display
-    // widget.
+    // A toolbar of undifferentiated icons makes you work out for yourself which
+    // control is the reason you can only see 300 of your 114,000 photos. Each
+    // group answers exactly one question and is labelled with it — so this asserts
+    // membership by LABEL, which is what the user reads, rather than by the class
+    // names the markup happens to use today.
     const errors = trackPageErrors(page);
     await openApp(page, { groupBy: ["folder"] });
 
-    // The timeline has a row to ITSELF, between the filters it belongs with and
-    // the display controls it does not. It is not a slider — it draws a histogram
-    // and hangs a date badge off each handle — so sharing a row rationed it ~200px
-    // and the two badges landed on top of each other.
-    await expect(
-      page.locator(".topbar-row.timeline .time-filter")
-    ).toBeVisible();
-    await expect(page.locator(".topbar-row.primary .time-filter")).toHaveCount(
-      0
-    );
-    await expect(
-      page.locator(".topbar-row.secondary .time-filter")
-    ).toHaveCount(0);
+    expect(await toolbar.groupLabels(page)).toEqual([
+      "Library",
+      "Filter",
+      "Group",
+      "View",
+    ]);
 
-    await expect(
-      page.locator(".topbar-row.secondary .cycle-all")
-    ).toBeVisible();
-    await expect(page.locator(".topbar-row.primary .cycle-all")).toHaveCount(0);
+    // FILTER holds everything that takes photos away — including the timeline,
+    // which narrows by capture time exactly as the stars and the kinds do.
+    const filters = toolbar.group(page, "Filter");
+    await expect(filters.locator(".search")).toBeVisible();
+    await expect(filters.locator(".kinds")).toBeVisible();
+    await expect(filters.locator(".time-filter")).toBeVisible();
 
-    // Size/burst/order moved out of the status bar so its right half is free for
-    // the jobs widget.
-    await expect(page.locator(".topbar .grid-controls")).toBeVisible();
+    // GROUP is not a filter: it hides nothing, it decides how the survivors are
+    // carved up — the same question the sidebar switch answers, so they sit
+    // together. The pills used to live among the filters, which read as a category
+    // error.
+    const grouping = toolbar.group(page, "Group");
+    await expect(grouping.locator(".group-by")).toBeVisible();
+    await expect(grouping.locator(".seg-toggle")).toBeVisible(); // tree / fisheye
+    await expect(filters.locator(".group-by")).toHaveCount(0);
+
+    // VIEW is one group, not three: full view / Locate / Auto Albums, size and
+    // burst, and sort are the same question asked several ways — how do I want to
+    // LOOK at what's left? — so they share a border and a name.
+    const view = toolbar.group(page, "View");
+    await expect(view.locator(".cycle-all")).toBeVisible();
+    await expect(view.locator(".grid-controls")).toBeVisible();
+    await expect(view.locator(".sort-control")).toBeVisible();
+
+    // Sort sits at the group's far RIGHT — the last question you ask. (Its right
+    // edge, not its left: it is the last control, whatever is beside it.)
+    const edges = await view.evaluate((el) => ({
+      group: el.getBoundingClientRect().right,
+      sort: el.querySelector(".sort-control").getBoundingClientRect().right,
+    }));
+    expect(edges.group - edges.sort).toBeLessThan(20);
+
+    // And size/burst are out of the status bar, whose right half is the jobs
+    // widget's now.
     await expect(page.locator(".statusbar .grid-controls")).toHaveCount(0);
 
-    // And the sidebar switch sits on its own row, over the sidebar it controls.
+    expect(errors).toEqual([]);
+  });
+
+  test("the ＋ menu is the one door to the library", async ({ page }) => {
+    // The big blue "Folders" button spent a permanent ~120px of the toolbar on
+    // something you press once a week, sitting next to a ＋ that did the other half
+    // of the same job. Both live behind the ＋ now, and both are NAMED — a bare ＋
+    // said "add", so "manage" had nowhere to live but a second button.
+    const errors = trackPageErrors(page);
+    await openApp(page, { groupBy: ["folder"] });
+
+    await expect(page.locator(".topbar .library-toggle")).toHaveCount(0);
+
+    await toolbar.plus(page).click();
+    await expect(toolbar.menuItem(page, "Add folder…")).toBeVisible();
+    await expect(toolbar.menuItem(page, "Manage library")).toBeVisible();
+
+    await toolbar.menuItem(page, "Manage library").click();
     await expect(
-      page.locator(".topbar-row.secondary .seg-toggle")
+      page.locator('dialog.modal[aria-label="Manage library"]')
     ).toBeVisible();
 
     expect(errors).toEqual([]);

@@ -1,0 +1,223 @@
+<script>
+  /**
+   * The whole toolbar: two deliberate rows of labelled, bordered groups.
+   *
+   * It was ~150 lines of markup inside App.svelte, which is the file this project
+   * keeps shipping layout bugs from. Pulling it out means the toolbar's structure
+   * — which row, which group, what shrinks first — is readable in one screen,
+   * instead of being buried in the middle of a 4,000-line component. App keeps the
+   * state and the handlers; this owns nothing but the arrangement.
+   *
+   * The arrangement is the point. Every group answers exactly ONE question, and
+   * says so on the tin — a toolbar of undifferentiated icons makes the user work
+   * out for themselves which control is the reason they can only see 300 of their
+   * 114,000 photos:
+   *
+   *   ROW 1 — what you HAVE, and what you're HIDING
+   *     Library  the ＋ menu: add a folder, or manage the ones you have
+   *     Filter   everything that takes photos away — search, stars, orientation,
+   *              kind, and the timeline, which is a filter like the rest and the
+   *              only one that can use the leftover width, so it gets all of it
+   *
+   *   ROW 2 — what to do with what's left
+   *     Group    tree/fisheye + the grouping pills. Grouping is NOT a filter: it
+   *              hides nothing, it decides how the survivors are carved up — the
+   *              same question the sidebar switch answers, so they sit together,
+   *              directly above the sidebar they drive.
+   *     View     how you want to LOOK at what's left: full view / snapshot /
+   *              collapsed, Locate, Auto Albums, thumbnail size, burst, and — at
+   *              its far right, the last question you ask — sort
+   *
+   * The timeline arrives through a slot: it needs a dozen props (histogram,
+   * sampled counts, view/focus markers) and every one is App's state. Threading
+   * them through here would make this component about plumbing instead of layout.
+   */
+  import { createEventDispatcher } from "svelte";
+  import SourceControls from "./SourceControls.svelte";
+  import FilterControls from "./FilterControls.svelte";
+  import GroupByControl from "./GroupByControl.svelte";
+  import SidebarModeToggle from "./SidebarModeToggle.svelte";
+  import ViewControls from "./ViewControls.svelte";
+  import GridControls from "./GridControls.svelte";
+  import SortControl from "./SortControl.svelte";
+  import ToolGroup from "./ToolGroup.svelte";
+
+  export let appVersion = "";
+
+  // Library (the ＋ menu + the add-folder popover).
+  export let scanning = false;
+  export let hasNativePicker = false;
+  export let alreadyIndexed = false;
+  export let subdirs = [];
+  export let subdirsLoading = false;
+  export let subdirsError = "";
+  export let subdirSelection = new Set();
+  export let addFolderOpen = false;
+  export let dir = "";
+  export let recursiveScan = true;
+  export let focusAfterAdd = false;
+  export let subdirsOpen = false;
+
+  // Filter.
+  export let filter;
+  export let filterMode = "display";
+
+  // Group.
+  export let groupBy = ["folder"];
+  export let sidebarMode = "tree";
+
+  // View.
+  export let cyclingAll = false;
+  export let globalViewMode = "full";
+  export let albumMode = false;
+  export let detectingAlbums = false;
+
+  // Size / Sort.
+  export let zoom = 2;
+  export let zoomMax = 4;
+  export let burstEnabled = true;
+  export let burstGapMs = 3000;
+  export let sort;
+
+  const dispatch = createEventDispatcher();
+</script>
+
+<header class="topbar">
+  <!-- ROW 1 -->
+  <div class="topbar-row primary">
+    <h1>
+      AutoGallery
+      <span class="app-version" title="App version">v{appVersion}</span>
+    </h1>
+
+    <SourceControls
+      {scanning}
+      {hasNativePicker}
+      {alreadyIndexed}
+      {subdirs}
+      {subdirsLoading}
+      {subdirsError}
+      {subdirSelection}
+      bind:addFolderOpen
+      bind:dir
+      bind:recursiveScan
+      bind:focusAfterAdd
+      bind:subdirsOpen
+      on:choosefolder
+      on:submit
+      on:managelibrary
+      on:loadsubdirs
+      on:toggledir
+      on:selectalldirs
+      on:selectnodirs
+    />
+
+    <FilterControls {filter} {filterMode} on:filtermodechange on:filterchange>
+      <svelte:fragment slot="timeline">
+        <slot name="timeline" />
+      </svelte:fragment>
+    </FilterControls>
+
+    <button
+      class="help-btn"
+      title="Keyboard shortcuts (?)"
+      aria-label="Keyboard shortcuts"
+      on:click={() => dispatch("help")}
+    >
+      ?
+    </button>
+  </div>
+
+  <!-- ROW 2 -->
+  <div class="topbar-row secondary">
+    <ToolGroup label="Group">
+      <!-- The switch used to be padded out to the sidebar's exact width so it sat
+           directly above the column it drives. Inside a labelled, bordered group
+           that alignment stopped paying for itself: it just left ~200px of empty
+           box, and the border already says what the group is. -->
+      <SidebarModeToggle bind:sidebarMode />
+      <GroupByControl {groupBy} on:groupbychange />
+    </ToolGroup>
+
+    <!-- ONE group, not three. View, Size and Sort are all the same question asked
+         three ways — how do I want to LOOK at what's left? — and giving each its
+         own border and label just drew two more boxes without adding a thought.
+         Sort keeps its place at the far right of the group, where the last
+         question you ask belongs. -->
+    <ToolGroup label="View" flavor="view">
+      <ViewControls
+        {cyclingAll}
+        {globalViewMode}
+        bind:albumMode
+        {detectingAlbums}
+        on:cycleall
+        on:revealcurrent
+        on:detectalbums
+      />
+      <GridControls bind:zoom {zoomMax} bind:burstEnabled bind:burstGapMs />
+      <div class="spacer"></div>
+      <SortControl {sort} on:sortchange />
+    </ToolGroup>
+  </div>
+
+  <slot name="manage-library" />
+</header>
+
+<style>
+  .topbar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid #2a2a2a;
+    background: #141414;
+    position: relative;
+    z-index: 20;
+    flex-shrink: 0;
+  }
+  /* Each row is ONE line, on purpose. The toolbar used to be a single wrapping
+     flex row, so its only relief valve when it ran out of width was to wrap — add
+     a third grouping dimension and the pills dropped onto a second line and shoved
+     everything else around. The shrink order lives in ToolGroup: the Filter group
+     gives, and inside it the search box and the timeline give; nothing else does. */
+  .topbar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+  h1 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .app-version {
+    font-size: 0.7rem;
+    color: #6a6a6a;
+    font-weight: 400;
+    margin-left: 4px;
+  }
+  /* Pushes Sort to the far right of the View group, where the last question you
+     ask belongs. */
+  .spacer {
+    flex: 1;
+  }
+  .help-btn {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    color: #9a9a9a;
+    font: inherit;
+    cursor: pointer;
+  }
+  .help-btn:hover {
+    background: #2a2a2a;
+    color: #e8e8e8;
+  }
+</style>

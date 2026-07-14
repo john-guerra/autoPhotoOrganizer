@@ -194,6 +194,42 @@ export const statusBar = {
   scopeChip: (page) => page.locator(".statusbar .scope-chip"),
 };
 
+// --- the toolbar (labelled groups) -------------------------------------------
+
+export const toolbar = {
+  /** A group by its LABEL — what the user reads — rather than by whichever class
+   * the markup happens to use this week. */
+  group: (page, label) =>
+    page
+      .locator(".tool-group")
+      .filter({ has: page.locator("legend", { hasText: label }) })
+      .first(),
+  /** Every group label, in toolbar order. textContent, not innerText: the legend
+   * is uppercased with `text-transform`, and innerText returns the RENDERED text —
+   * so a spec written against it would be asserting the CSS, and would break the
+   * day someone changed the casing. */
+  groupLabels: (page) =>
+    page
+      .locator(".tool-group > legend")
+      .evaluateAll((els) => els.map((e) => e.textContent.trim())),
+  /** The label of the last group in `rowSelector` — for "Sort is hard right". */
+  lastGroupOf: async (page, rowSelector) =>
+    (
+      await page
+        .locator(`${rowSelector} .tool-group > legend`)
+        .last()
+        .innerText()
+    ).trim(),
+  /** The ＋ menu button: add a folder, or manage the library. */
+  plus: (page) => page.locator(".topbar .add-toggle"),
+  /** An item in the ＋ menu. (Not `menu.item` — that one is scoped to the tree's
+   * .context-menu, which this is not.) */
+  menuItem: (page, label) =>
+    page
+      .locator(".source-menu")
+      .getByRole("menuitem", { name: label, exact: true }),
+};
+
 // --- background jobs (the status-bar widget) ---------------------------------
 
 export const jobs = {

@@ -1,16 +1,16 @@
 <script>
   /**
-   * Toolbar cluster ③: "Locate current" and the Albums toggle. Presentational —
-   * every action is emitted as an event.
+   * WHAT YOU DO with the photos the filters left you: show every group in full
+   * (or as a strip, or collapsed), jump to where you are, or cut the lot into
+   * albums. Presentational — every action is emitted as an event.
    *
-   * Two things have left this cluster, both because they are not ACTIONS. The
-   * Tree/Fisheye toggle went to SidebarModeToggle, directly above the column it
-   * switches. Cycle-all ("Full view") went to GridControls on row 2: it sets how
-   * every group is DRAWN, which is what size, burst and order do — where Locate
-   * and Auto Albums DO something. What is left here is the doing.
+   * The Tree/Fisheye toggle used to live here; it went to SidebarModeToggle,
+   * directly above the column it switches.
    */
   import { createEventDispatcher } from "svelte";
 
+  export let cyclingAll = false;
+  export let globalViewMode = "full";
   export let albumMode = false;
   export let detectingAlbums = false;
 
@@ -19,11 +19,30 @@
 
 <div class="cluster view">
   <button
-    class="reveal-btn"
-    on:click={() => dispatch("revealcurrent")}
-    title="Reveal the current photo's location in the tree"
+    class="reveal-btn cycle-all"
+    on:click={() => dispatch("cycleall")}
+    disabled={cyclingAll}
+    title="Cycle every group: full view → snapshot all → collapse all"
   >
-    ⌖ Locate
+    {cyclingAll
+      ? "…"
+      : globalViewMode === "snapshot"
+        ? "◐ Snapshot all"
+        : globalViewMode === "collapsed"
+          ? "▸ Collapsed all"
+          : "▦ Full view"}
+  </button>
+  <!-- Icon only. It is a nicety, not a headline — you mostly know where you are —
+       and it was spending as much of the toolbar as Auto Albums, which is a whole
+       feature. The name lives in the tooltip and the accessible label, so nothing
+       is lost but the pixels. -->
+  <button
+    class="reveal-btn icon-only"
+    on:click={() => dispatch("revealcurrent")}
+    title="Locate — reveal the current photo's folder in the tree"
+    aria-label="Locate the current photo in the tree"
+  >
+    ⌖
   </button>
   <button
     class="reveal-btn"
@@ -46,7 +65,6 @@
     display: flex;
     align-items: center;
     gap: 0.6rem;
-    min-width: 0;
     flex-shrink: 0;
   }
   .reveal-btn {
@@ -57,6 +75,11 @@
     padding: 4px 10px;
     border-radius: 4px;
     cursor: pointer;
+  }
+  .reveal-btn.icon-only {
+    padding: 4px 8px;
+    font-size: 1rem;
+    line-height: 1.1;
   }
   .reveal-btn:hover {
     background: #2a2a2a;
