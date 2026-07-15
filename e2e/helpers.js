@@ -438,7 +438,10 @@ export const tree = {
    *  (expandedKeys) — distinct from `.tree-collapse-icon`, which folds the group
    *  in the FEED. */
   foldIcon: (page, name) =>
-    page.locator(".tree-node-row", { hasText: name }).first().locator(".tree-fold-icon"),
+    page
+      .locator(".tree-node-row", { hasText: name })
+      .first()
+      .locator(".tree-fold-icon"),
 };
 
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------

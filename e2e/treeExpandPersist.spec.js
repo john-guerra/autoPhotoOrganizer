@@ -29,9 +29,9 @@ test("@p0 collapsing a tree folder survives a filter change", async ({
 
   // Collapse "Cards" in the TREE — its children leave the sidebar entirely.
   await tree.foldIcon(page, "Cards").click();
-  await expect(page.locator(".tree-node-row", { hasText: "Cam 1" })).toHaveCount(
-    0
-  );
+  await expect(
+    page.locator(".tree-node-row", { hasText: "Cam 1" })
+  ).toHaveCount(0);
 
   // A filter change (search) that reshapes the tree: "Cam" keeps the Cards
   // subtree but drops "Trip". Waiting for Trip to vanish proves the tree actually
@@ -44,9 +44,9 @@ test("@p0 collapsing a tree folder survives a filter change", async ({
   await expect(tree.node(page, "Cards")).toBeVisible();
 
   // "Cards" is STILL collapsed after the reload — the children did not come back.
-  await expect(page.locator(".tree-node-row", { hasText: "Cam 1" })).toHaveCount(
-    0
-  );
+  await expect(
+    page.locator(".tree-node-row", { hasText: "Cam 1" })
+  ).toHaveCount(0);
   await expect(
     page.locator(".tree-node-row", { hasText: "Cam 10" })
   ).toHaveCount(0);

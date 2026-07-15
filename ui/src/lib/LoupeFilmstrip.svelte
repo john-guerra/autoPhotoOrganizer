@@ -110,7 +110,8 @@
     />
     {#if item.kind === "video"}<span class="play">▶</span>{/if}
     {#if selectedIds.has(item.id)}<span class="sel">✓</span>{/if}
-    {#if item.rating > 0}<span class="rating"><Stars rating={item.rating} /></span
+    {#if item.rating > 0}<span class="rating"
+        ><Stars rating={item.rating} /></span
       >{/if}
     <!-- Same overlay glyphs as the feed grid (BurstOverlay). On the cover the
          ×N badge; on an expanded member the ⚏ marker — here it is ALSO the
