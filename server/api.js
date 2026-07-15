@@ -41,6 +41,7 @@ import {
   setPhotoRating,
   setPhotoCover,
   deleteFolder,
+  deleteFolderSubtree,
   resetLibrary,
   resolveDestFolderId,
   repointPhotoToFolder,
@@ -1321,12 +1322,14 @@ export function registerApi(app) {
       return res.status(400).json({ error: "path is required" });
     }
     const db = getDb();
-    const row = db
-      .prepare(`SELECT id FROM folders WHERE abs_path = ?`)
-      .get(path);
-    if (!row) return res.status(404).json({ error: `not indexed: ${path}` });
-    deleteFolder(db, row.id);
-    res.json({ removed: true, id: row.id });
+    // Subtree removal: a parent folder must take its descendants with it, or the
+    // children keep the parent alive in the index and the remove looks like a
+    // no-op. Works for a pure ancestor (no own row) too. See deleteFolderSubtree.
+    const { folders, photos } = deleteFolderSubtree(db, path);
+    if (folders === 0) {
+      return res.status(404).json({ error: `not indexed: ${path}` });
+    }
+    res.json({ removed: true, folders, photos });
   });
 
   // Rename a scanned folder on disk and update the index (issue #68 Slice B).

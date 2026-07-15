@@ -9,6 +9,7 @@ import {
   setPhotoRating,
   setPhotoCover,
   deleteFolder,
+  deleteFolderSubtree,
   resetLibrary,
   repointPhoto,
 } from "./photos.js";
@@ -164,6 +165,71 @@ describe("deleteFolder", () => {
   it("returns false for an unknown folder id", () => {
     const db = getDb();
     expect(deleteFolder(db, 999999)).toBe(false);
+  });
+});
+
+describe("deleteFolderSubtree", () => {
+  const one = (name) => [{ name, size: 10, mtimeMs: 1, kind: "image" }];
+
+  it("removes a parent AND its descendant folders — not just the parent's own row", () => {
+    const db = getDb();
+    // A parent that has its own photos AND children (the real-library shape that
+    // made Remove look like a no-op: dropping only the parent left the children,
+    // which reconstruct the parent).
+    upsertScan(db, "/lib/Cam 1", 1, one("p.jpg"));
+    upsertScan(db, "/lib/Cam 1/Cam 2", 1, one("c2.jpg"));
+    upsertScan(db, "/lib/Cam 1/Cam 3", 1, one("c3.jpg"));
+    // A sibling of the parent that must survive.
+    upsertScan(db, "/lib/Other", 1, one("o.jpg"));
+
+    const res = deleteFolderSubtree(db, "/lib/Cam 1");
+    expect(res).toEqual({ folders: 3, photos: 3 });
+
+    const remaining = db
+      .prepare(`SELECT abs_path FROM folders ORDER BY abs_path`)
+      .all()
+      .map((r) => r.abs_path);
+    expect(remaining).toEqual(["/lib/Other"]);
+    expect(db.prepare(`SELECT COUNT(*) AS c FROM photos`).get().c).toBe(1);
+  });
+
+  it("removes a pure ancestor that has no row of its own (only sub-folders)", () => {
+    const db = getDb();
+    // Nothing was scanned at "/lib/parent" itself — only below it.
+    upsertScan(db, "/lib/parent/a", 1, one("a.jpg"));
+    upsertScan(db, "/lib/parent/b", 1, one("b.jpg"));
+
+    const res = deleteFolderSubtree(db, "/lib/parent");
+    expect(res).toEqual({ folders: 2, photos: 2 });
+    expect(db.prepare(`SELECT COUNT(*) AS c FROM folders`).get().c).toBe(0);
+  });
+
+  it("does not sweep a sibling whose name only differs where a '_' sits (LIKE escaping)", () => {
+    const db = getDb();
+    // '_' is a LIKE wildcard. Without ESCAPE, the prefix for "2025_a" would also
+    // match "2025Xa" — a different real folder. The trailing-slash prefix plus
+    // escaping must keep them apart.
+    upsertScan(db, "/lib/2025_a", 1, one("keep.jpg"));
+    upsertScan(db, "/lib/2025_a/child", 1, one("gone.jpg"));
+    upsertScan(db, "/lib/2025Xa", 1, one("survivor.jpg"));
+
+    const res = deleteFolderSubtree(db, "/lib/2025_a");
+    expect(res).toEqual({ folders: 2, photos: 2 });
+    const remaining = db
+      .prepare(`SELECT abs_path FROM folders ORDER BY abs_path`)
+      .all()
+      .map((r) => r.abs_path);
+    expect(remaining).toEqual(["/lib/2025Xa"]);
+  });
+
+  it("removes nothing (folders:0) for a path that matches no folder or descendant", () => {
+    const db = getDb();
+    upsertScan(db, "/lib/a", 1, one("a.jpg"));
+    expect(deleteFolderSubtree(db, "/lib/nope")).toEqual({
+      folders: 0,
+      photos: 0,
+    });
+    expect(db.prepare(`SELECT COUNT(*) AS c FROM folders`).get().c).toBe(1);
   });
 });
 

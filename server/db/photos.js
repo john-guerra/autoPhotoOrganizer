@@ -220,6 +220,50 @@ export function deleteFolder(db, folderId) {
 }
 
 /**
+ * Remove a folder AND its whole subtree from the index by absolute path — the
+ * folder itself (if it has its own row) plus every descendant folder and all
+ * their photos. Real files on disk are never touched.
+ *
+ * "Remove from library" on a PARENT has to mean the subtree, or it silently does
+ * nothing: `deleteFolder` drops one folder's own row, but the children stay
+ * indexed and the parent is immediately reconstructed from them, so the user sees
+ * no change. It also has to work for a pure ANCESTOR that has no `folders` row of
+ * its own (it only contains sub-folders) — the prefix match still finds its
+ * descendants.
+ *
+ * Matches by scanning the folder rows in JS, exactly as `renameFolderPath` does
+ * and for the same reason: folder counts are small (tens), and folder names here
+ * are full of `_` (`2025_11Nov_08`) — a LIKE wildcard — so a SQL prefix match
+ * would need metacharacter escaping that is easy to get wrong. A trailing-`sep`
+ * prefix also keeps `…Canon 1` from matching its sibling `…Canon 10`.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} absPath  the folder's absolute path
+ * @returns {{folders: number, photos: number}} rows removed (folders 0 = nothing
+ *   matched, neither the folder nor any descendant — the caller reports 404)
+ */
+export function deleteFolderSubtree(db, absPath) {
+  const prefix = absPath.endsWith(sep) ? absPath : absPath + sep;
+  const tx = db.transaction(() => {
+    const ids = db
+      .prepare(`SELECT id, abs_path FROM folders`)
+      .all()
+      .filter((r) => r.abs_path === absPath || r.abs_path.startsWith(prefix))
+      .map((r) => r.id);
+    if (!ids.length) return { folders: 0, photos: 0 };
+    const placeholders = ids.map(() => "?").join(",");
+    const photos = db
+      .prepare(`DELETE FROM photos WHERE folder_id IN (${placeholders})`)
+      .run(...ids).changes;
+    const folders = db
+      .prepare(`DELETE FROM folders WHERE id IN (${placeholders})`)
+      .run(...ids).changes;
+    return { folders, photos };
+  });
+  return tx();
+}
+
+/**
  * Wipe the entire index — every scanned folder, photo, album, tag, and known
  * volume — in one transaction. This is the "start over" nuclear option (see
  * POST /api/library/reset); real files on disk are never touched, only the

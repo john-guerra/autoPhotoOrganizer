@@ -48,7 +48,12 @@
     <!-- The transient message comes AFTER the actions: "N photos loaded" is a
          separate thought and used to wedge itself between the count and Clear. -->
     {#if error || status}
-      <span class="status" class:err={!!error}>{error || status}</span>
+      <!-- title: the message can be long (a folder path, an error). It truncates
+           with an ellipsis rather than widening the whole app, so the full text
+           lives in the tooltip. -->
+      <span class="status" class:err={!!error} title={error || status}
+        >{error || status}</span
+      >
     {/if}
     {#if thumbProgress}
       <span class="thumb-progress" class:err={thumbCounts.error > 0}>
@@ -78,6 +83,10 @@
     align-items: center;
     gap: 0.75rem;
     min-width: 0;
+    /* The counts/scope/actions keep their size; the transient message is what
+       must give when the row runs out of room (see .status). Without this the
+       message pushed the whole app wider than the window. */
+    overflow: hidden;
   }
   /* Pushed to the far corner, and allowed to keep its width: the jobs pill is
      small and elides its own text, so the left half is what should give. */
@@ -111,7 +120,12 @@
     color: #9a9a9a;
     font-size: 0.85rem;
     white-space: nowrap;
-    flex-shrink: 0;
+    /* Shrink and ellipsis instead of forcing the status bar (and the app) wider.
+       The full text is in the title tooltip. */
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .status.err {
     color: #ff6b6b;
@@ -120,6 +134,10 @@
     color: #9a9a9a;
     font-size: 0.8rem;
     white-space: nowrap;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .thumb-progress.err {
     color: #ff8a80;

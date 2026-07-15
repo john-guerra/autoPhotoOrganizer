@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.6
+
+- **Removing a parent folder now removes everything under it.** "Remove from
+  library" on a folder that has sub-folders used to drop only that one folder's
+  own photos — the sub-folders stayed indexed and immediately rebuilt the parent,
+  so it looked like nothing happened. It now removes the folder and its whole
+  subtree in one go (index only — files on disk are never touched), and reports
+  exactly what came out in the status bar. (#127)
+- **A long status message no longer stretches the window.** The status bar text
+  now truncates with an ellipsis (full text on hover) instead of forcing the app
+  wider than its window.
+
 ## 2.15.5
 
 - **The loupe filmstrip handles bursts exactly like the grid.** Clicking a burst

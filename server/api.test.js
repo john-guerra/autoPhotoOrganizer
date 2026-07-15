@@ -830,6 +830,47 @@ describe("POST /api/folders/remove", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("removing a PARENT folder takes its indexed sub-folders with it (subtree)", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "ag-rmtree-"));
+    const child = join(parent, "sub cam");
+    await mkdir(child);
+    await sharp({
+      create: { width: 20, height: 20, channels: 3, background: { r: 1, g: 2, b: 3 } },
+    })
+      .jpeg()
+      .toFile(join(parent, "p.jpg"));
+    await sharp({
+      create: { width: 20, height: 20, channels: 3, background: { r: 4, g: 5, b: 6 } },
+    })
+      .jpeg()
+      .toFile(join(child, "c.jpg"));
+    // The non-recursive scan indexes one dir each — index BOTH so the parent has
+    // its own row AND a child row (the real-library shape where removing only the
+    // parent left the child behind and looked like a no-op).
+    await scan(srv.base, parent);
+    await scan(srv.base, child);
+    let lib = await (await fetch(`${srv.base}/api/library`)).json();
+    expect(lib.some((e) => e.path === parent)).toBe(true);
+    expect(lib.some((e) => e.path === child)).toBe(true);
+
+    const res = await fetch(`${srv.base}/api/folders/remove`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: parent }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ removed: true, folders: 2, photos: 2 });
+
+    lib = await (await fetch(`${srv.base}/api/library`)).json();
+    expect(lib.some((e) => e.path === parent)).toBe(false);
+    expect(lib.some((e) => e.path === child)).toBe(false);
+    // Files on disk are untouched.
+    expect(await readdir(child)).toEqual(["c.jpg"]);
+
+    await rm(parent, { recursive: true, force: true });
+  });
+
   it("404s for a path not in the index", async () => {
     const res = await fetch(`${srv.base}/api/folders/remove`, {
       method: "POST",

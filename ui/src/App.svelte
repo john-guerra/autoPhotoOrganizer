@@ -1343,8 +1343,10 @@
       return;
     }
     removeArmedKey = null;
+    const name = folderPath.split(/[/\\]/).filter(Boolean).pop() || folderPath;
     try {
-      await removeFolderByPath(folderPath);
+      status = `Removing ${name} from the library…`;
+      const res = await removeFolderByPath(folderPath);
       collapsedPaths = collapsedPaths.filter((p) => pathKey(p) !== key);
       const nextSnaps = new Set(snapshotGroupKeys);
       nextSnaps.delete(key);
@@ -1353,8 +1355,17 @@
       // Library remove path. `loadInitialFeed()` alone left the removed
       // folder lingering in the sidebar (it only refetches on libraryVersion).
       await onFolderRemoved();
+      // Never a silent success: say what came out, and that the subtree went with
+      // it, so removing a parent doesn't look like nothing happened.
+      const f = res?.folders ?? 1;
+      const p = res?.photos ?? 0;
+      status =
+        `Removed ${name} from the library — ` +
+        `${f} folder${f === 1 ? "" : "s"}, ${p} photo${p === 1 ? "" : "s"}. ` +
+        `Files on disk are untouched.`;
     } catch (e) {
-      error = e.message;
+      status = "";
+      error = `Couldn't remove ${name}: ${e.message}`;
     }
   }
 
@@ -2512,9 +2523,14 @@
 
   async function revealFolderInFinder(folderPath) {
     if (!folderPath) return;
+    const name = folderPath.split(/[/\\]/).filter(Boolean).pop() || folderPath;
     const res = await revealFolder(folderPath);
     if (!res.ok) {
       error = `Couldn't reveal that folder: ${res.error ?? "unknown error"}`;
+    } else {
+      // Never a silent success: the Finder window may open behind the app, so say
+      // it happened in the status bar too.
+      status = `Revealed ${name} in Finder`;
     }
   }
 
