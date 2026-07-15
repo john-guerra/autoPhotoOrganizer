@@ -96,7 +96,6 @@
       activeSrc = null;
     }
   }
-
 </script>
 
 {#if failed}
