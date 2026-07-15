@@ -58,8 +58,27 @@ Gate green after this group: 865 unit + 60 e2e + prod build.
 Still open (warnings, not blockers): Svelte 5 warns on self-closing non-void tags
 (`<div … />`). `sv migrate` fixes these mechanically; fold into Stage 2.
 
-**Electron stack** — still pending (its own step; native ABI rebuild of
-better-sqlite3, then a packaged build to verify).
+**Electron stack DONE** (Stage 1c) — electron 33→**43.1.1**, electron-builder
+25→**26.15.3**, @electron/rebuild 3→**4.2.0**, electron-updater 6.3→**6.8.9**. One
+config break:
+
+- **electron-builder 26 removed `win.publisherName`** (`additionalProperties:false`
+  now; it moved under the Windows *signing* config). This app builds unsigned NSIS
+  with no certificate, so the field no longer applies — dropped it from
+  `build.win`.
+
+Verified: `npm run rebuild:electron` rebuilds better-sqlite3 against Electron 43's
+ABI; a headless Electron smoke boot loads the native module and answers
+`/api/health`; `npm run electron:build:mac` packages a valid (ad-hoc-signed) .app +
+dmg with electron-builder 26; and launching the packaged .app boots the full process
+tree with the embedded Express 5 server on :4331 reporting version 2.15.0 (proving
+better-sqlite3 loads from its `asarUnpack` slot). The build script's trailing
+`rebuild:node` restores the Node ABI so local vitest stays green (865 unit + 60 e2e
+after the bump). Side note: the 11 npm high-severity advisories were all in the old
+electron-builder 25 tree — now **0 vulnerabilities**.
+
+**All dependency modernization (Stage 1a/1b/1c) is complete. Next: Stage 2 — the runes
+conversion.**
 
 **Scope (set by the user):** not just Svelte — **all libraries and technologies to
 their latest stable, recommended versions**, with the Svelte 4→5 runes migration as
