@@ -188,6 +188,60 @@ describe("POST /api/scan", () => {
     expect(job.result.root).toBe(photosDir);
     expect(typeof job.result.elapsedMs).toBe("number");
   });
+
+  it("marks rows stale when a previously-indexed folder is emptied on a recursive rescan", async () => {
+    // Isolated root — never the shared photosDir, so this test's assertions
+    // don't collide with the shared fixture's own rows.
+    const root = await mkdtemp(join(tmpdir(), "ag-scan-empty-"));
+    const sub = join(root, "sub");
+    await mkdir(sub, { recursive: true });
+    await writeFile(join(sub, "p.jpg"), "x");
+
+    try {
+      const first = await fetch(`${srv.base}/api/scan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dir: root, recursive: true }),
+      });
+      expect(first.status).toBe(202);
+      const { jobId: firstJobId } = await first.json();
+      await waitJob(firstJobId);
+
+      const db = getDb();
+      const staleBefore = db
+        .prepare(
+          `SELECT stale FROM photos
+           JOIN folders ON folders.id = photos.folder_id
+           WHERE folders.abs_path = ?`
+        )
+        .all(sub);
+      expect(staleBefore).toHaveLength(1);
+      expect(staleBefore[0].stale).toBe(0);
+
+      // Empty the subfolder, then rescan recursively again.
+      await rm(join(sub, "p.jpg"));
+      const second = await fetch(`${srv.base}/api/scan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dir: root, recursive: true }),
+      });
+      expect(second.status).toBe(202);
+      const { jobId: secondJobId } = await second.json();
+      await waitJob(secondJobId);
+
+      const staleAfter = db
+        .prepare(
+          `SELECT stale FROM photos
+           JOIN folders ON folders.id = photos.folder_id
+           WHERE folders.abs_path = ?`
+        )
+        .all(sub);
+      expect(staleAfter).toHaveLength(1);
+      expect(staleAfter[0].stale).toBe(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("GET /api/meta", () => {
@@ -835,12 +889,22 @@ describe("POST /api/folders/remove", () => {
     const child = join(parent, "sub cam");
     await mkdir(child);
     await sharp({
-      create: { width: 20, height: 20, channels: 3, background: { r: 1, g: 2, b: 3 } },
+      create: {
+        width: 20,
+        height: 20,
+        channels: 3,
+        background: { r: 1, g: 2, b: 3 },
+      },
     })
       .jpeg()
       .toFile(join(parent, "p.jpg"));
     await sharp({
-      create: { width: 20, height: 20, channels: 3, background: { r: 4, g: 5, b: 6 } },
+      create: {
+        width: 20,
+        height: 20,
+        channels: 3,
+        background: { r: 4, g: 5, b: 6 },
+      },
     })
       .jpeg()
       .toFile(join(child, "c.jpg"));

@@ -584,6 +584,18 @@ export function registerApi(app) {
               upsertScan(db, subdir, volumeId, files);
               count += files.length;
               folders += 1;
+            } else {
+              // A folder ALREADY in the index that is now empty must have its
+              // rows reconciled (marked stale), or an emptied folder's photos
+              // are never noticed as missing. New empty folders create no row.
+              const known = db
+                .prepare(`SELECT id FROM folders WHERE abs_path = ?`)
+                .get(subdir);
+              if (known) {
+                db.prepare(
+                  `UPDATE photos SET stale = 1 WHERE folder_id = ?`
+                ).run(known.id);
+              }
             }
             registry.update(job.id, {
               done: i + 1,

@@ -6,6 +6,11 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.13
+
+- **Emptied folders are noticed.** Removing every file from a folder now marks
+  those photos missing on the next rescan instead of leaving stale entries. (#1)
+
 ## 2.15.12
 
 - **Moved photos are recognised automatically.** After a scan, a file that
