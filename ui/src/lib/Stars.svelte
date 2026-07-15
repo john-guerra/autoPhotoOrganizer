@@ -1,15 +1,21 @@
 <script>
   // Compact star display. rating 0 renders nothing (or dim dots in `full` mode).
-  import { createEventDispatcher } from "svelte";
-  export let rating = 0;
-  export let full = false; // full = show all 5 slots (loupe); else only filled (grid badge)
-  export let interactive = false; // clickable stars → dispatch("rate", value)
+  /**
+   * @type {{
+   *   rating?: number,
+   *   full?: boolean,
+   *   interactive?: boolean,
+   *   onrate?: (value: number) => void,
+   * }}
+   * `full` shows all 5 slots (loupe) vs only filled (grid badge); `interactive`
+   * makes the stars clickable → `onrate(value)`.
+   */
+  let { rating = 0, full = false, interactive = false, onrate } = $props();
 
-  const dispatch = createEventDispatcher();
   // Click the current rating again to clear it (toggle to 0), matching the
   // keyboard "0 clears" affordance.
   function set(n) {
-    dispatch("rate", n === rating ? 0 : n);
+    onrate?.(n === rating ? 0 : n);
   }
 </script>
 
@@ -22,7 +28,10 @@
         class:on={n <= rating}
         aria-label={`${n} star${n === 1 ? "" : "s"}`}
         title={`Set ${n} star${n === 1 ? "" : "s"} (click again to clear)`}
-        on:click|stopPropagation={() => set(n)}>★</button
+        onclick={(e) => {
+          e.stopPropagation();
+          set(n);
+        }}>★</button
       >
     {/each}
   </span>

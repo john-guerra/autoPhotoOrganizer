@@ -1,17 +1,19 @@
 <script>
-  import { createEventDispatcher, tick } from "svelte";
+  import { tick } from "svelte";
   import { thumbUrl } from "./api.js";
   import { filmstripWindow } from "./filmstrip.js";
   import Stars from "./Stars.svelte";
 
-  const dispatch = createEventDispatcher();
-
-  export let items = [];
-  export let index = 0;
-  export let selectedIds = new Set();
   /**
-   * The thumbnail size to REQUEST — the grid's current one, not the 64px this
-   * strip draws at.
+   * @type {{
+   *   items?: any[],
+   *   index?: number,
+   *   selectedIds?: Set<number>,
+   *   requestSize?: number,
+   *   onselect?: (detail: { index: number }) => void,
+   * }}
+   * `requestSize` is the thumbnail size to REQUEST — the grid's current one, not
+   * the 64px this strip draws at.
    *
    * The thumb cache is keyed by exact pixel size, so asking for 64 (a size no
    * other view uses) meant every loupe open generated up to 81 brand-new
@@ -21,23 +23,34 @@
    * immutable and already fetched). Bigger bytes, but bytes we already have,
    * versus decoding the photo again. Drawn at 64px by CSS either way.
    */
-  export let requestSize = 64;
+  let {
+    items = [],
+    index = 0,
+    selectedIds = new Set(),
+    requestSize = 64,
+    onselect,
+  } = $props();
 
   const RADIUS = 40; // ±40 rendered around the current index
   const THUMB = 64; // px — the drawn size
 
   const isReal = (it) => it && typeof it.id === "number";
 
-  $: win = filmstripWindow(index, items.length, RADIUS);
+  const win = $derived(filmstripWindow(index, items.length, RADIUS));
   // [{ i, item }] for the current window, so click handlers know the real index.
-  $: windowItems = Array.from({ length: win.end - win.start }, (_, k) => {
-    const i = win.start + k;
-    return { i, item: items[i] };
-  });
+  const windowItems = $derived(
+    Array.from({ length: win.end - win.start }, (_, k) => {
+      const i = win.start + k;
+      return { i, item: items[i] };
+    })
+  );
 
   let stripEl;
   // Keep the current thumb centered horizontally whenever the index changes.
-  $: (index, scrollCurrentIntoView());
+  $effect(() => {
+    void index; // track the current position
+    scrollCurrentIntoView();
+  });
   async function scrollCurrentIntoView() {
     await tick();
     stripEl?.querySelector(".cell.current")?.scrollIntoView({
@@ -55,7 +68,7 @@
         class:current={i === index}
         style="width:{THUMB}px;height:{THUMB}px;"
         title={item.name}
-        on:click={() => dispatch("select", { index: i })}
+        onclick={() => onselect?.({ index: i })}
       >
         <!-- lazy: the strip renders ±40 cells but only ~15 are ever on screen.
              Eagerly fetching all 81 put a thundering herd in front of the one
@@ -75,7 +88,7 @@
           >{/if}
       </button>
     {:else}
-      <div class="gap" style="width:{THUMB / 3}px;height:{THUMB}px;" />
+      <div class="gap" style="width:{THUMB / 3}px;height:{THUMB}px;"></div>
     {/if}
   {/each}
 </div>

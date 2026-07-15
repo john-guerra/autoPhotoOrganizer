@@ -4742,10 +4742,10 @@
     showDetails={showLoupeDetails}
     showFilmstrip={showLoupeFilmstrip}
     thumbSize={filmstripThumbSize}
-    on:contextmenu={(e) => openContextMenu(e.detail.x, e.detail.y, selected)}
-    on:close={closeLoupe}
-    on:rate={(e) => rate(selected, e.detail)}
-    on:toggleselect={() => toggleSelect(resolvedPhotos[selected]?.id)}
+    oncontextmenu={(d) => openContextMenu(d.x, d.y, selected)}
+    onclose={closeLoupe}
+    onrate={(v) => rate(selected, v)}
+    ontoggleselect={() => toggleSelect(resolvedPhotos[selected]?.id)}
   />
 {/if}
 

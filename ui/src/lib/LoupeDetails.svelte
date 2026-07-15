@@ -9,22 +9,38 @@
     formatDimensions,
   } from "./exifFormat.js";
 
-  export let item = null; // current photo (from items[index])
-  export let meta = null; // full detail meta from /api/meta (or null while loading)
-  export let inSelection = false;
-  export let selectedCount = 0;
+  /**
+   * @type {{
+   *   item?: any,
+   *   meta?: any,
+   *   inSelection?: boolean,
+   *   selectedCount?: number,
+   *   onrate?: (value: number) => void,
+   * }}
+   * `item` is the current photo (items[index]); `meta` is the full detail meta
+   * from /api/meta (or null while loading). `onrate` forwards the star click up.
+   */
+  let {
+    item = null,
+    meta = null,
+    inSelection = false,
+    selectedCount = 0,
+    onrate,
+  } = $props();
 
   const DASH = "—";
   const or = (s) => (s ? s : DASH);
 
   // Prefer freshly-fetched meta, fall back to the feed item's own fields.
-  $: takenAt = meta?.takenAt ?? item?.takenAt ?? null;
-  $: dims = formatDimensions(
-    meta?.width ?? item?.width ?? 0,
-    meta?.height ?? item?.height ?? 0
+  const takenAt = $derived(meta?.takenAt ?? item?.takenAt ?? null);
+  const dims = $derived(
+    formatDimensions(
+      meta?.width ?? item?.width ?? 0,
+      meta?.height ?? item?.height ?? 0
+    )
   );
-  $: folder = meta?.folder ?? null;
-  $: isVideo = item?.kind === "video";
+  const folder = $derived(meta?.folder ?? null);
+  const isVideo = $derived(item?.kind === "video");
 
   function fmtDate(iso) {
     if (!iso) return DASH;
@@ -89,7 +105,7 @@
 
     <section class="rating-row">
       <h4>Rating</h4>
-      <Stars rating={item.rating ?? 0} full interactive on:rate />
+      <Stars rating={item.rating ?? 0} full interactive {onrate} />
     </section>
 
     <section class="select-row">

@@ -1,43 +1,66 @@
 <script>
-  import { createEventDispatcher } from "svelte";
   import { imageUrl, fetchMeta, prepareVideo } from "./api.js";
   import { waitForJob } from "./jobs.js";
   import LoupeDetails from "./LoupeDetails.svelte";
   import LoupeFilmstrip from "./LoupeFilmstrip.svelte";
   import { loadVideoPrefs, saveVideoPrefs } from "./videoPrefs.js";
 
-  const dispatch = createEventDispatcher();
+  /**
+   * @type {{
+   *   items: any[],
+   *   index?: number,
+   *   inSelection?: boolean,
+   *   selectedCount?: number,
+   *   selectedIds?: Set<number>,
+   *   showDetails?: boolean,
+   *   showFilmstrip?: boolean,
+   *   thumbSize?: number,
+   *   oncontextmenu?: (detail: { x: number, y: number }) => void,
+   *   onclose?: () => void,
+   *   ontoggleselect?: () => void,
+   *   onrate?: (value: number) => void,
+   * }}
+   * `index` is two-way bound (the filmstrip moves it). `thumbSize` is the size
+   * the filmstrip should REQUEST — the grid's current size, so the strip reuses
+   * already-cached thumbnails (see LoupeFilmstrip). `onrate` is forwarded up
+   * from LoupeDetails' star control.
+   */
+  let {
+    items,
+    index = $bindable(),
+    inSelection = false,
+    selectedCount = 0,
+    selectedIds = new Set(),
+    showDetails = true,
+    showFilmstrip = true,
+    thumbSize = 64,
+    oncontextmenu,
+    onclose,
+    ontoggleselect,
+    onrate,
+  } = $props();
 
   // Right-click the photo → let App.svelte open the shared context menu at the
   // cursor, targeting the currently-loupe'd photo.
   function onContextMenu(e) {
     e.preventDefault();
-    dispatch("contextmenu", { x: e.clientX, y: e.clientY });
+    oncontextmenu?.({ x: e.clientX, y: e.clientY });
   }
-
-  export let items;
-  export let index; // current position in items (two-way bound)
-  export let inSelection = false; // is the current photo in the selection?
-  export let selectedCount = 0; // total selected, for the panel
-  export let selectedIds = new Set(); // for the filmstrip's ✓ markers
-  export let showDetails = true;
-  export let showFilmstrip = true;
-  /** Thumb size the filmstrip should REQUEST — the grid's current size, so the
-   *  strip reuses thumbnails that are already cached (see LoupeFilmstrip). */
-  export let thumbSize = 64;
 
   // `items` is App.svelte's resolvedPhotos — 1:1 with displayEntries, so a
   // collapsed section's placeholder (string id like "collapsed:...") can appear
   // here; `index` may transiently point at one while the caller reassigns.
   const isRealPhoto = (it) => it && typeof it.id === "number";
-  $: item = isRealPhoto(items[index]) ? items[index] : null;
+  const item = $derived(isRealPhoto(items[index]) ? items[index] : null);
 
   // Lazy, Loupe-scoped full metadata (incl. EXIF): fetch the current photo and
   // its immediate neighbours, cached by id. /api/meta persists on first read,
   // so re-views are instant. This keeps EXIF cost off the grid's enrichMeta.
   const detailMeta = new Map(); // id -> meta object from /api/meta
-  let currentMeta = null;
-  $: if (item) loadMeta(item.id);
+  let currentMeta = $state(null);
+  $effect(() => {
+    if (item) loadMeta(item.id);
+  });
 
   async function loadMeta(id) {
     currentMeta = detailMeta.get(id) ?? null;
@@ -64,7 +87,7 @@
   // pointing <video> at the file and hoping — a black rectangle with sound is
   // the worst possible failure, since it looks like a broken FILE, not a
   // missing codec. The server hands back a URL, or transcodes one for us.
-  let videoState = null; // { status: "ready"|"preparing"|"error", url?, reason?, message? }
+  let videoState = $state(null); // { status: "ready"|"preparing"|"error", url?, reason?, message? }
 
   // Audio is a property of the person watching, not of the file: the <video> used
   // to be hardcoded `muted`, so every clip started silent and had to be un-muted
@@ -98,8 +121,10 @@
       });
     });
   }
-  $: if (item?.kind === "video") loadVideo(item.id);
-  $: if (item && item.kind !== "video") videoState = null;
+  $effect(() => {
+    if (item?.kind === "video") loadVideo(item.id);
+    else if (item && item.kind !== "video") videoState = null;
+  });
 
   /**
    * Can THIS machine decode that? The one question the server can't answer.
@@ -186,7 +211,9 @@
 
   // Image prefetch: keep ±3 neighbours warm so navigation never waits on decode.
   const warm = new Map(); // id -> Image()
-  $: if (item) prefetch(index);
+  $effect(() => {
+    if (item) prefetch(index);
+  });
   function prefetch(i) {
     const wanted = new Set();
     for (let d = -3; d <= 3; d++) {
@@ -240,7 +267,7 @@
     class="loupe-close"
     title="Close (Esc)"
     aria-label="Close"
-    on:click={() => dispatch("close")}>✕</button
+    onclick={() => onclose?.()}>✕</button
   >
   {#if item}
     <button
@@ -249,17 +276,17 @@
       title={inSelection ? "Deselect (X)" : "Select (X)"}
       aria-label={inSelection ? "Deselect photo" : "Select photo"}
       aria-pressed={inSelection}
-      on:click={() => dispatch("toggleselect")}
+      onclick={() => ontoggleselect?.()}
     >
       {#if inSelection}✓{/if}
     </button>
   {/if}
   <div class="body">
-    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <!-- contextmenu is a right-click affordance on the media stage; no ARIA
          role describes a bare image/video canvas, and keyboard users reach the
          same actions elsewhere. -->
-    <div class="stage" on:contextmenu={onContextMenu}>
+    <div class="stage" oncontextmenu={onContextMenu}>
       {#if item}
         {#key item.id}
           {#if item.kind === "video"}
@@ -277,8 +304,8 @@
                 playsinline
                 preload="metadata"
                 use:autoplay
-                on:volumechange={rememberAudio}
-                on:error={onVideoError}
+                onvolumechange={rememberAudio}
+                onerror={onVideoError}
               >
                 <track kind="captions" />
               </video>
@@ -319,7 +346,7 @@
         meta={currentMeta}
         {inSelection}
         {selectedCount}
-        on:rate
+        {onrate}
       />
     {/if}
   </div>
@@ -329,7 +356,7 @@
       {index}
       {selectedIds}
       requestSize={thumbSize}
-      on:select={(e) => (index = e.detail.index)}
+      onselect={(d) => (index = d.index)}
     />
   {/if}
 </div>
