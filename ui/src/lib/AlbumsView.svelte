@@ -3,7 +3,7 @@
   // shows them as break points (dividers) down the feed. The slider re-clusters
   // instantly (all client-side — see albums.js) so you can preview boundaries
   // before materializing them to dated folders on disk.
-  import { createEventDispatcher, onMount, tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import {
     startMaterialize,
     fetchSystemPaths,
@@ -25,96 +25,109 @@
   import AlbumTimeline from "./AlbumTimeline.svelte";
   import { albumColor } from "./albumColors.js";
 
-  export let photos = []; // [{id,t,mtimeMs}] time-ordered working set
-  export let truncated = false;
-  export let hasNativePicker = false;
-  export let limit = 20000; // current working-set cap (server hard-caps at 200000)
-  // The folder you're currently working in — focusPath if focused, else
-  // derived from the current groupBy position, else the first album photo's
-  // own folder (see App.svelte's `currentFolder`, #66). When set, materialize
-  // defaults to organizing in place — album subfolders created inside this
-  // folder.
-  export let defaultDest = "";
-  // The current folder's basename (App passes `currentFolderName`), used as
-  // the default "<folderName>_<n>" album name when the naming template is
-  // empty. Source-specific, so it is NOT persisted to the global album prefs
-  // (unlike `template`, which is).
-  export let currentFolderName = "";
-  // Global album prefs (template/gapMode/fixedGapMs/k/move) — see albumPrefs.js.
-  // AlbumsView owns the LIVE working copy (seeded here, tweaked by the slider,
-  // the Auto button, the type-exact editor, and the Options modal); App
-  // persists it back on `prefschange`.
-  export let prefs;
-  // Open the setup/explainer modal automatically the very first time Auto
-  // Albums is EVER entered (App persists this to localStorage, so it never
-  // reopens automatically again after that one time); afterward it's only
-  // reachable via the ⚙ Options button. Seeded at mount from this prop.
-  export let autoOpenSetup = false;
-
-  const dispatch = createEventDispatcher();
+  let {
+    photos = [], // [{id,t,mtimeMs}] time-ordered working set
+    truncated = false,
+    hasNativePicker = false,
+    limit = 20000, // current working-set cap (server hard-caps at 200000)
+    // The folder you're currently working in — focusPath if focused, else
+    // derived from the current groupBy position, else the first album photo's
+    // own folder (see App.svelte's `currentFolder`, #66). When set, materialize
+    // defaults to organizing in place — album subfolders created inside this
+    // folder.
+    defaultDest = "",
+    // The current folder's basename (App passes `currentFolderName`), used as
+    // the default "<folderName>_<n>" album name when the naming template is
+    // empty. Source-specific, so it is NOT persisted to the global album prefs
+    // (unlike `template`, which is).
+    currentFolderName = "",
+    // Global album prefs (template/gapMode/fixedGapMs/k/move) — see albumPrefs.js.
+    // AlbumsView owns the LIVE working copy (seeded here, tweaked by the slider,
+    // the Auto button, the type-exact editor, and the Options modal); App
+    // persists it back on `prefschange`.
+    prefs,
+    // Open the setup/explainer modal automatically the very first time Auto
+    // Albums is EVER entered (App persists this to localStorage, so it never
+    // reopens automatically again after that one time); afterward it's only
+    // reachable via the ⚙ Options button. Seeded at mount from this prop.
+    autoOpenSetup = false,
+    onrelimit,
+    onclose,
+    onopenphoto,
+    onprefschange,
+    onmaterialized,
+  } = $props();
 
   // Single authoritative gap state — gapMode/fixedGapMs/k. Every control
   // (slider, Auto button, type-exact editor, Options modal) reads/writes
-  // these same three fields; there is no parallel threshold path.
-  let gapMode = prefs.gapMode; // "fixed" | "auto"
-  let fixedGapMs = prefs.fixedGapMs;
-  let k = prefs.k; // auto-mode multiplier: threshold = mean + k·stddev
-  let editingThresh = false;
-  let threshInput = "";
+  // these same three fields; there is no parallel threshold path. Seeded
+  // ONCE from `prefs` (untrack — this is a one-shot local copy, not a live
+  // mirror; re-seeding on every `prefs` change would stomp in-progress edits).
+  let gapMode = $state(untrack(() => prefs.gapMode)); // "fixed" | "auto"
+  let fixedGapMs = $state(untrack(() => prefs.fixedGapMs));
+  let k = $state(untrack(() => prefs.k)); // auto-mode multiplier: threshold = mean + k·stddev
+  let editingThresh = $state(false);
+  let threshInput = $state("");
   // Local mirror of the naming template, kept in sync via the Options modal's
   // `apply` (prefs.template itself only updates once App persists+re-passes).
-  let template = prefs.template;
-  let setupOpen = autoOpenSetup;
+  let template = $state(untrack(() => prefs.template));
+  let setupOpen = $state(untrack(() => autoOpenSetup));
   // Destination: default to the opened folder (in-place) so Move creates album
   // subfolders directly inside the folder you're viewing. When you're not
   // focused on a folder it starts empty (rather than a stale remembered path
   // that could be a parent) — the mode-dependent block below then fills Copy's
   // default with the Desktop.
-  let dest = defaultDest || "";
+  let dest = $state(untrack(() => defaultDest) || "");
   // Track whether the user has hand-edited the destination; until they do, keep
   // it mode-dependent (see reactive block below) instead of a fixed value.
-  let destEdited = false;
-  let materializing = false;
-  let result = null;
+  let destEdited = $state(false);
+  let materializing = $state(false);
+  let result = $state(null);
   // Materialize defaults to MOVE (relocates the originals into the album
   // folders — by default subfolders of the folder you're viewing) — Copy is
   // the safer opt-in. A completed/partially-canceled move job can be undone
   // from the JobsPanel via its result manifest.
-  let move = prefs.move;
+  let move = $state(untrack(() => prefs.move));
 
   // Desktop path for Copy's default destination (fetched once; harmless if it
   // never resolves — the field just keeps whatever it was seeded with).
-  let desktopPath = "";
-  onMount(async () => {
-    try {
-      const { desktop } = await fetchSystemPaths();
-      desktopPath = desktop || "";
-    } catch {
-      // non-fatal: Copy's smart default just won't kick in
-    }
+  let desktopPath = $state("");
+  $effect(() => {
+    (async () => {
+      try {
+        const { desktop } = await fetchSystemPaths();
+        desktopPath = desktop || "";
+      } catch {
+        // non-fatal: Copy's smart default just won't kick in
+      }
+    })();
   });
 
   // Mode-dependent dest default: Move organizes in place (the opened
   // folder/source), Copy defaults to the Desktop — switching the toggle
   // updates the field only while the user hasn't hand-typed a dest.
-  $: if (!destEdited) {
-    if (move) {
-      if (defaultDest) dest = defaultDest;
-    } else if (desktopPath) {
-      dest = desktopPath;
+  $effect(() => {
+    if (!destEdited) {
+      if (move) {
+        if (defaultDest) dest = defaultDest;
+      } else if (desktopPath) {
+        dest = desktopPath;
+      }
     }
-  }
+  });
 
   // Cross-volume Move warning: a Move across volumes can't be a cheap
   // rename — materialize falls back to copy+delete, which is slow and not
   // an instant move. `sameVolume` is null while unknown/unchecked.
-  let sameVolume = null;
+  let sameVolume = $state(null);
   let volumeCheckToken = 0;
-  $: if (move && dest.trim() && defaultDest) {
-    checkVolume(defaultDest, dest.trim());
-  } else {
-    sameVolume = null;
-  }
+  $effect(() => {
+    if (move && dest.trim() && defaultDest) {
+      checkVolume(defaultDest, dest.trim());
+    } else {
+      sameVolume = null;
+    }
+  });
   async function checkVolume(source, destPath) {
     const token = ++volumeCheckToken;
     try {
@@ -126,41 +139,46 @@
   }
   // Local mirror of the max-photos prop. Re-syncs whenever the prop changes
   // (i.e. after a re-fetch clamps it) but survives typing in between.
-  let limitInput = limit;
-  $: limitInput = limit;
+  let limitInput = $state(untrack(() => limit));
+  $effect(() => {
+    limitInput = limit;
+  });
 
-  $: times = photos.map((p) => p.t);
-  $: stats = computeGapStats(times);
-  $: thresholdMs = gapMode === "auto" ? autoThresholdMs(stats, k) : fixedGapMs;
-  $: albums = clusterByGap(
-    photos.map((p) => ({ id: p.id, t: p.t })),
-    thresholdMs
+  const times = $derived(photos.map((p) => p.t));
+  const stats = $derived(computeGapStats(times));
+  const thresholdMs = $derived(
+    gapMode === "auto" ? autoThresholdMs(stats, k) : fixedGapMs
   );
-  $: mtimeById = new Map(photos.map((p) => [p.id, p.mtimeMs]));
+  const albums = $derived(
+    clusterByGap(
+      photos.map((p) => ({ id: p.id, t: p.t })),
+      thresholdMs
+    )
+  );
+  const mtimeById = $derived(new Map(photos.map((p) => [p.id, p.mtimeMs])));
 
   // Editable album folder names, keyed by each album's first-photo id so a
   // typed name survives re-clustering (slider/Auto move boundaries) as long
   // as that photo still starts the album. Un-edited albums render from
-  // `template`.
-  let editedNames = new Map(); // firstPhotoId -> typed name
-  $: names = computeAlbumNames(
-    albums,
-    editedNames,
-    template,
-    currentFolderName
+  // `template`. A deeply-reactive $state Map: mutating it in place (.set/
+  // .delete) notifies without the Svelte-4 reassignment ritual.
+  let editedNames = $state(new Map()); // firstPhotoId -> typed name
+  const names = $derived(
+    computeAlbumNames(albums, editedNames, template, currentFolderName)
   );
 
   function onNameInput(i, value) {
     const firstId = albums[i].ids[0];
     if (value == null || value === "") editedNames.delete(firstId);
     else editedNames.set(firstId, value);
-    editedNames = editedNames; // trigger Svelte reactivity
   }
 
   // Bound album-name <input> elements, indexed like `albums`/`names` — lets
   // plain Tab/Shift+Tab jump straight between name fields (issue #2) instead
   // of tabbing through every snapshot thumbnail in between.
-  let nameInputs = [];
+  // $state (not plain) because `bind:this={nameInputs[i]}` binds into the array —
+  // Svelte 5 warns (binding_property_non_reactive) unless the container is $state.
+  let nameInputs = $state([]);
   function onNameKeydown(e, i) {
     if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) return;
     const next = e.shiftKey ? i - 1 : i + 1;
@@ -176,10 +194,15 @@
   // tie them together: the shared colour (albumColor(i) — the chip and the band
   // call the same function with the same index), a two-way hover, and a marker
   // tracking where in the timeline you have scrolled to.
+  // scrollEl/dividerEls are bind:this targets read only imperatively (inside
+  // syncViewport/scrollToAlbum, never in the template or a $derived/$effect
+  // body), so they stay plain — no reactivity needed for a DOM handle nothing
+  // ever re-renders from.
   let scrollEl = null;
-  let dividerEls = [];
-  let hoveredIndex = -1; // hovered in EITHER view
-  let viewportIndex = -1; // the album currently at the top of the list
+  // $state: `bind:this={dividerEls[i]}` binds into the array (see nameInputs).
+  let dividerEls = $state([]);
+  let hoveredIndex = $state(-1); // hovered in EITHER view
+  let viewportIndex = $state(-1); // the album currently at the top of the list
 
   /** Which divider is stuck to the top of `.albums-scroll` right now.
    *  Each `.album-divider` is already `position: sticky; top: 0`, so "the album
@@ -209,7 +232,9 @@
 
   // Re-clustering moves every boundary, so the marker has to be recomputed after
   // Svelte has flushed the new dividers to the DOM — not from the old ones.
-  $: if (albums) tick().then(syncViewport);
+  $effect(() => {
+    if (albums) tick().then(syncViewport);
+  });
 
   function scrollToAlbum(i) {
     // Instant, not smooth. A smooth scroll across 150 albums is a long flight
@@ -241,15 +266,14 @@
     gapMode = "auto";
   }
 
-  function onSetupApply(e) {
-    const p = e.detail;
+  function onSetupApply(p) {
     gapMode = p.gapMode;
     fixedGapMs = p.fixedGapMs;
     move = p.move;
     dest = p.dest || dest;
     template = p.template;
     // Persist globally (App writes to albumPrefs.js / localStorage).
-    dispatch("prefschange", p);
+    onprefschange?.(p);
     setupOpen = false;
   }
   function commitLimit() {
@@ -258,7 +282,7 @@
       limitInput = limit; // reject garbage, restore
       return;
     }
-    if (v !== limit) dispatch("relimit", v);
+    if (v !== limit) onrelimit?.(v);
   }
   function fmtDate(ms) {
     return new Date(ms).toLocaleDateString(undefined, {
@@ -315,7 +339,7 @@
         result = job.result;
         // Tell App to rescan the destination so the newly-created album
         // folders index and show up in the sidebar tree right away.
-        dispatch("materialized", { destParent: dest.trim() });
+        onmaterialized?.({ destParent: dest.trim() });
       } else if (job.status === "canceled") {
         result = { error: "Materialize canceled." };
       } else {
@@ -345,42 +369,45 @@
           max="6"
           step="0.25"
           bind:value={k}
-          on:input={onSlider}
+          oninput={onSlider}
         />
       </label>
       <button
         class="mat-btn"
         class:active={gapMode === "auto"}
-        on:click={useAuto}
+        onclick={useAuto}
         title="Pick the split gap automatically (mean + k·stddev)"
       >
         Auto
       </button>
       {#if editingThresh}
-        <!-- svelte-ignore a11y-autofocus -->
+        <!-- svelte-ignore a11y_autofocus -->
         <input
           class="thresh-edit"
           bind:value={threshInput}
-          on:keydown={(e) => {
+          onkeydown={(e) => {
             if (e.key === "Enter") commitThresh();
             if (e.key === "Escape") editingThresh = false;
           }}
-          on:blur={commitThresh}
+          onblur={commitThresh}
           placeholder="e.g. 6h, 2d, 90m"
           autofocus
         />
       {:else}
         <!-- mousedown+preventDefault (not a plain click): opening the editor
              autofocuses the input, but a click's default focus handling would
-             immediately blur it back out (on:blur commits + closes), so the
+             immediately blur it back out (onblur commits + closes), so the
              field flashed and vanished. Preventing the mousedown default keeps
-             focus on the input the instant it mounts. on:click stays for
+             focus on the input the instant it mounts. onclick stays for
              keyboard activation, where no mousedown precedes it. -->
         <button
           class="thresh-val"
           title="Click to type an exact split gap (e.g. 6h, 2d, 90m)"
-          on:mousedown|preventDefault={startEditThresh}
-          on:click={startEditThresh}
+          onmousedown={(e) => {
+            e.preventDefault();
+            startEditThresh(e);
+          }}
+          onclick={startEditThresh}
         >
           {gapMode === "fixed" ? "fixed" : `${k}×`} · {fmtDur(thresholdMs)}
         </button>
@@ -399,8 +426,8 @@
         min="100"
         step="500"
         bind:value={limitInput}
-        on:change={commitLimit}
-        on:keydown={(e) => e.key === "Enter" && commitLimit()}
+        onchange={commitLimit}
+        onkeydown={(e) => e.key === "Enter" && commitLimit()}
       />
     </label>
     <span class="spacer"></span>
@@ -433,15 +460,15 @@
       type="text"
       placeholder="/materialize/destination"
       bind:value={dest}
-      on:input={() => (destEdited = true)}
+      oninput={() => (destEdited = true)}
       spellcheck="false"
     />
     {#if hasNativePicker}
-      <button class="mat-btn" on:click={pickDest}>Choose…</button>
+      <button class="mat-btn" onclick={pickDest}>Choose…</button>
     {/if}
     <button
       class="mat-btn primary"
-      on:click={doMaterialize}
+      onclick={doMaterialize}
       disabled={materializing}
     >
       {materializing
@@ -452,12 +479,12 @@
     </button>
     <button
       class="mat-btn"
-      on:click={() => (setupOpen = true)}
+      onclick={() => (setupOpen = true)}
       title="Naming & gap options"
     >
       ⚙ Options
     </button>
-    <button class="mat-btn" on:click={() => dispatch("close")}>Done</button>
+    <button class="mat-btn" onclick={() => onclose?.()}>Done</button>
   </div>
 
   {#if move}
@@ -496,19 +523,19 @@
     {names}
     {hoveredIndex}
     {viewportIndex}
-    on:hover={(e) => (hoveredIndex = e.detail)}
-    on:select={(e) => scrollToAlbum(e.detail)}
+    onhover={(v) => (hoveredIndex = v)}
+    onselect={(v) => scrollToAlbum(v)}
   />
 
-  <div class="albums-scroll" bind:this={scrollEl} on:scroll={onScroll}>
+  <div class="albums-scroll" bind:this={scrollEl} onscroll={onScroll}>
     {#each albums as album, i (album.index)}
-      <!-- svelte-ignore a11y-no-static-element-interactions -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="album-divider"
         class:on={hoveredIndex === i}
         bind:this={dividerEls[i]}
-        on:pointerenter={() => (hoveredIndex = i)}
-        on:pointerleave={() => (hoveredIndex = -1)}
+        onpointerenter={() => (hoveredIndex = i)}
+        onpointerleave={() => (hoveredIndex = -1)}
       >
         <!-- The chip and the timeline band are the same colour because both call
              albumColor(i). That IS the link between the two views. -->
@@ -517,8 +544,8 @@
           class="album-name-edit"
           bind:this={nameInputs[i]}
           value={names[i]}
-          on:input={(e) => onNameInput(i, e.target.value)}
-          on:keydown={(e) => onNameKeydown(e, i)}
+          oninput={(e) => onNameInput(i, e.target.value)}
+          onkeydown={(e) => onNameKeydown(e, i)}
           spellcheck="false"
           title="Album folder name (edit before materializing)"
           aria-label="Album folder name"
@@ -533,7 +560,7 @@
         <SnapshotStrip
           ids={album.ids}
           {mtimeById}
-          onselect={(d) => dispatch("openphoto", d)}
+          onselect={(d) => onopenphoto?.(d)}
         />
       </div>
     {/each}
@@ -547,7 +574,7 @@
   {dest}
   {hasNativePicker}
   {currentFolderName}
-  on:apply={onSetupApply}
+  onapply={onSetupApply}
 />
 
 <style>

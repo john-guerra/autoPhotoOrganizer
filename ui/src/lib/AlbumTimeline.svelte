@@ -22,26 +22,27 @@
    * serving both would need a mode flag, and mode flags are how a component grows
    * a second personality.
    */
-  import { createEventDispatcher } from "svelte";
   import { scaleTime, timeFormat } from "d3";
   import { zoomableAxisInput } from "@john-guerra/d3-zoomable-axis/input";
   import { albumColor } from "./albumColors.js";
   import { analyzedDomain, albumOfPhotos, hitAt } from "./albumTimeline.js";
   import { thumbUrl } from "./api.js";
 
-  export let photos = []; // [{id,t}] ascending by t — the clustered working set
-  export let albums = []; // [{index,startAt,endAt,ids}] from clusterByGap
-  export let names = []; // the album folder names, for the tooltip
-  export let hoveredIndex = -1; // album highlighted from the list below
-  export let viewportIndex = -1; // album at the top of the scrolled list
+  let {
+    photos = [], // [{id,t}] ascending by t — the clustered working set
+    albums = [], // [{index,startAt,endAt,ids}] from clusterByGap
+    names = [], // the album folder names, for the tooltip
+    hoveredIndex = -1, // album highlighted from the list below
+    viewportIndex = -1, // album at the top of the scrolled list
+    onhover, // (album) => void — hover crosses a band/dot; -1 in a real gap
+    onselect, // (album) => void — click selects an album; scrolls the list
+  } = $props();
 
   // Truncation (the working set was capped) is stated by AlbumsView's existing
   // warning, which sits directly above this strip and already carries the
   // actionable half ("raise Max…"). Repeating it here would be two boxes saying
   // one thing; AlbumsView adds the cutoff DATE to that message instead, which is
   // the part this chart is responsible for making honest.
-
-  const dispatch = createEventDispatcher();
 
   const AXIS_MARGIN = 22; // zoomableAxisInput's side margin (matches TimelineFilter)
   const BAND_H = 10; // album bands
@@ -63,50 +64,67 @@
     size: AXIS_H,
   };
 
-  let width = 0;
-  let canvas = null;
-  let hoverPx = null; // cursor x within the strip, or null
-  let tip = null; // {x, id, t, albumIndex} | null
+  let width = $state(0);
+  let canvas = $state(null);
+  let hoverPx = $state(null); // cursor x within the strip, or null
+  let tip = $state(null); // {x, id, t, albumIndex} | null
 
   // The full range that was actually clustered. The chart can be zoomed into a
   // sub-range, but this is what "reset" returns to and what the notice describes.
-  $: full = analyzedDomain(photos);
-  $: times = photos.map((p) => p.t);
+  const full = $derived(analyzedDomain(photos));
+  const times = $derived(photos.map((p) => p.t));
 
   // The current view. Starts as the analyzed range; the axis handles zoom it.
-  let view = null;
-  $: if (full && (view == null || !zoomed)) view = full;
-  let zoomed = false;
-  $: if (!full) {
-    view = null;
-    zoomed = false;
-  }
+  let view = $state(null);
+  let zoomed = $state(false);
+  $effect(() => {
+    // Seed/reset the view to the full range whenever we're NOT zoomed. This must
+    // not READ `view`: an $effect that both reads and writes `view` re-fires on
+    // its own write (each assignment re-proxies the array to a fresh reference),
+    // which is the effect_update_depth_exceeded loop. The old `view == null` init
+    // case is already covered — on mount `zoomed` is false, so this seeds it.
+    if (full && !zoomed) view = full;
+  });
+  $effect(() => {
+    if (!full) {
+      view = null;
+      zoomed = false;
+    }
+  });
 
   // A zero-width span is a real case (a folder of scans all sharing one mtime).
   // There is no timeline to draw for a single instant, and inventing a range
   // would be a lie about the data.
-  $: hasSpan = view != null && view[1] > view[0];
+  const hasSpan = $derived(view != null && view[1] > view[0]);
 
-  $: length = Math.max(60, width - AXIS_MARGIN * 2);
-  $: pxOf = (t) =>
-    !hasSpan
+  const length = $derived(Math.max(60, width - AXIS_MARGIN * 2));
+  // Plain functions, not $derived: they're read at CALL time (in onMove/onClick/
+  // drawDots), always closing over the current hasSpan/view/length — no
+  // memoization benefit, and `$derived` would need to be forced to re-read those
+  // values on every recompute since a function literal's body isn't executed
+  // (and therefore doesn't register as a dependency) until it's later invoked.
+  function pxOf(t) {
+    return !hasSpan
       ? null
       : AXIS_MARGIN + ((t - view[0]) / (view[1] - view[0])) * length;
-  $: timeAt = (px) =>
-    !hasSpan
+  }
+  function timeAt(px) {
+    return !hasSpan
       ? null
       : view[0] + ((px - AXIS_MARGIN) / length) * (view[1] - view[0]);
+  }
 
   // Every photo's album — drives the dot colours and the click target.
-  $: albumOfPhoto = albumOfPhotos(photos, albums);
+  const albumOfPhoto = $derived(albumOfPhotos(photos, albums));
 
   // --- the dots (canvas) ----------------------------------------------------
   // 20,000 photos is the DEFAULT working set here. That many <circle> elements,
   // re-created every time the k slider moves, would jank — and the slider is the
   // one control that has to feel instant, because it IS the tuning. A canvas
   // redraws the lot in about a millisecond.
-  $: if (canvas && width > 0)
-    drawDots(photos, albumOfPhoto, view, hoveredIndex);
+  $effect(() => {
+    if (canvas && width > 0) drawDots(photos, albumOfPhoto, view, hoveredIndex);
+  });
 
   function drawDots(ps, ofAlbum, v, hov) {
     const dpr = window.devicePixelRatio || 1;
@@ -135,8 +153,9 @@
 
   // The hit test itself lives in albumTimeline.js (pure, tested). It is the one
   // place that decides what the cursor means, so hover and click cannot disagree.
-  $: hit = (px) =>
-    hitAt({ px, times, albums, albumOfPhoto, xOf: pxOf, timeAt });
+  function hit(px) {
+    return hitAt({ px, times, albums, albumOfPhoto, xOf: pxOf, timeAt });
+  }
 
   function onMove(e) {
     if (!hasSpan) return;
@@ -144,7 +163,7 @@
     hoverPx = e.clientX - rect.left;
 
     const { album, photo } = hit(hoverPx);
-    dispatch("hover", album); // -1 in a real gap: the list clears its highlight
+    onhover?.(album); // -1 in a real gap: the list clears its highlight
     tip =
       photo >= 0 ? { x: hoverPx, id: photos[photo].id, t: times[photo] } : null; // no photo near the cursor ⇒ no thumbnail claiming one is there
   }
@@ -152,13 +171,13 @@
   function onLeave() {
     hoverPx = null;
     tip = null;
-    dispatch("hover", -1);
+    onhover?.(-1);
   }
 
   function onClick() {
     if (!hasSpan || hoverPx == null) return;
     const { album } = hit(hoverPx);
-    if (album >= 0) dispatch("select", album); // scroll the list to this album
+    if (album >= 0) onselect?.(album); // scroll the list to this album
   }
 
   function resetZoom() {
@@ -255,14 +274,14 @@
          to that album, and every album it can reach is already keyboard-reachable
          by tabbing the name fields below. So there is no keyboard handler here to
          write — a fake one on a canvas would be worse than none. -->
-    <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
       class="tl-plot"
-      on:pointermove={onMove}
-      on:pointerleave={onLeave}
-      on:click={onClick}
-      on:dblclick={resetZoom}
+      onpointermove={onMove}
+      onpointerleave={onLeave}
+      onclick={onClick}
+      ondblclick={resetZoom}
       style="height:{BAND_H + DOTS_H}px"
     >
       <svg class="tl-bands" {width} height={BAND_H + DOTS_H}>
@@ -327,7 +346,7 @@
     {#if zoomed}
       <button
         class="tl-reset"
-        on:click={resetZoom}
+        onclick={resetZoom}
         title="Double-click the chart">⤢ Reset zoom</button
       >
     {/if}

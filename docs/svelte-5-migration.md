@@ -342,6 +342,19 @@ by default in 5).
 - **Whitespace is trimmed more aggressively** — inline layouts that relied on a
   literal space may need `{' '}` or `preserveWhitespace`.
 - **`null`/`undefined` now render as an empty string**, not the text "null".
+- **An `$effect` that both READS and WRITES the same `$state` self-fires forever —
+  `effect_update_depth_exceeded` (this bit AlbumTimeline).** The Svelte-4 reseed
+  `$: if (full && (view == null || !zoomed)) view = full` translated literally to an
+  `$effect` reads `view` (via `view == null`) and writes `view` — and because `$state`
+  re-proxies an array to a fresh reference on assignment, the write always looks like a
+  change, so the effect retriggers without end. Fix: don't read what you write — drop
+  the `view == null` read (`if (full && !zoomed) view = full`), or guard on a PLAIN
+  untracked local (the UpdateBanner/AlbumsSetupModal reseed pattern). This is the most
+  likely failure when converting a side-effecting `$: if` that touches its own target.
+- **`bind:this={arr[i]}` into a plain array warns `binding_property_non_reactive`.**
+  Binding element refs into a collection (AlbumsView's `dividerEls`, `nameInputs`)
+  needs the container to be `$state([])`, even when the array is only ever read
+  imperatively (in handlers). Plain `let` compiles but warns at runtime.
 - **No multiple handlers on one event**, and **event modifiers are removed** (wrap
   manually).
 - `bind:clientWidth`/`bind:this`/`<svelte:window>`/`<svelte:self>`/transitions/

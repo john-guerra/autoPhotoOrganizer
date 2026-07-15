@@ -4384,11 +4384,11 @@
           {hasNativePicker}
           prefs={albumPrefs}
           autoOpenSetup={albumAutoOpenSetup}
-          on:relimit={(e) => onAlbumRelimit(e.detail)}
-          on:close={() => (albumMode = false)}
-          on:openphoto={(e) => openPhotoById(e.detail.id)}
-          on:prefschange={(e) => (albumPrefs = saveAlbumPrefs(e.detail))}
-          on:materialized={(e) => onAlbumsMaterialized(e.detail)}
+          onrelimit={(v) => onAlbumRelimit(v)}
+          onclose={() => (albumMode = false)}
+          onopenphoto={(d) => openPhotoById(d.id)}
+          onprefschange={(p) => (albumPrefs = saveAlbumPrefs(p))}
+          onmaterialized={(d) => onAlbumsMaterialized(d)}
         />
       {:else if items.length}
         <div

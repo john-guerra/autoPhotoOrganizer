@@ -1,47 +1,59 @@
 <script>
-  import { createEventDispatcher } from "svelte";
+  import { untrack } from "svelte";
   import Modal from "./Modal.svelte";
   import { renderAlbumName, parseDuration, fmtDur } from "./albums.js";
 
-  export let open = false;
-  export let prefs;
-  export let sampleDate = new Date();
-  export let dest = "";
-  export let hasNativePicker = false;
-  // The current folder's basename (App passes `currentFolderName`, derived
-  // from focusPath / the current groupBy position / the first album photo's
-  // folder — see App.svelte's `currentFolder`). Used only to preview/describe
-  // the empty-template default "<folderName>_<n>". Source-specific, so it is
-  // NOT part of the persisted `prefs`.
-  export let currentFolderName = "";
+  let {
+    open = $bindable(false),
+    prefs,
+    sampleDate = new Date(),
+    dest = "",
+    hasNativePicker = false,
+    // The current folder's basename (App passes `currentFolderName`, derived
+    // from focusPath / the current groupBy position / the first album photo's
+    // folder — see App.svelte's `currentFolder`). Used only to preview/describe
+    // the empty-template default "<folderName>_<n>". Source-specific, so it is
+    // NOT part of the persisted `prefs`.
+    currentFolderName = "",
+    onapply,
+    onclose,
+  } = $props();
 
-  const dispatch = createEventDispatcher();
+  // Local editable copy so Cancel discards. Re-seed when the modal (re)opens
+  // (the $effect below); the initializers here only need to cover first
+  // mount, so the reads are untracked — this is a one-shot seed, not a live
+  // mirror of `prefs`/`dest`.
+  let template = $state(untrack(() => prefs.template));
+  let gapMode = $state(untrack(() => prefs.gapMode)); // "fixed" | "auto"
+  let fixedGapMs = $state(untrack(() => prefs.fixedGapMs));
+  let move = $state(untrack(() => prefs.move));
+  let localDest = $state(untrack(() => dest));
+  let gapInput = $state("");
 
-  // Local editable copy so Cancel discards. Re-seed when the modal (re)opens.
-  let template = prefs.template;
-  let gapMode = prefs.gapMode; // "fixed" | "auto"
-  let fixedGapMs = prefs.fixedGapMs;
-  let move = prefs.move;
-  let localDest = dest;
-  let gapInput = "";
-  $: if (open) {
-    // one-shot reseed guard
-  }
+  // Re-seed the local editable copy on the CLOSED→OPEN transition only (not on
+  // every prefs/dest change while the modal stays open, or an in-progress edit
+  // would get stomped). `lastOpen` is a plain (untracked) local, not $state —
+  // reading it inside the effect would make the effect depend on its own write
+  // and re-fire forever (see UpdateBanner's dismissal-reset pattern, §6 of
+  // docs/svelte-5-migration.md).
   let lastOpen = false;
-  $: if (open && !lastOpen) {
-    template = prefs.template;
-    gapMode = prefs.gapMode;
-    fixedGapMs = prefs.fixedGapMs;
-    move = prefs.move;
-    localDest = dest;
-    gapInput = fmtDur(fixedGapMs);
-    lastOpen = true;
-  }
-  $: if (!open) lastOpen = false;
+  $effect(() => {
+    if (open && !lastOpen) {
+      template = prefs.template;
+      gapMode = prefs.gapMode;
+      fixedGapMs = prefs.fixedGapMs;
+      move = prefs.move;
+      localDest = dest;
+      gapInput = fmtDur(fixedGapMs);
+    }
+    lastOpen = open;
+  });
 
-  $: preview = template.trim()
-    ? renderAlbumName(template, sampleDate, 1)
-    : `${currentFolderName || "Album"}_1`;
+  const preview = $derived(
+    template.trim()
+      ? renderAlbumName(template, sampleDate, 1)
+      : `${currentFolderName || "Album"}_1`
+  );
 
   const TOKENS = [
     ["%Y", "4-digit year", "2017"],
@@ -79,7 +91,7 @@
   }
 
   function apply() {
-    dispatch("apply", {
+    onapply?.({
       template,
       gapMode,
       fixedGapMs,
@@ -90,7 +102,7 @@
   }
   function cancel() {
     open = false;
-    dispatch("close");
+    onclose?.();
   }
 </script>
 
@@ -104,9 +116,11 @@
     </p>
     <svg class="gap-diagram" viewBox="0 0 320 30" aria-hidden="true">
       <!-- cluster, big gap, cluster -->
-      {#each [8, 16, 24, 34, 44] as x}<circle cx={x} cy="15" r="4" />{/each}
-      {#each [150, 160, 172, 184] as x}<circle cx={x} cy="15" r="4" />{/each}
-      {#each [286, 296, 306] as x}<circle cx={x} cy="15" r="4" />{/each}
+      {#each [8, 16, 24, 34, 44] as x}<circle cx={x} cy="15" r="4"
+        ></circle>{/each}
+      {#each [150, 160, 172, 184] as x}<circle cx={x} cy="15" r="4"
+        ></circle>{/each}
+      {#each [286, 296, 306] as x}<circle cx={x} cy="15" r="4"></circle>{/each}
       <text x="95" y="19" class="gap-label">↤ new album ↦</text>
     </svg>
   </section>
@@ -114,20 +128,20 @@
   <section class="field">
     <span class="lbl">Split gap</span>
     <div class="gap-row">
-      <button class:active={gapMode === "fixed"} on:click={useFixed}
+      <button class:active={gapMode === "fixed"} onclick={useFixed}
         >Fixed</button
       >
       <input
         class="gap-input"
         bind:value={gapInput}
-        on:blur={commitGap}
-        on:keydown={(e) => e.key === "Enter" && commitGap()}
+        onblur={commitGap}
+        onkeydown={(e) => e.key === "Enter" && commitGap()}
         placeholder="e.g. 1m, 30m, 2h, 1d"
         disabled={gapMode !== "fixed"}
       />
       <button
         class:active={gapMode === "auto"}
-        on:click={useAuto}
+        onclick={useAuto}
         title="mean + k·stddev of gaps">Auto</button
       >
     </div>
@@ -152,7 +166,7 @@
         <button
           class="token"
           title={`${desc} — e.g. ${ex}`}
-          on:click={() => insertToken(tok)}>{tok}</button
+          onclick={() => insertToken(tok)}>{tok}</button
         >
       {/each}
     </div>
@@ -174,13 +188,13 @@
         placeholder="/materialize/destination"
         spellcheck="false"
       />
-      {#if hasNativePicker}<button on:click={pickDest}>Choose…</button>{/if}
+      {#if hasNativePicker}<button onclick={pickDest}>Choose…</button>{/if}
     </div>
   </section>
 
   {#snippet footer()}
-    <button on:click={cancel}>Cancel</button>
-    <button class="primary" on:click={apply}>Preview albums</button>
+    <button onclick={cancel}>Cancel</button>
+    <button class="primary" onclick={apply}>Preview albums</button>
   {/snippet}
 </Modal>
 
