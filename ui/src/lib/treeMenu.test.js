@@ -24,17 +24,21 @@ describe("buildTreeMenuItems", () => {
         "Remove from library…",
       ])
     );
-    expect(find(items, /Remove/).enabled).toBe(true);
+    expect(find(items, /Remove/).enabled).not.toBe(false); // enabled (undefined = on)
     expect(find(items, /Remove/).danger).toBe(true);
   });
 
-  it("never offers Remove on a virtual ancestor", () => {
-    // It is a real directory, but the index has no row for it (only folders that
-    // CONTAIN photos get one) — so there is nothing to remove, and an enabled
-    // Remove would be a menu item that silently does nothing.
+  it("offers an ENABLED, subtree-worded Remove on a virtual ancestor", () => {
+    // A virtual ancestor has no `folders` row of its OWN, but removal is now a
+    // subtree operation (deleteFolderSubtree), so removing it drops every
+    // descendant folder + their photos. Disabling it — while it rendered in the
+    // danger colour and so LOOKED clickable — was the reported bug: an option that
+    // shows up enabled must be enabled.
     const items = buildTreeMenuItems({ ...FOLDER, isVirtual: true });
-    expect(find(items, /Remove/).enabled).toBe(false);
-    // …but it IS a folder on disk, so these still make sense.
+    const remove = find(items, /Remove/);
+    expect(remove.enabled).not.toBe(false); // enabled (undefined defaults to on)
+    expect(remove.label).toMatch(/and its contents/i); // says it takes the subtree
+    expect(remove.danger).toBe(true);
     expect(find(items, /Reveal/).enabled).toBe(true);
     expect(find(items, /Rescan/).enabled).toBe(true);
   });

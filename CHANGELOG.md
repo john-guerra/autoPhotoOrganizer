@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.7
+
+- **You can now remove a parent/ancestor folder that has no photos of its own.**
+  Right-clicking a folder whose photos all live in sub-folders offered a red
+  "Remove" that looked clickable but did nothing — it was disabled because that
+  folder has no row of its own. Now that removal takes the whole subtree, the item
+  is enabled (worded "Remove folder and its contents…") and removes the folder and
+  everything under it.
+- **A disabled menu item can no longer look enabled.** A greyed-out action in a
+  right-click menu now always reads as disabled, even destructive (red) ones — a
+  disabled item was being painted in the danger colour and looked clickable.
+
 ## 2.15.6
 
 - **Removing a parent folder now removes everything under it.** "Remove from

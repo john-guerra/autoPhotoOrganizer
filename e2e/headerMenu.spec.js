@@ -51,7 +51,7 @@ test.describe("@p1 the feed header's right-click menu", () => {
     expect(errors).toEqual([]);
   });
 
-  test("a virtual-ancestor header can be revealed but not removed", async ({
+  test("a virtual-ancestor header offers an ENABLED subtree Remove that opens the confirm", async ({
     page,
   }) => {
     const errors = trackPageErrors(page);
@@ -59,9 +59,20 @@ test.describe("@p1 the feed header's right-click menu", () => {
 
     await rightClickHeader(page, "Cards");
     await expect(menu.root(page)).toBeVisible();
-    // No `folders` row to remove — same rule the tree menu enforces.
-    await expect(menu.item(page, "Remove from library…")).toBeDisabled();
+    // "Cards" has no `folders` row of its own, but Remove is now a subtree
+    // operation, so it must be ENABLED and worded for the subtree. (It used to be
+    // disabled while still rendering in the danger colour — it LOOKED clickable
+    // but wasn't, the reported bug.)
+    const remove = menu.item(page, "Remove folder and its contents…");
+    await expect(remove).toBeEnabled();
     await expect(menu.item(page, "Reveal in Finder")).toBeEnabled();
+
+    // Clicking it actually does something: the confirm dialog (which outlives the
+    // menu) appears — proof the enabled item is wired, not inert.
+    await remove.click();
+    await expect(
+      page.getByRole("button", { name: "Remove from library" })
+    ).toBeVisible();
 
     expect(errors).toEqual([]);
   });

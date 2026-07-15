@@ -134,10 +134,6 @@
     background: #3574f0;
     color: #fff;
   }
-  .item:disabled {
-    color: #666;
-    cursor: default;
-  }
   /* Destructive items read as destructive BEFORE the click, not after. Same
      palette as the group header's Remove (GroupLabelActions), so one action
      looks the same wherever it is offered. */
@@ -147,6 +143,16 @@
   .item.danger:hover:not(:disabled) {
     background: #7a2020;
     color: #fff;
+  }
+  /* Disabled ALWAYS wins the colour, danger included — a disabled item must never
+     look clickable. `.item.danger` and `.item:disabled` have equal specificity,
+     so without the compound `.item.danger:disabled` the later danger rule painted
+     a disabled destructive item red (it looked enabled but the click was blocked).
+     Listed last, and matching both plain and danger disabled, so it always wins. */
+  .item:disabled,
+  .item.danger:disabled {
+    color: #666;
+    cursor: not-allowed;
   }
   .sep {
     height: 1px;

@@ -9,10 +9,12 @@
  *
  * The one rule that shapes this whole file: a VIRTUAL ancestor is a folder on
  * disk that has no row in the `folders` table, because the index only records
- * folders that contain photos. So it can be revealed, rescanned, jumped to,
- * selected and folded — all of which work over its subtree — but it can NOT be
- * renamed or removed, because there is nothing in the index to rename or remove.
- * Offering those anyway would be a menu item that silently does nothing.
+ * folders that contain photos. Everything the menu offers works over its subtree
+ * — reveal, rescan, jump, select, fold, and (since the remove endpoint became a
+ * subtree operation) REMOVE, which drops every descendant folder + their photos
+ * by path prefix. It still can't be RENAMED (that repoints a single row that
+ * doesn't exist), but "nothing to remove" is no longer true: removing a
+ * photo-less ancestor removes everything under it.
  */
 
 /**
@@ -93,12 +95,20 @@ export function buildTreeMenuItems({
 
     items.push({ separator: true });
     items.push({
-      label: "Remove from library…",
-      // A virtual ancestor has no `folders` row to remove. The trailing ellipsis
-      // is a promise: this one asks before it does anything (ContextMenu closes
-      // on every action, so the confirm has to outlive the menu — App opens a
-      // Modal).
-      enabled: !isVirtual,
+      // A virtual ancestor owns no photos directly, so removing it is inherently
+      // "and everything inside it"; a real folder with sub-folders reads the same
+      // way. The removal is a subtree operation either way (see
+      // deleteFolderSubtree), so the label says so.
+      label: isVirtual
+        ? "Remove folder and its contents…"
+        : hasChildren
+          ? "Remove folder and its contents…"
+          : "Remove from library…",
+      // Always enabled for a folder row: the trailing ellipsis is a promise that
+      // it asks first (ContextMenu closes on every action, so the confirm has to
+      // outlive the menu — App opens a Modal). It used to be disabled on a virtual
+      // ancestor ("nothing to remove"), but the remove endpoint now takes the
+      // whole subtree, so a photo-less parent removes every descendant under it.
       danger: true,
       action: () => on.remove?.(),
     });

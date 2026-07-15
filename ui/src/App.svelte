@@ -5001,9 +5001,9 @@
       <strong>{removeFolderPending.folderPath}</strong>
     </p>
     <p class="confirm-note">
-      This drops the folder's photos — and their ratings — from the index. The
-      files on disk are not touched, and a rescan brings the photos back
-      (unrated).
+      This drops this folder — and any sub-folders inside it — with their photos
+      and ratings, from the index. The files on disk are not touched, and a
+      rescan brings the photos back (unrated).
     </p>
     <div class="confirm-actions">
       <button
