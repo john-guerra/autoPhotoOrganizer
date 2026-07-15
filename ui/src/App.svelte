@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { scale } from "svelte/transition";
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import { visibleRange, runwayPx } from "./lib/layouts/windowing.js";
@@ -163,126 +163,162 @@
     typeof window !== "undefined" && !!window.autogallery?.pickFolder;
 
   // Zoom = target row height of the justified layout. +/- keys or the slider.
-  let zoom = resolveZoom({
-    px: localStorage.getItem(LS_ZOOM_PX),
-    legacyIndex: localStorage.getItem(LS_ZOOM),
+  let zoom = $state(
+    resolveZoom({
+      px: localStorage.getItem(LS_ZOOM_PX),
+      legacyIndex: localStorage.getItem(LS_ZOOM),
+    })
+  );
+  $effect(() => {
+    localStorage.setItem(LS_ZOOM_PX, String(ZOOM_LEVELS[zoom]));
   });
-  $: localStorage.setItem(LS_ZOOM_PX, String(ZOOM_LEVELS[zoom]));
-  $: rowHeight = ZOOM_LEVELS[zoom];
-  $: gridGap = gapFor(rowHeight);
+  let rowHeight = $derived(ZOOM_LEVELS[zoom]);
+  let gridGap = $derived(gapFor(rowHeight));
 
   const storedBurstGap = Number.parseInt(
     localStorage.getItem(LS_BURST_GAP) ?? "",
     10
   );
-  let burstGapMs =
+  let burstGapMs = $state(
     Number.isFinite(storedBurstGap) && storedBurstGap >= 0
       ? storedBurstGap
-      : DEFAULT_BURST_GAP_MS;
-  $: localStorage.setItem(LS_BURST_GAP, String(burstGapMs));
+      : DEFAULT_BURST_GAP_MS
+  );
+  $effect(() => {
+    localStorage.setItem(LS_BURST_GAP, String(burstGapMs));
+  });
 
   const LS_BURST_ENABLED = "autogallery.burstEnabled";
-  let burstEnabled = localStorage.getItem(LS_BURST_ENABLED) !== "false"; // default on
-  $: localStorage.setItem(LS_BURST_ENABLED, String(burstEnabled));
+  let burstEnabled = $state(localStorage.getItem(LS_BURST_ENABLED) !== "false"); // default on
+  $effect(() => {
+    localStorage.setItem(LS_BURST_ENABLED, String(burstEnabled));
+  });
   // Request thumbs at the size actually displayed (row height × device pixel
   // ratio), snapped to a few buckets so the disk cache isn't fragmented per
   // pixel. The server caps size at 1024.
   const THUMB_BUCKETS = [160, 320, 480, 640, 1024];
-  $: thumbSize =
+  let thumbSize = $derived(
     THUMB_BUCKETS.find(
       (b) => b >= Math.ceil(rowHeight * (window.devicePixelRatio || 1))
-    ) ?? 1024;
+    ) ?? 1024
+  );
   // WIP (issue #90 — "collapse to snapshot → thumbs broken"). Snapshot strips
   // reuse the grid's cached thumbnails instead of a unique cold size: follow the
   // grid's current bucket, clamped to [320,640] so it never drops to the
   // always-cold 160 and never over-fetches 1024 for a ~104px slot. Both
   // endpoints are real buckets, so reuse holds at common zooms.
-  $: snapshotThumbSize = Math.min(640, Math.max(320, thumbSize));
+  let snapshotThumbSize = $derived(Math.min(640, Math.max(320, thumbSize)));
   // The loupe filmstrip, same lesson (#90 again): it used to ask for a bare 64px
   // — a size NOTHING else requests — so every loupe open generated up to 81 cold
   // thumbnails while the user was waiting on the full-size photo. Follow the
   // grid's bucket instead: those files already exist, and the browser has them
   // (the thumb URL is immutable). It is drawn at 64px regardless.
-  $: filmstripThumbSize = thumbSize;
+  let filmstripThumbSize = $derived(thumbSize);
 
-  let dir = localStorage.getItem(LS_KEY) || "";
+  let dir = $state(localStorage.getItem(LS_KEY) || "");
   // Recursive "soup folder" scan: pull in every subfolder. Default on — the
   // common case is pointing at a parent of dated album folders.
   const LS_RECURSIVE = "autogallery.recursiveScan";
-  let recursiveScan = localStorage.getItem(LS_RECURSIVE) !== "false";
-  $: localStorage.setItem(LS_RECURSIVE, String(recursiveScan));
+  let recursiveScan = $state(localStorage.getItem(LS_RECURSIVE) !== "false");
+  $effect(() => {
+    localStorage.setItem(LS_RECURSIVE, String(recursiveScan));
+  });
 
   // Loupe view toggles (issues #27/#28): details panel + filmstrip, default on,
   // remembered. Toggled with I / F while the loupe is open (see onKeydown).
   const LS_LOUPE_DETAILS = "autogallery.loupeDetails";
   const LS_LOUPE_FILMSTRIP = "autogallery.loupeFilmstrip";
-  let showLoupeDetails = localStorage.getItem(LS_LOUPE_DETAILS) !== "false";
-  let showLoupeFilmstrip = localStorage.getItem(LS_LOUPE_FILMSTRIP) !== "false";
-  $: localStorage.setItem(LS_LOUPE_DETAILS, String(showLoupeDetails));
-  $: localStorage.setItem(LS_LOUPE_FILMSTRIP, String(showLoupeFilmstrip));
+  let showLoupeDetails = $state(
+    localStorage.getItem(LS_LOUPE_DETAILS) !== "false"
+  );
+  let showLoupeFilmstrip = $state(
+    localStorage.getItem(LS_LOUPE_FILMSTRIP) !== "false"
+  );
+  $effect(() => {
+    localStorage.setItem(LS_LOUPE_DETAILS, String(showLoupeDetails));
+  });
+  $effect(() => {
+    localStorage.setItem(LS_LOUPE_FILMSTRIP, String(showLoupeFilmstrip));
+  });
   const LS_GROUP_BY = "autogallery.groupBy";
-  let groupBy = (() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(LS_GROUP_BY) ?? "null");
-      if (
-        Array.isArray(stored) &&
-        stored.every((d) => ALL_DIMENSIONS.includes(d))
-      ) {
-        return stored;
+  let groupBy = $state(
+    (() => {
+      try {
+        const stored = JSON.parse(localStorage.getItem(LS_GROUP_BY) ?? "null");
+        if (
+          Array.isArray(stored) &&
+          stored.every((d) => ALL_DIMENSIONS.includes(d))
+        ) {
+          return stored;
+        }
+      } catch {
+        /* fall through to default */
       }
-    } catch {
-      /* fall through to default */
-    }
-    return ["folder"];
-  })();
-  $: localStorage.setItem(LS_GROUP_BY, JSON.stringify(groupBy));
+      return ["folder"];
+    })()
+  );
+  $effect(() => {
+    localStorage.setItem(LS_GROUP_BY, JSON.stringify(groupBy));
+  });
 
   // Global feed sort (attribute + direction). Threaded into every feed/tree/
   // boundary call; date sorts re-derive the year/month/day grouping (server-side
   // applySortToDims), so grouping and sorting agree on one date notion.
   const LS_SORT = "autogallery.sort";
-  let sort = (() => {
-    try {
-      const s = JSON.parse(localStorage.getItem(LS_SORT) ?? "null");
-      if (
-        s &&
-        SORT_ATTRS.includes(s.by) &&
-        (s.dir === "asc" || s.dir === "desc")
-      )
-        return s;
-    } catch {
-      /* fall through to default */
-    }
-    // Ascending (oldest first) by default — culling a trip reads best in the
-    // order it was shot. Existing users keep their persisted sort (above).
-    return { by: "date_taken", dir: "asc" };
-  })();
-  $: localStorage.setItem(LS_SORT, JSON.stringify(sort));
+  let sort = $state(
+    (() => {
+      try {
+        const s = JSON.parse(localStorage.getItem(LS_SORT) ?? "null");
+        if (
+          s &&
+          SORT_ATTRS.includes(s.by) &&
+          (s.dir === "asc" || s.dir === "desc")
+        )
+          return s;
+      } catch {
+        /* fall through to default */
+      }
+      // Ascending (oldest first) by default — culling a trip reads best in the
+      // order it was shot. Existing users keep their persisted sort (above).
+      return { by: "date_taken", dir: "asc" };
+    })()
+  );
+  $effect(() => {
+    localStorage.setItem(LS_SORT, JSON.stringify(sort));
+  });
 
   const LS_FILTER = "autogallery.filter";
-  let filter = (() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(LS_FILTER) ?? "null");
-      if (stored && typeof stored === "object")
-        return { ...DEFAULT_FILTER, ...stored };
-    } catch {
-      /* fall through to default */
-    }
-    return { ...DEFAULT_FILTER };
-  })();
-  $: localStorage.setItem(LS_FILTER, JSON.stringify(filter));
+  let filter = $state(
+    (() => {
+      try {
+        const stored = JSON.parse(localStorage.getItem(LS_FILTER) ?? "null");
+        if (stored && typeof stored === "object")
+          return { ...DEFAULT_FILTER, ...stored };
+      } catch {
+        /* fall through to default */
+      }
+      return { ...DEFAULT_FILTER };
+    })()
+  );
+  $effect(() => {
+    localStorage.setItem(LS_FILTER, JSON.stringify(filter));
+  });
 
   // The timeline reflects the feed's SORT date. A date sort becomes the
   // timeline's attribute (and is remembered); a non-date sort (rating/size/name)
   // keeps the last date attr. Seed from the persisted sort/filter so the timeline
   // matches the sort on first paint. `lastDateSort` is the remembered date attr.
-  let lastDateSort = DATE_SORT_ATTRS.includes(sort.by)
-    ? sort.by
-    : DATE_SORT_ATTRS.includes(filter.dateAttr)
-      ? filter.dateAttr
-      : "date_taken";
-  if (filter.dateAttr !== lastDateSort)
-    filter = { ...filter, dateAttr: lastDateSort };
+  let lastDateSort = untrack(() =>
+    DATE_SORT_ATTRS.includes(sort.by)
+      ? sort.by
+      : DATE_SORT_ATTRS.includes(filter.dateAttr)
+        ? filter.dateAttr
+        : "date_taken"
+  );
+  untrack(() => {
+    if (filter.dateAttr !== lastDateSort)
+      filter = { ...filter, dateAttr: lastDateSort };
+  });
 
   /** The per-photo epoch-ms for a given date attribute, mirroring the server's
    * NULL-safe exprs (COALESCE to mtime), so the "you are here" marker sits on the
@@ -303,65 +339,73 @@
   // across rescans of the same folder; ids that later vanish (folder removed)
   // are simply skipped by export server-side, so no pruning is needed here.
   const LS_SELECTION = "autogallery.selection";
-  let selectedIds = new Set(
-    parseStoredSelection(localStorage.getItem(LS_SELECTION))
+  let selectedIds = $state(
+    new Set(parseStoredSelection(localStorage.getItem(LS_SELECTION)))
   );
-  $: localStorage.setItem(LS_SELECTION, JSON.stringify([...selectedIds]));
+  $effect(() => {
+    localStorage.setItem(LS_SELECTION, JSON.stringify([...selectedIds]));
+  });
   // Stash of the last cleared selection, so Clear is undoable (persists until
   // used or the next clear replaces it — no timed toast, per project taste).
-  let lastClearedSelection = null;
+  let lastClearedSelection = $state(null);
 
   // The app's one working scope — "show me only this". Either a live folder-path
   // predicate or an explicit id set, never both (see lib/scope.js for why the two
   // kinds stay distinct: a folder scope tracks photos scanned into it later and
   // survives a reload, an id set is frozen and session-only). null = whole library.
   // Write it ONLY through applyScope().
-  let scope = loadScope();
-  $: persistScope(scope);
-  $: chip = scopeChip(scope);
+  let scope = $state(loadScope());
+  $effect(() => {
+    persistScope(scope);
+  });
+  let chip = $derived(scopeChip(scope));
 
   // Read-only projections, so every existing reader (albums, export, the empty
   // state, activeFacetLabels, the loupe) keeps working unchanged.
-  $: focusPath = scope?.kind === "folder" ? scope.path : null;
-  $: keepIds = scope?.kind === "ids" ? scope.ids : null;
+  let focusPath = $derived(scope?.kind === "folder" ? scope.path : null);
+  let keepIds = $derived(scope?.kind === "ids" ? scope.ids : null);
 
   // Auto-albums review mode: replaces the grid with a time-gap-clustered view
   // of the working set (see AlbumsView).
-  let albumMode = false;
-  let albumPhotos = [];
-  let albumTruncated = false;
-  let detectingAlbums = false;
+  let albumMode = $state(false);
+  let albumPhotos = $state([]);
+  let albumTruncated = $state(false);
+  let detectingAlbums = $state(false);
   // Max photos pulled into the album timeline (user-tunable; server hard-caps).
-  let albumLimit =
-    Number(localStorage.getItem("autogallery.albumLimit")) || 20000;
+  let albumLimit = $state(
+    Number(localStorage.getItem("autogallery.albumLimit")) || 20000
+  );
   // Global Auto-Albums prefs (template/gapMode/fixedGapMs/k/move), persisted
   // in localStorage — see albumPrefs.js. AlbumsView owns the live working
   // copy; its `prefschange` just asks us to persist + re-seed it.
-  let albumPrefs = loadAlbumPrefs();
+  let albumPrefs = $state(loadAlbumPrefs());
   // Open the Auto-albums setup/explainer modal automatically only the very
   // FIRST time the mode is ever entered (persisted across reloads/sessions —
   // see LS_ALBUM_SETUP_SEEN in detectAlbums); later entries go straight to the
   // review. The ⚙ Options button still opens it on demand.
   const LS_ALBUM_SETUP_SEEN = "autogallery.albumSetupSeen";
-  let albumAutoOpenSetup = false;
+  let albumAutoOpenSetup = $state(false);
   // Fallback folder for Auto-Albums' destination/naming default when neither
   // focusPath nor the current groupBy grouping yields a folder (e.g. grouped
   // by year/camera/kind only) — resolved once per detectAlbums() call from
   // the first album photo's own folder, since album-timeline photos
   // (albumPhotos) carry no path of their own (see fetchAlbumTimeline).
-  let albumFirstPhotoFolder = null;
+  let albumFirstPhotoFolder = $state(null);
 
   // Filter mode: does the rating/orientation filter narrow what's DISPLAYED
   // (classic), or drive the SELECTION (the grid then shows everything and the
   // matching photos join the selection)? A persisted toggle.
   const LS_FILTER_MODE = "autogallery.filterMode";
-  let filterMode =
-    localStorage.getItem(LS_FILTER_MODE) === "select" ? "select" : "display";
-  $: localStorage.setItem(LS_FILTER_MODE, filterMode);
+  let filterMode = $state(
+    localStorage.getItem(LS_FILTER_MODE) === "select" ? "select" : "display"
+  );
+  $effect(() => {
+    localStorage.setItem(LS_FILTER_MODE, filterMode);
+  });
   // What the feed/tree/counts actually filter by. In "select" mode the grid
   // is deliberately NOT narrowed — the filter only feeds the selection — so
   // the display filter is the no-op default.
-  $: displayFilter = {
+  let displayFilter = $derived({
     ...(filterMode === "select" ? DEFAULT_FILTER : filter),
     // The one scope, projected onto the filter keys the feed/tree/counts speak:
     // a folder scope becomes the live folderPath predicate (a WHERE over
@@ -372,7 +416,7 @@
     // the sort date in both modes (in select mode the rest resets to DEFAULT, but
     // the timeline column must still track the sort).
     dateAttr: filter.dateAttr,
-  };
+  });
 
   // --- Timeline filter (brushable density under the toolbar) ----------------
   // The timeline's KDE is a crossfilter: it reflects the OTHER active facets
@@ -381,25 +425,27 @@
   // displayFilter with the time facet stripped; timesKey is its stable
   // signature so we refetch only when the non-time facets or the library
   // change — never on a brush.
-  let timeMin = null;
-  let timeMax = null;
-  let timeTimes = [];
+  let timeMin = $state(null);
+  let timeMax = $state(null);
+  let timeTimes = $state([]);
   // The density curve is a SAMPLE above ~12k photos. The server says so; the app
   // used to throw that away and draw the curve as if it were the whole truth —
   // in the one view you brush to find album boundaries.
-  let timeSampled = false;
-  let timeTotal = 0;
+  let timeSampled = $state(false);
+  let timeTotal = $state(0);
   let timesEpoch = 0;
-  $: timesFilter = (() => {
+  let timesFilter = $derived.by(() => {
     const { dateFrom, dateTo, ...rest } = displayFilter;
     return rest;
-  })();
-  $: timesKey = JSON.stringify(timesFilter) + "|" + libraryVersion;
+  });
+  let timesKey = $derived(JSON.stringify(timesFilter) + "|" + libraryVersion);
   let lastTimesKey = null;
-  $: if (timesKey !== lastTimesKey) {
-    lastTimesKey = timesKey;
-    refreshTimes(timesFilter);
-  }
+  $effect(() => {
+    if (timesKey !== lastTimesKey) {
+      lastTimesKey = timesKey;
+      refreshTimes(timesFilter);
+    }
+  });
   async function refreshTimes(spec) {
     const epoch = ++timesEpoch;
     try {
@@ -426,27 +472,27 @@
 
   // Three live counts the user asked for: whole library, currently shown
   // (under displayFilter), and selected. selectedCount is reactive off the Set.
-  let libraryTotal = 0;
-  let showingCount = 0;
-  $: selectedCount = selectedIds.size;
+  let libraryTotal = $state(0);
+  let showingCount = $state(0);
+  let selectedCount = $derived(selectedIds.size);
 
   // Export popover state (mirrors the add-folder popover).
   const LS_EXPORT_DEST = "autogallery.exportDest";
-  let exportOpen = false;
-  let exportDest = localStorage.getItem(LS_EXPORT_DEST) || "";
-  let exportName = defaultExportName();
+  let exportOpen = $state(false);
+  let exportDest = $state(localStorage.getItem(LS_EXPORT_DEST) || "");
+  let exportName = $state(defaultExportName());
   // MOVE the originals instead of copying. Off by default and never remembered:
   // a destructive default is how people lose photos. It is undoable (the job
   // carries a manifest), and the UI says so before you commit.
-  let exportMove = false;
-  let exporting = false;
-  let exportResult = null;
+  let exportMove = $state(false);
+  let exporting = $state(false);
+  let exportResult = $state(null);
   // Metadata reading: `rereading` = a forced re-read of the selection is in
   // flight; `sweeping` = the read-everything-unread job is; `pendingMeta` = how
   // many photos have never been read (0 hides the sweep button).
-  let rereading = false;
-  let sweeping = false;
-  let pendingMeta = 0;
+  let rereading = $state(false);
+  let sweeping = $state(false);
+  let pendingMeta = $state(0);
 
   // Sidebar view: classic "tree" or focus+context "fisheye" (toggle, persisted).
   // --- Resizable sidebar (drag its right edge; width persisted) -------------
@@ -456,14 +502,18 @@
   const LS_SIDEBAR_WIDTH = "autogallery.sidebarWidth";
   const clampSidebar = (w) =>
     Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, Math.round(w)));
-  let sidebarWidth = (() => {
-    const stored = Number(localStorage.getItem(LS_SIDEBAR_WIDTH));
-    return Number.isFinite(stored) && stored > 0
-      ? clampSidebar(stored)
-      : DEFAULT_SIDEBAR_WIDTH;
-  })();
-  $: localStorage.setItem(LS_SIDEBAR_WIDTH, String(sidebarWidth));
-  let resizingSidebar = false;
+  let sidebarWidth = $state(
+    (() => {
+      const stored = Number(localStorage.getItem(LS_SIDEBAR_WIDTH));
+      return Number.isFinite(stored) && stored > 0
+        ? clampSidebar(stored)
+        : DEFAULT_SIDEBAR_WIDTH;
+    })()
+  );
+  $effect(() => {
+    localStorage.setItem(LS_SIDEBAR_WIDTH, String(sidebarWidth));
+  });
+  let resizingSidebar = $state(false);
 
   /** Pointer-capture drag so the resize keeps tracking even when the cursor
    * outruns the 5px handle (a plain mousemove-on-handle loses it instantly). */
@@ -504,43 +554,46 @@
   }
 
   const LS_SIDEBAR_MODE = "autogallery.sidebarMode";
-  let sidebarMode =
-    localStorage.getItem(LS_SIDEBAR_MODE) === "fisheye" ? "fisheye" : "tree";
-  $: localStorage.setItem(LS_SIDEBAR_MODE, sidebarMode);
-  let collapsedPaths = []; // Array<Array<{dimension,value}>>, reset on hierarchy change
+  let sidebarMode = $state(
+    localStorage.getItem(LS_SIDEBAR_MODE) === "fisheye" ? "fisheye" : "tree"
+  );
+  $effect(() => {
+    localStorage.setItem(LS_SIDEBAR_MODE, sidebarMode);
+  });
+  let collapsedPaths = $state([]); // Array<Array<{dimension,value}>>, reset on hierarchy change
   // rendererIdFor() is called ~3x per header per render (class, title, icon) plus
   // once per placeholder in the layout. Scanning collapsedPaths with a
   // JSON.stringify compare each time was O(headers x collapsedPaths) stringifies
   // per render — brutal after Collapse-all or a 400-leaf shift-fold, on top of
   // the known large-selection stall (#97). Derive the key set ONCE.
-  $: collapsedKeys = new Set(collapsedPaths.map(pathKey));
+  let collapsedKeys = $derived(new Set(collapsedPaths.map(pathKey)));
   // Groups rendered as a one-line SnapshotStrip instead of the collapsed
   // pill. A group in this set is ALSO server-collapsed (its path lives in
   // collapsedPaths, per the tri-state design in
   // docs/superpowers/specs/2026-07-09-fisheye-snapshot-view-design.md) —
   // this set only decides how the client renders that collapsed placeholder.
   // Keyed by pathKey(path), reset on hierarchy change alongside collapsedPaths.
-  let snapshotGroupKeys = new Set();
+  let snapshotGroupKeys = $state(new Set());
   // A snapshot band is exactly ONE GRID ROW tall — it follows the zoom, like the
   // photos it stands in for. It used to be a fixed 148px ("group label row on top
   // + the strip beneath"), which stopped being true when the label moved into the
   // section header and renderers stopped drawing chrome: the number stayed, and
   // the strip's photos ended up a different size from the same group's photos in
   // full view, at every zoom level.
-  $: snapshotRowHeight = rowHeight;
+  let snapshotRowHeight = $derived(rowHeight);
   // Last global view action (the top-of-toolbar "cycle all" control); the
   // per-group toggles may diverge from it, but the button just applies the
   // next whole-view state each click: full view → snapshot all → collapse all.
   // A GROUP_RENDERERS id — the whole-view control cycles the same registry order
   // the per-group toggle does.
-  let globalViewMode = DEFAULT_RENDERER_ID;
-  let cyclingAll = false;
+  let globalViewMode = $state(DEFAULT_RENDERER_ID);
+  let cyclingAll = $state(false);
   // Two-click confirm for "remove album from library" (drops the folder's rows
   // + ratings from the index; files on disk are untouched). Holds the pathKey
   // of the group armed for removal; the next click on the same group commits.
-  let removeArmedKey = null;
-  let treeSidebarRef; // bound to TreeSidebar, for revealCurrentLocation to call revealPath
-  let items = []; // the currently-loaded feed window, ordered
+  let removeArmedKey = $state(null);
+  let treeSidebarRef = $state(); // bound to TreeSidebar, for revealCurrentLocation to call revealPath
+  let items = $state([]); // the currently-loaded feed window, ordered
   let hasMoreBefore = false;
   let hasMoreAfter = true;
   let fetchingBefore = false;
@@ -563,13 +616,13 @@
   // between — a non-contiguous `items` array, not a genuine duplicate row
   // (the database has no duplicate photos/folders). A simple re-entry
   // guard, checked and set before the first await, closes this off.
-  let jumpingGroup = false;
+  let jumpingGroup = false; // plain guard: never read in a reactive context
   // True from a group-jump's landing until its window's metadata finishes
   // loading — the cue to re-assert the landing once (the above-the-fold rows
   // resize as their dimensions arrive, drifting the one-shot landing down).
   // Cleared the instant the user takes over (a keypress or wheel/trackpad
   // scroll), so the re-assert never fights them. Not a timer.
-  let jumpRevealPending = false;
+  let jumpRevealPending = $state(false);
   // Expanding a collapsed group must not move its header on screen: the header
   // holds the exact viewport offset it had at the click while the group's
   // photos grow downward below it (issue #74). Set to {key, offset} at expand
@@ -578,7 +631,7 @@
   // group replaces the whole feed window — so the header's grid Y is rebuilt
   // and a one-shot scroll can't hold it. Cleared on the user's first keypress/
   // wheel. Not a timer.
-  let expandPin = null; // { key: string, offset: number } | null
+  let expandPin = $state(null); // { key: string, offset: number } | null
   // Per-group photo counts shown on each section header, so the user knows
   // how many photos a group holds before scrolling it (the loaded window is
   // only a slice; a group can hold thousands). Keyed by pathKey(group path).
@@ -588,15 +641,15 @@
   // the underlying photos (loadInitialFeed bumps countsEpoch). headerCounts
   // is reassigned (not mutated) to stay reactive; the two Sets are plain
   // bookkeeping and needn't be.
-  let headerCounts = {}; // pathKey(fullPath) -> number
-  let fetchedParents = new Set(); // pathKey(parentPath) already resolved
-  let inFlightParents = new Set(); // pathKey(parentPath) mid-fetch (dedup)
+  let headerCounts = $state({}); // pathKey(fullPath) -> number
+  let fetchedParents = new Set(); // pathKey(parentPath) already resolved — plain bookkeeping
+  let inFlightParents = new Set(); // pathKey(parentPath) mid-fetch (dedup) — plain bookkeeping
   // The folder level's raw tree-API rows, per parent path — the SAME response
   // loadHeaderCounts already fetches for the counts, kept so the feed can build
   // the folder trie from it. Nesting the feed's folders therefore costs no extra
   // request. Reassigned (never mutated) so the derivation below re-runs.
-  let folderNodesByParentKey = new Map(); // pathKey(parentPath) -> [{value,count}]
-  let countsEpoch = 0;
+  let folderNodesByParentKey = $state(new Map()); // pathKey(parentPath) -> [{value,count}]
+  let countsEpoch = $state(0);
   const PAGE_SIZE = 60;
   const FETCH_THRESHOLD = 20; // floor: fetch when within this many entries of an edge
   // The real trigger (see updateVisibleRange): keep at least two viewports of
@@ -605,40 +658,45 @@
   // fling's 3,000-6,000 px/s even that is only ~300ms, which a ~1ms feed query
   // (2.12.7) plus render comfortably fits inside.
   const MIN_RUNWAY_PX = 1200;
-  let status = "";
-  let error = "";
-  let scanning = false;
-  let feedEpoch = 0; // invalidates in-flight meta fetches when the window resets
-  let library = [];
+  let status = $state("");
+  let error = $state("");
+  let scanning = $state(false);
+  let feedEpoch = 0; // invalidates in-flight meta fetches when the window resets (plain guard)
+  let library = $state([]);
   // Bumped whenever the library's photo set changes (scan, folder removal,
   // full reset). The sidebars key their refetch on this so they always mirror
   // the real index, not just groupBy/filter changes.
-  let libraryVersion = 0;
-  let addFolderOpen = false;
-  let manageLibraryOpen = false;
+  let libraryVersion = $state(0);
+  let addFolderOpen = $state(false);
+  let manageLibraryOpen = $state(false);
   // Scope to the folder once it's in? (The old "Open a folder…" entry, now an
   // option on the one Add panel rather than a second door to the same room.)
-  let focusAfterAdd = false;
+  let focusAfterAdd = $state(false);
   // "Already in your library": the path itself, or any subtree of it, is a
   // scanned folder. Decides the Add button's verb (Add & scan / Rescan / Open)
   // and whether opening it needs a scan at all.
-  $: alreadyIndexed =
+  let alreadyIndexed = $derived(
     !!dir.trim() &&
-    library.some(
-      (e) => e.path === dir.trim() || e.path.startsWith(dir.trim() + "/")
-    );
+      library.some(
+        (e) => e.path === dir.trim() || e.path.startsWith(dir.trim() + "/")
+      )
+  );
 
   // The subfolder checklist (see lib/subfolderSelection.js). Collapsed until the
   // user asks for it, so a plain add never waits on a directory walk.
-  let subdirsOpen = false;
-  let subdirs = [];
-  let subdirsLoading = false;
-  let subdirsError = "";
-  let subdirSelection = new Set();
+  let subdirsOpen = $state(false);
+  let subdirs = $state([]);
+  let subdirsLoading = $state(false);
+  let subdirsError = $state("");
+  let subdirSelection = $state(new Set());
 
   // A checklist built for a different folder is worse than none — drop it the
-  // moment the path changes.
-  $: (dir, resetSubdirs());
+  // moment the path changes. Reads `dir`; resetSubdirs writes only the subdir*
+  // state (never `dir`), so this effect cannot loop.
+  $effect(() => {
+    dir;
+    resetSubdirs();
+  });
   function resetSubdirs() {
     subdirsOpen = false;
     subdirs = [];
@@ -666,7 +724,7 @@
     }
   }
 
-  let selected = 0; // index into displayEntries; must never land on a
+  let selected = $state(0); // index into displayEntries; must never land on a
   // {kind:'placeholder'} entry — see nextSelectable below.
 
   /**
@@ -679,7 +737,7 @@
    * rating auto-advances, so a user who landed there by accident rated a
    * different photo with every keystroke (issue #104).
    */
-  let focusIsExplicit = false;
+  let focusIsExplicit = false; // plain: read only imperatively in onTileClick
 
   /** The one place that records a deliberate focus. Use it instead of assigning
    *  `selected` directly whenever the USER moved the focus. */
@@ -688,26 +746,28 @@
     focusIsExplicit = true;
   }
 
-  let loupeOpen = false;
-  let shortcutsHelpOpen = false; // '?' toggles the keyboard-shortcuts overlay
-  let gridEl;
-  let mainColumnEl;
-  let gridWidth = 0;
+  let loupeOpen = $state(false);
+  let shortcutsHelpOpen = $state(false); // '?' toggles the keyboard-shortcuts overlay
+  let gridEl = $state();
+  let mainColumnEl = $state();
+  let gridWidth = $state(0);
 
   // Virtualization: only Thumbs in [renderStart, renderEnd] (plus the
   // selected index) are mounted. Recomputed on scroll/resize/layout change.
-  let renderStart = 0;
-  let renderEnd = -1;
-  let rafPending = false;
-  let focusPending = false; // set after a scan; consumed once `boxes` exists
-  let expandedStackIds = new Set(); // stack ids currently expanded inline in the grid
+  let renderStart = $state(0);
+  let renderEnd = $state(-1);
+  let rafPending = false; // plain guard (scheduleVisibleRangeUpdate)
+  let focusPending = $state(false); // set after a scan; consumed once `boxes` exists
+  let expandedStackIds = $state(new Set()); // stack ids currently expanded inline in the grid
 
   // Aggregate thumbnail load progress across the whole grid, fed by each
   // Thumb's attempt/settled events (Map mutations aren't reactive on their
   // own, hence thumbStatusTick as an explicit dependency). Reset per scan so
   // a rescan's ids don't inherit a stale previous scan's counts.
-  let thumbStatus = new Map(); // id -> 'pending' | 'ok' | 'error'
-  let thumbStatusTick = 0;
+  let thumbStatus = $state(new Map()); // id -> 'pending' | 'ok' | 'error'
+  // Kept as an explicit trigger too (the derived reads it) — redundant now that
+  // thumbStatus is deeply reactive, but harmless and avoids churn.
+  let thumbStatusTick = $state(0);
   function handleThumbAttempt({ id }) {
     thumbStatus.set(id, "pending");
     thumbStatusTick++;
@@ -716,7 +776,7 @@
     thumbStatus.set(id, ok ? "ok" : "error");
     thumbStatusTick++;
   }
-  $: thumbCounts = (() => {
+  let thumbCounts = $derived.by(() => {
     thumbStatusTick; // eslint-disable-line no-unused-expressions
     let pending = 0,
       ok = 0,
@@ -727,13 +787,14 @@
       else error++;
     }
     return { pending, ok, error };
-  })();
-  $: thumbProgress =
+  });
+  let thumbProgress = $derived(
     thumbCounts.pending > 0
       ? `loading thumbnails… ${thumbCounts.ok} loaded${thumbCounts.error ? `, ${thumbCounts.error} failed` : ""}`
       : thumbCounts.error > 0
         ? `${thumbCounts.error} thumbnail${thumbCounts.error === 1 ? "" : "s"} failed to load`
-        : "";
+        : ""
+  );
 
   onMount(() => {
     // Show the version in the browser tab / Electron window title. Electron's
@@ -882,7 +943,7 @@
 
   // Human names of the currently-active filter facets, for the empty-state hint
   // (so it says exactly what's hiding the photos, not a generic list).
-  $: activeFacetLabels = (() => {
+  let activeFacetLabels = $derived.by(() => {
     const f = [];
     if ((filter.minRating ?? 0) > 0) f.push(`${filter.minRating}+ stars`);
     const o = filter.orientations ?? [];
@@ -891,7 +952,7 @@
     if (keepIds) f.push("keep-only scope");
     if (focusPath) f.push("folder focus");
     return f;
-  })();
+  });
 
   function onFilterChange(next) {
     filter = next;
@@ -955,20 +1016,27 @@
   // lazily, once, for visible headers) and intersect it with the selection.
   // Entries are tagged with the current filter+sort signature so a stale one is
   // ignored after the feed's ordering/filtering changes.
-  let groupIdCache = new Map(); // pathKey -> { ids: number[], sig: string }
-  let groupIdCacheVersion = 0; // bumped when the cache changes, to re-derive
-  let groupIdInFlight = new Set(); // pathKeys mid-fetch (dedup)
-  $: groupSelSig = JSON.stringify([displayFilter ?? null, sort ?? null]);
+  let groupIdCache = new Map(); // pathKey -> { ids: number[], sig: string } (plain; groupIdCacheVersion is the reactive trigger)
+  let groupIdCacheVersion = $state(0); // bumped when the cache changes, to re-derive
+  let groupIdInFlight = new Set(); // pathKeys mid-fetch (dedup) — plain bookkeeping
+  let groupSelSig = $derived(
+    JSON.stringify([displayFilter ?? null, sort ?? null])
+  );
   // Drop cached group ids whenever the header/count caches reset — the one
   // signal (`countsEpoch`) that fires on every filter / keep-only / groupBy /
   // rescan / library-reset, i.e. exactly when a group's membership can change.
+  // Reads countsEpoch (tracked) + _groupCacheEpoch (plain guard); writes the
+  // plain guard + plain caches + the version signal, none of which it reads —
+  // so it cannot loop.
   let _groupCacheEpoch = 0;
-  $: if (countsEpoch !== _groupCacheEpoch) {
-    _groupCacheEpoch = countsEpoch;
-    groupIdCache = new Map();
-    groupIdInFlight = new Set();
-    groupIdCacheVersion++;
-  }
+  $effect(() => {
+    if (countsEpoch !== _groupCacheEpoch) {
+      _groupCacheEpoch = countsEpoch;
+      groupIdCache = new Map();
+      groupIdInFlight = new Set();
+      groupIdCacheVersion++;
+    }
+  });
 
   /** Kick off a one-shot id fetch for a group whose ids aren't cached yet. */
   async function ensureGroupIds(path, paths, key, sig) {
@@ -1033,12 +1101,12 @@
   // 10,000 photos into a selection on a keystroke is a surprise, not a feature.
   // `pendingBulk` is that question; pressing the same shortcut again answers it.
   /** @type {null|"select"|"deselect"} */
-  let pendingBulk = null;
-  $: pendingBulkCount = pendingBulk ? showingCount : 0;
+  let pendingBulk = $state(null);
+  let pendingBulkCount = $derived(pendingBulk ? showingCount : 0);
 
   /** The pending "select this whole folder?" question (the threshold lives in
    * groupSelection.js). @type {null|{ids:number[], label:string}} */
-  let pendingGroupSelect = null;
+  let pendingGroupSelect = $state(null);
 
   /** Every photo the filters currently show — the whole set, not just the
    * loaded window. The same server query select-all and export already use. */
@@ -1254,8 +1322,8 @@
   // --- Rename a folder group in place (issue #68 Slice B) ------------------
   // Inline-edit the folder's section header; commit renames the real folder on
   // disk and reloads the feed. `renamingKey` is the pathKey being edited.
-  let renamingKey = null;
-  let renameDraft = "";
+  let renamingKey = $state(null);
+  let renameDraft = $state("");
 
   function startRename(path) {
     const folderPath = path?.find((p) => p.dimension === "folder")?.value;
@@ -1468,7 +1536,7 @@
    * the focused tile, a plain click keeps the existing open/expand behavior. */
   // --- Right-click context menu (issue #18; shared surface for #25) ---------
   // `targetIndex` indexes displayEntries, like `selected`.
-  let contextMenu = { open: false, x: 0, y: 0, targetIndex: -1 };
+  let contextMenu = $state({ open: false, x: 0, y: 0, targetIndex: -1 });
 
   function openContextMenu(x, y, targetIndex) {
     contextMenu = { open: true, x, y, targetIndex };
@@ -1534,14 +1602,15 @@
 
   // Menu items for the current target. Kept as data so actions can be appended
   // without reworking the menu component; the stack items are built by the module.
-  $: revealTargetId = resolvedPhotos[contextMenu.targetIndex]?.id;
+  let revealTargetId = $derived(resolvedPhotos[contextMenu.targetIndex]?.id);
   // Reveal the whole selection when the right-clicked photo is part of a
   // multi-selection (like a file manager); otherwise reveal just that photo.
-  $: revealWholeSelection =
+  let revealWholeSelection = $derived(
     selectedIds.size > 1 &&
-    typeof revealTargetId === "number" &&
-    selectedIds.has(revealTargetId);
-  $: contextMenuItems = [
+      typeof revealTargetId === "number" &&
+      selectedIds.has(revealTargetId)
+  );
+  let contextMenuItems = $derived([
     {
       label: revealWholeSelection
         ? `Reveal ${selectedIds.size} photos in Finder`
@@ -1562,7 +1631,7 @@
       onCreate: onCreateStack,
       onDissolve: onDissolveStack,
     }),
-  ];
+  ]);
 
   function onTileClick(e, entry, i) {
     if (e.metaKey || e.ctrlKey) {
@@ -1897,9 +1966,12 @@
   // anchor left the dot frozen (issue #18). When you mouse-scroll AWAY from the
   // focus (focus leaves the render window) we fall back to the first visible row
   // so the marker still follows the feed as you browse. Best of both.
-  $: hereIndex =
-    selected >= renderStart && selected <= renderEnd ? selected : renderStart;
-  $: currentPath = deriveCurrentPath(hereIndex, displayEntries, groupBy);
+  let hereIndex = $derived(
+    selected >= renderStart && selected <= renderEnd ? selected : renderStart
+  );
+  let currentPath = $derived(
+    deriveCurrentPath(hereIndex, displayEntries, groupBy)
+  );
 
   /** The abs folder path carried by a group path's "folder" or "folderName"
    * dimension, if present. Both dimensions carry the identical abs_path value
@@ -1919,14 +1991,15 @@
    * "folderName"), else the first album photo's own folder (resolved
    * asynchronously in detectAlbums, since album-timeline photos carry no
    * path). null when none of these resolve — never a stale remembered path. */
-  $: currentFolder =
+  let currentFolder = $derived(
     focusPath ||
-    folderFromGroupPath(currentPath) ||
-    albumFirstPhotoFolder ||
-    null;
-  $: currentFolderName = currentFolder
-    ? currentFolder.split(/[/\\]/).filter(Boolean).pop()
-    : "";
+      folderFromGroupPath(currentPath) ||
+      albumFirstPhotoFolder ||
+      null
+  );
+  let currentFolderName = $derived(
+    currentFolder ? currentFolder.split(/[/\\]/).filter(Boolean).pop() : ""
+  );
 
   /** Epoch-ms at the "you are here" anchor (`hereIndex` — the focused photo, or
    * the first visible row when the focus is scrolled off), for the timeline's
@@ -1951,8 +2024,12 @@
   // scrolling the feed never makes your focused photo's marker drift. Pass dateAttr
   // so both recompute when the sort date changes, not just on scroll (Svelte only
   // tracks deps named in the reactive expression).
-  $: focusTime = deriveCurrentTime(selected, displayEntries, filter.dateAttr);
-  $: viewTime = deriveCurrentTime(renderStart, displayEntries, filter.dateAttr);
+  let focusTime = $derived(
+    deriveCurrentTime(selected, displayEntries, filter.dateAttr)
+  );
+  let viewTime = $derived(
+    deriveCurrentTime(renderStart, displayEntries, filter.dateAttr)
+  );
   // The markers follow the loaded feed window (`displayEntries`), which is rebuilt
   // asynchronously on each filter change, while the selection band follows `filter`
   // synchronously. During rapid brushing the window lags the band, which would
@@ -1969,8 +2046,8 @@
     if (f.dateTo != null && t > f.dateTo) return null;
     return t;
   }
-  $: focusMarkerTime = clampMarker(focusTime, filterMode, filter);
-  $: viewMarkerTime = clampMarker(viewTime, filterMode, filter);
+  let focusMarkerTime = $derived(clampMarker(focusTime, filterMode, filter));
+  let viewMarkerTime = $derived(clampMarker(viewTime, filterMode, filter));
 
   /** Keeps the first occurrence of each id, dropping later repeats. Guards
    * against a real, observed case: fetching "before" and "after" a focusId
@@ -2172,12 +2249,16 @@
   // Watch the backend. If it dies or restarts (a crash, or `node --watch`
   // reloading it after a server edit), ServerBanner says so and we refetch once
   // it's back — instead of silently sitting on data from a server that's gone.
-  let seenRestart = 0;
+  let seenRestart = 0; // plain guard (edge-detect; never read reactively)
   startServerWatchdog();
-  $: if ($serverRestarted > seenRestart) {
-    seenRestart = $serverRestarted;
-    onServerBack();
-  }
+  // Reads the $serverRestarted store (tracked) + seenRestart (plain guard);
+  // writes only the plain guard, so it can't loop.
+  $effect(() => {
+    if ($serverRestarted > seenRestart) {
+      seenRestart = $serverRestarted;
+      onServerBack();
+    }
+  });
   async function onServerBack() {
     try {
       libraryVersion++; // sidebars refetch
@@ -2266,17 +2347,17 @@
   // a pixel; the corpus is the whole library (not the filtered view), so a label
   // never changes shape as you filter or scroll. The tree sidebar is handed the
   // same stats, so a folder reads the same in both places.
-  $: folderPaths = library.map((entry) => entry.path);
-  $: tokenStats = buildTokenStats(folderPaths);
-  $: siblingIndex = buildSiblingIndex(folderPaths);
+  let folderPaths = $derived(library.map((entry) => entry.path));
+  let tokenStats = $derived(buildTokenStats(folderPaths));
+  let siblingIndex = $derived(buildSiblingIndex(folderPaths));
   // The same roots the tree draws. A header drops everything ABOVE its own root
   // ("/Users/me/Pictures") and keeps the root itself ("backup/…"), so it
   // still says which library it belongs to. Stripping a single library-wide
   // ancestor can't work once folders live on more than one volume — they share
   // only "/" — and then every header would render its full absolute path and get
   // cut at the tail, losing the very part that names the group.
-  $: libraryRoots = buildFolderTree(
-    folderPaths.map((value) => ({ value, count: 0 }))
+  let libraryRoots = $derived(
+    buildFolderTree(folderPaths.map((value) => ({ value, count: 0 })))
   );
   function headerPrefixFor(value) {
     const root = libraryRoots.find(
@@ -2314,9 +2395,9 @@
   // folding both into one object means every item has to re-derive which kind it
   // is. Both render through the same ContextMenu component — the surface is
   // shared, the state is not.
-  let treeMenu = { open: false, x: 0, y: 0, items: [] };
+  let treeMenu = $state({ open: false, x: 0, y: 0, items: [] });
   /** The folder a Remove is waiting on confirmation for (null = no dialog). */
-  let removeFolderPending = null;
+  let removeFolderPending = $state(null);
 
   function openTreeMenu(detail) {
     treeMenu = {
@@ -2555,14 +2636,15 @@
    * the animation never fired at all in the one place it was being tested.
    */
   const FOLD_MS = 260;
-  let folding = false;
-  let foldTimer = null;
+  let folding = $state(false);
+  let foldTimer = null; // plain timer handle
 
   /** Halve nothing for someone who has asked the OS not to animate things. */
-  $: foldMs =
+  let foldMs = $derived(
     folding && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
       ? FOLD_MS
-      : 0;
+      : 0
+  );
 
   function beginFold() {
     clearTimeout(foldTimer);
@@ -3100,10 +3182,15 @@
   // (sidebar tree + feed + counts) once per undo-move job as it reaches a
   // terminal state — otherwise the sidebar keeps showing the moved-away
   // folders. Edge-detected via `handledUndoJobs` so it fires exactly once.
-  let handledUndoJobs = new Set();
-  $: if (takeNewlyFinished($jobs, "undo-move", handledUndoJobs).length) {
-    onFolderRemoved();
-  }
+  let handledUndoJobs = new Set(); // plain edge-detect set
+  // Reads the $jobs store (tracked); handledUndoJobs is a plain set mutated
+  // inside takeNewlyFinished, so this effect fires only when $jobs changes and
+  // cannot loop on its own writes.
+  $effect(() => {
+    if (takeNewlyFinished($jobs, "undo-move", handledUndoJobs).length) {
+      onFolderRemoved();
+    }
+  });
 
   /** After AlbumsView materializes (move/copy) album folders to disk, scan
    * the destination so the newly-created nested folders index and show up
@@ -3295,14 +3382,18 @@
       : 0;
   }
 
-  $: autoStacks = detectBurstsByGroup(items, groupBy, {
-    gapMs: burstEnabled ? burstGapMs : 0,
-  });
+  let autoStacks = $derived(
+    detectBurstsByGroup(items, groupBy, {
+      gapMs: burstEnabled ? burstGapMs : 0,
+    })
+  );
   // Fold in the persisted manual create/dissolve overrides (issue #24) — all
   // logic lives in ui/src/lib/stackOverrides.js; this is the only stacks change.
-  $: stacks = applyStackOverrides(autoStacks, items);
-  $: displayEntries = buildDisplayEntries(items, stacks, expandedStackIds);
-  $: resolvedPhotos = displayEntries.map(resolvePhoto); // passed to Loupe
+  let stacks = $derived(applyStackOverrides(autoStacks, items));
+  let displayEntries = $derived(
+    buildDisplayEntries(items, stacks, expandedStackIds)
+  );
+  let resolvedPhotos = $derived(displayEntries.map(resolvePhoto)); // passed to Loupe
   // deriveSectionHeaders' `index` must land in the same index space as the
   // `{#each visibleItems}` loop below, which walks `displayEntries` (via
   // buildVisibleItems) — not raw `items`. A collapsed burst stack folds
@@ -3329,22 +3420,31 @@
   // path/count logic keys off) and `visualDepth` (how deep it sits in the folder
   // tree, which the layout and the dendrogram draw). Conflating those two is the
   // bug this split exists to prevent — see lib/folderSections.js.
-  $: rootsByParentKey = new Map(
-    [...folderNodesByParentKey].map(([key, nodes]) => [
-      key,
-      buildFolderTree(nodes),
-    ])
+  let rootsByParentKey = $derived(
+    new Map(
+      [...folderNodesByParentKey].map(([key, nodes]) => [
+        key,
+        buildFolderTree(nodes),
+      ])
+    )
   );
-  $: sectionHeaders = nestFolderHeaders(
-    computeHeaderPaths(deriveSectionHeaders(resolvedPhotos, groupBy)),
-    { groupBy, rootsByParentKey }
+  let sectionHeaders = $derived(
+    nestFolderHeaders(
+      computeHeaderPaths(deriveSectionHeaders(resolvedPhotos, groupBy)),
+      { groupBy, rootsByParentKey }
+    )
   );
   // Fetch each visible group's total photo count, one query per *parent*
   // path (the tree API returns every sibling's count in a single GROUP BY),
   // caching so scrolling — which recomputes sectionHeaders on every window
   // change — refetches nothing already known. Runs whenever the header set
   // changes; almost every run is a no-op once a region's counts are cached.
-  $: loadHeaderCounts(sectionHeaders, groupBy, countsEpoch);
+  // (loadHeaderCounts writes headerCounts/folderNodesByParentKey only AFTER an
+  // await, and the dedup Sets it reads/writes synchronously — fetchedParents /
+  // inFlightParents — are plain, so this effect never loops.)
+  $effect(() => {
+    loadHeaderCounts(sectionHeaders, groupBy, countsEpoch);
+  });
 
   async function loadHeaderCounts(headers, groupByAtCall, epoch) {
     for (const parent of headerParentPaths(headers)) {
@@ -3386,7 +3486,7 @@
       }
     }
   }
-  $: layoutResult =
+  let layoutResult = $derived(
     displayEntries.length && gridWidth > 2 * PAD
       ? sectionedJustifiedLayout(
           displayEntries.map((e) => {
@@ -3439,8 +3539,9 @@
             indentPerDepth: GROUP_INDENT,
           }
         )
-      : null;
-  $: boxes = layoutResult ? layoutResult.boxes : null;
+      : null
+  );
+  let boxes = $derived(layoutResult ? layoutResult.boxes : null);
   // How far below the scroll viewport's top a revealed tile should sit: one
   // sticky-header band per grouping level, plus a PAD of breathing room. Used
   // both as the tile's CSS scroll-margin-top (--reveal-margin) and by the
@@ -3449,10 +3550,12 @@
   // nesting on screen — which, with folder subtrees, is no longer bounded by
   // groupBy.length (a folder chain can be several rows deep inside one groupBy
   // slot). Measure it instead of assuming it.
-  $: stickyDepth = sectionHeaders.length
-    ? 1 + Math.max(...sectionHeaders.map((h) => h.visualDepth))
-    : groupBy.length;
-  $: revealMargin = HEADER_HEIGHT * stickyDepth + PAD;
+  let stickyDepth = $derived(
+    sectionHeaders.length
+      ? 1 + Math.max(...sectionHeaders.map((h) => h.visualDepth))
+      : groupBy.length
+  );
+  let revealMargin = $derived(HEADER_HEIGHT * stickyDepth + PAD);
   // Re-pin the group-jump landing on every LAYOUT recompute while pinned, not
   // just on grid-height change (the ResizeObserver's blind spot): a metadata
   // reflow can shrink the rows above the landing while others grow, leaving
@@ -3461,11 +3564,17 @@
   // recompute, so this fires for exactly those reflows. tick() (a microtask,
   // unlike rAF) defers to just after Svelte patches the DOM, so pinNow reads
   // the tile's final position — and works even in a backgrounded tab.
-  $: if (jumpRevealPending && boxes) scheduleJumpPin();
+  $effect(() => {
+    if (jumpRevealPending && boxes) scheduleJumpPin();
+  });
   // Same re-pin story for an expanded group's header (see expandPin): the
   // refetch + metadata reflow keep moving it until the layout settles.
-  $: if (expandPin && boxes) scheduleExpandPin();
-  $: gridHeight = layoutResult ? layoutResult.totalHeight + 2 * PAD : 0;
+  $effect(() => {
+    if (expandPin && boxes) scheduleExpandPin();
+  });
+  let gridHeight = $derived(
+    layoutResult ? layoutResult.totalHeight + 2 * PAD : 0
+  );
   // The first time this fires (right when `boxes` first becomes non-null,
   // e.g. after the initial feed load), the grid's layout/paint may not have
   // settled yet, so gridEl.getBoundingClientRect() below can return
@@ -3476,15 +3585,30 @@
   // actually finished laying out (tick() alone only guarantees pending
   // state changes were applied to the DOM, not that the browser finished a
   // layout/paint pass) — see focusPending above for the same class of issue.
-  $: if (boxes) {
-    updateVisibleRange();
-    tick().then(() => requestAnimationFrame(updateVisibleRange));
-  }
-  $: visibleItems = buildVisibleItems(
-    displayEntries,
-    renderStart,
-    renderEnd,
-    selected
+  // MUST be `$effect.pre`, not `$effect`: it writes `renderStart`/`renderEnd`,
+  // which `visibleItems` (below) derives and the grid `{#each}` reads. A plain
+  // `$effect` runs AFTER the DOM updates, so a fold/filter that shortened `boxes`
+  // would render the OLD visible range against the NEW, shorter `boxes` — and
+  // `boxes[i]` is then undefined for a stale index (crash: reading 'y'/'kind').
+  // The Svelte-4 `$:` ran in dependency order BEFORE render; `$effect.pre` +
+  // lazy `$derived` restores exactly that: the range is refreshed before
+  // `visibleItems` is pulled for the DOM.
+  $effect.pre(() => {
+    if (boxes) {
+      // Depend ONLY on `boxes` (matching the Svelte-4 `$:`): untrack the body so
+      // updateVisibleRange → loadMore's SYNCHRONOUS reads (items, selected, the
+      // fetching flags) don't become effect dependencies and re-fire this on
+      // every feed mutation — and so loadMore's synchronous `fetchingAfter =
+      // true` write can never re-enter this effect (a Svelte-4 `$:` tracked only
+      // `boxes`; runes' dynamic tracking would otherwise widen that).
+      untrack(() => {
+        updateVisibleRange();
+        tick().then(() => requestAnimationFrame(updateVisibleRange));
+      });
+    }
+  });
+  let visibleItems = $derived(
+    buildVisibleItems(displayEntries, renderStart, renderEnd, selected)
   );
 
   // First scan of a session: bind:clientWidth's initial value arrives
@@ -3493,23 +3617,28 @@
   // the post-scan focus until `boxes` — and therefore the selected Thumb —
   // actually exists; this also covers rescans, where `boxes` is already
   // truthy and this fires immediately.
-  $: if (focusPending && boxes) {
-    focusPending = false;
-    tick().then(() => {
-      // Thumb's data-id attribute is always the resolved photo's raw id
-      // (Thumb only ever receives `item`, never the display entry), so DOM
-      // lookups must key on resolvePhoto(entry).id, not entryDomId(entry) —
-      // entryDomId is the stack id for a collapsed stack and never appears
-      // in the DOM as a data-id.
-      const entry = displayEntries[selected];
-      // preventScroll while a group is being expanded: focusing the selected
-      // tile must not yank the viewport off the header the expand pin is holding
-      // (issue #74). Normal scans/jumps (no pin) keep the focus-reveal scroll.
-      focusTile(entry ? resolvePhoto(entry).id : null, {
-        preventScroll: !!expandPin,
+  // Reads focusPending + boxes; writes focusPending = false. The write flips the
+  // condition false, so the one re-run this schedules is a no-op — it converges
+  // (this is the documented reseed pattern, not an infinite loop).
+  $effect(() => {
+    if (focusPending && boxes) {
+      focusPending = false;
+      tick().then(() => {
+        // Thumb's data-id attribute is always the resolved photo's raw id
+        // (Thumb only ever receives `item`, never the display entry), so DOM
+        // lookups must key on resolvePhoto(entry).id, not entryDomId(entry) —
+        // entryDomId is the stack id for a collapsed stack and never appears
+        // in the DOM as a data-id.
+        const entry = displayEntries[selected];
+        // preventScroll while a group is being expanded: focusing the selected
+        // tile must not yank the viewport off the header the expand pin is holding
+        // (issue #74). Normal scans/jumps (no pin) keep the focus-reveal scroll.
+        focusTile(entry ? resolvePhoto(entry).id : null, {
+          preventScroll: !!expandPin,
+        });
       });
-    });
-  }
+    }
+  });
 
   /**
    * Rate a photo optimistically, and PUT THE STAR BACK if the write fails.
@@ -4195,10 +4324,10 @@
      feed with no idea what happened (e.g. the collapsed-nested-group crash in
      formatGroupValue). Never fail silently: put it on screen, say what to do. -->
 <svelte:window
-  on:keydown={onKeydown}
-  on:resize={scheduleVisibleRangeUpdate}
-  on:error={(e) => reportUncaught("display", e.error ?? e.message)}
-  on:unhandledrejection={(e) => reportUncaught("background", e.reason)}
+  onkeydown={onKeydown}
+  onresize={scheduleVisibleRangeUpdate}
+  onerror={(e) => reportUncaught("display", e.error ?? e.message)}
+  onunhandledrejection={(e) => reportUncaught("background", e.reason)}
 />
 
 <UpdateBanner />
@@ -4323,7 +4452,8 @@
         />
       {/if}
     </div>
-    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="sidebar-resizer"
       class:dragging={resizingSidebar}
@@ -4332,15 +4462,15 @@
       aria-label="Resize sidebar (double-click to reset)"
       tabindex="0"
       title="Drag to resize the sidebar (double-click to reset)"
-      on:pointerdown={startSidebarResize}
-      on:dblclick={() => (sidebarWidth = DEFAULT_SIDEBAR_WIDTH)}
-      on:keydown={onSidebarResizeKey}
+      onpointerdown={startSidebarResize}
+      ondblclick={() => (sidebarWidth = DEFAULT_SIDEBAR_WIDTH)}
+      onkeydown={onSidebarResizeKey}
     ></div>
     <div
       class="main-column"
       bind:this={mainColumnEl}
-      on:scroll={scheduleVisibleRangeUpdate}
-      on:wheel={() => ((jumpRevealPending = false), (expandPin = null))}
+      onscroll={scheduleVisibleRangeUpdate}
+      onwheel={() => ((jumpRevealPending = false), (expandPin = null))}
       style="--reveal-margin:{revealMargin}px"
     >
       {#if albumMode}
@@ -4403,7 +4533,7 @@
                       )
                     )}
                     aria-label="Cycle this group: full grid → snapshot strip → collapsed"
-                    on:click={(e) =>
+                    onclick={(e) =>
                       onGroupToggle(
                         header.path,
                         e,
@@ -4431,16 +4561,16 @@
                     <FolderIcon virtual={header.isVirtual} />
                   {/if}
                   {#if header.path && renamingKey === pathKey(header.path)}
-                    <!-- svelte-ignore a11y-autofocus -->
+                    <!-- svelte-ignore a11y_autofocus -->
                     <input
                       class="section-rename"
                       bind:value={renameDraft}
-                      on:click|stopPropagation
-                      on:keydown={(e) => {
+                      onclick={(e) => e.stopPropagation()}
+                      onkeydown={(e) => {
                         if (e.key === "Enter") commitRename(header.path);
                         else if (e.key === "Escape") cancelRename();
                       }}
-                      on:blur={() => commitRename(header.path)}
+                      onblur={() => commitRename(header.path)}
                       autofocus
                     />
                   {:else}
@@ -4452,7 +4582,7 @@
                           ? " — double-click to rename this folder on disk"
                           : ""
                       }`}
-                      on:dblclick={() =>
+                      ondblclick={() =>
                         !header.isVirtual && startRename(header.path)}
                     >
                       <span
@@ -4519,6 +4649,7 @@
                   )
                 )}
                 {#if renderer.component && boxes[i].height > 0}
+                  {@const Renderer = renderer.component}
                   <!-- + PAD on BOTH axes, exactly as Thumb does (`box.x + pad`).
                        Absolutely-positioned children ignore the grid's CSS
                        padding, so every box has to add the frame inset itself —
@@ -4549,8 +4680,7 @@
                       PAD}px; width:{boxes[i].width}px; height:{boxes[i]
                       .height}px;"
                   >
-                    <svelte:component
-                      this={renderer.component}
+                    <Renderer
                       groupPath={entry.item.path}
                       count={entry.item.count}
                       filter={displayFilter}
@@ -4603,7 +4733,7 @@
             </p>
             <button
               class="empty-action"
-              on:click={() =>
+              onclick={() =>
                 hasNativePicker ? chooseFolder() : (addFolderOpen = true)}
             >
               Add folder…
@@ -4620,7 +4750,7 @@
                 : "filters"}{activeFacetLabels.length > 1 ? "s" : ""}. Widen or
               clear them to see photos again.
             </p>
-            <button class="empty-action" on:click={clearAllFilters}
+            <button class="empty-action" onclick={clearAllFilters}
               >Clear filters</button
             >
           </div>
@@ -4649,7 +4779,7 @@
     <!-- The scope chip explains the "showing" count it sits next to. -->
     {#snippet scope()}
       {#if chip}
-        <button class="scope-chip" on:click={exitScope} title={chip.title}>
+        <button class="scope-chip" onclick={exitScope} title={chip.title}>
           {chip.icon}
           {chip.text} ✕
         </button>
@@ -4755,11 +4885,11 @@
     <div class="confirm-actions">
       <button
         class="confirm-cancel"
-        on:click={() => (removeFolderPending = null)}
+        onclick={() => (removeFolderPending = null)}
       >
         Cancel
       </button>
-      <button class="confirm-remove" on:click={confirmRemoveFolder}>
+      <button class="confirm-remove" onclick={confirmRemoveFolder}>
         Remove from library
       </button>
     </div>
