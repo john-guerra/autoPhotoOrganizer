@@ -19,7 +19,7 @@
   import { jobs, undoFailureMessage } from "./jobs.js";
   import { cancelJob, dismissJob, dismissAllJobs, undoMove } from "./api.js";
 
-  let open = false;
+  let open = $state(false);
 
   // Per-row error, keyed by job id — for undo, and for the same reason for
   // cancel and dismiss. `undoMove()` throws on a *synchronous* failure (a 413
@@ -28,43 +28,50 @@
   // Cancel and Dismiss were STILL fire-and-forget: a rejected cancel left the row
   // sitting there claiming to be "running" forever, with no hint that the button
   // did nothing. Await them and surface the message on the row itself.
-  let undoErrors = {};
+  let undoErrors = $state({});
   /** A failed Dismiss all — same rule: the button must not silently do nothing. */
-  let sweepError = "";
+  let sweepError = $state("");
 
-  $: running = $jobs.filter((j) => j.status === "running");
-  $: broken = $jobs.filter(
-    (j) => j.status === "failed" || j.status === "canceled"
+  let running = $derived($jobs.filter((j) => j.status === "running"));
+  let broken = $derived(
+    $jobs.filter((j) => j.status === "failed" || j.status === "canceled")
   );
-  $: finished = $jobs.filter((j) => j.status !== "running");
+  let finished = $derived($jobs.filter((j) => j.status !== "running"));
 
   // What the pill says, in priority order: something is wrong > something is
   // working > something is waiting to be acknowledged. Only ONE line, because the
   // whole point is that it stays small.
-  $: pill = broken.length
-    ? { kind: "err", icon: "✗", text: `${broken.length} failed` }
-    : running.length
-      ? {
-          kind: "busy",
-          icon: "◐",
-          text:
-            running.length === 1
-              ? running[0].label
-              : `${running.length} jobs running`,
-        }
-      : { kind: "ok", icon: "✓", text: `${finished.length} done` };
+  let pill = $derived(
+    broken.length
+      ? { kind: "err", icon: "✗", text: `${broken.length} failed` }
+      : running.length
+        ? {
+            kind: "busy",
+            icon: "◐",
+            text:
+              running.length === 1
+                ? running[0].label
+                : `${running.length} jobs running`,
+          }
+        : { kind: "ok", icon: "✓", text: `${finished.length} done` }
+  );
 
   // A single bar for everything in flight. Jobs that can't count their own work
   // (a transcode: ffmpeg reports no step total) contribute nothing to either
   // side, so a lone uncountable job leaves the bar indeterminate rather than
   // pinning it at 0% and looking stuck.
-  $: countable = running.filter((j) => j.total > 0);
-  $: totalWork = countable.reduce((n, j) => n + j.total, 0);
-  $: doneWork = countable.reduce((n, j) => n + (j.done ?? 0), 0);
+  let countable = $derived(running.filter((j) => j.total > 0));
+  let totalWork = $derived(countable.reduce((n, j) => n + j.total, 0));
+  let doneWork = $derived(countable.reduce((n, j) => n + (j.done ?? 0), 0));
 
   // The popover is pointless once every job it was showing is gone; close it so
   // the user isn't left staring at an empty box that they now have to dismiss.
-  $: if (!$jobs.length && open) open = false;
+  // This is a genuine side effect (it mutates `open`, which is otherwise
+  // user-driven, not a pure function of `$jobs`) so it stays an effect rather
+  // than becoming a `$derived`.
+  $effect(() => {
+    if (!$jobs.length && open) open = false;
+  });
 
   async function handleCancel(job) {
     undoErrors = { ...undoErrors, [job.id]: null };
@@ -182,13 +189,13 @@
   }
 </script>
 
-<svelte:window on:keydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} />
 
 {#if $jobs.length}
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="jobs-widget"
-    on:focusout={(e) => {
+    onfocusout={(e) => {
       // Close when focus leaves the widget entirely — a click elsewhere in the
       // app shouldn't leave the popover hanging over the photos, which is the
       // whole complaint this change exists to answer.
@@ -205,13 +212,13 @@
             title={finished.length
               ? "Clear every finished job (running jobs keep going)"
               : "Nothing finished to clear"}
-            on:click={handleDismissAll}>Dismiss all</button
+            onclick={handleDismissAll}>Dismiss all</button
           >
           <button
             class="job-dismiss"
             title="Close"
             aria-label="Close"
-            on:click={() => (open = false)}>×</button
+            onclick={() => (open = false)}>×</button
           >
         </header>
 
@@ -254,34 +261,34 @@
                     >{/if}
                   {job.phase}
                 </span>
-                <button class="job-btn" on:click={() => handleCancel(job)}
+                <button class="job-btn" onclick={() => handleCancel(job)}
                   >Cancel</button
                 >
               {:else if job.status === "done"}
                 <span class="job-icon ok" aria-hidden="true">✓</span>
                 <span class="job-summary">{summarize(job)}</span>
                 {#if canUndo(job)}
-                  <button class="job-btn" on:click={() => handleUndo(job)}
+                  <button class="job-btn" onclick={() => handleUndo(job)}
                     >Undo</button
                   >
                 {/if}
                 <button
                   class="job-dismiss"
                   title="Dismiss"
-                  on:click={() => handleDismiss(job)}>×</button
+                  onclick={() => handleDismiss(job)}>×</button
                 >
               {:else}
                 <span class="job-icon err" aria-hidden="true">✗</span>
                 <span class="job-summary">{job.error}</span>
                 {#if canUndo(job)}
-                  <button class="job-btn" on:click={() => handleUndo(job)}
+                  <button class="job-btn" onclick={() => handleUndo(job)}
                     >Undo</button
                   >
                 {/if}
                 <button
                   class="job-dismiss"
                   title="Dismiss"
-                  on:click={() => handleDismiss(job)}>×</button
+                  onclick={() => handleDismiss(job)}>×</button
                 >
               {/if}
 
@@ -300,7 +307,7 @@
       class="jobs-pill {pill.kind}"
       aria-expanded={open}
       title="Background jobs — click for details"
-      on:click={() => (open = !open)}
+      onclick={() => (open = !open)}
     >
       <span
         class="pill-icon"
