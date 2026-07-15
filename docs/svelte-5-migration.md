@@ -63,7 +63,7 @@ Still open (warnings, not blockers): Svelte 5 warns on self-closing non-void tag
 config break:
 
 - **electron-builder 26 removed `win.publisherName`** (`additionalProperties:false`
-  now; it moved under the Windows *signing* config). This app builds unsigned NSIS
+  now; it moved under the Windows _signing_ config). This app builds unsigned NSIS
   with no certificate, so the field no longer applies — dropped it from
   `build.win`.
 
@@ -317,6 +317,17 @@ by default in 5).
 - `bind:clientWidth`/`bind:this`/`<svelte:window>`/`<svelte:self>`/transitions/
   `|global` all **still exist** and are unchanged — the `SnapshotStrip`/`TimelineFilter`
   width binds and the `in:scale|global` fold keep working.
+- **Named slots do NOT auto-bridge legacy→runes — this one bit us (Modal).** When you
+  convert a child to runes and its slots become snippet props, a legacy parent's
+  DEFAULT slot content still bridges (it feeds the child's `children` snippet), but a
+  legacy `<svelte:fragment slot="footer">` does **NOT** populate the child's `footer`
+  snippet — it silently renders nothing. Symptom: the `<dialog>` opened correctly but
+  its footer (Cancel/Preview buttons) was empty, so the e2e click timed out with no
+  error. Fix: convert each named-slot call site to `{#snippet footer()}…{/snippet}`
+  (snippets are valid inside a still-legacy parent). This applies to every remaining
+  named-slot consumer — `StatusBar` (3), `Toolbar` (2), `ToolGroup` (2),
+  `FilterControls` (1), `ToolbarRow` (1): convert the parent's slot syntax in the same
+  commit as the child.
 
 ## 7. Recommended strategy
 

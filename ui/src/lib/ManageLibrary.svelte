@@ -119,7 +119,7 @@
   open={true}
   title="Manage library"
   size="md"
-  on:close={() => dispatch("close")}
+  onclose={() => dispatch("close")}
 >
   {#if message}<p class="message">{message}</p>{/if}
 

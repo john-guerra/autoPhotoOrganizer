@@ -4,28 +4,43 @@
   // Esc-to-close (the `cancel` event), focus trapping, and focus restoration to
   // the invoker on close. Borrows Bootstrap's header/body/footer *structure*,
   // not its CSS.
-  import { createEventDispatcher } from "svelte";
+  /**
+   * @type {{
+   *   open?: boolean,
+   *   title?: string,
+   *   size?: "sm" | "md" | "lg",
+   *   dismissible?: boolean,
+   *   onclose?: () => void,
+   *   children?: import("svelte").Snippet,
+   *   footer?: import("svelte").Snippet,
+   * }}
+   */
+  let {
+    open = $bindable(false),
+    title = "",
+    size = "md",
+    dismissible = true,
+    onclose,
+    children,
+    footer,
+  } = $props();
 
-  export let open = false;
-  export let title = "";
-  export let size = "md"; // sm | md | lg
-  export let dismissible = true;
-
-  const dispatch = createEventDispatcher();
-  let dialogEl;
+  let dialogEl = $state();
 
   // Drive the imperative dialog API from the reactive `open` prop. Guard on the
   // dialog's real .open so we never double-call showModal()/close() (which would
-  // throw or loop).
-  $: if (dialogEl) {
+  // throw or loop). A runes $effect tracks `open` and `dialogEl` precisely — none
+  // of the safe_not_equal re-fire the old `$: if (dialogEl)` form was prone to.
+  $effect(() => {
+    if (!dialogEl) return;
     if (open && !dialogEl.open) dialogEl.showModal();
     else if (!open && dialogEl.open) dialogEl.close();
-  }
+  });
 
   function requestClose() {
     if (!dismissible) return;
     open = false; // keep bind:open in sync
-    dispatch("close");
+    onclose?.();
   }
 
   // Native Esc fires `cancel`; preventDefault so WE own the close path (sets
@@ -42,15 +57,15 @@
   }
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 <!-- on:click only detects clicks on the ::backdrop (target === the <dialog>)
      to close; the keyboard close path is the native Esc → on:cancel below. -->
 <dialog
   bind:this={dialogEl}
   class="modal size-{size}"
-  on:cancel={onCancel}
-  on:click={onDialogClick}
-  on:close={() => {
+  oncancel={onCancel}
+  onclick={onDialogClick}
+  onclose={() => {
     if (open) requestClose();
   }}
   aria-label={title}
@@ -59,17 +74,17 @@
     <header class="modal-header">
       <h2>{title}</h2>
       {#if dismissible}
-        <button class="modal-close" title="Close (Esc)" on:click={requestClose}
+        <button class="modal-close" title="Close (Esc)" onclick={requestClose}
           >✕</button
         >
       {/if}
     </header>
     <div class="modal-body">
-      <slot />
+      {@render children?.()}
     </div>
-    {#if $$slots.footer}
+    {#if footer}
       <footer class="modal-footer">
-        <slot name="footer" />
+        {@render footer()}
       </footer>
     {/if}
   </div>

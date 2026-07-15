@@ -102,7 +102,7 @@
   ];
 </script>
 
-<Modal open={true} title="Keyboard shortcuts" size="lg" on:close={close}>
+<Modal open={true} title="Keyboard shortcuts" size="lg" onclose={close}>
   <div class="groups">
     {#each groups as group}
       <section>
@@ -126,9 +126,9 @@
       </section>
     {/each}
   </div>
-  <svelte:fragment slot="footer">
+  {#snippet footer()}
     <span>Press <kbd>?</kbd> anytime to toggle this list.</span>
-  </svelte:fragment>
+  {/snippet}
 </Modal>
 
 <style>

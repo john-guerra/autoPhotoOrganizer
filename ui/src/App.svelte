@@ -4777,7 +4777,7 @@
     open={true}
     title="Remove folder from library?"
     size="sm"
-    on:close={() => (removeFolderPending = null)}
+    onclose={() => (removeFolderPending = null)}
   >
     <p class="confirm-body">
       <strong>{removeFolderPending.folderPath}</strong>

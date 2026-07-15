@@ -94,7 +94,7 @@
   }
 </script>
 
-<Modal bind:open title="Auto Albums" size="lg" on:close={cancel}>
+<Modal bind:open title="Auto Albums" size="lg" onclose={cancel}>
   <section class="how">
     <p>
       AutoGallery looks at <strong>when each photo and video was taken</strong>.
@@ -178,10 +178,10 @@
     </div>
   </section>
 
-  <svelte:fragment slot="footer">
+  {#snippet footer()}
     <button on:click={cancel}>Cancel</button>
     <button class="primary" on:click={apply}>Preview albums</button>
-  </svelte:fragment>
+  {/snippet}
 </Modal>
 
 <style>
