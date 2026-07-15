@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.1
+
+- **Browsing a large library no longer fails with "Failed to fetch."** Opening,
+  searching, or clicking a folder while nothing is selected used to fire one
+  request per group — around a thousand at once on a big library — which
+  overwhelmed the browser and could leave the feed or folder tree blank. The
+  group select indicator now skips that work entirely when you have no selection,
+  and paces the requests when you do. (#4)
+
 ## 2.15.0
 
 Packaged build. Bundles everything since 2.14.0 — folder hierarchy in the feed,

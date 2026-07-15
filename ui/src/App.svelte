@@ -1034,23 +1034,54 @@
       _groupCacheEpoch = countsEpoch;
       groupIdCache = new Map();
       groupIdInFlight = new Set();
+      // Drop queued fetches too: their sig is now stale, and the next render
+      // re-enqueues whatever is still needed. In-flight ones finish harmlessly
+      // (groupSelectState re-checks sig before trusting a cached entry).
+      _groupIdQueue.length = 0;
       groupIdCacheVersion++;
     }
   });
 
-  /** Kick off a one-shot id fetch for a group whose ids aren't cached yet. */
-  async function ensureGroupIds(path, paths, key, sig) {
+  // The tri-state fetch is bounded. A wide feed (or a fully-expanded folder
+  // tree) renders hundreds-to-thousands of headers at once, and each uncached
+  // one wants its own /api/photos/ids. Fired unbounded, ~1,000 requests land on
+  // the browser's ~6-connections-per-host cap simultaneously and STARVE the
+  // requests that actually matter — the feed page and the tree reload — which
+  // then fail with "Failed to fetch" and leave the grid looking empty. Draining
+  // the id fetches a few at a time keeps connection slots free for the critical
+  // requests; the indicator just fills in progressively (it already shows
+  // "loading"). Kept well under the cap so the feed/tree never wait behind it.
+  const GROUP_ID_MAX_CONCURRENT = 3;
+  let _groupIdActive = 0;
+  const _groupIdQueue = []; // pending fetch thunks, drained by pumpGroupIdQueue
+  function pumpGroupIdQueue() {
+    while (_groupIdActive < GROUP_ID_MAX_CONCURRENT && _groupIdQueue.length) {
+      const job = _groupIdQueue.shift();
+      _groupIdActive++;
+      job().finally(() => {
+        _groupIdActive--;
+        pumpGroupIdQueue();
+      });
+    }
+  }
+
+  /** Kick off a one-shot id fetch for a group whose ids aren't cached yet.
+   *  Enqueued rather than fired immediately — see GROUP_ID_MAX_CONCURRENT. */
+  function ensureGroupIds(path, paths, key, sig) {
     if (groupIdInFlight.has(key)) return;
     groupIdInFlight.add(key);
-    try {
-      const ids = await fetchGroupIds(path, paths);
-      groupIdCache.set(key, { ids, sig });
-      groupIdCacheVersion++; // trigger the reactive re-derive
-    } catch {
-      // Leave uncached; a later render retries. The click path surfaces errors.
-    } finally {
-      groupIdInFlight.delete(key);
-    }
+    _groupIdQueue.push(async () => {
+      try {
+        const ids = await fetchGroupIds(path, paths);
+        groupIdCache.set(key, { ids, sig });
+        groupIdCacheVersion++; // trigger the reactive re-derive
+      } catch {
+        // Leave uncached; a later render retries. The click path surfaces errors.
+      } finally {
+        groupIdInFlight.delete(key);
+      }
+    });
+    pumpGroupIdQueue();
   }
 
   /** Derive a group's select indicator. Reads reactive `_sel`/`_ver`/`_sig` as
@@ -1064,6 +1095,13 @@
    * never lit up.
    * @returns {"none"|"some"|"all"|"loading"} */
   function groupSelectState(path, paths, _sel, _ver, _sig) {
+    // Nothing selected ⇒ every group is trivially "none": intersecting an empty
+    // selection can only be empty. Short-circuit BEFORE ensureGroupIds so plain
+    // browsing/searching (the common case, and no-selection is exactly the state
+    // of the original #4 repro) never fires a single per-group id request. This
+    // alone eliminates the whole request storm whenever the user has no
+    // selection active.
+    if (_sel.size === 0) return "none";
     const key = pathKey(path);
     const entry = groupIdCache.get(key);
     if (!entry || entry.sig !== _sig) {
