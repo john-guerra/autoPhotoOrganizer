@@ -24,7 +24,7 @@
         Reconnecting… (attempt {$reconnectAttempts})
       {/if}
     </span>
-    <button class="retry" on:click={retryServerNow}>Retry now</button>
+    <button class="retry" onclick={retryServerNow}>Retry now</button>
   </div>
 {/if}
 

@@ -7,43 +7,48 @@
    * the user explicitly triggered a check (Check for Updates… menu). In the web
    * build window.autogallery is undefined, so this renders nothing.
    */
-  import { onMount, onDestroy } from "svelte";
-
   const updates =
     typeof window !== "undefined" ? window.autogallery?.updates : null;
 
-  let status = null;
-  let unsub = null;
+  let status = $state(null);
 
-  onMount(() => {
+  // Subscribe to the main process's update stream for this component's lifetime.
+  // One $effect with a cleanup return replaces the onMount/onDestroy + unsub
+  // handle.
+  $effect(() => {
     if (!updates) return;
-    unsub = updates.onStatus((s) => (status = s));
+    const unsub = updates.onStatus((s) => (status = s));
+    return () => unsub && unsub();
   });
-  onDestroy(() => unsub && unsub());
 
-  $: state = status?.state;
+  const state = $derived(status?.state);
 
   // Which states get a visible card. Non-actionable states (checking / up to
   // date / error) only show when the user asked — otherwise the background
   // startup check would flash a banner every launch.
-  $: visible =
+  const visible = $derived(
     state === "available" ||
-    state === "downloading" ||
-    state === "downloaded" ||
-    ((state === "checking" || state === "none" || state === "error") &&
-      status?.userInitiated);
+      state === "downloading" ||
+      state === "downloaded" ||
+      ((state === "checking" || state === "none" || state === "error") &&
+        status?.userInitiated)
+  );
 
   // Reset dismissal on genuine state transitions only (not on every
   // download-progress tick, so the card stays dismissible mid-download).
-  let dismissed = false;
+  // `prevState` is a plain (untracked) local, so writing it here can't loop the
+  // effect — only `state` is a tracked dependency.
+  let dismissed = $state(false);
   let prevState;
-  $: if (state !== prevState) {
-    prevState = state;
-    dismissed = false;
-  }
+  $effect(() => {
+    if (state !== prevState) {
+      prevState = state;
+      dismissed = false;
+    }
+  });
 
-  let installing = false;
-  let installError = "";
+  let installing = $state(false);
+  let installError = $state("");
   async function restart() {
     installing = true;
     installError = "";
@@ -85,7 +90,7 @@
     {/if}
 
     {#if state === "downloaded"}
-      <button class="install" on:click={restart} disabled={installing}>
+      <button class="install" onclick={restart} disabled={installing}>
         {installing ? "Restarting…" : "Restart & Install"}
       </button>
     {/if}
@@ -98,7 +103,7 @@
       class="close"
       title="Dismiss"
       aria-label="Dismiss"
-      on:click={() => (dismissed = true)}>×</button
+      onclick={() => (dismissed = true)}>×</button
     >
   </div>
 {/if}

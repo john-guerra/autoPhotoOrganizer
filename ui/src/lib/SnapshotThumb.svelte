@@ -1,4 +1,4 @@
-<script context="module">
+<script module>
   // WIP (issue #90 — "collapse to snapshot → thumbs broken").
   //
   // A single resilient thumbnail for the snapshot strip. The grid tile
@@ -15,27 +15,38 @@
 </script>
 
 <script>
-  import { onDestroy } from "svelte";
   import { thumbUrl, previewUrl } from "./api.js";
 
-  export let id;
-  /** thumbnail longest edge — a shared bucket the grid also uses, so the strip
-   * reuses the grid's cache instead of forcing a unique cold size */
-  export let size = 320;
-  /** optional mtime cache-buster (browser-side only; the server ignores it) */
-  export let v = undefined;
+  /**
+   * @type {{ id: any, size?: number, v?: any }}
+   * `size` is the thumbnail longest edge — a shared bucket the grid also uses,
+   * so the strip reuses the grid's cache instead of forcing a unique cold size.
+   * `v` is an optional mtime cache-buster (browser-side only; server ignores it).
+   */
+  let { id, size = 320, v = undefined } = $props();
 
+  // Only `failed` and `activeSrc` are rendered, so only they need to be $state;
+  // the rest are internal load-machine bookkeeping read solely inside handlers.
   let attempt = 0; // full-thumbnail retry count
   let usingPreview = false; // exhausted retries → showing the embedded preview
-  let failed = false; // preview failed too — surface a visible placeholder
-  let activeSrc = null;
+  let failed = $state(false); // preview failed too — surface a visible placeholder
+  let activeSrc = $state(null);
   let stallTimer;
   let retryTimer;
 
   // Restart from scratch whenever the identity of what we're showing changes.
   // Keyed on id+size+v so a rescan swapping the file under this id, or a zoom
-  // changing the bucket, re-attempts cleanly.
-  $: startFor(`${id}:${size}:${v}`);
+  // changing the bucket, re-attempts cleanly. startFor guards on currentKey so
+  // this effect is idempotent when unrelated state changes.
+  $effect(() => {
+    startFor(`${id}:${size}:${v}`);
+  });
+
+  // Clear pending timers when the component is destroyed (was onDestroy).
+  $effect(() => () => {
+    clearTimeout(stallTimer);
+    clearTimeout(retryTimer);
+  });
 
   let currentKey = null;
   function startFor(key) {
@@ -86,10 +97,6 @@
     }
   }
 
-  onDestroy(() => {
-    clearTimeout(stallTimer);
-    clearTimeout(retryTimer);
-  });
 </script>
 
 {#if failed}
@@ -97,8 +104,8 @@
 {:else}
   <img
     src={activeSrc}
-    on:load={onLoad}
-    on:error={onError}
+    onload={onLoad}
+    onerror={onError}
     loading="lazy"
     alt=""
   />
