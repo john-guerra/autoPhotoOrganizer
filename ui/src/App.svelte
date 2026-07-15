@@ -4754,7 +4754,7 @@
     x={contextMenu.x}
     y={contextMenu.y}
     items={contextMenuItems}
-    on:close={() => (contextMenu.open = false)}
+    onclose={() => (contextMenu.open = false)}
   />
 {/if}
 
@@ -4763,7 +4763,7 @@
     x={treeMenu.x}
     y={treeMenu.y}
     items={treeMenu.items}
-    on:close={() => (treeMenu.open = false)}
+    onclose={() => (treeMenu.open = false)}
   />
 {/if}
 

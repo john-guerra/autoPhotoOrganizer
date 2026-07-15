@@ -5,39 +5,41 @@
   //
   // This is intentionally the shared menu surface issue #25 (multi-select +
   // context menu) will grow — extend it by passing more `items`, don't rebuild.
-  import { onMount, onDestroy, createEventDispatcher } from "svelte";
-
-  export let x = 0;
-  export let y = 0;
-  /** An item is either a row or a rule:
-   *   {label, action, enabled?, danger?}  — `danger` styles a destructive action
-   *   {separator: true}                   — a rule between groups of items
-   * NOTE every action auto-dismisses the menu (see onItem), so a two-click
-   * "arm the confirm" pattern cannot live in here — a destructive item must
-   * confirm somewhere that outlives the menu (the tree's Remove opens a Modal).
-   * @type {Array<{label?: string, action?: () => void, enabled?: boolean, danger?: boolean, separator?: boolean}>} */
-  export let items = [];
-
-  const dispatch = createEventDispatcher();
+  /**
+   * @type {{
+   *   x?: number,
+   *   y?: number,
+   *   items?: Array<{label?: string, action?: () => void, enabled?: boolean, danger?: boolean, separator?: boolean}>,
+   *   onclose?: () => void,
+   * }}
+   * An item is either a row {label, action, enabled?, danger?} (`danger` styles a
+   * destructive action) or a rule {separator:true}. Every action auto-dismisses
+   * the menu (see onItem), so a two-click "arm the confirm" pattern cannot live
+   * in here — a destructive item must confirm somewhere that outlives the menu
+   * (the tree's Remove opens a Modal).
+   */
+  let { x = 0, y = 0, items = [], onclose } = $props();
 
   let menuEl;
-  let w = 0;
-  let h = 0;
+  let w = $state(0);
+  let h = $state(0);
   const MARGIN = 6;
 
   // Clamp so the menu never spills past the right/bottom edge. Before the first
   // measurement w/h are 0, so it opens exactly at the cursor, then settles.
-  $: left =
+  const left = $derived(
     typeof window !== "undefined"
       ? Math.max(MARGIN, Math.min(x, window.innerWidth - w - MARGIN))
-      : x;
-  $: top =
+      : x
+  );
+  const top = $derived(
     typeof window !== "undefined"
       ? Math.max(MARGIN, Math.min(y, window.innerHeight - h - MARGIN))
-      : y;
+      : y
+  );
 
   function close() {
-    dispatch("close");
+    onclose?.();
   }
 
   function onItem(item) {
@@ -59,22 +61,20 @@
     }
   }
 
-  onMount(() => {
-    // Scroll must be captured: the grid scrolls an inner overflow container
-    // whose scroll events don't bubble to window, so a bubbling listener would
-    // miss them. Capture phase sees them all.
+  // Scroll must be captured: the grid scrolls an inner overflow container whose
+  // scroll events don't bubble to window, so a bubbling listener would miss
+  // them. Capture phase sees them all. (onMount/onDestroy → one $effect.)
+  $effect(() => {
     window.addEventListener("scroll", close, true);
-  });
-  onDestroy(() => {
-    window.removeEventListener("scroll", close, true);
+    return () => window.removeEventListener("scroll", close, true);
   });
 </script>
 
 <svelte:window
-  on:mousedown={onWindowMousedown}
-  on:keydown={onKeydown}
-  on:blur={close}
-  on:resize={close}
+  onmousedown={onWindowMousedown}
+  onkeydown={onKeydown}
+  onblur={close}
+  onresize={close}
 />
 
 <div
@@ -95,7 +95,7 @@
         class:danger={item.danger}
         role="menuitem"
         disabled={item.enabled === false}
-        on:click={() => onItem(item)}
+        onclick={() => onItem(item)}
       >
         {item.label}
       </button>
