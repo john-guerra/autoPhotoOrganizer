@@ -827,3 +827,57 @@ export async function checkSameVolume(a, b) {
   }
   return res.json();
 }
+
+/** Photos that vanished from disk (stale, not dismissed) on mounted volumes. */
+export async function fetchMissing() {
+  const res = await fetch("/api/missing");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      body.error || `could not load missing files (${res.status})`
+    );
+  }
+  return res.json();
+}
+
+/** Repoint a vanished photo to its new location (destAbsPath = the file's new path). */
+export async function relocateMissing(id, destAbsPath) {
+  const res = await fetch("/api/missing/relocate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, destAbsPath }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `relocate failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Tombstone vanished photos (recoverable; never a hard delete). */
+export async function dismissMissing(ids) {
+  const res = await fetch("/api/missing/dismiss", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `dismiss failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Carry a vanished copy's rating/albums/tags/stack onto an unrated survivor. */
+export async function carryMissing(fromId, toId) {
+  const res = await fetch("/api/missing/carry", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ fromId, toId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `carry failed (${res.status})`);
+  }
+  return res.json();
+}
