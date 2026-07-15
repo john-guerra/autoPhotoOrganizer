@@ -6,10 +6,9 @@
   // App.svelte's onKeydown (single keyboard owner) to avoid a
   // capture-vs-bubble double-toggle.
   import Modal from "./Modal.svelte";
-  import { createEventDispatcher } from "svelte";
 
-  const dispatch = createEventDispatcher();
-  const close = () => dispatch("close");
+  let { onclose } = $props();
+  const close = () => onclose?.();
 
   // The platform's own modifier key (lib/platform.js). Listing both as
   // "⌘ / Ctrl" rendered the slash as its own <kbd> pill — it read as a third key

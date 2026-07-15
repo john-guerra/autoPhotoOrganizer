@@ -80,7 +80,7 @@ electron-builder 25 tree — now **0 vulnerabilities**.
 **All dependency modernization (Stage 1a/1b/1c) is complete.**
 
 **Stage 2 IN PROGRESS — runes conversion, leaf-first.** Converted & gated so far
-(20 of 41 components; 865 unit + 60 e2e green after each batch):
+(24 of 41 components; 865 unit + 60 e2e green after each batch):
 
 - **Independent leaves:** FolderIcon, GroupStateIcon (pure `$props`), GridControls,
   SidebarModeToggle (`$bindable` — bridges legacy parents' `bind:`), ServerBanner
@@ -128,14 +128,32 @@ electron-builder 25 tree — now **0 vulnerabilities**.
   collapsed to a single `$effect` + plain untracked `lastOpen`. Two traps caught on
   review (now in §6): AlbumTimeline's view-reseed `$effect` read AND wrote `view`
   → `effect_update_depth_exceeded`; `bind:this={arr[i]}` needs `$state([])`.
+- **4 independent App.svelte-only leaves:** ShortcutsOverlay (`dispatch("close")`
+  → `onclose?.()`; the Modal `footer` snippet was already done). FisheyeSidebar
+  (5 `export let` → `$props()`, no bindables; the hierarchy-reload `$:` → an
+  `$effect` with explicit `void filter/sort/refreshToken` reads, same pattern as
+  TreeSidebar's `resetAndLoad`; the inner `<FisheyeNav on:select>` stays `on:` —
+  that child ships Svelte-4 source and is out of scope). GroupLabelActions (3
+  `export let`, 5 `dispatch` → callback props `ontoggleselect`/`onjumpprev`/
+  `onjumpnext`/`onkeeponly`/`onremove`; all 5 `on:click|stopPropagation` inlined
+  to `onclick={(e) => { e.stopPropagation(); on...?.(); }}`). StatusBar (7
+  `export let` → `$props()`; its 3 named slots `scope`/`jobs`/`selection` became
+  snippet props rendered as `{#if x}{@render x()}{/if}`, preserving the
+  `sb-right` wrapper around `jobs`). App.svelte's 4 usage sites updated in
+  lockstep: `<FisheyeSidebar on:jump>`→`onjump`; `<GroupLabelActions on:*>`→the
+  5 callback props (`e.detail` dropped — the callback now hands back the raw
+  click event directly); the `<StatusBar>` block's
+  `<svelte:fragment slot="scope">`→`{#snippet scope()}`,
+  `<JobsPanel slot="jobs">`→`{#snippet jobs()}<JobsPanel />{/snippet}`,
+  `<SelectionBar slot="selection" …>`→`{#snippet selection()}<SelectionBar
+…>{/snippet}` (SelectionBar itself stays legacy, untouched inside);
+  `<ShortcutsOverlay on:close>`→`onclose`.
 
-**Remaining (21), by coupling cluster — all end at a choke point or App.svelte:**
+**Remaining (17), by coupling cluster — all end at a choke point or App.svelte:**
 Toolbar cluster (Toolbar, ToolGroup, ToolbarRow, ViewControls, GroupByControl,
 SortControl, FilterControls + the 4 filter leaves RatingFilter/OrientationFilter/
-KindFilter/SearchFilter, TimelineFilter, SourceControls); FisheyeSidebar;
-GroupLabelActions; ShortcutsOverlay (Modal consumer — footer snippet + `onclose`
-already done, still dispatches `close`); StatusBar; SelectionBar; ManageLibrary;
-Thumb; and **App.svelte last** (5,170 lines — its own careful pass, sequenced
+KindFilter/SearchFilter, TimelineFilter, SourceControls); SelectionBar;
+ManageLibrary; Thumb; and **App.svelte last** (5,170 lines — its own careful pass, sequenced
 against #124).
 
 **Working rule that's held:** convert each cluster atomically (leaf child + every
@@ -401,7 +419,7 @@ by default in 5).
   its footer (Cancel/Preview buttons) was empty, so the e2e click timed out with no
   error. Fix: convert each named-slot call site to `{#snippet footer()}…{/snippet}`
   (snippets are valid inside a still-legacy parent). This applies to every remaining
-  named-slot consumer — `StatusBar` (3), `Toolbar` (2), `ToolGroup` (2),
+  named-slot consumer — `StatusBar` (3, done), `Toolbar` (2), `ToolGroup` (2),
   `FilterControls` (1), `ToolbarRow` (1): convert the parent's slot syntax in the same
   commit as the child.
 

@@ -10,27 +10,31 @@
   // row's own click (e.g. the collapsed pill's cycle). The tri-state checkbox
   // is the select-all affordance — there is no separate "Select" button (it
   // would only duplicate the checkbox's select half).
-  import { createEventDispatcher } from "svelte";
-
-  /** @type {"none"|"some"|"all"|"loading"} tri-state select indicator */
-  export let selectState = "none";
-  /** show the Remove action (only meaningful for a folder leaf group) */
-  export let isFolder = false;
-  /** Remove is armed (first click) → show "Confirm remove" in danger style */
-  export let removeArmed = false;
-
-  const dispatch = createEventDispatcher();
+  let {
+    /** @type {"none"|"some"|"all"|"loading"} tri-state select indicator */
+    selectState = "none",
+    /** show the Remove action (only meaningful for a folder leaf group) */
+    isFolder = false,
+    /** Remove is armed (first click) → show "Confirm remove" in danger style */
+    removeArmed = false,
+    ontoggleselect,
+    onjumpprev,
+    onjumpnext,
+    onkeeponly,
+    onremove,
+  } = $props();
 
   // The subtree, not just this folder: clicking a parent takes what's under it.
   // Shift is called out because a partially-selected group is exactly when you
   // can't tell what a plain click will do, and it's the state you most often want
   // to empty.
-  $: selectTitle =
+  let selectTitle = $derived(
     selectState === "all"
       ? "Deselect every photo in this group"
       : selectState === "some"
         ? "Select every photo in this group (and the folders under it) — Shift-click to deselect them all"
-        : "Select every photo in this group, and the folders under it";
+        : "Select every photo in this group, and the folders under it"
+  );
 </script>
 
 <span class="gla">
@@ -40,7 +44,10 @@
     title={selectTitle}
     aria-label={selectTitle}
     aria-pressed={selectState === "all"}
-    on:click|stopPropagation={(e) => dispatch("toggleselect", e)}
+    onclick={(e) => {
+      e.stopPropagation();
+      ontoggleselect?.(e);
+    }}
   >
     {#if selectState === "all"}✓{:else if selectState === "some"}–{:else if selectState === "loading"}⋯{/if}
   </button>
@@ -53,7 +60,10 @@
       class="section-act nav"
       title="Jump to the previous group (Option+←)"
       aria-label="Jump to the previous group"
-      on:click|stopPropagation={() => dispatch("jumpprev")}
+      onclick={(e) => {
+        e.stopPropagation();
+        onjumpprev?.();
+      }}
     >
       ‹
     </button>
@@ -61,14 +71,20 @@
       class="section-act nav"
       title="Jump to the next group (Option+→)"
       aria-label="Jump to the next group"
-      on:click|stopPropagation={() => dispatch("jumpnext")}
+      onclick={(e) => {
+        e.stopPropagation();
+        onjumpnext?.();
+      }}
     >
       ›
     </button>
     <button
       class="section-act"
       title="Keep only this group as the working set"
-      on:click|stopPropagation={() => dispatch("keeponly")}
+      onclick={(e) => {
+        e.stopPropagation();
+        onkeeponly?.();
+      }}
     >
       Keep only
     </button>
@@ -77,7 +93,10 @@
         class="section-act"
         class:danger={removeArmed}
         title="Remove this album from the library (files on disk are untouched; ratings are lost)"
-        on:click|stopPropagation={() => dispatch("remove")}
+        onclick={(e) => {
+          e.stopPropagation();
+          onremove?.();
+        }}
       >
         {removeArmed ? "Confirm remove" : "Remove"}
       </button>

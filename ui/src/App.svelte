@@ -4349,7 +4349,7 @@
           {sort}
           filter={displayFilter}
           refreshToken={libraryVersion}
-          on:jump={(e) => jumpToPath(e.detail)}
+          onjump={(p) => jumpToPath(p)}
         />
       {/if}
     </div>
@@ -4520,17 +4520,13 @@
                       isFolder={!header.isVirtual &&
                         isRemovableFolder(header.path)}
                       removeArmed={removeArmedKey === pathKey(header.path)}
-                      on:toggleselect={(e) =>
-                        toggleGroupSelectAll(
-                          header.path,
-                          header.groupPaths,
-                          e.detail
-                        )}
-                      on:keeponly={() =>
+                      ontoggleselect={(e) =>
+                        toggleGroupSelectAll(header.path, header.groupPaths, e)}
+                      onkeeponly={() =>
                         keepOnlyGroup(header.path, header.groupPaths)}
-                      on:jumpprev={() => jumpFromGroup(header.path, "prev")}
-                      on:jumpnext={() => jumpFromGroup(header.path, "next")}
-                      on:remove={() => removeAlbum(header.path)}
+                      onjumpprev={() => jumpFromGroup(header.path, "prev")}
+                      onjumpnext={() => jumpFromGroup(header.path, "next")}
+                      onremove={() => removeAlbum(header.path)}
                     />
                   {/if}
                 </div>
@@ -4681,51 +4677,52 @@
     {thumbCounts}
   >
     <!-- The scope chip explains the "showing" count it sits next to. -->
-    <svelte:fragment slot="scope">
+    {#snippet scope()}
       {#if chip}
         <button class="scope-chip" on:click={exitScope} title={chip.title}>
           {chip.icon}
           {chip.text} ✕
         </button>
       {/if}
-    </svelte:fragment>
+    {/snippet}
 
     <!-- Background jobs: a pill in the corner that opens a scrollable list, not
          a strip that takes height from the grid for every video you play. -->
-    <JobsPanel slot="jobs" />
+    {#snippet jobs()}<JobsPanel />{/snippet}
 
     <!-- Clear / Keep only / Export live next to the selected count now: that is
          what makes "Clear" read as "clear the selection" rather than "clear
          something, somewhere". -->
-    <SelectionBar
-      slot="selection"
-      {selectedCount}
-      {lastClearedSelection}
-      {hasNativePicker}
-      {exporting}
-      {exportResult}
-      bind:exportOpen
-      bind:exportDest
-      bind:exportName
-      bind:exportMove
-      {pendingBulk}
-      pendingCount={pendingBulkCount}
-      pendingGroup={pendingGroupSelect && {
-        count: pendingGroupSelect.ids.length,
-        label: pendingGroupSelect.label,
-      }}
-      on:bulkconfirm={confirmPendingBulk}
-      on:bulkcancel={() => (pendingBulk = null)}
-      on:groupconfirm={confirmPendingGroupSelect}
-      on:groupcancel={() => (pendingGroupSelect = null)}
-      {rereading}
-      on:clear={clearSelection}
-      on:keeponly={keepOnlySelection}
-      on:reread={rereadSelection}
-      on:undoclear={undoClearSelection}
-      on:choosedest={chooseExportDest}
-      on:export={doExport}
-    />
+    {#snippet selection()}
+      <SelectionBar
+        {selectedCount}
+        {lastClearedSelection}
+        {hasNativePicker}
+        {exporting}
+        {exportResult}
+        bind:exportOpen
+        bind:exportDest
+        bind:exportName
+        bind:exportMove
+        {pendingBulk}
+        pendingCount={pendingBulkCount}
+        pendingGroup={pendingGroupSelect && {
+          count: pendingGroupSelect.ids.length,
+          label: pendingGroupSelect.label,
+        }}
+        on:bulkconfirm={confirmPendingBulk}
+        on:bulkcancel={() => (pendingBulk = null)}
+        on:groupconfirm={confirmPendingGroupSelect}
+        on:groupcancel={() => (pendingGroupSelect = null)}
+        {rereading}
+        on:clear={clearSelection}
+        on:keeponly={keepOnlySelection}
+        on:reread={rereadSelection}
+        on:undoclear={undoClearSelection}
+        on:choosedest={chooseExportDest}
+        on:export={doExport}
+      />
+    {/snippet}
   </StatusBar>
 </div>
 
@@ -4800,7 +4797,7 @@
 {/if}
 
 {#if shortcutsHelpOpen}
-  <ShortcutsOverlay on:close={() => (shortcutsHelpOpen = false)} />
+  <ShortcutsOverlay onclose={() => (shortcutsHelpOpen = false)} />
 {/if}
 
 <style>

@@ -7,38 +7,47 @@
   // AutoGallery's: fetching the flat tree, this app's label formatting, and
   // translating the widget's {key,value} paths into the feed's
   // {dimension,value} paths.
-  import { createEventDispatcher } from "svelte";
   import FisheyeNav from "@john-guerra/fisheye-nav/svelte";
   import { fetchFlatTree } from "./api.js";
   import { shortLeafLabel } from "./labels.js";
 
-  export let groupBy; // string[]
-  export let currentPath = null; // Array<{dimension,value}> | null — feed position
-  export let filter = null;
-  export let sort = null; // feed sort — date sorts change the date-group order
-  export let refreshToken = 0; // bump to force a reload when the index changes
-
-  const dispatch = createEventDispatcher();
+  let {
+    groupBy, // string[]
+    currentPath = null, // Array<{dimension,value}> | null — feed position
+    filter = null,
+    sort = null, // feed sort — date sorts change the date-group order
+    refreshToken = 0, // bump to force a reload when the index changes
+    onjump,
+  } = $props();
 
   // The lens settings (view, algorithm, distortion, DOI weights, …) are the
   // widget's own — it renders the ⚙ and persists the choices under this key. We
   // pass no `style`/`layout` at all, so the user's saved lens is what loads.
   const SETTINGS_KEY = "autogallery.fisheyeSettings";
 
-  let leaves = [];
+  let leaves = $state([]);
   // The groupBy the CURRENT `leaves` were fetched with — NOT the live prop.
   // `groupBy` changes synchronously when you add a dimension, but `leaves` only
   // catches up when the fetch resolves. Handing the widget the new keys over the
   // old rows builds a hierarchy with `month=undefined` levels for a frame. Keys
   // and rows must always come from the same fetch.
-  let loadedGroupBy = [];
-  let total = 0;
-  let loadError = "";
+  let loadedGroupBy = $state([]);
+  let total = $state(0);
+  let loadError = $state("");
   let epoch = 0;
 
   // Reload the whole ordered leaf sequence whenever the hierarchy changes.
   // A leaf's position is only meaningful under the groupBy it was fetched with.
-  $: (filter, sort, refreshToken, loadLeaves(groupBy));
+  $effect(() => {
+    // loadLeaves reads groupBy itself (as its argument); filter/sort are read
+    // inside it (via fetchFlatTree) before its first await, but refreshToken is
+    // a pure "bump to reload" signal nothing else reads, so it needs an
+    // explicit read here to stay tracked.
+    void filter;
+    void sort;
+    void refreshToken;
+    loadLeaves(groupBy);
+  });
   async function loadLeaves(gb) {
     const mine = ++epoch;
     loadError = "";
@@ -59,7 +68,7 @@
 
   // The server sends `{values: {year, month, day}, count}`; the widget wants a
   // flat row per leaf with the dimensions as plain fields.
-  $: rows = leaves.map((l) => ({ ...l.values, count: l.count }));
+  let rows = $derived(leaves.map((l) => ({ ...l.values, count: l.count })));
 
   // The widget speaks {key, value}; the feed speaks {dimension, value}.
   const toFeedPath = (path) =>
@@ -69,7 +78,7 @@
       ? path.map((p) => ({ key: p.dimension, value: p.value }))
       : null;
 
-  $: selected = toNavPath(currentPath);
+  let selected = $derived(toNavPath(currentPath));
 
   // shortLeafLabel only knows folder/year/month/day and returns undefined for
   // anything else (camera, kind, …) — so always fall back to the raw value.
@@ -97,7 +106,7 @@
     <!-- Never fail silently: a dead column tells the user nothing. -->
     <p class="fisheye-error" role="alert">
       Couldn’t load the library outline: {loadError}
-      <button class="retry" on:click={() => loadLeaves(groupBy)}>Retry</button>
+      <button class="retry" onclick={() => loadLeaves(groupBy)}>Retry</button>
     </p>
   {:else}
     <div class="fisheye-body">
@@ -106,7 +115,7 @@
         keys={loadedGroupBy}
         {selected}
         options={{ label, controls: true, persistKey: SETTINGS_KEY }}
-        on:select={(e) => dispatch("jump", toFeedPath(e.detail))}
+        on:select={(e) => onjump?.(toFeedPath(e.detail))}
       />
     </div>
   {/if}

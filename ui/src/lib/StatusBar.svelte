@@ -9,13 +9,18 @@
    * strip's right half for the background-jobs widget.
    */
 
-  export let libraryTotal = 0;
-  export let showingCount = 0;
-  export let selectedCount = 0;
-  export let status = "";
-  export let error = "";
-  export let thumbProgress = "";
-  export let thumbCounts = { error: 0 };
+  let {
+    libraryTotal = 0,
+    showingCount = 0,
+    selectedCount = 0,
+    status = "",
+    error = "",
+    thumbProgress = "",
+    thumbCounts = { error: 0 },
+    scope,
+    jobs,
+    selection,
+  } = $props();
 </script>
 
 <footer class="statusbar">
@@ -34,12 +39,12 @@
          not up in the toolbar: it is the reason that number is smaller than the
          library count, and reading the two side by side is what makes the
          narrowed view legible instead of alarming. -->
-    <slot name="scope" />
+    {#if scope}{@render scope()}{/if}
     <!-- Selection actions (Clear / Keep only / Export) sit RIGHT NEXT TO the
          selected count — that's what makes "Clear" mean "clear the selection".
-         Passed as a slot so App keeps ownership of the selection + export state
-         instead of drilling a dozen props through here. -->
-    <slot name="selection" />
+         Passed as a snippet so App keeps ownership of the selection + export
+         state instead of drilling a dozen props through here. -->
+    {#if selection}{@render selection()}{/if}
     <!-- The transient message comes AFTER the actions: "N photos loaded" is a
          separate thought and used to wedge itself between the count and Clear. -->
     {#if error || status}
@@ -54,7 +59,7 @@
 
   <!-- Background jobs live down here, in the corner furthest from the photos. -->
   <div class="sb-right">
-    <slot name="jobs" />
+    {#if jobs}{@render jobs()}{/if}
   </div>
 </footer>
 
