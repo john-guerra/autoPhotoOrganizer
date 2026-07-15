@@ -6,6 +6,10 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.16
+
+- Test: guard that the missing-files review panel opens and renders. (#1)
+
 ## 2.15.15
 
 - **Review missing files.** When a photo disappears from disk, the app now tells
