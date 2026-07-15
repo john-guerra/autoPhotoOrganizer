@@ -188,6 +188,23 @@ here — App has no props; the work is its ~72 `$:` statements, 13 localStorage-
 reactives, `<svelte:window>`/`<svelte:component>`, tick() calls, and the sole
 transition).
 
+**App.svelte-vs-#124: chose (a) — decompose first, then convert.** Per §7's lean,
+we extract App.svelte's self-contained logic clusters into pure, unit-tested modules
+BEFORE the runes pass, shrinking the file so the eventual conversion is small and
+safe. Done **incrementally, safest-first** — each extraction is a pure module in the
+existing `groupSelection.js`/`bulkSelection.js` style (NOT a store rewrite, which
+would touch ~360 `selectedIds` sites and risk the silent-reactivity breakage this
+file is known for), gated (build + unit + e2e) and committed on its own.
+
+- **#124 extraction 1 — Selection set-algebra (`selectionOps.js`).** Pulled the
+  localStorage parse + the clone-to-reassign set algebra (`parseStoredSelection`,
+  `toggleId`, `withIds`, `withoutIds`, `rangeIds`) out of App's ~8 hand-inlined
+  mutation sites into one tested module (+21 unit tests). `selectedIds` stays App
+  reactive state, so the reactivity model is unchanged; the runes pass later drops
+  the reassign ritual in one place. The fetch/status/scope orchestrators
+  (`selectMatching`, `selectAllInView`, `bulk*`, group select) stay in App and call
+  the helpers.
+
 **Working rule that's held:** convert each cluster atomically (leaf child + every
 parent usage site in the same commit) so the app compiles and all 60 e2e stay green
 at every commit; App.svelte stays legacy throughout, its child-usage syntax updated

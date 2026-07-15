@@ -121,6 +121,13 @@
     groupLabel,
     restoreSelection,
   } from "./lib/bulkSelection.js";
+  import {
+    parseStoredSelection,
+    toggleId,
+    withIds,
+    withoutIds,
+    rangeIds,
+  } from "./lib/selectionOps.js";
   import { combo } from "./lib/platform.js";
   import TimelineFilter from "./lib/TimelineFilter.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
@@ -296,16 +303,7 @@
   // are simply skipped by export server-side, so no pruning is needed here.
   const LS_SELECTION = "autogallery.selection";
   let selectedIds = new Set(
-    (() => {
-      try {
-        const stored = JSON.parse(localStorage.getItem(LS_SELECTION) ?? "null");
-        if (Array.isArray(stored))
-          return stored.filter((n) => Number.isInteger(n));
-      } catch {
-        /* fall through to empty */
-      }
-      return [];
-    })()
+    parseStoredSelection(localStorage.getItem(LS_SELECTION))
   );
   $: localStorage.setItem(LS_SELECTION, JSON.stringify([...selectedIds]));
   // Stash of the last cleared selection, so Clear is undoable (persists until
@@ -944,7 +942,7 @@
   async function selectMatching(spec) {
     try {
       const ids = await fetchPhotoIds(filterIsActive(spec) ? spec : null);
-      selectedIds = new Set([...selectedIds, ...ids]);
+      selectedIds = withIds(selectedIds, ids);
     } catch (e) {
       error = e.message;
     }
@@ -1019,7 +1017,7 @@
       );
       if (!ids.length) return;
       snapshotSelection(); // selecting everything can bury a careful selection too
-      selectedIds = new Set([...selectedIds, ...ids]);
+      selectedIds = withIds(selectedIds, ids);
       status = `Selected ${selectedIds.size.toLocaleString()} photo${
         selectedIds.size === 1 ? "" : "s"
       } — Undo to restore`;
@@ -1069,7 +1067,7 @@
       if (action === "group") {
         pendingBulk = null;
         snapshotSelection();
-        selectedIds = new Set([...selectedIds, ...ids]);
+        selectedIds = withIds(selectedIds, ids);
         status = `Selected ${ids.length.toLocaleString()} in ${groupLabel(currentPath)} — ${combo("A")} again for all ${showingCount.toLocaleString()}`;
         return;
       }
@@ -1117,9 +1115,7 @@
     const removed = ids.filter((id) => selectedIds.has(id));
     if (!removed.length) return;
     snapshotSelection();
-    const next = new Set(selectedIds);
-    for (const id of removed) next.delete(id);
-    selectedIds = next;
+    selectedIds = withoutIds(selectedIds, removed);
     status = `Removed ${removed.length.toLocaleString()} photo${
       removed.length === 1 ? "" : "s"
     } from the selection (${what}) — Undo to restore`;
@@ -1207,7 +1203,7 @@
   /** Add a group's photos to the selection, undoably. */
   function applyGroupSelect(ids, label) {
     snapshotSelection();
-    selectedIds = new Set([...selectedIds, ...ids]);
+    selectedIds = withIds(selectedIds, ids);
     status = `Selected ${ids.length.toLocaleString()} photo${
       ids.length === 1 ? "" : "s"
     } in ${label} — Undo to restore`;
@@ -1457,22 +1453,14 @@
   /** Toggle one photo's membership in the selection. */
   function toggleSelect(id) {
     if (typeof id !== "number") return;
-    if (selectedIds.has(id)) selectedIds.delete(id);
-    else selectedIds.add(id);
-    selectedIds = selectedIds; // reassign to trigger reactivity
+    selectedIds = toggleId(selectedIds, id);
   }
 
   /** Add every real photo between two displayEntries indices (inclusive) to
    * the selection — the shift-click range. Collapsed-stack entries contribute
    * their cover photo only. */
   function selectRange(a, b) {
-    const lo = Math.min(a, b);
-    const hi = Math.max(a, b);
-    for (let k = lo; k <= hi; k++) {
-      const p = resolvedPhotos[k];
-      if (p && typeof p.id === "number") selectedIds.add(p.id);
-    }
-    selectedIds = selectedIds;
+    selectedIds = withIds(selectedIds, rangeIds(resolvedPhotos, a, b));
   }
 
   /** Grid tile click: Cmd/Ctrl toggles selection, Shift selects a range from
