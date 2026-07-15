@@ -80,7 +80,8 @@ electron-builder 25 tree — now **0 vulnerabilities**.
 **All dependency modernization (Stage 1a/1b/1c) is complete.**
 
 **Stage 2 IN PROGRESS — runes conversion, leaf-first.** Converted & gated so far
-(27 of 41 components; 865 unit + 60 e2e green after each batch):
+(40 of 41 components — only App.svelte remains; 865 unit + 60 e2e green after each
+batch):
 
 - **Independent leaves:** FolderIcon, GroupStateIcon (pure `$props`), GridControls,
   SidebarModeToggle (`$bindable` — bridges legacy parents' `bind:`), ServerBanner
@@ -159,12 +160,33 @@ electron-builder 25 tree — now **0 vulnerabilities**.
   untracked. App's `<Thumb>` + `<SelectionBar>` (inside the StatusBar `selection`
   snippet) usage moved to callback props; `bind:export*` kept.
 
-**Remaining (14) — the toolbar cluster (one atomic unit) + App.svelte:**
-Toolbar cluster (Toolbar, ToolGroup, ToolbarRow, ViewControls, GroupByControl,
-SortControl, FilterControls + the 4 filter leaves RatingFilter/OrientationFilter/
-KindFilter/SearchFilter, TimelineFilter, SourceControls) — deep `bind:`/forward
-chains (App→Toolbar→SourceControls/FilterControls), so it converts as ONE unit; and
-**App.svelte last** (5,170 lines — its own careful pass, sequenced against #124).
+- **Toolbar cluster (one atomic unit, 13 components):** Toolbar, ToolbarRow,
+  ToolGroup, ViewControls, GroupByControl, SortControl, FilterControls + the 4
+  filter leaves (RatingFilter, OrientationFilter, KindFilter, SearchFilter),
+  TimelineFilter, SourceControls. Converted together because the `bind:`/forward/
+  named-slot chains span App→Toolbar→{Source,Filter,View,Group,Sort}Controls. The
+  whole zoom/burst/albumMode/sidebarMode/add-folder two-way chain became
+  `$bindable()` (still bound from legacy App); 15 `createEventDispatcher` forwards
+  became callback props (App's `<Toolbar>` block drops the old `.detail` unwrap —
+  `onfilterchange={onFilterChange}`); `use:` actions call their callback directly.
+  Trap 1 (nested named-slot forwarding): Toolbar's `timeline` slot now forwards a
+  snippet **value** straight into FilterControls (`{timeline}`), and App passes
+  `{#snippet timeline()}` / `{#snippet manageLibrary()}` because a legacy parent's
+  `<svelte:fragment slot=x>` does NOT bridge to a runes snippet prop (§6). Trap 2:
+  `bind:this` refs in ToolGroup made `$state` (`non_reactive_update`). SearchFilter's
+  outside-sync `$: if` became an `$effect` that reads+writes `value` but converges
+  in one pass (a string reassignment is a no-op once equal — unlike the array
+  reproxy that looped in AlbumTimeline); debounced emits fire from `setTimeout`,
+  never inside an `$effect`, so no callback-in-effect loop.
+
+**Remaining (1) — App.svelte only:** 5,170 lines, converted last as its own
+careful pass, sequenced against the #124 App.svelte refactor. Everything it consumes
+is now runes; its child-usage syntax has been migrated incrementally cluster by
+cluster (`on:x`→`onx`, named slots→snippets, `bind:` unchanged for `$bindable`
+children), so the remaining work is App's OWN internals (194→0 `export let` is n/a
+here — App has no props; the work is its ~72 `$:` statements, 13 localStorage-persist
+reactives, `<svelte:window>`/`<svelte:component>`, tick() calls, and the sole
+transition).
 
 **Working rule that's held:** convert each cluster atomically (leaf child + every
 parent usage site in the same commit) so the app compiles and all 60 e2e stay green
