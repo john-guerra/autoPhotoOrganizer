@@ -162,7 +162,7 @@ function hasUserMetadata(db, id) {
 /**
  * Copy user metadata from `fromId` onto `toId` ONLY when `toId` has none, so a
  * vanished copy's stars/albums/tags/stack survive on a duplicate that had none.
- * Re-parents FK rows (INSERT OR IGNORE against composite PKs). Never touches an
+ * Re-parents FK rows (UPDATE OR IGNORE against composite PKs). Never touches an
  * already-annotated survivor.
  * @param {import("better-sqlite3").Database} db
  * @param {number} fromId
@@ -192,4 +192,39 @@ export function carryMetadata(db, fromId, toId) {
   });
   tx();
   return { carried: true };
+}
+
+/**
+ * The review pane's rows: unresolved missing photos on currently-mounted
+ * volumes, each with its classification. An unmounted drive is not a deletion,
+ * so its rows are omitted.
+ * @param {import("better-sqlite3").Database} db
+ * @param {{mountedVolumeIds:number[], scanStartedAt?:number}} opts
+ * @returns {Array<{id:number, filename:string, absPath:string, rating:number, kind:string, classification:object}>}
+ */
+export function listMissing(db, { mountedVolumeIds, scanStartedAt = 0 }) {
+  const rows = db
+    .prepare(
+      `SELECT photos.id AS id, photos.filename AS filename,
+              folders.abs_path AS absPath, folders.volume_id AS volumeId,
+              photos.rating AS rating, photos.kind AS kind,
+              photos.content_hash AS content_hash,
+              photos.size AS size, photos.mtime AS mtime,
+              photos.first_seen_at AS firstSeenAt
+         FROM photos JOIN folders ON folders.id = photos.folder_id
+        WHERE photos.stale = 1 AND photos.dismissed = 0
+        ORDER BY folders.abs_path, photos.filename`
+    )
+    .all();
+  const mounted = new Set(mountedVolumeIds);
+  return rows
+    .filter((r) => r.volumeId != null && mounted.has(r.volumeId))
+    .map((r) => ({
+      id: r.id,
+      filename: r.filename,
+      absPath: r.absPath,
+      rating: r.rating,
+      kind: r.kind,
+      classification: classifyRow(db, r, scanStartedAt),
+    }));
 }

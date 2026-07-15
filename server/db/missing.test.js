@@ -7,6 +7,7 @@ import { upsertScan, setPhotoRating } from "./photos.js";
 import { sameFileCandidates } from "./missing.js";
 import { classifyMissing, classifyRow, relocateMissing } from "./missing.js";
 import { dismissPhotos, carryMetadata } from "./missing.js";
+import { listMissing } from "./missing.js";
 
 let cacheDir;
 beforeEach(async () => {
@@ -211,5 +212,22 @@ describe("dismiss + carryMetadata", () => {
     expect(
       db.prepare("SELECT rating FROM photos WHERE id = ?").get(b.id).rating
     ).toBe(2);
+  });
+});
+
+describe("listMissing", () => {
+  it("lists mounted missing rows with classification, omitting unmounted volumes", () => {
+    const db = getDb();
+    const [a] = upsertScan(db, "/a/trip", 1, [F]);
+    const [b] = upsertScan(db, "/b/only", 2, [{ ...F, name: "X.jpg" }]);
+    markStale(db, a.id);
+    markStale(db, b.id);
+    const rows = listMissing(db, { mountedVolumeIds: [1], scanStartedAt: 0 });
+    expect(rows.map((r) => r.id)).toEqual([a.id]); // b is on unmounted vol 2
+    expect(rows[0]).toMatchObject({
+      absPath: "/a/trip",
+      filename: "IMG_1.jpg",
+    });
+    expect(rows[0].classification.kind).toBe("gone");
   });
 });
