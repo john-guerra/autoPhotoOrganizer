@@ -6,6 +6,28 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.0
+
+Packaged build. Bundles everything since 2.15.0 — headlined by the move to
+**Svelte 5 (runes)** with a full dependency modernization, and the new
+**missing-files review** feature.
+
+- **The app is rebuilt on Svelte 5 (runes)** with every dependency brought up to
+  its current release (Vite, Vitest, Playwright, Express, Electron, and the native
+  modules). No change to how the app looks or works — it's the same app on a
+  modern, supported foundation.
+- **Review missing files.** When a photo disappears from disk, the app tells you
+  and opens a review panel to relocate it to where it moved (keeping its rating,
+  albums and tags) or dismiss it. Files that simply moved are relocated
+  automatically; copies still backed up on another drive are flagged, not lost. (#1)
+- **The library tree shows where you are** — an amber dot on the group you're
+  working in and a grey eye on the top of the feed, matching the timeline. (#130)
+- **The Fisheye sidebar fills the whole pane**, and right-clicking a feed section
+  header now opens the same menu the folder tree offers. (#128, #126)
+- Plus the 2.15.x fixes: burst stacks in the loupe filmstrip, removing a
+  photo-less parent folder, the Export panel and status-bar layout, and search
+  reliability on large libraries.
+
 ## 2.15.18
 
 - **Missing-file review polish.** The "files went missing" notice reads as an
