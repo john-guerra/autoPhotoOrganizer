@@ -11,6 +11,7 @@
   import { thumbUrl, previewUrl, formatDuration } from "./api.js";
   import { formatSize } from "./exifFormat.js";
   import Stars from "./Stars.svelte";
+  import BurstOverlay from "./BurstOverlay.svelte";
 
   let {
     item, // {id, name, rating, mtimeMs}
@@ -324,7 +325,7 @@
       <span class="badge"><Stars rating={item.rating} /></span>
     {/if}
     {#if stackCount}
-      <span class="stack-badge">×{stackCount}</span>
+      <BurstOverlay count={stackCount} />
     {/if}
     {#if showSize && item.size != null}
       <!-- Size pill: bottom-right (as requested when sorting by size); shifts
@@ -334,14 +335,13 @@
       >
     {/if}
     {#if inExpandedStack}
-      <span
-        class="stack-marker"
-        class:is-cover={isCurrentCover}
-        title={isCurrentCover
+      <BurstOverlay
+        member
+        isCover={isCurrentCover}
+        markerTitle={isCurrentCover
           ? "Current cover for this stack — press C to unset, Escape to collapse"
           : "Part of a burst — press C to make this the cover, Escape to collapse"}
-        >⚏</span
-      >
+      />
     {/if}
   </button>
 </div>
@@ -473,17 +473,6 @@
     bottom: 5px;
     pointer-events: none;
   }
-  .stack-badge {
-    position: absolute;
-    right: 5px;
-    bottom: 5px;
-    padding: 1px 5px;
-    background: rgba(0, 0, 0, 0.65);
-    color: #fff;
-    font-size: 0.7rem;
-    border-radius: 3px;
-    pointer-events: none;
-  }
   .size-badge {
     position: absolute;
     right: 5px;
@@ -535,23 +524,7 @@
     pointer-events: none;
     z-index: 100;
   }
-  .stack-marker {
-    position: absolute;
-    left: 5px;
-    top: 5px;
-    padding: 1px 4px;
-    background: rgba(76, 154, 255, 0.75);
-    color: #06121f;
-    font-size: 0.7rem;
-    border-radius: 3px;
-    pointer-events: none;
-  }
-  .stack-marker.is-cover {
-    background: rgba(255, 196, 0, 0.85);
-  }
-  .badge,
-  .stack-badge,
-  .stack-marker {
+  .badge {
     z-index: 100;
   }
   .thumb-spinner {

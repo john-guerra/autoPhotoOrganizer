@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.5
+
+- **The loupe filmstrip handles bursts exactly like the grid.** Clicking a burst
+  cover in the strip expands it in place; the members draw as one tight run with a
+  connecting line behind them, each showing the same ⚏ marker (gold on the cover),
+  and clicking that marker collapses the burst again. The badge and marker are now
+  a single shared control, so the strip and the grid can't drift apart. (#127)
+
 ## 2.15.4
 
 - **The loupe filmstrip shows bursts.** A collapsed burst now carries the same ×N

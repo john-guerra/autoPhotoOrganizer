@@ -12,13 +12,14 @@
    *   inSelection?: boolean,
    *   selectedCount?: number,
    *   selectedIds?: Set<number>,
-   *   burstInfo?: Array<null | { count: number } | { member: true }>,
+   *   burstInfo?: Array<null | { count: number, stackId: string } | { member: true, stackId: string, isCover: boolean }>,
    *   showDetails?: boolean,
    *   showFilmstrip?: boolean,
    *   thumbSize?: number,
    *   oncontextmenu?: (detail: { x: number, y: number }) => void,
    *   onclose?: () => void,
    *   ontoggleselect?: () => void,
+   *   ontoggleburst?: (detail: { stackId: string }) => void,
    *   onrate?: (value: number) => void,
    * }}
    * `index` is two-way bound (the filmstrip moves it). `thumbSize` is the size
@@ -39,6 +40,7 @@
     oncontextmenu,
     onclose,
     ontoggleselect,
+    ontoggleburst,
     onrate,
   } = $props();
 
@@ -360,6 +362,7 @@
       {burstInfo}
       requestSize={thumbSize}
       onselect={(d) => (index = d.index)}
+      {ontoggleburst}
     />
   {/if}
 </div>

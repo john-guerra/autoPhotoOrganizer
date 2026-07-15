@@ -3460,18 +3460,33 @@
     buildDisplayEntries(items, stacks, expandedStackIds)
   );
   let resolvedPhotos = $derived(displayEntries.map(resolvePhoto)); // passed to Loupe
+  let stackById = $derived(new Map(stacks.map((s) => [s.id, s])));
   // Per-photo burst tag, 1:1 with resolvedPhotos, so the loupe filmstrip can draw
-  // bursts the way the grid does: a collapsed cover shows a ×N badge, and the
-  // members of an expanded burst share an accent edge (#127).
+  // bursts EXACTLY the way the grid does (via the shared BurstOverlay): a
+  // collapsed cover shows a ×N badge and is click-to-expand; the members of an
+  // expanded burst show the ⚏ marker (gold on the cover) and are click-to-collapse
+  // (#127). Each tag carries the stackId so those controls can call back into
+  // toggleExpand/collapseStack.
   let loupeBurstInfo = $derived(
     displayEntries.map((e) =>
       e.kind === "stack"
-        ? { count: e.stack.count }
+        ? { count: e.stack.count, stackId: e.stack.id }
         : e.kind === "photo" && e.stackId
-          ? { member: true }
+          ? {
+              member: true,
+              stackId: e.stackId,
+              isCover: e.item.id === stackById.get(e.stackId)?.coverId,
+            }
           : null
     )
   );
+  // The loupe filmstrip's expand/collapse control routes here, reusing the feed's
+  // own stack toggle so the loupe and grid stay in lock-step: expanding sets
+  // `selected` to the cover (toggleExpand → focusEntry), so the loupe follows.
+  function loupeToggleBurst(stackId) {
+    const stack = stacks.find((s) => s.id === stackId);
+    if (stack) toggleExpand(stack); // toggleExpand already folds both ways
+  }
   // deriveSectionHeaders' `index` must land in the same index space as the
   // `{#each visibleItems}` loop below, which walks `displayEntries` (via
   // buildVisibleItems) — not raw `items`. A collapsed burst stack folds
@@ -4920,6 +4935,7 @@
   <Loupe
     items={resolvedPhotos}
     burstInfo={loupeBurstInfo}
+    ontoggleburst={(d) => loupeToggleBurst(d.stackId)}
     bind:index={selected}
     inSelection={typeof resolvedPhotos[selected]?.id === "number" &&
       selectedIds.has(resolvedPhotos[selected].id)}

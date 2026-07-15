@@ -39,3 +39,37 @@ test("@p0 the loupe filmstrip badges a collapsed burst with its count", async ({
 
   expect(errors).toEqual([]);
 });
+
+test("@p0 clicking a filmstrip burst cover expands it into a connecting-line run, and its marker collapses it", async ({
+  page,
+}) => {
+  const errors = trackPageErrors(page);
+  await openWithBursts(page);
+  await expect(page.locator(".thumb .stack-badge").first()).toBeVisible();
+
+  await loupe.open(page, 0);
+  const strip = page.locator(".filmstrip");
+  await expect(strip).toBeVisible();
+
+  // Nothing is expanded yet: no run, no member markers. (Other folders' covers
+  // may also be badged in the ±window, so we assert on run/marker state, which is
+  // specific to the burst we act on, rather than a global badge count.)
+  await expect(strip.locator(".burst-run")).toHaveCount(0);
+  await expect(strip.locator(".stack-marker")).toHaveCount(0);
+
+  // Same control as the feed: clicking a collapsed cover EXPANDS the burst — it
+  // does not just navigate. The strip then draws the members as one tight "run"
+  // with a connecting line behind them (.burst-run), each carrying the ⚏ marker.
+  const cover = strip.locator(".cell:has(.stack-badge)").first();
+  await cover.click();
+  await expect(strip.locator(".burst-run")).toBeVisible();
+  await expect(strip.locator(".stack-marker").first()).toBeVisible();
+
+  // The member marker is the collapse control (Escape closes the loupe instead):
+  // clicking it folds the burst back — the run and its markers disappear.
+  await strip.locator(".stack-marker").first().click();
+  await expect(strip.locator(".burst-run")).toHaveCount(0);
+  await expect(strip.locator(".stack-marker")).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});
