@@ -2483,6 +2483,33 @@
     };
   }
 
+  /** Right-click on a FEED section header opens the SAME menu the tree offers,
+   * built from the header's own group path via the shared buildTreeMenuItems +
+   * openTreeMenu path. The feed has no tree-expand concept, so the "expand/
+   * collapse sub-folders" item is omitted (hasChildren:false); everything else —
+   * jump, select-all, keep-only, the grid/snapshot/collapse view-cycle, and (for
+   * folder groups) Reveal/Copy path/Rescan/Remove — is identical to the tree's,
+   * so the two surfaces can never disagree about what a group action means. (#126)
+   */
+  function openHeaderMenu(e, header) {
+    if (!header?.path) return;
+    e.preventDefault();
+    const folderPath = folderFromGroupPath(header.path);
+    openTreeMenu({
+      x: e.clientX,
+      y: e.clientY,
+      path: header.path,
+      groupPaths: header.groupPaths,
+      folderPath,
+      isVirtual: !!header.isVirtual,
+      isFolder: !!folderPath,
+      hasChildren: false,
+      expanded: false,
+      rendererId: rendererIdFor(header.path, collapsedKeys, snapshotGroupKeys),
+      jumpPath: header.path,
+    });
+  }
+
   async function revealFolderInFinder(folderPath) {
     if (!folderPath) return;
     const res = await revealFolder(folderPath);
@@ -4559,10 +4586,15 @@
                 style="--depth:{header.depth}; --ind:{GROUP_INDENT}px; top:{header.y}px; height:{header.endY -
                   header.y}px;"
               >
+                <!-- Right-click opens the group menu; the header's own buttons
+                     already carry every action for keyboard/pointer, so this is a
+                     supplementary affordance (same as the tree row). -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
                   class="section-header"
                   style="top:{header.depth *
                     HEADER_HEIGHT}px; z-index:{Z_HEADER_BASE - header.depth};"
+                  oncontextmenu={(e) => openHeaderMenu(e, header)}
                 >
                   <button
                     class="section-toggle-icon"

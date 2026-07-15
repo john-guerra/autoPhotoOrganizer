@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.3
+
+- **Right-click a group header in the feed to get its menu.** The same actions the
+  folder tree offers — Jump, Select all, Keep only, the grid/snapshot/collapse
+  view-cycle, and (for folders) Reveal in Finder, Copy path, Rescan, and Remove —
+  are now a right-click away on any feed section header, not just in the sidebar.
+  (#126)
+
 ## 2.15.2
 
 - **The folder tree keeps your collapse/expand choices when you filter.** Folding
