@@ -77,8 +77,38 @@ better-sqlite3 loads from its `asarUnpack` slot). The build script's trailing
 after the bump). Side note: the 11 npm high-severity advisories were all in the old
 electron-builder 25 tree — now **0 vulnerabilities**.
 
-**All dependency modernization (Stage 1a/1b/1c) is complete. Next: Stage 2 — the runes
-conversion.**
+**All dependency modernization (Stage 1a/1b/1c) is complete.**
+
+**Stage 2 IN PROGRESS — runes conversion, leaf-first.** Converted & gated so far
+(12 of 41 components; 865 unit + 60 e2e green after each batch):
+
+- **Independent leaves:** FolderIcon, GroupStateIcon (pure `$props`), GridControls,
+  SidebarModeToggle (`$bindable` — bridges legacy parents' `bind:`), ServerBanner
+  (DOM `on:`→`on`), UpdateBanner (`onMount`/`onDestroy`→`$effect` + cleanup;
+  `$:`→`$derived`; transition-reset kept as an `$effect` over a plain untracked
+  `prevState`), SnapshotThumb (`<script context="module">`→`<script module>`;
+  render-only state → `$state`; restart/cleanup → `$effect`).
+- **Modal + consumers:** Modal → runes (`$bindable`, `$effect` over the `bind:this`
+  dialog, dispatch→`onclose`, slots→snippets). Fixed a real interop trap — a legacy
+  parent's named `<svelte:fragment slot="footer">` does NOT bridge to a runes child's
+  `footer` snippet (default content does, via `children`); consumers must pass
+  `{#snippet footer()}`. See §6.
+- **Loupe cluster:** Stars, LoupeDetails, LoupeFilmstrip, Loupe — the Stars `rate`
+  event is now a callback prop forwarded straight through the chain to App; `index`
+  is `$bindable`; the `|stopPropagation` modifier (removed in 5) is inlined.
+
+**Remaining (29), by coupling cluster — all end at a choke point or App.svelte:**
+Toolbar cluster (Toolbar, ToolGroup, ToolbarRow, ViewControls, GroupByControl,
+SortControl, FilterControls + the 4 filter leaves, SourceControls); Tree cluster
+(TreeSidebar, recursive TreeNode, FisheyeSidebar, ContextMenu, GroupLabelActions);
+Albums (AlbumsView, AlbumsSetupModal, AlbumTimeline, TimelineFilter); jobs/status
+(JobsPanel, StatusBar, SelectionBar); ManageLibrary; Thumb; SnapshotStrip; and
+**App.svelte last** (5,170 lines — its own careful pass, sequenced against #124).
+
+**Working rule that's held:** convert each cluster atomically (leaf child + every
+parent usage site in the same commit) so the app compiles and all 60 e2e stay green
+at every commit; App.svelte stays legacy throughout, its child-usage syntax updated
+incrementally (`on:x`→`onx`, `bind:` unchanged for `$bindable` children).
 
 **Scope (set by the user):** not just Svelte — **all libraries and technologies to
 their latest stable, recommended versions**, with the Svelte 4→5 runes migration as
