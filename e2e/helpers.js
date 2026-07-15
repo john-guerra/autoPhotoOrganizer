@@ -434,6 +434,11 @@ export const tree = {
   collapseAll: (page) =>
     page.locator(".tree-action", { hasText: "Collapse all" }),
   rowCount: (page) => page.locator(".tree-node-row").count(),
+  /** The disclosure triangle that shows/hides a node's sub-folders IN THE TREE
+   *  (expandedKeys) — distinct from `.tree-collapse-icon`, which folds the group
+   *  in the FEED. */
+  foldIcon: (page, name) =>
+    page.locator(".tree-node-row", { hasText: name }).first().locator(".tree-fold-icon"),
 };
 
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------

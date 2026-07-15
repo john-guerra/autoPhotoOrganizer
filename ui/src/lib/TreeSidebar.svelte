@@ -60,25 +60,68 @@
     }
   }
 
-  // A path is only meaningful under the groupBy order it was fetched
-  // with, so the whole tree resets whenever the hierarchy order changes —
-  // matches the same reasoning collapsedPaths already resets on hierarchy
-  // change in App.svelte.
+  // An expanded key (a tree path) is only meaningful under the groupBy ORDER it
+  // was opened in, so a groupBy change starts the tree fresh — and expanded, the
+  // way it always has. But a mere FILTER/sort/refresh change keeps the same
+  // hierarchy, so it must KEEP the user's collapse/expand choices instead of
+  // re-opening everything: re-expanding the whole tree on every search keystroke
+  // is exactly the thing #125 reported. `expandedForGroupBy` is the signature of
+  // the hierarchy the current expand state belongs to; `reloadEpoch` drops a
+  // superseded reload's late writes when filters change in quick succession.
+  let expandedForGroupBy = null;
+  let reloadEpoch = 0;
+
   async function resetAndLoad() {
+    const sig = JSON.stringify(groupBy);
+    const sameHierarchy = sig === expandedForGroupBy;
+    expandedForGroupBy = sig;
+    const mine = ++reloadEpoch;
+
     childrenByKey = new Map();
-    expandedKeys = new Set();
     loadingKeys = new Set();
     highlightedKey = null;
+    // Only a new hierarchy invalidates the expand set; a filter change keeps it.
+    if (!sameHierarchy) expandedKeys = new Set();
+
     await loadRoot();
-    // Open by default: the tree is a map of the library, and a map you have to
-    // unfold one node at a time isn't much of a map. expandAll() is capped and
-    // reports when it stops, so a huge library degrades to "expanded as far as is
-    // sane" rather than a fetch storm.
-    //
-    // Grouping by folder ALONE is now a hierarchy too (folderTree.js), so the
-    // old `groupBy.length > 1` test would have left the commonest grouping of all
-    // starting collapsed — and folder levels cost no fetch to expand.
-    if (groupBy.length > 1 || groupBy.includes("folder")) expandAll();
+    if (mine !== reloadEpoch) return;
+
+    if (!sameHierarchy) {
+      // New hierarchy → open by default: the tree is a map of the library, and a
+      // map you have to unfold one node at a time isn't much of a map. expandAll()
+      // is capped and reports when it stops, so a huge library degrades to
+      // "expanded as far as is sane" rather than a fetch storm. Grouping by folder
+      // ALONE is a hierarchy too (folderTree.js), so this fires for it as well.
+      if (groupBy.length > 1 || groupBy.includes("folder")) expandAll();
+    } else if (expandedKeys.size) {
+      // Same hierarchy → keep what the user opened; just repopulate the fetched
+      // (next-dimension) child levels behind those still-open nodes, since the
+      // filter/sort may have changed which photos each group holds.
+      await refetchExpanded(mine);
+    }
+  }
+
+  /** Re-fetch the grouping-dimension child levels behind the currently expanded
+   * nodes WITHOUT changing which nodes are expanded — the reload path for a
+   * filter/sort change that leaves the hierarchy (and the user's expand choices)
+   * intact. Folder sub-levels ride the trie and need no fetch, so this only walks
+   * down through open nodes re-requesting the levels that do (childRows). */
+  async function refetchExpanded(mine) {
+    let frontier = rootNodes.map((node) => ({
+      node,
+      path: [{ dimension: groupBy[0], value: node.value }],
+      depth: 0,
+    }));
+    while (frontier.length) {
+      const nextFrontier = [];
+      for (const row of frontier) {
+        if (!expandedKeys.has(treeKey(row.path))) continue;
+        const kids = await childRows(row);
+        if (mine !== reloadEpoch) return; // a newer reload superseded this one
+        nextFrontier.push(...kids);
+      }
+      frontier = nextFrontier;
+    }
   }
   $effect(() => {
     // Explicit reactive dependencies, matching the old `$:` statement's list.
