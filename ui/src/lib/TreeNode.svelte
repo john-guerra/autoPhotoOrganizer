@@ -1,5 +1,4 @@
 <script>
-  import { createEventDispatcher } from "svelte";
   import { treeKey } from "./treeState.js";
   import { pathKey } from "./feed.js";
   import { shortLeafLabel } from "./labels.js";
@@ -8,28 +7,35 @@
   import GroupStateIcon from "./GroupStateIcon.svelte";
   import FolderIcon from "./FolderIcon.svelte";
   import { getRenderer, nextRendererId } from "./groupRenderers.js";
+  // Svelte 5 deprecates <svelte:self> in favor of a self-import — same
+  // recursive component, no deprecation warning.
+  import TreeNode from "./TreeNode.svelte";
 
-  export let groupBy; // string[]
-  export let path; // Array<{dimension,value}> — this node's own path
-  export let node; // {value, label, count, hasChildren} — folder levels also carry
-  // {children, isGroup, ownCount} from folderTree.js
-  export let expandedKeys; // Set<string>
-  export let childrenByKey; // Map<string, {nodes, error?}>
-  export let loadingKeys; // Set<string>
-  export let highlightedKey; // string|null
-  export let collapsedPaths; // Array<Array<{dimension,value}>>
-  export let snapshotKeys = new Set(); // pathKeys rendered as a snapshot strip
-  export let tokenStats = EMPTY_STATS; // library-wide token df, for folder labels
-  export let siblingLabels = []; // every label at THIS level — the redundancy to strip
+  let {
+    groupBy, // string[]
+    path, // Array<{dimension,value}> — this node's own path
+    node, // {value, label, count, hasChildren} — folder levels also carry
+    // {children, isGroup, ownCount} from folderTree.js
+    expandedKeys, // Set<string>
+    childrenByKey, // Map<string, {nodes, error?}>
+    loadingKeys, // Set<string>
+    highlightedKey, // string|null
+    collapsedPaths, // Array<Array<{dimension,value}>>
+    snapshotKeys = new Set(), // pathKeys rendered as a snapshot strip
+    tokenStats = EMPTY_STATS, // library-wide token df, for folder labels
+    siblingLabels = [], // every label at THIS level — the redundancy to strip
+    ontoggleexpand,
+    ontogglecollapse,
+    onjump,
+    oncontextmenu,
+  } = $props();
 
-  const dispatch = createEventDispatcher();
-
-  $: depth = path.length - 1;
-  $: key = treeKey(path);
-  $: expanded = expandedKeys.has(key);
-  $: loading = loadingKeys.has(key);
-  $: children = childrenByKey.get(key)?.nodes ?? [];
-  $: childError = childrenByKey.get(key)?.error;
+  let depth = $derived(path.length - 1);
+  let key = $derived(treeKey(path));
+  let expanded = $derived(expandedKeys.has(key));
+  let loading = $derived(loadingKeys.has(key));
+  let children = $derived(childrenByKey.get(key)?.nodes ?? []);
+  let childError = $derived(childrenByKey.get(key)?.error);
 
   // --- Folder levels are a real hierarchy ------------------------------------
   // Folders are the one dimension whose values nest: the server hands us every
@@ -42,77 +48,86 @@
   // one `folder` dimension, so a group path is [.., {folder, absPath}] no matter
   // how deep the folder sits. The nesting is a fact about the paths, not about the
   // grouping. That is what keeps treeKey/pathKey matching collapsedPaths.
-  $: isFolderLevel = groupBy[depth] === "folder";
-  $: subfolders = isFolderLevel ? (node.children ?? []) : [];
-  $: isVirtual = isFolderLevel && node.isGroup === false;
-  $: nextDim = groupBy[depth + 1];
+  let isFolderLevel = $derived(groupBy[depth] === "folder");
+  let subfolders = $derived(isFolderLevel ? (node.children ?? []) : []);
+  let isVirtual = $derived(isFolderLevel && node.isGroup === false);
+  let nextDim = $derived(groupBy[depth + 1]);
   // Only a REAL group can have next-dimension children; a virtual ancestor has no
   // photos of its own, so there is nothing for the server to group.
-  $: wantsFetch = isFolderLevel
-    ? Boolean(node.isGroup && nextDim)
-    : node.hasChildren;
-  $: hasChildren = isFolderLevel
-    ? subfolders.length > 0 || wantsFetch
-    : node.hasChildren;
+  let wantsFetch = $derived(
+    isFolderLevel ? Boolean(node.isGroup && nextDim) : node.hasChildren
+  );
+  let hasChildren = $derived(
+    isFolderLevel ? subfolders.length > 0 || wantsFetch : node.hasChildren
+  );
 
-  $: subfolderPath = (value) => [
-    ...path.slice(0, -1),
-    { dimension: "folder", value },
-  ];
-  $: subfolderLabels = subfolders.map((n) => n.label);
+  function subfolderPath(value) {
+    return [...path.slice(0, -1), { dimension: "folder", value }];
+  }
+  let subfolderLabels = $derived(subfolders.map((n) => n.label));
 
   // --- Feed state -----------------------------------------------------------
   // Compare against collapsedPaths directly (not via a called function) so
   // Svelte's dependency tracking — based on the reactive statement's own
   // source text, not what a called function closes over — actually re-runs
   // this when collapsedPaths changes.
-  $: collapsedInFeed = collapsedPaths.some((p) => treeKey(p) === key);
+  let collapsedInFeed = $derived(
+    collapsedPaths.some((p) => treeKey(p) === key)
+  );
   // NOTE: snapshotKeys is keyed by feed.js's `pathKey` (JSON-encoded), NOT by
   // this file's `treeKey` (delimiter-joined) — they are different strings, so
   // checking it with treeKey silently never matches and every snapshot group
   // rendered as "collapsed" here. Use pathKey for that Set specifically.
-  $: ownRendererId = !collapsedInFeed
-    ? "grid"
-    : snapshotKeys.has(pathKey(path))
-      ? "snapshot"
-      : "collapsed";
+  let ownRendererId = $derived(
+    !collapsedInFeed
+      ? "grid"
+      : snapshotKeys.has(pathKey(path))
+        ? "snapshot"
+        : "collapsed"
+  );
 
   // Every real group this row speaks for. For a leaf that's just itself; for a
   // folder row with sub-folders it's the whole subtree, so one click can fold a
   // whole trip.
-  $: groupPaths = isFolderLevel
-    ? descendantGroups(node).map(subfolderPath)
-    : [path];
+  let groupPaths = $derived(
+    isFolderLevel ? descendantGroups(node).map(subfolderPath) : [path]
+  );
 
   // A virtual ancestor has no state of its own — it reports what its descendants
   // are collectively doing, and says "mixed" when they disagree rather than
   // picking one and lying about the rest.
-  $: descendantStates = groupPaths.map((p) => {
-    const k = pathKey(p);
-    if (!collapsedPaths.some((c) => pathKey(c) === k)) return "grid";
-    return snapshotKeys.has(k) ? "snapshot" : "collapsed";
-  });
-  $: rendererId = !isVirtual
-    ? ownRendererId
-    : descendantStates.length &&
-        descendantStates.every((s) => s === descendantStates[0])
-      ? descendantStates[0]
-      : "mixed";
-  $: iconState =
-    rendererId === "mixed" ? "mixed" : getRenderer(rendererId).icon;
-  $: toggleTitle =
+  let descendantStates = $derived(
+    groupPaths.map((p) => {
+      const k = pathKey(p);
+      if (!collapsedPaths.some((c) => pathKey(c) === k)) return "grid";
+      return snapshotKeys.has(k) ? "snapshot" : "collapsed";
+    })
+  );
+  let rendererId = $derived(
+    !isVirtual
+      ? ownRendererId
+      : descendantStates.length &&
+          descendantStates.every((s) => s === descendantStates[0])
+        ? descendantStates[0]
+        : "mixed"
+  );
+  let iconState = $derived(
+    rendererId === "mixed" ? "mixed" : getRenderer(rendererId).icon
+  );
+  let toggleTitle = $derived(
     rendererId === "mixed"
       ? "The groups under here are shown differently — click to show them all"
       : `${getRenderer(rendererId).label} — click for ${getRenderer(
           nextRendererId(rendererId)
-        ).label.toLowerCase()}`;
+        ).label.toLowerCase()}`
+  );
 
   // Clicking a virtual ancestor's icon has to act on the groups beneath it —
   // it has none of its own. Shift-click does the same for a real folder that
   // also has sub-folders ("fold this whole trip").
   function onToggleCollapse(event) {
     const foldSubtree = isVirtual || (event.shiftKey && subfolders.length > 0);
-    dispatch("toggleCollapse", {
+    ontogglecollapse?.({
       path,
       event,
       paths: foldSubtree ? groupPaths : undefined,
@@ -121,7 +136,7 @@
 
   // A virtual ancestor is not a group, so there is no section to scroll to —
   // jump to the first real group beneath it instead.
-  $: jumpPath = isVirtual ? (groupPaths[0] ?? null) : path;
+  let jumpPath = $derived(isVirtual ? (groupPaths[0] ?? null) : path);
 
   /** Right-click. Ships the facts App CANNOT recompute from the path alone —
    * isVirtual, groupPaths and the row's own subfolders come out of folderTree's
@@ -129,7 +144,7 @@
    * built without App having to rebuild the tree's state. */
   function onContextMenu(event) {
     event.preventDefault();
-    dispatch("contextmenu", {
+    oncontextmenu?.({
       x: event.clientX,
       y: event.clientY,
       path,
@@ -152,11 +167,13 @@
   // Folder names are mostly redundancy (the year the parent row already states,
   // the _peq every folder carries); folderLabel.js decides which tokens earn a
   // pixel. Other dimensions are already short — leave them alone.
-  $: parts = isFolderLevel
-    ? labelParts(node.label, { stats: tokenStats, siblings: siblingLabels })
-    : [{ text: shortLeafLabel(groupBy[depth], node.value), kind: "keep" }];
+  let parts = $derived(
+    isFolderLevel
+      ? labelParts(node.label, { stats: tokenStats, siblings: siblingLabels })
+      : [{ text: shortLeafLabel(groupBy[depth], node.value), kind: "keep" }]
+  );
   // The whole truth is always one hover away.
-  $: fullTitle = isFolderLevel ? node.value : node.label;
+  let fullTitle = $derived(isFolderLevel ? node.value : node.label);
 
   // How fast a clipped folder name slides aside on hover. Slow enough to READ as
   // it moves (you are trying to see the hidden head of the name, not be startled
@@ -222,8 +239,8 @@
 </script>
 
 <li class="tree-node" class:highlighted={highlightedKey === key}>
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
-  <div class="tree-node-row" on:contextmenu={onContextMenu}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="tree-node-row" oncontextmenu={onContextMenu}>
     <!-- TREE structure: a disclosure triangle — shows/hides this node's CHILD
          folders here in the sidebar. -->
     {#if hasChildren}
@@ -232,8 +249,7 @@
         title="Show/hide sub-folders in this tree (shift-click: fold all descendants)"
         aria-label="Show or hide sub-folders in the tree"
         aria-expanded={expanded}
-        on:click={(e) =>
-          dispatch("toggleExpand", { path, event: e, fetch: wantsFetch })}
+        onclick={(e) => ontoggleexpand?.({ path, event: e, fetch: wantsFetch })}
       >
         {expanded ? "▾" : "▸"}
       </button>
@@ -249,7 +265,7 @@
       class:not-grid={rendererId !== "grid"}
       title={toggleTitle}
       aria-label="Cycle this group in the feed: full grid → snapshot strip → collapsed"
-      on:click={onToggleCollapse}
+      onclick={onToggleCollapse}
     >
       <GroupStateIcon state={iconState} />
     </button>
@@ -266,7 +282,7 @@
       class:virtual={isVirtual}
       title={fullTitle}
       disabled={!jumpPath}
-      on:click={() => jumpPath && dispatch("jump", jumpPath)}
+      onclick={() => jumpPath && onjump?.(jumpPath)}
     >
       <span class="tree-label-text" use:hoverScroll={parts}
         >{#each parts as part}<span class="part-{part.kind}">{part.text}</span
@@ -281,7 +297,7 @@
            already here. The next grouping dimension (if any) is fetched, and only
            ever exists for a folder that has photos of its own. -->
       {#each subfolders as child (child.value)}
-        <svelte:self
+        <TreeNode
           {groupBy}
           path={subfolderPath(child.value)}
           node={child}
@@ -293,10 +309,10 @@
           {snapshotKeys}
           {tokenStats}
           siblingLabels={subfolderLabels}
-          on:toggleExpand
-          on:toggleCollapse
-          on:jump
-          on:contextmenu
+          {ontoggleexpand}
+          {ontogglecollapse}
+          {onjump}
+          {oncontextmenu}
         />
       {/each}
       {#if wantsFetch}
@@ -306,7 +322,7 @@
           <li class="tree-error">{childError}</li>
         {:else}
           {#each children as child (child.value)}
-            <svelte:self
+            <TreeNode
               {groupBy}
               path={[...path, { dimension: nextDim, value: child.value }]}
               node={child}
@@ -318,10 +334,10 @@
               {snapshotKeys}
               {tokenStats}
               siblingLabels={children.map((n) => n.label)}
-              on:toggleExpand
-              on:toggleCollapse
-              on:jump
-              on:contextmenu
+              {ontoggleexpand}
+              {ontogglecollapse}
+              {onjump}
+              {oncontextmenu}
             />
           {/each}
         {/if}

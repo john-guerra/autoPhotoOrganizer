@@ -4338,10 +4338,9 @@
           filter={displayFilter}
           refreshToken={libraryVersion}
           {tokenStats}
-          on:toggle={(e) =>
-            onGroupToggle(e.detail.path, e.detail.event, e.detail.paths)}
-          on:jump={(e) => jumpToPath(e.detail)}
-          on:contextmenu={(e) => openTreeMenu(e.detail)}
+          ontoggle={(d) => onGroupToggle(d.path, d.event, d.paths)}
+          onjump={(p) => jumpToPath(p)}
+          oncontextmenu={(d) => openTreeMenu(d)}
         />
       {:else}
         <FisheyeSidebar

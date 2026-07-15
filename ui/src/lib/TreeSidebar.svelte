@@ -1,34 +1,36 @@
 <script>
-  import { createEventDispatcher } from "svelte";
   import { fetchTreeNode } from "./api.js";
   import { treeKey, collapseDescendants } from "./treeState.js";
   import { buildFolderTree, isFolderNode, chainTo } from "./folderTree.js";
   import { EMPTY_STATS } from "./folderLabel.js";
   import TreeNode from "./TreeNode.svelte";
 
-  export let groupBy; // string[]
-  export let collapsedPaths; // Array<Array<{dimension,value}>>
-  export let snapshotKeys = new Set(); // pathKeys rendered as a snapshot strip
-  export let filter = null;
-  export let sort = null; // feed sort — date sorts change the date-group order
-  export let refreshToken = 0; // bump to force a reload when the index changes
-  // Library-wide token frequencies, for the folder label rule (folderLabel.js).
-  // Owned by App (which already has the library list) so the feed's headers and
-  // these rows judge a folder name by exactly the same corpus.
-  export let tokenStats = EMPTY_STATS;
+  let {
+    groupBy, // string[]
+    collapsedPaths, // Array<Array<{dimension,value}>>
+    snapshotKeys = new Set(), // pathKeys rendered as a snapshot strip
+    filter = null,
+    sort = null, // feed sort — date sorts change the date-group order
+    refreshToken = 0, // bump to force a reload when the index changes
+    // Library-wide token frequencies, for the folder label rule (folderLabel.js).
+    // Owned by App (which already has the library list) so the feed's headers and
+    // these rows judge a folder name by exactly the same corpus.
+    tokenStats = EMPTY_STATS,
+    ontoggle,
+    onjump,
+    oncontextmenu,
+  } = $props();
 
-  const dispatch = createEventDispatcher();
-
-  let rootTotal = null;
-  let rootNodes = [];
+  let rootTotal = $state(null);
+  let rootNodes = $state([]);
   /** Why the tree is empty, when it is empty because something FAILED rather
    *  than because the library is. Rendered — an empty tree that stays silent is
    *  the app telling the user they have no photos. */
-  let rootError = "";
-  let childrenByKey = new Map(); // treeKey(path) -> { nodes, error? }
-  let expandedKeys = new Set();
-  let loadingKeys = new Set();
-  let highlightedKey = null;
+  let rootError = $state("");
+  let childrenByKey = $state(new Map()); // treeKey(path) -> { nodes, error? }
+  let expandedKeys = $state(new Set());
+  let loadingKeys = $state(new Set());
+  let highlightedKey = $state(null);
 
   /** Folder values nest; every other dimension's values are flat. The server can
    * only hand us the flat list (folders is a flat table — the hierarchy lives in
@@ -78,7 +80,17 @@
     // starting collapsed — and folder levels cost no fetch to expand.
     if (groupBy.length > 1 || groupBy.includes("folder")) expandAll();
   }
-  $: (groupBy, filter, sort, refreshToken, resetAndLoad());
+  $effect(() => {
+    // Explicit reactive dependencies, matching the old `$:` statement's list.
+    // resetAndLoad reads groupBy/filter/sort itself (via loadRoot, synchronously
+    // before its first await), but refreshToken is a pure "bump to reload"
+    // signal nothing else reads — list it explicitly so it still tracks.
+    void groupBy;
+    void filter;
+    void sort;
+    void refreshToken;
+    resetAndLoad();
+  });
 
   // Track the in-flight PROMISE, not just a "loading" flag: expandAll awaits
   // loadChildren and then reads childrenByKey, so bailing out early on a
@@ -137,8 +149,8 @@
   // own, since every row is DOM.
   const MAX_EXPAND_FETCHES = 800;
   const MAX_EXPAND_ROWS = 5000;
-  let expandingAll = false;
-  let expandAllNote = "";
+  let expandingAll = $state(false);
+  let expandAllNote = $state("");
 
   /** Does opening this row hit the server? Only a next-dimension level does — and
    * only for a folder that has photos of its own to group. */
@@ -245,7 +257,7 @@
     expandAllNote = "";
   }
 
-  function handleToggleExpand({ detail: { path, event, fetch } }) {
+  function handleToggleExpand({ path, event, fetch }) {
     const key = treeKey(path);
     if (expandedKeys.has(key)) {
       expandedKeys = event.shiftKey
@@ -260,26 +272,26 @@
     }
   }
 
-  function handleToggleCollapse({ detail: { path, event, paths } }) {
+  function handleToggleCollapse({ path, event, paths }) {
     event.stopPropagation();
     // Forward the event too: App needs the shiftKey to decide "fold this group"
     // vs "fold all of its leaves" (VS Code-style folding). `paths` is set when the
     // row stands for several groups at once (a virtual folder ancestor, or a
     // shift-click on a folder that has sub-folders) — App applies the cycle to all
     // of them together.
-    dispatch("toggle", { path, event, paths });
+    ontoggle?.({ path, event, paths });
   }
 
-  function handleJump({ detail: path }) {
-    dispatch("jump", path);
+  function handleJump(path) {
+    onjump?.(path);
   }
 
   /** Right-click on a row. The expand/collapse of a subtree is handled HERE, not
    * in App: `expandedKeys` is sidebar-local state, and App has no way to reach
    * it. Everything else is App's (it owns the feed), so the event goes up with a
    * callback the menu can invoke for the part that is ours. */
-  function handleContextMenu({ detail }) {
-    dispatch("contextmenu", {
+  function handleContextMenu(detail) {
+    oncontextmenu?.({
       ...detail,
       toggleDescendants: () => {
         if (detail.expanded) {
@@ -328,11 +340,11 @@
 
   // A folder grouping is a hierarchy even on its own, so "Expand all" is useful
   // with a single folder dimension — it wasn't when every level was flat.
-  $: canExpandAll = groupBy.length > 1 || groupBy.includes("folder");
+  let canExpandAll = $derived(groupBy.length > 1 || groupBy.includes("folder"));
 
   // What a row's siblings are called is what tells us which of its tokens are
   // redundant (see folderLabel.js) — so every level passes its own labels down.
-  $: rootLabels = rootNodes.map((n) => n.label);
+  let rootLabels = $derived(rootNodes.map((n) => n.label));
 </script>
 
 <nav class="tree-sidebar" aria-label="Library hierarchy">
@@ -345,7 +357,7 @@
       class="tree-action"
       title="Expand every group in the tree"
       disabled={expandingAll || !canExpandAll}
-      on:click={expandAll}
+      onclick={expandAll}
     >
       {expandingAll ? "Expanding…" : "Expand all"}
     </button>
@@ -353,7 +365,7 @@
       class="tree-action"
       title="Collapse every group in the tree"
       disabled={expandingAll || expandedKeys.size === 0}
-      on:click={collapseAll}
+      onclick={collapseAll}
     >
       Collapse all
     </button>
@@ -361,7 +373,7 @@
   {#if rootError}
     <p class="tree-error" role="alert">
       Couldn't load the folder tree: {rootError}
-      <button class="tree-action" on:click={loadRoot}>Retry</button>
+      <button class="tree-action" onclick={loadRoot}>Retry</button>
     </p>
   {/if}
   {#if expandAllNote}
@@ -381,10 +393,10 @@
         {snapshotKeys}
         {tokenStats}
         siblingLabels={rootLabels}
-        on:toggleExpand={handleToggleExpand}
-        on:toggleCollapse={handleToggleCollapse}
-        on:jump={handleJump}
-        on:contextmenu={handleContextMenu}
+        ontoggleexpand={handleToggleExpand}
+        ontogglecollapse={handleToggleCollapse}
+        onjump={handleJump}
+        oncontextmenu={handleContextMenu}
       />
     {/each}
   </ul>

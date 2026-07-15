@@ -80,7 +80,7 @@ electron-builder 25 tree — now **0 vulnerabilities**.
 **All dependency modernization (Stage 1a/1b/1c) is complete.**
 
 **Stage 2 IN PROGRESS — runes conversion, leaf-first.** Converted & gated so far
-(12 of 41 components; 865 unit + 60 e2e green after each batch):
+(20 of 41 components; 865 unit + 60 e2e green after each batch):
 
 - **Independent leaves:** FolderIcon, GroupStateIcon (pure `$props`), GridControls,
   SidebarModeToggle (`$bindable` — bridges legacy parents' `bind:`), ServerBanner
@@ -96,14 +96,47 @@ electron-builder 25 tree — now **0 vulnerabilities**.
 - **Loupe cluster:** Stars, LoupeDetails, LoupeFilmstrip, Loupe — the Stars `rate`
   event is now a callback prop forwarded straight through the chain to App; `index`
   is `$bindable`; the `|stopPropagation` modifier (removed in 5) is inlined.
+- **Tree cluster:** TreeNode (recursive), TreeSidebar. All 8 `dispatch()` calls
+  across the pair became callback props (`ontoggleexpand`/`ontogglecollapse`/
+  `onjump`/`oncontextmenu` on TreeNode, `ontoggle`/`onjump`/`oncontextmenu` on
+  TreeSidebar); TreeSidebar's handlers dropped `.detail` since callback props
+  hand back the payload directly. `revealPath` stayed an `export async function`
+  (App still calls it via `bind:this`). New gotcha found here, not yet in §6:
+  **`<svelte:self>` compiles clean in Svelte-4-legacy components but warns
+  `svelte_self_deprecated` once the component is runes** — converted both
+  recursion sites in `TreeNode.svelte` to a self-import
+  (`import TreeNode from "./TreeNode.svelte"`) instead, which is silent and
+  behaves identically. Both recursion sites thread all 4 callback props;
+  missing either reproduces the "only the top level fires" bug this file is
+  famous for. The `$:` reseed `resetAndLoad()` trigger became an `$effect`
+  that explicitly reads `groupBy`/`filter`/`sort`/`refreshToken` — the first
+  three are also read implicitly (via `loadRoot`, synchronously before its
+  first `await`), but `refreshToken` is a pure "bump to reload" signal nothing
+  else reads, so it needed an explicit read to stay tracked.
+- **ContextMenu:** `onclose` callback; the clamp `$: left/top` → `$derived` (w/h
+  `$state` for `bind:clientWidth`); the capture-phase scroll listener's
+  onMount/onDestroy → one `$effect`.
+- **SnapshotStrip** (shared feed + albums node): `onselect` callback; the two
+  client-sample / server-fetch `$: if` blocks → `$effect`s; one-shot `count` seed
+  wrapped in `untrack()`. Consumers updated: App's feed `<svelte:component>` and
+  AlbumsView's per-album strip.
+- **JobsPanel:** self-contained; `$jobs`-store derivations → `$derived`; the
+  popover auto-close stays an `$effect`.
+- **Albums cluster:** AlbumTimeline, AlbumsSetupModal, AlbumsView. `$:`-closures
+  (`pxOf`/`timeAt`) became plain functions (a `$derived` only tracks synchronous
+  reads, so a closure body never registers deps); AlbumsSetupModal's open-reseed
+  collapsed to a single `$effect` + plain untracked `lastOpen`. Two traps caught on
+  review (now in §6): AlbumTimeline's view-reseed `$effect` read AND wrote `view`
+  → `effect_update_depth_exceeded`; `bind:this={arr[i]}` needs `$state([])`.
 
-**Remaining (29), by coupling cluster — all end at a choke point or App.svelte:**
+**Remaining (21), by coupling cluster — all end at a choke point or App.svelte:**
 Toolbar cluster (Toolbar, ToolGroup, ToolbarRow, ViewControls, GroupByControl,
-SortControl, FilterControls + the 4 filter leaves, SourceControls); Tree cluster
-(TreeSidebar, recursive TreeNode, FisheyeSidebar, ContextMenu, GroupLabelActions);
-Albums (AlbumsView, AlbumsSetupModal, AlbumTimeline, TimelineFilter); jobs/status
-(JobsPanel, StatusBar, SelectionBar); ManageLibrary; Thumb; SnapshotStrip; and
-**App.svelte last** (5,170 lines — its own careful pass, sequenced against #124).
+SortControl, FilterControls + the 4 filter leaves RatingFilter/OrientationFilter/
+KindFilter/SearchFilter, TimelineFilter, SourceControls); FisheyeSidebar;
+GroupLabelActions; ShortcutsOverlay (Modal consumer — footer snippet + `onclose`
+already done, still dispatches `close`); StatusBar; SelectionBar; ManageLibrary;
+Thumb; and **App.svelte last** (5,170 lines — its own careful pass, sequenced
+against #124).
 
 **Working rule that's held:** convert each cluster atomically (leaf child + every
 parent usage site in the same commit) so the app compiles and all 60 e2e stay green
