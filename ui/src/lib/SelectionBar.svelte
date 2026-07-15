@@ -12,34 +12,44 @@
    * The selection itself and all export logic live in App; this emits an event
    * per action and two-way binds the export popover's open state + form fields.
    */
-  import { createEventDispatcher } from "svelte";
   import { clickOutside, onEscape, clampToViewport } from "./actions.js";
   import { combo } from "./platform.js";
 
-  export let selectedCount = 0;
-  export let lastClearedSelection = null;
-  export let hasNativePicker = false;
-  export let exporting = false;
-  export let exportResult = null;
+  let {
+    selectedCount = 0,
+    lastClearedSelection = null,
+    hasNativePicker = false,
+    exporting = false,
+    exportResult = null,
 
-  export let exportOpen = false;
-  export let exportDest = "";
-  export let exportName = "";
-  export let exportMove = false;
+    exportOpen = $bindable(false),
+    exportDest = $bindable(""),
+    exportName = $bindable(""),
+    exportMove = $bindable(false),
 
-  /** The pending ⌘A / ⌘⇧A question, if one is up. @type {null|"select"|"deselect"} */
-  export let pendingBulk = null;
-  /** How many photos the answer would touch (everything the filters show). */
-  export let pendingCount = 0;
-  /** The pending "select this whole folder?" question — clicking a group's
-   * select-all when the group is very large. Same inline surface as ⌘A's, for the
-   * same reason: a blocking confirm() froze the whole UI (#97).
-   * @type {null|{count: number, label: string}} */
-  export let pendingGroup = null;
-  /** A re-read job is in flight — the button says so instead of looking dead. */
-  export let rereading = false;
+    /** The pending ⌘A / ⌘⇧A question, if one is up. @type {null|"select"|"deselect"} */
+    pendingBulk = null,
+    /** How many photos the answer would touch (everything the filters show). */
+    pendingCount = 0,
+    /** The pending "select this whole folder?" question — clicking a group's
+     * select-all when the group is very large. Same inline surface as ⌘A's, for the
+     * same reason: a blocking confirm() froze the whole UI (#97).
+     * @type {null|{count: number, label: string}} */
+    pendingGroup = null,
+    /** A re-read job is in flight — the button says so instead of looking dead. */
+    rereading = false,
 
-  const dispatch = createEventDispatcher();
+    onbulkconfirm,
+    onbulkcancel,
+    ongroupconfirm,
+    ongroupcancel,
+    onclear,
+    onkeeponly,
+    onreread,
+    onundoclear,
+    onchoosedest,
+    onexport,
+  } = $props();
 </script>
 
 <!-- Stays up while there's a selection OR a clear still waiting to be undone.
@@ -65,13 +75,11 @@
       </span>
       <button
         class="sel-btn confirm"
-        on:click={() => dispatch("bulkconfirm")}
+        onclick={() => onbulkconfirm?.()}
         title={`${combo("A", { shift: pendingBulk === "deselect" })} again also confirms`}
         >{pendingBulk === "select" ? "Select all" : "Remove all"}</button
       >
-      <button class="sel-btn" on:click={() => dispatch("bulkcancel")}>
-        Cancel
-      </button>
+      <button class="sel-btn" onclick={() => onbulkcancel?.()}> Cancel </button>
     {/if}
     <!-- The same question, asked of one folder instead of the whole view. It
          names the folder, because "select all 12,431 photos?" without saying
@@ -82,30 +90,30 @@
       </span>
       <button
         class="sel-btn confirm"
-        on:click={() => dispatch("groupconfirm")}
+        onclick={() => ongroupconfirm?.()}
         title="Select every photo in this folder and the folders under it"
         >Select all</button
       >
-      <button class="sel-btn" on:click={() => dispatch("groupcancel")}>
+      <button class="sel-btn" onclick={() => ongroupcancel?.()}>
         Cancel
       </button>
     {/if}
     {#if selectedCount > 0}
       <button
         class="sel-btn"
-        on:click={() => dispatch("clear")}
+        onclick={() => onclear?.()}
         title="Clear selection">Clear</button
       >
       <button
         class="sel-btn"
-        on:click={() => dispatch("keeponly")}
+        onclick={() => onkeeponly?.()}
         title="Focus the whole app on just these photos (keep only)"
         >Keep only</button
       >
       <button
         class="sel-btn"
         disabled={rereading}
-        on:click={() => dispatch("reread")}
+        onclick={() => onreread?.()}
         title="Read these photos' EXIF again from disk — dates, camera, lens, dimensions (use after editing the files elsewhere)"
         >{rereading ? "Re-reading…" : "Re-read metadata"}</button
       >
@@ -113,7 +121,7 @@
     {#if lastClearedSelection}
       <button
         class="sel-btn undo"
-        on:click={() => dispatch("undoclear")}
+        onclick={() => onundoclear?.()}
         title="Put the selection back exactly as it was before the last bulk change (Clear, ⌘A, ⌘⇧A)"
         >Undo</button
       >
@@ -126,7 +134,7 @@
       >
         <button
           class="sel-btn export"
-          on:click={() => (exportOpen = !exportOpen)}
+          onclick={() => (exportOpen = !exportOpen)}
           title="Copy the selected photos into a new folder">Export…</button
         >
         {#if exportOpen}
@@ -135,7 +143,7 @@
               class="export-close"
               title="Close"
               aria-label="Close export"
-              on:click={() => (exportOpen = false)}>✕</button
+              onclick={() => (exportOpen = false)}>✕</button
             >
             <label class="export-field">
               <span>Destination folder</span>
@@ -150,7 +158,7 @@
                 {#if hasNativePicker}
                   <button
                     class="choose-folder"
-                    on:click={() => dispatch("choosedest")}
+                    onclick={() => onchoosedest?.()}
                   >
                     Choose…
                   </button>
@@ -184,7 +192,7 @@
               <button
                 class="scan"
                 class:danger={exportMove}
-                on:click={() => dispatch("export")}
+                onclick={() => onexport?.()}
                 disabled={exporting || !exportDest.trim() || !exportName.trim()}
               >
                 {exporting

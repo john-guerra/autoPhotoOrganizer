@@ -1,4 +1,4 @@
-<script context="module">
+<script module>
   export const PEEK_STEP_PX = 6; // px offset per peeking layer (diagonal: horizontal alternating + vertical), tuned for visibility
   export const MAX_PEEK_DEPTH = 2; // visual depth cap — peeks beyond this render at the same max offset, keeping the tile's footprint small and neat regardless of actual stack size
   export const PEEK_VERTICAL_PX = 2; // flat vertical offset for every peek layer (not scaled by depth) — a subtle "slightly offset" cue, kept tiny since it isn't reserved for in the grid layout
@@ -7,60 +7,85 @@
 </script>
 
 <script>
-  import { onMount, onDestroy, createEventDispatcher } from "svelte";
+  import { untrack } from "svelte";
   import { thumbUrl, previewUrl, formatDuration } from "./api.js";
   import { formatSize } from "./exifFormat.js";
   import Stars from "./Stars.svelte";
 
-  const dispatch = createEventDispatcher();
-
-  export let item; // {id, name, rating, mtimeMs}
-  export let box; // {x, y, width, height} from the justified layout
-  export let pad = 0; // grid frame inset (abs children ignore CSS padding)
-  export let size = 640; // thumb longest edge; higher zoom requests sharper
-  export let selected = false;
-  export let inSelection = false; // member of the multi-select set (batch export)
-  export let showSize = false; // show the file-size pill (when sorting by size)
-  export let stackCount = undefined; // set when this tile is a collapsed stack's cover
-  export let inExpandedStack = false; // true when this photo is a member of a currently-expanded stack
-  export let isCurrentCover = false; // true when this expanded member currently resolves as its stack's cover
-  export let stackPeekItems = []; // this stack's other members (excludes the cover), for the peeking-photos visual
-  export let stackMarginPx = 0; // horizontal margin reserved in the layout for this stack's peek layers (0 for non-stack tiles)
-  // App already loaded this id's thumbnail once (thumbStatus === 'ok', reset
-  // only on scan). True when a group is re-expanded after being collapsed: the
-  // bytes are in the browser cache, so skip the blank→observer→spinner→fade
-  // lifecycle a fresh mount would otherwise re-run and paint the cached image
-  // straight away (issue #41). Measured: the re-fetches on expand are ~80%
-  // cache hits (transferSize 0), yet the tiles still rebuilt from blank — this
-  // is the client-side lifecycle cost, not the network.
-  export let warm = false;
+  let {
+    item, // {id, name, rating, mtimeMs}
+    box, // {x, y, width, height} from the justified layout
+    pad = 0, // grid frame inset (abs children ignore CSS padding)
+    size = 640, // thumb longest edge; higher zoom requests sharper
+    selected = false,
+    inSelection = false, // member of the multi-select set (batch export)
+    showSize = false, // show the file-size pill (when sorting by size)
+    stackCount = undefined, // set when this tile is a collapsed stack's cover
+    inExpandedStack = false, // true when this photo is a member of a currently-expanded stack
+    isCurrentCover = false, // true when this expanded member currently resolves as its stack's cover
+    stackPeekItems = [], // this stack's other members (excludes the cover), for the peeking-photos visual
+    stackMarginPx = 0, // horizontal margin reserved in the layout for this stack's peek layers (0 for non-stack tiles)
+    // App already loaded this id's thumbnail once (thumbStatus === 'ok', reset
+    // only on scan). True when a group is re-expanded after being collapsed: the
+    // bytes are in the browser cache, so skip the blank→observer→spinner→fade
+    // lifecycle a fresh mount would otherwise re-run and paint the cached image
+    // straight away (issue #41). Measured: the re-fetches on expand are ~80%
+    // cache hits (transferSize 0), yet the tiles still rebuilt from blank — this
+    // is the client-side lifecycle cost, not the network.
+    warm = false,
+    onclick,
+    oncontextmenu,
+    ontoggleselect,
+    onattempt,
+    onsettled,
+  } = $props();
 
   let el;
   // `warm` tiles skip the IntersectionObserver gate: set `src` at mount instead
   // of waiting for the observer to re-confirm a visibility that hasn't changed.
-  let visible = warm;
-  let loaded = false;
+  // `warm` seeds these once at mount, deliberately non-reactive (a later
+  // change to the `warm` prop must not retroactively rewrite in-flight local
+  // state) — `untrack` tells the compiler this initial read is intentional,
+  // matching Svelte 4's `export let visible = warm;` semantics.
+  let visible = $state(untrack(() => warm));
+  let loaded = $state(false);
   // `warm` ⇒ the image is cache-warm, so drop the fade from the first paint
   // (the `instant` class). detectCache may also set this for a cold-but-cached
   // tile, but its synchronous `complete` check is unreliable right after `src`
   // is assigned, so `warm` is the dependable signal for the re-expand case.
-  let cacheHit = warm; // the <img> is browser-cached → skip the fade (issue #41)
-  let failed = false; // server 500'd, or the request stalled past STALL_MS
-  let retryNonce = 0; // bumped by the retry click to force a fresh request past caches
+  let cacheHit = $state(untrack(() => warm)); // the <img> is browser-cached → skip the fade (issue #41)
+  let failed = $state(false); // server 500'd, or the request stalled past STALL_MS
+  let retryNonce = $state(0); // bumped by the retry click to force a fresh request past caches
   let observer;
   let stallTimer;
-  let previewSrc = null; // the fast-tier embedded-preview URL, set only if the full thumbnail hasn't loaded within PREVIEW_DELAY_MS
+  let previewSrc = $state(null); // the fast-tier embedded-preview URL, set only if the full thumbnail hasn't loaded within PREVIEW_DELAY_MS
   let previewTimer;
 
   // Recompute the src whenever the tile is visible OR the item/size changes.
   // Svelte reuses this component across rescans (keyed by id), so `item` can
   // swap to a different file under the same id — the mtime version keeps the
   // URL correct.
-  $: src = visible
-    ? thumbUrl(item.id, size, item.mtimeMs) +
-      (retryNonce ? `&retry=${retryNonce}` : "")
-    : null;
-  $: if (src) armAttempt(src);
+  let src = $derived(
+    visible
+      ? thumbUrl(item.id, size, item.mtimeMs) +
+          (retryNonce ? `&retry=${retryNonce}` : "")
+      : null
+  );
+  $effect(() => {
+    // Track ONLY `src` (a stable string). armAttempt runs untracked: it reads
+    // `item` and calls `onattempt`, which synchronously updates App's thumbStatus
+    // and re-renders — re-passing a fresh `item` object. If the effect tracked
+    // `item`'s identity, that re-render would retrigger it → onattempt → re-render
+    // → effect_update_depth_exceeded. (Svelte 4's `dispatch` was scheduled, so it
+    // never re-entered; a callback prop fires synchronously.) `src` already
+    // encodes id+mtime+size+retry, so it changes exactly when a new attempt is due.
+    const url = src;
+    if (url) untrack(() => armAttempt(url));
+    return () => {
+      clearTimeout(stallTimer);
+      clearTimeout(previewTimer);
+    };
+  });
 
   // Each new attempt (initial load or retry) reports "pending" to the grid's
   // aggregate progress counter, resets visible state, and arms the stall
@@ -72,7 +97,7 @@
     loaded = false; // re-fade in when the source changes
     failed = false;
     previewSrc = null;
-    dispatch("attempt", { id: item.id });
+    onattempt?.({ id: item.id });
     clearTimeout(stallTimer);
     clearTimeout(previewTimer);
     stallTimer = setTimeout(() => {
@@ -103,7 +128,7 @@
       previewSrc = previewUrl(item.id, item.mtimeMs);
     loaded = ok;
     failed = !ok;
-    dispatch("settled", { id: item.id, ok });
+    onsettled?.({ id: item.id, ok });
   }
 
   // Cache-hit fast path (issue #41). Thumbnails are served `Cache-Control:
@@ -130,11 +155,6 @@
     retryNonce += 1;
   }
 
-  onDestroy(() => {
-    clearTimeout(stallTimer);
-    clearTimeout(previewTimer);
-  });
-
   // Split alternately: chronologically-nearer non-cover members peek out
   // closer to the cover (right first, then left, then right again, ...).
   // Sliced to MAX_PEEK_DEPTH per side: every layer beyond that depth
@@ -143,14 +163,14 @@
   // them anyway would mean fetching/decoding/compositing a thumbnail
   // <img> for every extra member of a large burst for zero visible
   // effect. The ×N badge already carries the true, uncapped count.
-  $: rightPeekItems = stackPeekItems
-    .filter((_, i) => i % 2 === 0)
-    .slice(0, MAX_PEEK_DEPTH);
-  $: leftPeekItems = stackPeekItems
-    .filter((_, i) => i % 2 === 1)
-    .slice(0, MAX_PEEK_DEPTH);
+  let rightPeekItems = $derived(
+    stackPeekItems.filter((_, i) => i % 2 === 0).slice(0, MAX_PEEK_DEPTH)
+  );
+  let leftPeekItems = $derived(
+    stackPeekItems.filter((_, i) => i % 2 === 1).slice(0, MAX_PEEK_DEPTH)
+  );
 
-  onMount(() => {
+  $effect(() => {
     observer = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
@@ -174,9 +194,8 @@
       { rootMargin: "150px" }
     );
     observer.observe(el);
+    return () => observer?.disconnect();
   });
-
-  onDestroy(() => observer?.disconnect());
 
   // (Selection reveal is owned by App.svelte's revealSelected(), triggered by
   // active navigation only — a tile no longer scrolls the page itself. This
@@ -215,8 +234,8 @@
     data-id={item.id}
     title={item.name}
     style={stackMarginPx ? `inset: 0 ${stackMarginPx}px;` : ""}
-    on:click
-    on:contextmenu
+    {onclick}
+    {oncontextmenu}
   >
     <!-- A role="button" span, NOT a <button>: it lives inside the .thumb button,
          and Svelte 5 (rightly) rejects a button nested in a button — the browser
@@ -231,11 +250,15 @@
       title={inSelection ? "Deselect" : "Select"}
       aria-label={inSelection ? "Deselect photo" : "Select photo"}
       aria-pressed={inSelection}
-      on:click|stopPropagation={() => dispatch("toggleselect")}
-      on:keydown|stopPropagation={(e) => {
+      onclick={(e) => {
+        e.stopPropagation();
+        ontoggleselect?.();
+      }}
+      onkeydown={(e) => {
+        e.stopPropagation();
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          dispatch("toggleselect");
+          ontoggleselect?.();
         }
       }}
     >
@@ -247,7 +270,7 @@
         alt=""
         loading="lazy"
         class="preview"
-        on:error={() => (previewSrc = null)}
+        onerror={() => (previewSrc = null)}
       />
     {/if}
     {#if src}
@@ -260,8 +283,8 @@
           class:loaded
           class:instant={cacheHit}
           use:detectCache
-          on:load={() => settle(true)}
-          on:error={() => settle(false)}
+          onload={() => settle(true)}
+          onerror={() => settle(false)}
         />
       {/key}
     {/if}
@@ -276,8 +299,12 @@
         role="button"
         tabindex="0"
         title="Failed to load — click to retry"
-        on:click|stopPropagation={retry}
-        on:keydown|stopPropagation={(e) => {
+        onclick={(e) => {
+          e.stopPropagation();
+          retry();
+        }}
+        onkeydown={(e) => {
+          e.stopPropagation();
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             retry();

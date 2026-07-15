@@ -709,12 +709,12 @@
   // a rescan's ids don't inherit a stale previous scan's counts.
   let thumbStatus = new Map(); // id -> 'pending' | 'ok' | 'error'
   let thumbStatusTick = 0;
-  function handleThumbAttempt(e) {
-    thumbStatus.set(e.detail.id, "pending");
+  function handleThumbAttempt({ id }) {
+    thumbStatus.set(id, "pending");
     thumbStatusTick++;
   }
-  function handleThumbSettled(e) {
-    thumbStatus.set(e.detail.id, e.detail.ok ? "ok" : "error");
+  function handleThumbSettled({ id, ok }) {
+    thumbStatus.set(id, ok ? "ok" : "error");
     thumbStatusTick++;
   }
   $: thumbCounts = (() => {
@@ -4315,10 +4315,10 @@
           {library}
           {pendingMeta}
           {sweeping}
-          on:close={() => (manageLibraryOpen = false)}
-          on:sweep={sweepMetadata}
-          on:folderRemoved={onFolderRemoved}
-          on:libraryReset={onLibraryReset}
+          onclose={() => (manageLibraryOpen = false)}
+          onsweep={sweepMetadata}
+          onfolderRemoved={onFolderRemoved}
+          onlibraryReset={onLibraryReset}
         />
       {/if}
     </svelte:fragment>
@@ -4614,11 +4614,11 @@
                     entry.stackId !== null &&
                     stacks.find((s) => s.id === entry.stackId)?.coverId ===
                       entry.item.id}
-                  on:click={(e) => onTileClick(e, entry, i)}
-                  on:toggleselect={() => toggleSelect(resolvePhoto(entry)?.id)}
-                  on:contextmenu={(e) => onTileContextMenu(e, entry, i)}
-                  on:attempt={handleThumbAttempt}
-                  on:settled={handleThumbSettled}
+                  onclick={(e) => onTileClick(e, entry, i)}
+                  ontoggleselect={() => toggleSelect(resolvePhoto(entry)?.id)}
+                  oncontextmenu={(e) => onTileContextMenu(e, entry, i)}
+                  onattempt={handleThumbAttempt}
+                  onsettled={handleThumbSettled}
                 />
               {/if}
             {/each}
@@ -4710,17 +4710,17 @@
           count: pendingGroupSelect.ids.length,
           label: pendingGroupSelect.label,
         }}
-        on:bulkconfirm={confirmPendingBulk}
-        on:bulkcancel={() => (pendingBulk = null)}
-        on:groupconfirm={confirmPendingGroupSelect}
-        on:groupcancel={() => (pendingGroupSelect = null)}
+        onbulkconfirm={confirmPendingBulk}
+        onbulkcancel={() => (pendingBulk = null)}
+        ongroupconfirm={confirmPendingGroupSelect}
+        ongroupcancel={() => (pendingGroupSelect = null)}
         {rereading}
-        on:clear={clearSelection}
-        on:keeponly={keepOnlySelection}
-        on:reread={rereadSelection}
-        on:undoclear={undoClearSelection}
-        on:choosedest={chooseExportDest}
-        on:export={doExport}
+        onclear={clearSelection}
+        onkeeponly={keepOnlySelection}
+        onreread={rereadSelection}
+        onundoclear={undoClearSelection}
+        onchoosedest={chooseExportDest}
+        onexport={doExport}
       />
     {/snippet}
   </StatusBar>

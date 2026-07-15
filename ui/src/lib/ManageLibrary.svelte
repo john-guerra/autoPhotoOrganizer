@@ -1,5 +1,4 @@
 <script>
-  import { createEventDispatcher } from "svelte";
   import {
     deleteFolder,
     fetchCacheStats,
@@ -10,21 +9,25 @@
   } from "./api.js";
   import Modal from "./Modal.svelte";
 
-  export let library = [];
-  /** Photos whose metadata has never been read, and whether a sweep is running. */
-  export let pendingMeta = 0;
-  export let sweeping = false;
+  let {
+    library = [],
+    /** Photos whose metadata has never been read, and whether a sweep is running. */
+    pendingMeta = 0,
+    sweeping = false,
+    onclose,
+    onsweep,
+    onfolderRemoved,
+    onlibraryReset,
+  } = $props();
 
-  const dispatch = createEventDispatcher();
-
-  let stats = null;
-  let breakdown = null;
-  let breakdownLoading = false;
-  let busy = false;
-  let message = "";
+  let stats = $state(null);
+  let breakdown = $state(null);
+  let breakdownLoading = $state(false);
+  let busy = $state(false);
+  let message = $state("");
   // Danger zone: typing this exact word arms the full-reset button.
   const RESET_WORD = "DELETE";
-  let resetConfirm = "";
+  let resetConfirm = $state("");
 
   function formatBytes(n) {
     if (n < 1024) return `${n} B`;
@@ -55,7 +58,7 @@
     busy = true;
     try {
       await deleteFolder(entry.id);
-      dispatch("folderRemoved", { id: entry.id });
+      onfolderRemoved?.({ id: entry.id });
       message = `Removed "${entry.name}".`;
     } catch (e) {
       message = e.message;
@@ -106,7 +109,7 @@
       const result = await resetLibrary();
       message = `Library reset — removed ${result.folders} folder(s), ${result.photos} photo(s), and cleared the thumbnail cache. Photos on disk are untouched.`;
       resetConfirm = "";
-      dispatch("libraryReset", result);
+      onlibraryReset?.(result);
     } catch (e) {
       message = e.message;
     } finally {
@@ -115,12 +118,7 @@
   }
 </script>
 
-<Modal
-  open={true}
-  title="Manage library"
-  size="md"
-  onclose={() => dispatch("close")}
->
+<Modal open={true} title="Manage library" size="md" onclose={() => onclose?.()}>
   {#if message}<p class="message">{message}</p>{/if}
 
   <section>
@@ -136,7 +134,7 @@
           <button
             class="remove-btn"
             disabled={busy}
-            on:click={() => removeFolder(entry)}
+            onclick={() => removeFolder(entry)}
           >
             Remove
           </button>
@@ -154,11 +152,11 @@
     {/if}
 
     <div class="cache-actions">
-      <button disabled={busy} on:click={showBreakdown}>
+      <button disabled={busy} onclick={showBreakdown}>
         {breakdownLoading ? "Computing…" : "Show breakdown"}
       </button>
-      <button disabled={busy} on:click={doClearCache}>Clear cache</button>
-      <button disabled={busy} on:click={doPruneCache}>Prune orphaned</button>
+      <button disabled={busy} onclick={doClearCache}>Clear cache</button>
+      <button disabled={busy} onclick={doPruneCache}>Prune orphaned</button>
     </div>
 
     {#if breakdown}
@@ -189,7 +187,7 @@
         <strong>{pendingMeta.toLocaleString()}</strong> photos not read yet.
       </p>
       <div class="cache-actions">
-        <button disabled={busy || sweeping} on:click={() => dispatch("sweep")}>
+        <button disabled={busy || sweeping} onclick={() => onsweep?.()}>
           {sweeping ? "Reading…" : "Read all metadata"}
         </button>
       </div>
@@ -224,7 +222,7 @@
       <button
         class="reset-btn"
         disabled={busy || resetConfirm !== RESET_WORD}
-        on:click={doResetLibrary}
+        onclick={doResetLibrary}
       >
         Reset library
       </button>

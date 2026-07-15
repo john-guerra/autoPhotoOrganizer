@@ -80,7 +80,7 @@ electron-builder 25 tree — now **0 vulnerabilities**.
 **All dependency modernization (Stage 1a/1b/1c) is complete.**
 
 **Stage 2 IN PROGRESS — runes conversion, leaf-first.** Converted & gated so far
-(24 of 41 components; 865 unit + 60 e2e green after each batch):
+(27 of 41 components; 865 unit + 60 e2e green after each batch):
 
 - **Independent leaves:** FolderIcon, GroupStateIcon (pure `$props`), GridControls,
   SidebarModeToggle (`$bindable` — bridges legacy parents' `bind:`), ServerBanner
@@ -148,13 +148,23 @@ electron-builder 25 tree — now **0 vulnerabilities**.
   `<SelectionBar slot="selection" …>`→`{#snippet selection()}<SelectionBar
 …>{/snippet}` (SelectionBar itself stays legacy, untouched inside);
   `<ShortcutsOverlay on:close>`→`onclose`.
+- **SelectionBar, ManageLibrary, Thumb:** SelectionBar (13 props, 4 `$bindable`:
+  `exportOpen`/`exportDest`/`exportName`/`exportMove`; 10 payload-less dispatches →
+  `on*` callbacks). ManageLibrary (dispatches → `onclose`/`onsweep`/
+  `onfolderRemoved`/`onlibraryReset`; the Modal's `onclose` already wired). Thumb
+  (the hot-path feed tile: `<script module>`; IntersectionObserver
+  `onMount`/`onDestroy` → one `$effect`; `src`/peek lists → `$derived`; prop-seeded
+  `$state` via `untrack`). **Thumb hit the callback-in-effect re-entrancy loop**
+  (see §6) — the load `$effect` now tracks only `src` and runs `armAttempt`
+  untracked. App's `<Thumb>` + `<SelectionBar>` (inside the StatusBar `selection`
+  snippet) usage moved to callback props; `bind:export*` kept.
 
-**Remaining (17), by coupling cluster — all end at a choke point or App.svelte:**
+**Remaining (14) — the toolbar cluster (one atomic unit) + App.svelte:**
 Toolbar cluster (Toolbar, ToolGroup, ToolbarRow, ViewControls, GroupByControl,
 SortControl, FilterControls + the 4 filter leaves RatingFilter/OrientationFilter/
-KindFilter/SearchFilter, TimelineFilter, SourceControls); SelectionBar;
-ManageLibrary; Thumb; and **App.svelte last** (5,170 lines — its own careful pass, sequenced
-against #124).
+KindFilter/SearchFilter, TimelineFilter, SourceControls) — deep `bind:`/forward
+chains (App→Toolbar→SourceControls/FilterControls), so it converts as ONE unit; and
+**App.svelte last** (5,170 lines — its own careful pass, sequenced against #124).
 
 **Working rule that's held:** convert each cluster atomically (leaf child + every
 parent usage site in the same commit) so the app compiles and all 60 e2e stay green
@@ -406,6 +416,19 @@ by default in 5).
   Binding element refs into a collection (AlbumsView's `dividerEls`, `nameInputs`)
   needs the container to be `$state([])`, even when the array is only ever read
   imperatively (in handlers). Plain `let` compiles but warns at runtime.
+- **A callback prop fired inside an `$effect` re-enters SYNCHRONOUSLY — Svelte 4's
+  `dispatch` did not. This bit Thumb (the hot-path feed tile) and hung the whole
+  feed.** Thumb's load effect read `src` AND, via `armAttempt`, called
+  `onattempt?.({id: item.id})`. In Svelte 4 that was `dispatch("attempt")` — a
+  scheduled event. As a callback prop it runs App's handler right now, which mutates
+  `thumbStatus` and re-renders, re-passing a fresh `item` object; because the effect
+  also read `item` (identity), the re-render retriggered it → `onattempt` →
+  re-render → `effect_update_depth_exceeded`. Fix: track only the stable value the
+  effect actually keys on (`src`, a string that already encodes id+mtime+size+retry)
+  and run the notifying body untracked — `const url = src; if (url) untrack(() =>
+armAttempt(url));`. **Rule: when an effect both reads reactive state and calls a
+  parent callback that can write reactive state, untrack the callback path or you
+  risk a synchronous loop the Svelte-4 code never had.**
 - **No multiple handlers on one event**, and **event modifiers are removed** (wrap
   manually).
 - `bind:clientWidth`/`bind:this`/`<svelte:window>`/`<svelte:self>`/transitions/
