@@ -90,8 +90,12 @@
   }
 
   async function pickDest() {
-    const p = await window.autogallery?.pickFolder?.();
-    if (p) destPath = p;
+    try {
+      const p = await window.autogallery?.pickFolder?.();
+      if (p) destPath = p;
+    } catch (e) {
+      error = e.message;
+    }
   }
 
   async function confirmRelocate(row) {

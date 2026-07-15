@@ -230,4 +230,31 @@ describe("listMissing", () => {
     });
     expect(rows[0].classification.kind).toBe("gone");
   });
+
+  it("at display time (scanStartedAt=now) classifies a still-backed-up row as covered, not moved", () => {
+    const db = getDb();
+    const [a] = upsertScan(db, "/a/trip", 1, [F]);
+    const [b] = upsertScan(db, "/b/backup", 2, [F]); // an OLD backup copy
+    db.prepare("UPDATE photos SET first_seen_at = ? WHERE id = ?").run(
+      100,
+      b.id
+    );
+    markStale(db, a.id); // A's copy vanished; B still on disk
+    // Display-time classification: nothing is "new this scan", so the surviving
+    // backup makes this "covered" (safe to carry metadata + dismiss).
+    const now = 999999999999;
+    const rows = listMissing(db, {
+      mountedVolumeIds: [1, 2],
+      scanStartedAt: now,
+    });
+    const row = rows.find((r) => r.id === a.id);
+    expect(row.classification.kind).toBe("covered");
+    // Guard note: with the buggy default scanStartedAt=0, B counts as "new this
+    // scan" and A is misread as "moved" — the exact trap this test locks out.
+    const buggy = listMissing(db, {
+      mountedVolumeIds: [1, 2],
+      scanStartedAt: 0,
+    });
+    expect(buggy.find((r) => r.id === a.id).classification.kind).toBe("moved");
+  });
 });

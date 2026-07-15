@@ -1362,7 +1362,15 @@ export function registerApi(app) {
 
   app.get("/api/missing", (_req, res) => {
     const db = getDb();
-    const items = listMissing(db, { mountedVolumeIds: mountedVolumeIds(db) });
+    // scanStartedAt = now: at display time no scan is in progress, so no surviving
+    // copy counts as "new this scan". Without this (default 0), classifyRow would
+    // treat every survivor as new and mislabel a still-backed-up row as "moved"
+    // instead of "covered" — which makes the review pane skip carrying the vanished
+    // copy's rating to its survivor on dismiss. See db/missing.js classifyRow.
+    const items = listMissing(db, {
+      mountedVolumeIds: mountedVolumeIds(db),
+      scanStartedAt: Date.now(),
+    });
     res.json({ items, count: items.length });
   });
 
