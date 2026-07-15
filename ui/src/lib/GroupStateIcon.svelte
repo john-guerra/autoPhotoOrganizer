@@ -15,8 +15,11 @@
    * (a virtual ancestor in the tree): its descendants disagree about how they're
    * rendered, and saying so is better than picking one of them and lying.
    */
-  /** A GroupRenderer's `icon` field — see lib/groupRenderers.js — or "mixed". */
-  export let state = "grid"; // "grid" | "strip" | "bar" | "mixed"
+  /**
+   * A GroupRenderer's `icon` field — see lib/groupRenderers.js — or "mixed".
+   * @type {{ state?: "grid" | "strip" | "bar" | "mixed" }}
+   */
+  let { state = "grid" } = $props();
 </script>
 
 {#if state === "mixed"}

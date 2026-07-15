@@ -14,10 +14,12 @@
    *
    * Presentational: App owns the state, these are two-way bound.
    */
-  export let zoom = 2;
-  export let zoomMax = 4;
-  export let burstEnabled = true;
-  export let burstGapMs = 3000;
+  let {
+    zoom = $bindable(2),
+    zoomMax = 4,
+    burstEnabled = $bindable(true),
+    burstGapMs = $bindable(3000),
+  } = $props();
 </script>
 
 <div class="grid-controls">

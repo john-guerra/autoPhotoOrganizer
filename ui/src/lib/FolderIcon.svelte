@@ -10,9 +10,11 @@
   // photos. So it cannot be renamed or removed, and its select/keep-only act over
   // the subtree instead. Drawing it with the SAME icon would promise actions that
   // silently do nothing, so it gets an outline: same shape, hollow.
-  export let virtual = false;
-  /** rendered size in px — matches the surrounding text's cap height */
-  export let size = 12;
+  /**
+   * @type {{ virtual?: boolean, size?: number }}
+   * `size` is the rendered size in px — matches the surrounding text's cap height.
+   */
+  let { virtual = false, size = 12 } = $props();
 </script>
 
 <svg

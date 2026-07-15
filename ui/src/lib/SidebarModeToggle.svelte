@@ -10,7 +10,7 @@
    * why it could not be styled or moved. Same seg-toggle language as the rest of
    * the toolbar now.
    */
-  export let sidebarMode = "tree";
+  let { sidebarMode = $bindable("tree") } = $props();
 
   const MODES = [
     { id: "tree", label: "Tree" },
@@ -24,7 +24,7 @@
       type="button"
       class:active={sidebarMode === mode.id}
       aria-pressed={sidebarMode === mode.id}
-      on:click={() => (sidebarMode = mode.id)}
+      onclick={() => (sidebarMode = mode.id)}
     >
       {mode.label}
     </button>
