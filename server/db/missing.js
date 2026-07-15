@@ -119,3 +119,77 @@ export function classifyMissing(db, scanStartedAt) {
   }
   return { autoRelocated, toReview };
 }
+
+/**
+ * Tombstone stale rows: hidden everywhere, never deleted, rating preserved.
+ * @param {import("better-sqlite3").Database} db
+ * @param {number[]} ids
+ * @returns {{dismissed:number}}
+ */
+export function dismissPhotos(db, ids) {
+  if (!ids.length) return { dismissed: 0 };
+  const stmt = db.prepare(`UPDATE photos SET dismissed = 1 WHERE id = ?`);
+  const tx = db.transaction((all) => {
+    let n = 0;
+    for (const id of all) n += stmt.run(id).changes;
+    return n;
+  });
+  return { dismissed: tx(ids) };
+}
+
+/** True if `id` carries any user-authored metadata worth preserving. */
+function hasUserMetadata(db, id) {
+  const p = db
+    .prepare(
+      `SELECT rating, preferred_cover, no_auto_stack FROM photos WHERE id = ?`
+    )
+    .get(id);
+  if (!p) return false;
+  if (p.rating > 0 || p.preferred_cover === 1 || p.no_auto_stack === 1)
+    return true;
+  const counts = db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM photo_album  WHERE photo_id = @id)
+       + (SELECT COUNT(*) FROM photo_tags   WHERE photo_id = @id)
+       + (SELECT COUNT(*) FROM keep_scope   WHERE photo_id = @id)
+       + (SELECT COUNT(*) FROM manual_stacks WHERE photo_id = @id) AS n`
+    )
+    .get({ id });
+  return counts.n > 0;
+}
+
+/**
+ * Copy user metadata from `fromId` onto `toId` ONLY when `toId` has none, so a
+ * vanished copy's stars/albums/tags/stack survive on a duplicate that had none.
+ * Re-parents FK rows (INSERT OR IGNORE against composite PKs). Never touches an
+ * already-annotated survivor.
+ * @param {import("better-sqlite3").Database} db
+ * @param {number} fromId
+ * @param {number} toId
+ * @returns {{carried:boolean}}
+ */
+export function carryMetadata(db, fromId, toId) {
+  if (hasUserMetadata(db, toId)) return { carried: false };
+  const tx = db.transaction(() => {
+    db.prepare(
+      `UPDATE photos SET
+         rating = (SELECT rating FROM photos WHERE id = @from),
+         preferred_cover = (SELECT preferred_cover FROM photos WHERE id = @from),
+         no_auto_stack = (SELECT no_auto_stack FROM photos WHERE id = @from)
+       WHERE id = @to`
+    ).run({ from: fromId, to: toId });
+    for (const tbl of [
+      "photo_album",
+      "photo_tags",
+      "keep_scope",
+      "manual_stacks",
+    ]) {
+      db.prepare(
+        `UPDATE OR IGNORE ${tbl} SET photo_id = @to WHERE photo_id = @from`
+      ).run({ from: fromId, to: toId });
+    }
+  });
+  tx();
+  return { carried: true };
+}

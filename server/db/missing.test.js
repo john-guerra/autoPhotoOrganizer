@@ -6,6 +6,7 @@ import { getDb, _resetDbForTest } from "./connection.js";
 import { upsertScan, setPhotoRating } from "./photos.js";
 import { sameFileCandidates } from "./missing.js";
 import { classifyMissing, classifyRow, relocateMissing } from "./missing.js";
+import { dismissPhotos, carryMetadata } from "./missing.js";
 
 let cacheDir;
 beforeEach(async () => {
@@ -163,5 +164,52 @@ describe("classify + relocate", () => {
     expect(classifyRow(db, staleRow(db, a.id), scanStart).kind).toBe(
       "ambiguous"
     );
+  });
+});
+
+describe("dismiss + carryMetadata", () => {
+  it("dismiss sets the tombstone flag", () => {
+    const db = getDb();
+    const [a] = upsertScan(db, "/a/trip", 1, [F]);
+    markStale(db, a.id);
+    expect(dismissPhotos(db, [a.id])).toEqual({ dismissed: 1 });
+    expect(
+      db.prepare("SELECT dismissed FROM photos WHERE id = ?").get(a.id)
+        .dismissed
+    ).toBe(1);
+  });
+
+  it("carries rating + tag membership to an unrated survivor", () => {
+    const db = getDb();
+    const [a] = upsertScan(db, "/a/trip", 1, [F]);
+    const [b] = upsertScan(db, "/b/backup", 2, [F]);
+    setPhotoRating(db, a.id, 5);
+    db.prepare(
+      "INSERT INTO tags (id, dimension_name, value) VALUES (1, 'keyword', 'kids')"
+    ).run();
+    db.prepare(
+      "INSERT INTO photo_tags (photo_id, tag_id, source) VALUES (?, 1, 'manual')"
+    ).run(a.id);
+    expect(carryMetadata(db, a.id, b.id)).toEqual({ carried: true });
+    expect(
+      db.prepare("SELECT rating FROM photos WHERE id = ?").get(b.id).rating
+    ).toBe(5);
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS n FROM photo_tags WHERE photo_id = ?")
+        .get(b.id).n
+    ).toBe(1);
+  });
+
+  it("leaves an already-rated survivor untouched", () => {
+    const db = getDb();
+    const [a] = upsertScan(db, "/a/trip", 1, [F]);
+    const [b] = upsertScan(db, "/b/backup", 2, [F]);
+    setPhotoRating(db, a.id, 5);
+    setPhotoRating(db, b.id, 2);
+    expect(carryMetadata(db, a.id, b.id)).toEqual({ carried: false });
+    expect(
+      db.prepare("SELECT rating FROM photos WHERE id = ?").get(b.id).rating
+    ).toBe(2);
   });
 });
