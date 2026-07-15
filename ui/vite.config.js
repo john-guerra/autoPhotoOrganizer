@@ -32,6 +32,13 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   server: {
+    // Bind IPv4 loopback explicitly. Left to its default, Vite resolves its
+    // `localhost` host under Node's verbatim DNS order and, on machines that list
+    // ::1 first, binds IPv6-ONLY. Electron's Chromium loads `localhost` as IPv4
+    // 127.0.0.1 first, finds nothing there, and shows a blank window (and the
+    // Express API is IPv4-only too). Pinning 127.0.0.1 keeps the whole dev stack
+    // on one address family.
+    host: "127.0.0.1",
     // VITE_PORT lets the e2e stack run on its own port (playwright.config.js) so
     // it never collides with a dev server you already have on 5173.
     port: Number(process.env.VITE_PORT) || 5173,

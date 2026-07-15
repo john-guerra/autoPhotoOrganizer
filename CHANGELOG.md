@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.1
+
+- **`electron:dev` now opens the app instead of a blank window.** On machines
+  where Vite bound only IPv6 (`::1`), Electron looked for the UI on IPv4
+  (`127.0.0.1`) and found nothing. The dev server is now pinned to IPv4 loopback,
+  matching the API server and Electron, so the desktop dev window loads reliably.
+
 ## 2.16.0
 
 Packaged build. Bundles everything since 2.15.0 — headlined by the move to
