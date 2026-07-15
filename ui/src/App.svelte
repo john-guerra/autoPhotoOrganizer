@@ -4594,8 +4594,7 @@
                       thumbPx={boxes[i].height}
                       gapPx={gridGap}
                       size={snapshotThumbSize}
-                      on:select={(e) =>
-                        openPhotoById(e.detail.id, entry.item.path)}
+                      onselect={(d) => openPhotoById(d.id, entry.item.path)}
                     />
                   </div>
                 {/if}

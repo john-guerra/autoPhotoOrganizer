@@ -6,62 +6,89 @@
   //     client-side, no fetch.
   //   - `groupPath` (+ `groupBy`/`filter`/`sort`): a feed group — samples are
   //     fetched from GET /api/group/sample, which reuses the feed's ORDER BY.
-  import { createEventDispatcher } from "svelte";
+  import { untrack } from "svelte";
   import { fetchGroupSample } from "./api.js";
   import { sampleOffsets, slotCount } from "./snapshot.js";
   import SnapshotThumb from "./SnapshotThumb.svelte";
 
-  /** @type {number[]|null} ordered id list — client-side sampling */
-  export let ids = null;
-  /** @type {Array<{dimension:string,value:string}>|null} group path — server-side sampling */
-  export let groupPath = null;
-  /** @type {number} known/estimated total for groupPath mode, shown before the fetch resolves */
-  export let count = 0;
-  export let filter = null;
-  export let sort = null;
-  /** @type {string[]} */
-  export let groupBy = [];
-  export let thumbPx = 110;
-  export let gapPx = 4;
-  // WIP (issue #90): the strip now renders resilient SnapshotThumb tiles at a
-  // shared cache bucket instead of a bare <img> at a unique cold size.
-  /** thumbnail longest edge — a shared bucket the grid also caches, so the strip
-   * reuses warm thumbnails instead of forcing a unique cold size (issue #90) */
-  export let size = 320;
-  /** @type {Map<number, number>|null} optional id->mtimeMs for thumb cache-busting */
-  export let mtimeById = null;
-  /** When true, thumbnails are clickable buttons that dispatch `select`.
-   * AlbumsView listens for `select` and routes it through App.svelte's
-   * canonical feed-recenter helper (issue #42) rather than duplicating it. */
-  export let interactive = true;
-
-  const dispatch = createEventDispatcher();
+  /**
+   * @type {{
+   *   ids?: number[]|null,
+   *   groupPath?: Array<{dimension:string,value:string}>|null,
+   *   count?: number,
+   *   filter?: any,
+   *   sort?: any,
+   *   groupBy?: string[],
+   *   thumbPx?: number,
+   *   gapPx?: number,
+   *   size?: number,
+   *   mtimeById?: Map<number, number>|null,
+   *   interactive?: boolean,
+   *   onselect?: (detail: { id: number }) => void,
+   * }}
+   */
+  let {
+    ids = null,
+    groupPath = null,
+    count = 0,
+    filter = null,
+    sort = null,
+    groupBy = [],
+    thumbPx = 110,
+    gapPx = 4,
+    // WIP (issue #90): the strip now renders resilient SnapshotThumb tiles at a
+    // shared cache bucket instead of a bare <img> at a unique cold size.
+    // thumbnail longest edge — a shared bucket the grid also caches, so the
+    // strip reuses warm thumbnails instead of forcing a unique cold size
+    // (issue #90)
+    size = 320,
+    mtimeById = null,
+    // When true, thumbnails are clickable buttons that call `onselect`.
+    // AlbumsView listens for it and routes it through App.svelte's canonical
+    // feed-recenter helper (issue #42) rather than duplicating it.
+    interactive = true,
+    onselect,
+  } = $props();
 
   // Measured via Svelte's reactive `bind:clientWidth` (fires reliably on mount
   // and on every resize — a hand-rolled ResizeObserver missed the initial
   // layout for strips inserted into the virtualized grid, leaving slots at 0).
-  let stripWidth = 0;
-  let shown = [];
-  let total = count;
+  let stripWidth = $state(0);
+  let shown = $state([]);
+  // `count` is only a starting estimate shown before the fetch/sample
+  // resolves (see the prop doc above); read it once at init, not reactively,
+  // so a parent-driven `count` change can't stomp a freshly-loaded `total`.
+  let total = $state(untrack(() => count));
   let requestToken = 0;
 
   // Only the slot COUNT matters; recomputing from width means a sub-thumbnail
   // resize doesn't change `slots` and so doesn't re-sample/re-fetch.
-  $: slots = stripWidth > 0 ? slotCount(stripWidth, thumbPx, gapPx) : 0;
+  const slots = $derived(
+    stripWidth > 0 ? slotCount(stripWidth, thumbPx, gapPx) : 0
+  );
 
   // Mode 1: client-side sampling from an explicit ordered id list.
-  $: if (ids) {
-    const { offsets, gaps } =
-      slots > 0 ? sampleOffsets(ids.length, slots) : { offsets: [], gaps: [] };
-    shown = offsets.map((o, i) => ({ id: ids[o], gapAfter: gaps.includes(i) }));
-    total = ids.length;
-  }
+  $effect(() => {
+    if (ids) {
+      const { offsets, gaps } =
+        slots > 0
+          ? sampleOffsets(ids.length, slots)
+          : { offsets: [], gaps: [] };
+      shown = offsets.map((o, i) => ({
+        id: ids[o],
+        gapAfter: gaps.includes(i),
+      }));
+      total = ids.length;
+    }
+  });
 
   // Mode 2: server-fetched sampling for a feed group. Guarded with a
   // request token so a slow earlier response can't clobber a later one.
-  $: if (!ids && groupPath && slots > 0) {
-    loadSample(groupPath, filter, sort, groupBy, slots);
-  }
+  $effect(() => {
+    if (!ids && groupPath && slots > 0) {
+      loadSample(groupPath, filter, sort, groupBy, slots);
+    }
+  });
 
   async function loadSample(path, filterArg, sortArg, groupByArg, slotsArg) {
     const token = ++requestToken;
@@ -83,7 +110,7 @@
   }
 
   function pick(id) {
-    dispatch("select", { id });
+    onselect?.({ id });
   }
 </script>
 
@@ -99,7 +126,7 @@
       class:static={!interactive}
       style="width:{thumbPx}px; height:{thumbPx}px;"
       role={interactive ? undefined : "presentation"}
-      on:click={() => interactive && pick(item.id)}
+      onclick={() => interactive && pick(item.id)}
     >
       <SnapshotThumb id={item.id} {size} v={mtimeById?.get(item.id)} />
     </svelte:element>

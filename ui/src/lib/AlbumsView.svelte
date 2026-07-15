@@ -533,7 +533,7 @@
         <SnapshotStrip
           ids={album.ids}
           {mtimeById}
-          on:select={(e) => dispatch("openphoto", e.detail)}
+          onselect={(d) => dispatch("openphoto", d)}
         />
       </div>
     {/each}
