@@ -85,7 +85,14 @@ export function listenOnOpenPort(
 ) {
   const tryPort = (port) =>
     new Promise((resolve, reject) => {
-      const server = app.listen(port, host, () => {
+      // Express 5's app.listen() once()-wraps the final callback and registers
+      // it as BOTH the 'listening' and 'error' handler, so on EADDRINUSE the
+      // callback fires Node-style with an Error argument — and server.address()
+      // is null at that point. Honor that err param (reading .port off a null
+      // address is exactly the crash it otherwise causes). The separate 'error'
+      // listener stays for Express-4 semantics, where only the event fires.
+      const server = app.listen(port, host, (err) => {
+        if (err) return reject(err);
         resolve({ server, port: server.address().port });
       });
       server.on("error", reject);

@@ -40,8 +40,26 @@ not a function`, blank app. Aliased sortablejs to its CJS/UMD build. **We contro
    quirk Chrome dispatches as an uncaught error; Svelte 5's render timing surfaces it
    (ToolbarRow's overflow fold). Swallowed ONLY that exact message in `ui/src/main.js`.
 
+**Runtime + dev tooling DONE** (Stage 1b) — express 4→**5.2.1**, concurrently 8→**10**,
+cross-env 7→**10**, wait-on 8→**9**. Two Express-5 breaks, both already covered by
+red tests (the migration's own regression guard):
+
+1. **`req.query` is now getter-only** — `bodyAsQuery` did `req.query = {…}`, which
+   throws in Express 5. Shadowed it with an own data property via
+   `Object.defineProperty` (`server/api.js`). Caught by `api.test.js`'s "POST body as
+   query" test.
+2. **`app.listen`'s callback is now `once()`-wrapped onto BOTH 'listening' and
+   'error'** — on EADDRINUSE the success callback fires Node-style with an Error and a
+   null `address()`, so `listenOnOpenPort` crashed reading `.port` off null. Honor the
+   `err` param (`server/index.js`). Caught by `index.test.js`'s port-fallback test.
+
+Gate green after this group: 865 unit + 60 e2e + prod build.
+
 Still open (warnings, not blockers): Svelte 5 warns on self-closing non-void tags
 (`<div … />`). `sv migrate` fixes these mechanically; fold into Stage 2.
+
+**Electron stack** — still pending (its own step; native ABI rebuild of
+better-sqlite3, then a packaged build to verify).
 
 **Scope (set by the user):** not just Svelte — **all libraries and technologies to
 their latest stable, recommended versions**, with the Svelte 4→5 runes migration as

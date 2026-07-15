@@ -1431,7 +1431,15 @@ export function registerApi(app) {
       else if (k === "groupBy" && Array.isArray(v)) promoted[k] = v.join(",");
       else promoted[k] = JSON.stringify(v);
     }
-    req.query = { ...req.query, ...promoted };
+    // Express 5 made req.query a getter-only accessor (parsed lazily from the
+    // URL) — assigning `req.query = …` now throws. Shadow it with an own data
+    // property so the downstream handlers read the promoted body instead.
+    Object.defineProperty(req, "query", {
+      value: { ...req.query, ...promoted },
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
     next();
   };
 
