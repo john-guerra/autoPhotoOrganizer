@@ -218,17 +218,29 @@
     on:click
     on:contextmenu
   >
-    <button
+    <!-- A role="button" span, NOT a <button>: it lives inside the .thumb button,
+         and Svelte 5 (rightly) rejects a button nested in a button — the browser
+         silently repairs that markup, breaking the component's structure. A span
+         keeps valid nesting while the class-based CSS and the .thumb:hover reveal
+         are untouched; role/tabindex/keydown restore the button's keyboard use. -->
+    <span
       class="select-circle"
       class:on={inSelection}
-      type="button"
+      role="button"
+      tabindex="0"
       title={inSelection ? "Deselect" : "Select"}
       aria-label={inSelection ? "Deselect photo" : "Select photo"}
       aria-pressed={inSelection}
       on:click|stopPropagation={() => dispatch("toggleselect")}
+      on:keydown|stopPropagation={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          dispatch("toggleselect");
+        }
+      }}
     >
       {#if inSelection}✓{/if}
-    </button>
+    </span>
     {#if src && previewSrc && !loaded}
       <img
         src={previewSrc}
@@ -257,10 +269,20 @@
       <span class="thumb-spinner" aria-hidden="true"></span>
     {/if}
     {#if failed && item.kind !== "raw"}
-      <button
+      <!-- role="button" span, not <button> — same reason as .select-circle: no
+           button may nest inside the .thumb button under Svelte 5. -->
+      <span
         class="thumb-retry"
+        role="button"
+        tabindex="0"
         title="Failed to load — click to retry"
-        on:click|stopPropagation={retry}>⟳ Retry</button
+        on:click|stopPropagation={retry}
+        on:keydown|stopPropagation={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            retry();
+          }
+        }}>⟳ Retry</span
       >
     {/if}
     {#if item.kind === "video"}

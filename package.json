@@ -12,7 +12,7 @@
   },
   "homepage": "https://johnguerra.co",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
@@ -51,16 +51,16 @@
     "@electron/rebuild": "^3.6.1",
     "@john-guerra/d3-zoomable-axis": "^0.0.5",
     "@playwright/test": "^1.61.1",
-    "@sveltejs/vite-plugin-svelte": "^3.1.2",
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
-    "prettier": "^3.3.3",
-    "prettier-plugin-svelte": "^3.5.2",
-    "svelte": "^4.2.19",
-    "vite": "^5.4.8",
-    "vitest": "^2.1.2",
+    "prettier": "^3.9.5",
+    "prettier-plugin-svelte": "^4.1.1",
+    "svelte": "^5.56.5",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10",
     "wait-on": "^8.0.1"
   },
   "build": {

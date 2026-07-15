@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22.12"
           cache: npm
       - run: npm ci
       - run: npm run format:check
@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22.12"
           cache: npm
       - run: npm ci
       # Chromium only — the app ships inside Electron, which is Chromium.

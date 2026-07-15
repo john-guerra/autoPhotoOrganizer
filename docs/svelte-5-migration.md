@@ -6,6 +6,43 @@ code changed; keep it current as the migration lands.
 
 **Baseline:** `main` @ v2.15.0 (`6c1566e`). Branch: `worktree-svelte-5-migration`.
 
+## Status
+
+**Stage 1 DONE** — the Svelte toolchain is on latest (svelte 5.56, vite-plugin-svelte
+7.2, vite 8.1, vitest 4.1, prettier 3.9 + plugin 4.1), Node floor raised to 22.12
+(CI pinned), `ui/svelte.config.js` stub deleted. **No component was converted to
+runes** — all 41 still compile in Svelte-4 legacy mode. Gate green: build (dev +
+prod), 865 unit, 60 e2e, plus a live pass on the 114k library (grid + loupe render
+correctly, no `:where()` regression).
+
+Four things broke and had to be fixed even without touching component syntax — the
+"zero syntax change" stage is not "zero change":
+
+1. **`new App({ target })` → `mount(App, …)`** in `ui/src/main.js`. The removed
+   Svelte-4 client API is the ONE `new Component()` in the repo — in the entry
+   point, which the component survey didn't cover. Symptom: blank page,
+   `component_api_invalid_new`.
+2. **`sortablejs` interop under Vite 8** (`ui/vite.config.js` alias). `multi-auto-select`'s
+   UMD build calls `Sortable.create(...)`, expecting sortablejs's default export to
+   BE the class; Vite 8/esbuild now resolves sortablejs via its ESM `module` field
+   and hands the factory the ESM _namespace_, so `.create` is missing → `e.create is
+not a function`, blank app. Aliased sortablejs to its CJS/UMD build. **We control
+   `multi-auto-select`**, so the cleaner long-term fix is to correct its sortablejs
+   import upstream (import the class, or `Sortable.create` off the right member) and
+   drop the alias.
+3. **Nested `<button>` in `Thumb.svelte`** — the `.select-circle` and `.thumb-retry`
+   buttons sat inside the `.thumb` button. Svelte 5's stricter HTML validation
+   rejects it (the browser silently repairs such markup). Converted the two inner
+   controls to `role="button"` spans (valid nesting; class-based CSS and the
+   `.thumb:hover` reveal untouched; keyboard handlers restored).
+4. **Benign ResizeObserver warning** now trips the e2e page-error guard.
+   "ResizeObserver loop completed with undelivered notifications" is a spec-sanctioned
+   quirk Chrome dispatches as an uncaught error; Svelte 5's render timing surfaces it
+   (ToolbarRow's overflow fold). Swallowed ONLY that exact message in `ui/src/main.js`.
+
+Still open (warnings, not blockers): Svelte 5 warns on self-closing non-void tags
+(`<div … />`). `sv migrate` fixes these mechanically; fold into Stage 2.
+
 **Scope (set by the user):** not just Svelte — **all libraries and technologies to
 their latest stable, recommended versions**, with the Svelte 4→5 runes migration as
 the largest single piece.
@@ -199,9 +236,11 @@ becomes an inline wrapper or a `svelte/legacy` helper.
 Slots → snippets. `Modal.svelte`'s `$$slots.footer`:
 
 ```svelte
-<!-- was --> {#if $$slots.footer}<footer><slot name="footer"/></footer>{/if}
-<!-- now --> {#if footer}<footer>{@render footer()}</footer>{/if}
-<!-- with --> let { children, footer } = $props();
+<!-- was -->
+{#if $$slots.footer}<footer><slot name="footer" /></footer>{/if}
+<!-- now -->
+{#if footer}<footer>{@render footer()}</footer>{/if}
+<!-- with --> let {(children, footer)} = $props();
 ```
 
 Named slots (`<svelte:fragment slot="timeline">`) become snippet props +

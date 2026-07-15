@@ -13,6 +13,19 @@ const pkg = JSON.parse(
 
 export default defineConfig({
   plugins: [svelte()],
+  resolve: {
+    alias: {
+      // multi-auto-select's UMD build expects sortablejs's default export to BE
+      // the Sortable class — it calls `Sortable.create(...)`. Vite 8 / esbuild
+      // resolves sortablejs through its ESM "module" field and hands the UMD
+      // factory the ESM *namespace* ({ default, Sortable, Swap, MultiDrag })
+      // instead, so `.create` is undefined on the root and the grouping widget
+      // throws "e.create is not a function", blanking the whole app. Point
+      // sortablejs at its CJS/UMD build, whose single default export IS the
+      // class. (Vite 5 interoped this the old way; Vite 8 changed it.)
+      sortablejs: "sortablejs/Sortable.min.js",
+    },
+  },
   // Compile-time constant so the UI can show its version without importing the
   // whole package.json into the bundle.
   define: {
