@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.10
+
+- **The library tree shows where you are.** An amber dot marks the group holding
+  the photo you're working on, and a grey eye marks the group at the top of the
+  feed — the same two anchors, and the same colours, as the timeline. When both
+  land on the same group only the amber dot shows. (#130)
+
 ## 2.15.9
 
 - **The Fisheye sidebar fills the whole pane.** Its bars used to stop 6px short of

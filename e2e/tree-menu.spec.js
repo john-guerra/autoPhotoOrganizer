@@ -38,12 +38,14 @@ test.describe("@p1 the tree's right-click menu", () => {
     expect(errors).toEqual([]);
   });
 
-  test("a real folder can be removed; a virtual ancestor cannot", async ({
+  test("a real folder and a virtual ancestor can both be removed", async ({
     page,
   }) => {
-    // A virtual ancestor is a real directory, but the index has no row for it
-    // (only folders that CONTAIN photos get one) — so Remove would have nothing
-    // to remove. Offering it enabled would be a menu item that silently no-ops.
+    // A virtual ancestor is a real directory the index has no row for (only
+    // folders that CONTAIN photos get one) — but its sub-folders do. Remove still
+    // works: it drops the WHOLE subtree, so a photo-less parent is removable and
+    // the menu says so ("…and its contents") instead of offering a dead item.
+    // A leaf, holding its own photos, is a plain "Remove from library…".
     const errors = trackPageErrors(page);
     await openApp(page, { groupBy: ["folder"] });
 
@@ -52,8 +54,10 @@ test.describe("@p1 the tree's right-click menu", () => {
     await page.keyboard.press("Escape");
 
     await tree.node(page, VIRTUAL_ANCESTOR).click({ button: "right" });
-    await expect(menu.item(page, "Remove from library…")).toBeDisabled();
-    // …but it IS a folder on disk, so these still apply.
+    await expect(
+      menu.item(page, "Remove folder and its contents…")
+    ).toBeEnabled();
+    // …and it IS a folder on disk, so these still apply.
     await expect(menu.item(page, "Reveal in Finder")).toBeEnabled();
     await expect(menu.item(page, "Rescan this folder")).toBeEnabled();
 

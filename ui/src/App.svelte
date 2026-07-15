@@ -36,6 +36,7 @@
     pathKey,
     headerParentPaths,
   } from "./lib/feed.js";
+  import { treeKey } from "./lib/treeState.js";
   import {
     fetchFeed,
     fetchGroupBoundary,
@@ -2021,6 +2022,25 @@
   );
   let currentPath = $derived(
     deriveCurrentPath(hereIndex, displayEntries, groupBy)
+  );
+
+  // "You are here" in the sidebar tree — the SAME two anchors the timeline draws,
+  // so the tree, the timeline and the fisheye all agree on where you are:
+  //   • FOCUS — the photo you're working on (`selected`). Amber dot.
+  //   • VIEW  — the group at the top of the feed viewport (`renderStart`). Eye.
+  // treeKey strings so TreeNode can match by key. When the two land on the same
+  // group, null out the view marker so the row shows just the amber focus dot —
+  // exactly how the timeline collapses its coincident ticks (TimelineFilter).
+  let focusHerePath = $derived(
+    deriveCurrentPath(selected, displayEntries, groupBy)
+  );
+  let viewHerePath = $derived(
+    deriveCurrentPath(renderStart, displayEntries, groupBy)
+  );
+  let focusHereKey = $derived(focusHerePath ? treeKey(focusHerePath) : null);
+  let viewHereKey = $derived(viewHerePath ? treeKey(viewHerePath) : null);
+  let viewHereKeyDistinct = $derived(
+    viewHereKey && viewHereKey !== focusHereKey ? viewHereKey : null
   );
 
   /** The abs folder path carried by a group path's "folder" or "folderName"
@@ -4553,6 +4573,8 @@
           filter={displayFilter}
           refreshToken={libraryVersion}
           {tokenStats}
+          focusKey={focusHereKey}
+          viewKey={viewHereKeyDistinct}
           ontoggle={(d) => onGroupToggle(d.path, d.event, d.paths)}
           onjump={(p) => jumpToPath(p)}
           oncontextmenu={(d) => openTreeMenu(d)}

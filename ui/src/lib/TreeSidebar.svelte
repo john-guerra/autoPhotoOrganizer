@@ -16,6 +16,12 @@
     // Owned by App (which already has the library list) so the feed's headers and
     // these rows judge a folder name by exactly the same corpus.
     tokenStats = EMPTY_STATS,
+    // "You are here" — the same two anchors the timeline draws, as tree markers:
+    // the FOCUS group (the photo you're working on) and the VIEW group (top of the
+    // feed viewport). treeKey strings; App resolves the coincide case (view null
+    // when it equals focus). See TreeNode's here-marker.
+    focusKey = null,
+    viewKey = null,
     ontoggle,
     onjump,
     oncontextmenu,
@@ -432,6 +438,8 @@
         {childrenByKey}
         {loadingKeys}
         {highlightedKey}
+        {focusKey}
+        {viewKey}
         {collapsedPaths}
         {snapshotKeys}
         {tokenStats}

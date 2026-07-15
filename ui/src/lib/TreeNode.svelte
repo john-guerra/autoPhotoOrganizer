@@ -20,6 +20,8 @@
     childrenByKey, // Map<string, {nodes, error?}>
     loadingKeys, // Set<string>
     highlightedKey, // string|null
+    focusKey = null, // treeKey of the FOCUS group ("you are here" — amber dot)
+    viewKey = null, // treeKey of the VIEW group (top of viewport — eye glyph)
     collapsedPaths, // Array<Array<{dimension,value}>>
     snapshotKeys = new Set(), // pathKeys rendered as a snapshot strip
     tokenStats = EMPTY_STATS, // library-wide token df, for folder labels
@@ -32,6 +34,9 @@
 
   let depth = $derived(path.length - 1);
   let key = $derived(treeKey(path));
+  // "You are here" — the two timeline anchors, as row markers.
+  let isFocusHere = $derived(focusKey != null && key === focusKey);
+  let isViewHere = $derived(viewKey != null && key === viewKey);
   let expanded = $derived(expandedKeys.has(key));
   let loading = $derived(loadingKeys.has(key));
   let children = $derived(childrenByKey.get(key)?.nodes ?? []);
@@ -290,6 +295,35 @@
       >
     </button>
     <span class="tree-count">{node.count}</span>
+    <!-- "You are here": the SAME two anchors the timeline draws, same colours.
+         FOCUS = the photo you're working on (amber dot); VIEW = the top of the
+         feed viewport (grey eye). App nulls `viewKey` when it coincides with
+         `focusKey`, so a group you're both focused on and viewing shows just the
+         amber dot — exactly how the timeline collapses its two ticks. -->
+    {#if isFocusHere}
+      <span
+        class="here-marker here-focus"
+        title="The photo you're working on is in this group"
+        aria-label="Focused photo is here"
+      ></span>
+    {/if}
+    {#if isViewHere}
+      <span
+        class="here-marker here-view"
+        title="The top of what's on screen is in this group"
+        aria-label="Current view is here"
+      >
+        <svg viewBox="0 0 12 9" width="12" height="9" aria-hidden="true">
+          <path
+            d="M1 4.5C3 1 9 1 11 4.5 9 8 3 8 1 4.5Z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.3"
+          />
+          <circle cx="6" cy="4.5" r="1.7" fill="currentColor" />
+        </svg>
+      </span>
+    {/if}
   </div>
   {#if expanded}
     <ul class="tree-level">
@@ -305,6 +339,8 @@
           {childrenByKey}
           {loadingKeys}
           {highlightedKey}
+          {focusKey}
+          {viewKey}
           {collapsedPaths}
           {snapshotKeys}
           {tokenStats}
@@ -330,6 +366,8 @@
               {childrenByKey}
               {loadingKeys}
               {highlightedKey}
+              {focusKey}
+              {viewKey}
               {collapsedPaths}
               {snapshotKeys}
               {tokenStats}
@@ -441,6 +479,26 @@
   .tree-count {
     color: #888;
     font-size: 0.85em;
+  }
+  /* "You are here" markers — same palette as the timeline's two ticks
+     (TimelineFilter): amber focus, cool-grey eye. Pushed to the row's right edge,
+     after the count. */
+  .here-marker {
+    margin-left: 4px;
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    line-height: 0;
+  }
+  .here-focus {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ffd24c; /* timeline focus amber */
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  }
+  .here-view {
+    color: #b9c2cc; /* timeline view / eye grey */
   }
   .tree-node.highlighted > .tree-node-row {
     background: #2a2a2a;
