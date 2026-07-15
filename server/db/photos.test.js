@@ -98,6 +98,36 @@ describe("upsertScan", () => {
     const count = db.prepare("SELECT COUNT(*) AS c FROM folders").get().c;
     expect(count).toBe(1);
   });
+
+  it("stamps first_seen_at on insert and never changes it on rescan", () => {
+    const db = getDb();
+    const [first] = upsertScan(db, "/photos/trip", 1, [FILES[0]]);
+    const seen1 = db
+      .prepare("SELECT first_seen_at FROM photos WHERE id = ?")
+      .get(first.id).first_seen_at;
+    expect(Number.isInteger(seen1)).toBe(true);
+    // Rescan the same unchanged file: first_seen_at must be stable.
+    upsertScan(db, "/photos/trip", 1, [FILES[0]]);
+    const seen2 = db
+      .prepare("SELECT first_seen_at FROM photos WHERE id = ?")
+      .get(first.id).first_seen_at;
+    expect(seen2).toBe(seen1);
+  });
+
+  it("clears a dismissed tombstone when the same file reappears, keeping its rating", () => {
+    const db = getDb();
+    const [p] = upsertScan(db, "/photos/trip", 1, [FILES[0]]);
+    setPhotoRating(db, p.id, 5);
+    db.prepare("UPDATE photos SET stale = 1, dismissed = 1 WHERE id = ?").run(
+      p.id
+    );
+    // The file comes back on a later scan of the same folder.
+    upsertScan(db, "/photos/trip", 1, [FILES[0]]);
+    const row = db
+      .prepare("SELECT stale, dismissed, rating FROM photos WHERE id = ?")
+      .get(p.id);
+    expect(row).toMatchObject({ stale: 0, dismissed: 0, rating: 5 });
+  });
 });
 
 describe("getPhotoById", () => {

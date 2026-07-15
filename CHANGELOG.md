@@ -6,6 +6,11 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.11
+
+- **Groundwork for missing-file review:** the index now remembers when a photo
+  was first seen and can tombstone a removed file recoverably. (#1)
+
 ## 2.15.10
 
 - **The library tree shows where you are.** An amber dot marks the group holding

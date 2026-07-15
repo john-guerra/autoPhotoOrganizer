@@ -106,6 +106,14 @@ export function applySchema(db) {
   // "Keep separate" (dissolve) marker — a per-photo boolean like preferred_cover,
   // so it rides upsertScan's ON CONFLICT and survives rescans of unchanged files.
   ensureColumn(db, "photos", "no_auto_stack", "INTEGER NOT NULL DEFAULT 0");
+  // Missing-files review (#1). `dismissed` is a recoverable tombstone: a stale
+  // row the user removed from the index, hidden everywhere but never deleted, so
+  // its rating survives and is restored if the file reappears. `first_seen_at`
+  // (set on INSERT, never updated) distinguishes a row that appeared THIS scan
+  // (a candidate move target) from a pre-existing copy — the signal that keeps
+  // auto-relocate from repointing onto an existing backup. See db/missing.js.
+  ensureColumn(db, "photos", "dismissed", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "photos", "first_seen_at", "INTEGER");
   // Video length in seconds (fractional; NULL for images and un-probed videos).
   ensureColumn(db, "photos", "duration", "REAL");
   // Loupe details panel EXIF (issue #27). Nullable — populated lazily by
