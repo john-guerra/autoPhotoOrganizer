@@ -12,6 +12,7 @@
    *   inSelection?: boolean,
    *   selectedCount?: number,
    *   selectedIds?: Set<number>,
+   *   burstInfo?: Array<null | { count: number } | { member: true }>,
    *   showDetails?: boolean,
    *   showFilmstrip?: boolean,
    *   thumbSize?: number,
@@ -31,6 +32,7 @@
     inSelection = false,
     selectedCount = 0,
     selectedIds = new Set(),
+    burstInfo = [],
     showDetails = true,
     showFilmstrip = true,
     thumbSize = 64,
@@ -355,6 +357,7 @@
       {items}
       {index}
       {selectedIds}
+      {burstInfo}
       requestSize={thumbSize}
       onselect={(d) => (index = d.index)}
     />

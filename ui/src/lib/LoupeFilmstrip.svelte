@@ -9,9 +9,15 @@
    *   items?: any[],
    *   index?: number,
    *   selectedIds?: Set<number>,
+   *   burstInfo?: Array<null | { count: number } | { member: true }>,
    *   requestSize?: number,
    *   onselect?: (detail: { index: number }) => void,
    * }}
+   * `burstInfo` is parallel to `items` (both index into the same displayEntries):
+   * a collapsed burst cover carries `{ count }` (drawn as a ×N badge, like the
+   * grid), an expanded burst member carries `{ member: true }` (a run of them gets
+   * a shared accent edge so you can see the burst you're paging through), and a
+   * plain photo is `null`.
    * `requestSize` is the thumbnail size to REQUEST — the grid's current one, not
    * the 64px this strip draws at.
    *
@@ -27,6 +33,7 @@
     items = [],
     index = 0,
     selectedIds = new Set(),
+    burstInfo = [],
     requestSize = 64,
     onselect,
   } = $props();
@@ -66,8 +73,11 @@
       <button
         class="cell"
         class:current={i === index}
+        class:burst-member={burstInfo[i]?.member}
         style="width:{THUMB}px;height:{THUMB}px;"
-        title={item.name}
+        title={burstInfo[i]?.count
+          ? `${item.name} — burst of ${burstInfo[i].count}`
+          : item.name}
         onclick={() => onselect?.({ index: i })}
       >
         <!-- lazy: the strip renders ±40 cells but only ~15 are ever on screen.
@@ -81,6 +91,8 @@
           width={THUMB}
           height={THUMB}
         />
+        {#if burstInfo[i]?.count}<span class="stack-badge">×{burstInfo[i]
+              .count}</span>{/if}
         {#if item.kind === "video"}<span class="badge">▶</span>{/if}
         {#if selectedIds.has(item.id)}<span class="sel">✓</span>{/if}
         {#if item.rating > 0}<span class="rating"
@@ -137,6 +149,27 @@
   .badge {
     bottom: 2px;
     left: 2px;
+  }
+  /* Collapsed-burst cover: the same ×N the grid draws, so a burst reads the same
+     in the loupe strip as it does in the grid. Top-left, clear of the video ▶
+     (bottom-left), the ✓ (top-right) and the rating (bottom-right). */
+  .stack-badge {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    font-size: 0.6rem;
+    line-height: 1;
+    padding: 1px 3px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Expanded-burst member: a run of these is one burst opened up. A shared accent
+     along the bottom edge lets you SEE the burst you're paging through without
+     collapsing it. */
+  .cell.burst-member {
+    border-bottom-color: #4c9dff;
   }
   .sel {
     top: 2px;

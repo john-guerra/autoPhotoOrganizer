@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.4
+
+- **The loupe filmstrip shows bursts.** A collapsed burst now carries the same ×N
+  badge in the filmstrip that it does in the grid, and the members of an expanded
+  burst share an accent edge — so you can see the burst you're paging through
+  instead of a flat, unmarked strip. (#127)
+
 ## 2.15.3
 
 - **Right-click a group header in the feed to get its menu.** The same actions the

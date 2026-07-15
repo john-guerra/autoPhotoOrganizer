@@ -3460,6 +3460,18 @@
     buildDisplayEntries(items, stacks, expandedStackIds)
   );
   let resolvedPhotos = $derived(displayEntries.map(resolvePhoto)); // passed to Loupe
+  // Per-photo burst tag, 1:1 with resolvedPhotos, so the loupe filmstrip can draw
+  // bursts the way the grid does: a collapsed cover shows a ×N badge, and the
+  // members of an expanded burst share an accent edge (#127).
+  let loupeBurstInfo = $derived(
+    displayEntries.map((e) =>
+      e.kind === "stack"
+        ? { count: e.stack.count }
+        : e.kind === "photo" && e.stackId
+          ? { member: true }
+          : null
+    )
+  );
   // deriveSectionHeaders' `index` must land in the same index space as the
   // `{#each visibleItems}` loop below, which walks `displayEntries` (via
   // buildVisibleItems) — not raw `items`. A collapsed burst stack folds
@@ -4907,6 +4919,7 @@
 {#if loupeOpen}
   <Loupe
     items={resolvedPhotos}
+    burstInfo={loupeBurstInfo}
     bind:index={selected}
     inSelection={typeof resolvedPhotos[selected]?.id === "number" &&
       selectedIds.has(resolvedPhotos[selected].id)}
