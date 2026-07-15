@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.15
+
+- **Review missing files.** When a photo disappears from disk, the app now tells
+  you and offers a review panel to relocate it to where it moved (keeping its
+  rating and albums) or dismiss it. Files that simply moved are relocated
+  automatically; copies still backed up elsewhere are flagged, not lost. (#1)
+
 ## 2.15.14
 
 - **Missing files have an API.** The app can now list photos that vanished from

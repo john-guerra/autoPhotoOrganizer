@@ -37,6 +37,8 @@
     subdirSelection = new Set(),
 
     onmanagelibrary,
+    onreviewmissing,
+    missingCount = 0,
     onchoosefolder,
     onsubmit,
     onloadsubdirs,
@@ -112,6 +114,17 @@
           }}
         >
           Manage library
+        </button>
+        <button
+          role="menuitem"
+          onclick={() => {
+            menuOpen = false;
+            onreviewmissing?.();
+          }}
+        >
+          Review missing files…
+          {#if missingCount > 0}<span class="mr-badge">{missingCount}</span
+            >{/if}
         </button>
       </div>
     {/if}
@@ -253,6 +266,17 @@
   }
   .source-menu button:hover {
     background: #2a2a2a;
+  }
+  /* A small red count pill on the "Review missing files…" entry — only shown
+     when something is actually missing, so an empty library shows no badge. */
+  .mr-badge {
+    margin-left: 0.4rem;
+    background: #b4442f;
+    color: #fff;
+    border-radius: 999px;
+    padding: 0 0.4rem;
+    font-size: 0.72rem;
+    font-weight: 600;
   }
   .add-folder {
     position: relative;

@@ -61,6 +61,7 @@
     revealInFinder,
     revealSelection,
     revealFolder,
+    fetchMissing,
   } from "./lib/api.js";
   import { buildTreeMenuItems } from "./lib/treeMenu.js";
   import Modal from "./lib/Modal.svelte";
@@ -101,6 +102,7 @@
   import UpdateBanner from "./lib/UpdateBanner.svelte";
   import Toolbar from "./lib/Toolbar.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
+  import MissingReview from "./lib/MissingReview.svelte";
   import AlbumsView from "./lib/AlbumsView.svelte";
   import { loadAlbumPrefs, saveAlbumPrefs } from "./lib/albumPrefs.js";
   import SnapshotStrip from "./lib/SnapshotStrip.svelte";
@@ -670,6 +672,8 @@
   let libraryVersion = $state(0);
   let addFolderOpen = $state(false);
   let manageLibraryOpen = $state(false);
+  let missingReviewOpen = $state(false);
+  let missingCount = $state(0);
   // Scope to the folder once it's in? (The old "Open a folder…" entry, now an
   // option on the one Add panel rather than a second door to the same room.)
   let focusAfterAdd = $state(false);
@@ -805,6 +809,7 @@
     refreshLibrary();
     loadInitialFeed();
     refreshCounts();
+    refreshMissingCount();
   });
 
   /** THE one guarded feed-window-replace transaction (issue #42). Every
@@ -1545,6 +1550,41 @@
       pendingMeta = await fetchPendingMeta();
     } catch {
       pendingMeta = 0; // a failed count must not break the panel
+    }
+  }
+
+  /** How many indexed photos are missing from disk (drives the menu badge). */
+  async function refreshMissingCount() {
+    try {
+      const { count } = await fetchMissing();
+      missingCount = count;
+    } catch {
+      // A count is advisory; never surface its failure as a user error.
+    }
+  }
+
+  /** After a review action (relocate/dismiss/carry) the library changed the same
+   * way a folder removal does — refresh the count and the feed/tree together. */
+  async function onMissingChanged() {
+    await refreshMissingCount();
+    await onFolderRemoved();
+  }
+
+  /** Nudge after a user-initiated folder scan that turned up missing files.
+   * Uses `error` (not `status`) so the notice survives the feed reload that a
+   * scan triggers; it is informational, not a failure. Shared by the three
+   * scan-completion sites so the message stays identical. */
+  async function reportScanMissing(job) {
+    const m = job?.result?.missing;
+    await refreshMissingCount();
+    if (m && (m.toReview > 0 || m.autoRelocated > 0)) {
+      const parts = [];
+      if (m.toReview > 0)
+        parts.push(
+          `${m.toReview} file${m.toReview === 1 ? "" : "s"} went missing`
+        );
+      if (m.autoRelocated > 0) parts.push(`${m.autoRelocated} auto-relocated`);
+      error = `${parts.join(", ")} — open “Review missing files” to sort them out`;
     }
   }
 
@@ -2601,6 +2641,7 @@
       await loadInitialFeed();
       refreshCounts();
       libraryVersion++; // the tree/fisheye refetch
+      await reportScanMissing(job);
     } catch (e) {
       error = `Couldn't rescan that folder: ${e?.message ?? e}`;
       status = "";
@@ -3319,6 +3360,7 @@
       await refreshLibrary();
       libraryVersion++;
       status = "";
+      await reportScanMissing(job);
     } catch (e) {
       error = e.message;
       status = "";
@@ -3366,6 +3408,7 @@
     error = "";
     scanning = true;
     status = "scanning…";
+    let scanJob = null;
     try {
       if (recursiveScan) {
         // Recursive ("soup folder") scans run as a cancelable background
@@ -3391,6 +3434,7 @@
           status = "";
           return false;
         }
+        scanJob = job;
       } else {
         await apiScan(dir.trim(), false);
       }
@@ -3403,6 +3447,7 @@
       await loadInitialFeed();
       refreshCounts();
       libraryVersion++;
+      if (scanJob) await reportScanMissing(scanJob);
       return true;
     } catch (e) {
       error = e.message;
@@ -4504,6 +4549,11 @@
       manageLibraryOpen = true;
       refreshPendingMeta(); // the count moves as you browse — never show a stale one
     }}
+    onreviewmissing={() => {
+      missingReviewOpen = true;
+      refreshMissingCount();
+    }}
+    {missingCount}
     onloadsubdirs={loadSubdirs}
     ontoggledir={(payload) =>
       (subdirSelection = toggleSubdir(subdirSelection, payload.path, subdirs))}
@@ -4558,6 +4608,13 @@
       {/if}
     {/snippet}
   </Toolbar>
+
+  {#if missingReviewOpen}
+    <MissingReview
+      onclose={() => (missingReviewOpen = false)}
+      onchanged={onMissingChanged}
+    />
+  {/if}
 
   <div class="app-body">
     <!-- Resizable sidebar pane: owns the width (persisted) for BOTH sidebar

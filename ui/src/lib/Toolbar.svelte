@@ -84,6 +84,8 @@
     onchoosefolder,
     onsubmit,
     onmanagelibrary,
+    onreviewmissing,
+    missingCount = 0,
     onloadsubdirs,
     ontoggledir,
     onselectalldirs,
@@ -129,6 +131,8 @@
       {onchoosefolder}
       {onsubmit}
       {onmanagelibrary}
+      {onreviewmissing}
+      {missingCount}
       {onloadsubdirs}
       {ontoggledir}
       {onselectalldirs}
