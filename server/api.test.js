@@ -3080,3 +3080,35 @@ describe("POST /api/enrich { ids } — re-read the selected photos", () => {
     expect(empty.status).toBe(400);
   });
 });
+
+describe("GET /api/missing", () => {
+  it("lists stale rows on a mounted volume; dismiss tombstones them", async () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO volumes (id, label, uuid, last_mount_path, last_seen_at) VALUES (9, 'v', 'u9', ?, ?)`
+    ).run(tmpdir(), Date.now()); // a mounted path
+    // Insert a folder on that volume with one stale photo.
+    const fid = db
+      .prepare(
+        `INSERT INTO folders (abs_path, volume_id, last_scanned_at) VALUES (?, 9, ?)`
+      )
+      .run(tmpdir(), Date.now()).lastInsertRowid;
+    const pid = db
+      .prepare(
+        `INSERT INTO photos (folder_id, filename, size, mtime, kind, stale) VALUES (?, 'g.jpg', 1, 1, 'image', 1)`
+      )
+      .run(fid).lastInsertRowid;
+
+    const list = await (await fetch(`${srv.base}/api/missing`)).json();
+    expect(list.items.some((r) => r.id === pid)).toBe(true);
+
+    const res = await fetch(`${srv.base}/api/missing/dismiss`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: [pid] }),
+    });
+    expect(await res.json()).toEqual({ dismissed: 1 });
+    const after = await (await fetch(`${srv.base}/api/missing`)).json();
+    expect(after.items.some((r) => r.id === pid)).toBe(false);
+  });
+});

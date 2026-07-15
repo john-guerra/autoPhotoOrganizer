@@ -13,7 +13,15 @@ import {
 import * as fsp from "node:fs/promises";
 import { writeFile, rename, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { extname, join, basename, dirname, resolve, sep } from "node:path";
+import {
+  extname,
+  join,
+  basename,
+  dirname,
+  resolve,
+  sep,
+  isAbsolute,
+} from "node:path";
 import { homedir } from "node:os";
 import { revealCommand, revealManyCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
@@ -81,6 +89,13 @@ import { sampleOffsets } from "./db/sampleGroup.js";
 import { setKeepScope } from "./db/keepScope.js";
 import { createManualStack, dissolveStack } from "./db/manualStacks.js";
 import { registry } from "./jobs/registry.js";
+import {
+  classifyMissing,
+  listMissing,
+  relocateMissing,
+  dismissPhotos,
+  carryMetadata,
+} from "./db/missing.js";
 
 /**
  * True if `target` is `root` itself or nested anywhere inside it. Same
@@ -497,6 +512,9 @@ export function registerApi(app) {
   });
 
   app.post("/api/scan", async (req, res) => {
+    // Wall-clock (Date.now, NOT the monotonic t0 below) so it's comparable
+    // against photos.first_seen_at when classifyMissing runs after the scan.
+    const scanStartedAt = Date.now();
     const dir = req.body?.dir;
     // Recursive ("soup folder") scan: point at a parent, pull in every
     // subfolder. Each directory with media becomes its own folders row, so the
@@ -604,7 +622,14 @@ export function registerApi(app) {
           }
           const elapsedMs = Math.round(performance.now() - t0);
           hashPendingPhotos(db).catch(() => {});
-          registry.finish(job.id, { root: dir, count, folders, elapsedMs });
+          const missing = classifyMissing(db, scanStartedAt);
+          registry.finish(job.id, {
+            root: dir,
+            count,
+            folders,
+            elapsedMs,
+            missing,
+          });
         } catch (e) {
           registry.fail(job.id, e);
         }
@@ -631,7 +656,15 @@ export function registerApi(app) {
       manualStackId: r.manualStackId ?? null,
       keepSeparate: r.keepSeparate === 1,
     }));
-    res.json({ root: dir, count: items.length, folders: 1, elapsedMs, items });
+    const missing = classifyMissing(db, scanStartedAt);
+    res.json({
+      root: dir,
+      count: items.length,
+      folders: 1,
+      elapsedMs,
+      missing,
+      items,
+    });
   });
 
   // --- Metadata sweep -------------------------------------------------------
@@ -1315,6 +1348,74 @@ export function registerApi(app) {
       };
     });
     res.json(entries);
+  });
+
+  // --- Missing files (vanished-from-disk review) ----------------------------
+  /** Volume ids whose last known mount path currently exists. */
+  function mountedVolumeIds(db) {
+    return db
+      .prepare(`SELECT id, last_mount_path FROM volumes`)
+      .all()
+      .filter((v) => v.last_mount_path && existsSync(v.last_mount_path))
+      .map((v) => v.id);
+  }
+
+  app.get("/api/missing", (_req, res) => {
+    const db = getDb();
+    const items = listMissing(db, { mountedVolumeIds: mountedVolumeIds(db) });
+    res.json({ items, count: items.length });
+  });
+
+  // A relocate destination is a user-chosen absolute path anywhere on disk —
+  // there is no trusted root to confine it to (same shape as /api/scan's
+  // `dir`), so this validates with statSync rather than safeResolve (which
+  // requires a root + userPath pair and doesn't apply here).
+  app.post("/api/missing/relocate", (req, res) => {
+    const { id, destAbsPath } = req.body ?? {};
+    if (
+      !Number.isInteger(id) ||
+      typeof destAbsPath !== "string" ||
+      !destAbsPath
+    ) {
+      return res.status(400).json({ error: "id and destAbsPath are required" });
+    }
+    if (!isAbsolute(destAbsPath)) {
+      return res.status(400).json({ error: "destAbsPath must be absolute" });
+    }
+    let st;
+    try {
+      st = statSync(destAbsPath);
+    } catch {
+      return res
+        .status(400)
+        .json({ error: `file not found at destination: ${destAbsPath}` });
+    }
+    if (!st.isFile()) {
+      return res
+        .status(400)
+        .json({ error: `file not found at destination: ${destAbsPath}` });
+    }
+    const db = getDb();
+    const { relocatedId } = relocateMissing(db, id, destAbsPath);
+    res.json({ relocated: true, id: relocatedId });
+  });
+
+  app.post("/api/missing/dismiss", (req, res) => {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || !ids.every((n) => Number.isInteger(n))) {
+      return res
+        .status(400)
+        .json({ error: "ids must be an array of integers" });
+    }
+    res.json(dismissPhotos(getDb(), ids));
+  });
+
+  app.post("/api/missing/carry", (req, res) => {
+    const { fromId, toId } = req.body ?? {};
+    if (!Number.isInteger(fromId) || !Number.isInteger(toId)) {
+      return res.status(400).json({ error: "fromId and toId are required" });
+    }
+    res.json(carryMetadata(getDb(), fromId, toId));
   });
 
   app.delete("/api/folders/:id", (req, res) => {
