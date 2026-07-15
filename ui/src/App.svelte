@@ -1308,8 +1308,9 @@
     try {
       await removeFolderByPath(folderPath);
       collapsedPaths = collapsedPaths.filter((p) => pathKey(p) !== key);
-      snapshotGroupKeys.delete(key);
-      snapshotGroupKeys = snapshotGroupKeys;
+      const nextSnaps = new Set(snapshotGroupKeys);
+      nextSnaps.delete(key);
+      snapshotGroupKeys = nextSnaps; // new ref — a $state Set isn't reactive in place
       // Full refresh (feed + sidebar tree + counts) — same as the Manage
       // Library remove path. `loadInitialFeed()` alone left the removed
       // folder lingering in the sidebar (it only refetches on libraryVersion).
@@ -3748,8 +3749,9 @@
           ? null
           : { path: groupPath, rendererId: was };
       collapsedPaths = collapsedPaths.filter((p) => pathKey(p) !== key);
-      snapshotGroupKeys.delete(key);
-      snapshotGroupKeys = snapshotGroupKeys;
+      const nextSnaps = new Set(snapshotGroupKeys);
+      nextSnaps.delete(key);
+      snapshotGroupKeys = nextSnaps; // new ref — a $state Set isn't reactive in place
     } else {
       loupeRestore = null;
       collapsedPaths = [];
@@ -3782,8 +3784,12 @@
   /** Re-collapse a stack: remove it from expandedStackIds, then re-select
    * and re-focus its now-collapsed tile once displayEntries recomputes. */
   async function collapseStack(stackId) {
-    expandedStackIds.delete(stackId);
-    expandedStackIds = expandedStackIds; // trigger reactivity
+    // Reassign a NEW Set — a `$state` Set is NOT deeply reactive (unlike arrays/
+    // objects), so `.delete()` + self-assign is a no-op that never re-runs the
+    // displayEntries derived; only a fresh reference triggers it.
+    const next = new Set(expandedStackIds);
+    next.delete(stackId);
+    expandedStackIds = next;
     await tick();
     const newIndex = displayEntries.findIndex(
       (e) => e.kind === "stack" && e.stack.id === stackId
@@ -3805,8 +3811,10 @@
       await collapseStack(stack.id);
       return;
     }
-    expandedStackIds.add(stack.id);
-    expandedStackIds = expandedStackIds; // trigger reactivity
+    // New Set, not `.add()` + self-assign: a `$state` Set isn't deeply reactive,
+    // so mutating in place never re-runs the displayEntries derived (this is why
+    // clicking a burst stopped expanding it after the Svelte 5 migration).
+    expandedStackIds = new Set(expandedStackIds).add(stack.id);
     await tick();
     const newIndex = displayEntries.findIndex(
       (e) => e.kind === "photo" && e.item.id === stack.coverId

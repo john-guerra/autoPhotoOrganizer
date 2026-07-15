@@ -492,6 +492,22 @@ by default in 5).
   Binding element refs into a collection (AlbumsView's `dividerEls`, `nameInputs`)
   needs the container to be `$state([])`, even when the array is only ever read
   imperatively (in handlers). Plain `let` compiles but warns at runtime.
+- **A `$state` Set/Map is NOT deeply reactive — mutating it in place (`.add()` /
+  `.delete()` / `.set()`) does nothing, and `x = x` self-assign is a no-op (this
+  bit burst-expand, live only).** `$state` deeply proxies plain objects and arrays
+  (so `items[k].rating = r` IS reactive, which is why rating worked), but it does
+  NOT proxy `Map`/`Set` — their mutator methods aren't instrumented. The Svelte-4
+  idiom `set.add(x); set = set` therefore silently stops working: `.add()` isn't
+  tracked and `set = set` assigns the same reference (no change → no trigger), so a
+  derived reading the set never recomputes. Symptom: clicking a burst did nothing;
+  no error, no e2e (the fixture avoids bursts). **Fix: reassign a NEW collection
+  (`set = new Set(set).add(x)`; for delete, clone → delete → assign) OR use
+  `SvelteSet`/`SvelteMap` from `svelte/reactivity`.** Watch for this on EVERY
+  `$state(new Set())`/`$state(new Map())` that is mutated in place — grep the old
+  `x = x` self-assigns. (A `$state(0)` companion counter bumped on each mutation,
+  like `thumbStatusTick`, is the other escape hatch and is load-bearing where used,
+  not "harmless redundancy".) Arrays reassigned wholesale or objects mutated by
+  property are fine — this trap is specific to Set/Map.
 - **`$effect` runs AFTER the DOM; `$effect.pre` runs BEFORE it — a side-effecting
   `$:` that writes state the template reads IN THE SAME FLUSH must become
   `$effect.pre` (this bit App.svelte, 7 e2e failures).** Svelte-4 `$:` blocks run in
