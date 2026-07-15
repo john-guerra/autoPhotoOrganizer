@@ -114,7 +114,15 @@
         data={rows}
         keys={loadedGroupBy}
         {selected}
-        options={{ label, controls: true, persistKey: SETTINGS_KEY }}
+        options={{
+          label,
+          controls: true,
+          persistKey: SETTINGS_KEY,
+          // Fill the whole sidebar: the widget keeps 6px of right-edge clearance
+          // by default (its `gutter`), which read as wasted space in this narrow,
+          // resizable pane. Zero it so the bars reach the divider. (#128)
+          gutter: 0,
+        }}
         on:select={(e) => onjump?.(toFeedPath(e.detail))}
       />
     </div>

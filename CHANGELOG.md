@@ -6,6 +6,11 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.9
+
+- **The Fisheye sidebar fills the whole pane.** Its bars used to stop 6px short of
+  the right edge; they now reach the divider, using the full sidebar width. (#128)
+
 ## 2.15.8
 
 - **The Export panel opens again.** It had started rendering clipped/behind the
