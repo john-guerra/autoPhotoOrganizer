@@ -71,4 +71,41 @@ test.describe("@p1 selection", () => {
 
     expect(errors).toEqual([]);
   });
+
+  test("the Export panel opens fully above the feed, not clipped by the status bar", async ({
+    page,
+  }) => {
+    // Regression: a status-bar overflow:hidden (added to stop a long message
+    // widening the app) clipped the Export popover — an absolutely-positioned
+    // child lifted up over the feed — to the thin status-bar row, so it vanished.
+    // A clipped element keeps its layout box (so toBeVisible / toBeInViewport /
+    // getBoundingClientRect all still pass), which is why this hit-tests with
+    // elementFromPoint: that DOES respect ancestor overflow-clipping, so a clipped
+    // panel returns the feed element painted behind it, not the panel.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    await page.keyboard.press("Meta+a"); // select the current group → Export shows
+    const exportBtn = statusBar.exportBtn(page);
+    await expect(exportBtn).toBeVisible();
+    await exportBtn.click();
+
+    const panel = page.locator(".export-panel");
+    await expect(panel).toBeVisible();
+
+    // The panel must actually be PAINTED where it sits — hit-test its centre.
+    const panelOnTop = await page.evaluate(() => {
+      const p = document.querySelector(".export-panel");
+      if (!p) return false;
+      const r = p.getBoundingClientRect();
+      const el = document.elementFromPoint(
+        Math.round(r.left + r.width / 2),
+        Math.round(r.top + r.height / 2)
+      );
+      return !!el && p.contains(el);
+    });
+    expect(panelOnTop).toBe(true);
+
+    expect(errors).toEqual([]);
+  });
 });

@@ -82,11 +82,12 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    /* min-width:0 lets this pane shrink so the flexible .status/.thumb-progress
+       inside it can ellipsis instead of widening the app. NOT overflow:hidden —
+       that would clip the Export popover, which is an absolutely-positioned child
+       lifted up over the feed (see SelectionBar's clampToViewport). The message
+       truncation lives on .status itself, so the clip was never needed here. */
     min-width: 0;
-    /* The counts/scope/actions keep their size; the transient message is what
-       must give when the row runs out of room (see .status). Without this the
-       message pushed the whole app wider than the window. */
-    overflow: hidden;
   }
   /* Pushed to the far corner, and allowed to keep its width: the jobs pill is
      small and elides its own text, so the left half is what should give. */

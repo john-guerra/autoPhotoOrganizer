@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.8
+
+- **The Export panel opens again.** It had started rendering clipped/behind the
+  feed — a status-bar overflow rule (added to keep long messages from widening the
+  app) was cutting off the pop-up, which lifts up over the feed from the Export
+  button. The pop-up shows in full again, and long status messages still don't
+  widen the window.
+
 ## 2.15.7
 
 - **You can now remove a parent/ancestor folder that has no photos of its own.**
