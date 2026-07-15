@@ -84,6 +84,7 @@
     DEFAULT_RENDERER_ID,
     SNAPSHOT_ID,
   } from "./lib/groupRenderers.js";
+  import { isPathUnder, isKeyUnder } from "./lib/foldPaths.js";
   import ServerBanner from "./lib/ServerBanner.svelte";
   import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
@@ -2582,28 +2583,9 @@
   // Plain click on a parent aggregates it (collapse/snapshot the parent as one
   // block). Shift+click instead applies the state to every LEAF underneath, so
   // the parent stays open and you see its subgroups as folded rows.
+  // `isPathUnder`/`isKeyUnder` (the shared subtree test the three fold writers
+  // rely on) live in lib/foldPaths.js.
   const MAX_FOLD_LEAVES = 400;
-
-  /** Is `p` (an Array<{dimension,value}>) at or beneath `parent`? */
-  function isPathUnder(p, parent) {
-    if (!Array.isArray(p) || p.length < parent.length) return false;
-    return parent.every(
-      (seg, i) => p[i]?.dimension === seg.dimension && p[i]?.value === seg.value
-    );
-  }
-  /** Same test, but for a snapshotGroupKeys entry (a pathKey string: [[dim,val],…]). */
-  function isKeyUnder(key, parent) {
-    let pairs;
-    try {
-      pairs = JSON.parse(key);
-    } catch {
-      return false;
-    }
-    if (!Array.isArray(pairs) || pairs.length < parent.length) return false;
-    return parent.every(
-      (seg, i) => pairs[i]?.[0] === seg.dimension && pairs[i]?.[1] === seg.value
-    );
-  }
 
   /** Every LEAF group path under `parent` (a path of full groupBy depth). */
   async function collectLeafPaths(parent) {
