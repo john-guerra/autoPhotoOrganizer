@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.12
+
+- **Moved photos are recognised automatically.** After a scan, a file that
+  simply moved on disk is relocated in place with its rating and albums intact;
+  copies that are still backed up elsewhere are never touched. (#1)
+
 ## 2.15.11
 
 - **Groundwork for missing-file review:** the index now remembers when a photo
