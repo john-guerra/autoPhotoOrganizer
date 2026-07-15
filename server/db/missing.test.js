@@ -99,6 +99,28 @@ describe("classify + relocate", () => {
     ).toBeUndefined();
   });
 
+  it("relocateMissing refuses to overwrite a DIFFERENT annotated photo at the destination", () => {
+    const db = getDb();
+    const [a] = upsertScan(db, "/a/trip", 1, [F]); // the vanished photo
+    markStale(db, a.id);
+    // The destination folder already indexes a DIFFERENT photo of the same name,
+    // and it's rated — relocating onto it must not silently delete it.
+    const [c] = upsertScan(db, "/a/dest", 1, [
+      { ...F, size: 999, mtimeMs: 777 },
+    ]);
+    setPhotoRating(db, c.id, 5);
+    expect(() => relocateMissing(db, a.id, "/a/dest/IMG_1.jpg")).toThrow(
+      /already has/
+    );
+    // The annotated photo survives; the vanished row stays stale (not relocated).
+    expect(
+      db.prepare("SELECT id FROM photos WHERE id = ?").get(c.id)
+    ).toBeDefined();
+    expect(
+      db.prepare("SELECT stale FROM photos WHERE id = ?").get(a.id).stale
+    ).toBe(1);
+  });
+
   it("classifies a clean move and auto-relocates it", () => {
     const db = getDb();
     const scanStart = 5000;

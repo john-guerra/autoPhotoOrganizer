@@ -1404,8 +1404,15 @@ export function registerApi(app) {
         .json({ error: `file not found at destination: ${destAbsPath}` });
     }
     const db = getDb();
-    const { relocatedId } = relocateMissing(db, id, destAbsPath);
-    res.json({ relocated: true, id: relocatedId });
+    try {
+      const { relocatedId } = relocateMissing(db, id, destAbsPath);
+      res.json({ relocated: true, id: relocatedId });
+    } catch (e) {
+      if (e.code === "DEST_OCCUPIED") {
+        return res.status(409).json({ error: e.message });
+      }
+      throw e;
+    }
   });
 
   app.post("/api/missing/dismiss", (req, res) => {

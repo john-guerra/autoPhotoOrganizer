@@ -3436,7 +3436,8 @@
         }
         scanJob = job;
       } else {
-        await apiScan(dir.trim(), false);
+        const body = await apiScan(dir.trim(), false);
+        scanJob = { result: body };
       }
       localStorage.setItem(LS_KEY, dir.trim());
       refreshLibrary();

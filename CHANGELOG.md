@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.17
+
+- **Missing-file review is safer and more complete.** A single-folder rescan now
+  reports files that went missing, just like a recursive one; and relocating a
+  missing file into a folder that already holds a different rated photo of the
+  same name is refused instead of silently overwriting it. (#1)
+
 ## 2.15.16
 
 - Test: guard that the missing-files review panel opens and renders. (#1)

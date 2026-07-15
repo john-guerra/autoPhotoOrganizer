@@ -37,15 +37,41 @@ export function sameFileCandidates(db, row) {
  * Repoint a vanished (stale) row to where its file now lives, keeping the row id
  * so every FK (albums/tags/keep_scope/manual_stacks) and on-row field (rating,
  * preferred_cover, no_auto_stack) survives. Deletes any freshly-scanned
- * duplicate already occupying the destination's (folder, filename) slot first.
+ * duplicate already occupying the destination's (folder, filename) slot first —
+ * unless that occupant is a DIFFERENT photo carrying user metadata, in which
+ * case this throws (`err.code === "DEST_OCCUPIED"`) rather than delete it.
  * @param {import("better-sqlite3").Database} db
  * @param {number} staleId
  * @param {string} destAbsPath  absolute path of the file at its new location
  * @returns {{relocatedId:number}}
+ * @throws {Error} with `code: "DEST_OCCUPIED"` when the destination already
+ *   holds a different, user-annotated photo of the same filename
  */
 export function relocateMissing(db, staleId, destAbsPath) {
-  const destFolderId = resolveDestFolderId(db, join(destAbsPath, "..")); // dir
+  const destDir = join(destAbsPath, "..");
   const filename = basename(destAbsPath);
+  // Guard: refuse if the destination already indexes a DIFFERENT photo of the
+  // same name that carries user metadata — silently deleting it (as the repoint
+  // below would) loses that photo's rating/albums/tags. The fresh rating-0
+  // duplicate an auto-relocate targets has no metadata, so it passes.
+  const existingFolder = db
+    .prepare(`SELECT id FROM folders WHERE abs_path = ?`)
+    .get(destDir);
+  if (existingFolder) {
+    const collide = db
+      .prepare(
+        `SELECT id FROM photos WHERE folder_id = ? AND filename = ? AND id != ?`
+      )
+      .get(existingFolder.id, filename, staleId);
+    if (collide && hasUserMetadata(db, collide.id)) {
+      const err = new Error(
+        `the destination already has a different rated photo named "${filename}"`
+      );
+      err.code = "DEST_OCCUPIED";
+      throw err;
+    }
+  }
+  const destFolderId = resolveDestFolderId(db, destDir);
   const tx = db.transaction(() => {
     db.prepare(
       `DELETE FROM photos WHERE folder_id = ? AND filename = ? AND id != ?`
