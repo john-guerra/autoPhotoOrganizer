@@ -79,9 +79,11 @@ electron-builder 25 tree — now **0 vulnerabilities**.
 
 **All dependency modernization (Stage 1a/1b/1c) is complete.**
 
-**Stage 2 IN PROGRESS — runes conversion, leaf-first.** Converted & gated so far
-(40 of 41 components — only App.svelte remains; 865 unit + 60 e2e green after each
-batch):
+**Stage 2 DONE — all 41 components are on runes.** 898 unit + 60 e2e green; build
+compiles with zero warnings; App.svelte live-verified on the 114k library (scroll/
+fling, fold → snapshot render, optimistic rating, filter + feed-narrow + header
+counts). The one App.svelte review bug and the two #124 pre-extractions are written
+up below. Converted & gated in batches (865→898 unit + 60 e2e green after each):
 
 - **Independent leaves:** FolderIcon, GroupStateIcon (pure `$props`), GridControls,
   SidebarModeToggle (`$bindable` — bridges legacy parents' `bind:`), ServerBanner
@@ -179,14 +181,40 @@ batch):
   reproxy that looped in AlbumTimeline); debounced emits fire from `setTimeout`,
   never inside an `$effect`, so no callback-in-effect loop.
 
-**Remaining (1) — App.svelte only:** 5,170 lines, converted last as its own
-careful pass, sequenced against the #124 App.svelte refactor. Everything it consumes
-is now runes; its child-usage syntax has been migrated incrementally cluster by
-cluster (`on:x`→`onx`, named slots→snippets, `bind:` unchanged for `$bindable`
-children), so the remaining work is App's OWN internals (194→0 `export let` is n/a
-here — App has no props; the work is its ~72 `$:` statements, 13 localStorage-persist
-reactives, `<svelte:window>`/`<svelte:component>`, tick() calls, and the sole
-transition).
+**App.svelte (the last one, 5,170 lines) — DONE.** Converted as its own careful
+pass. 72 `$:` → 48 `$derived` + 24 `$effect` (13 localStorage persists + the
+side-effecting `$: if` blocks); no `$:`-closures existed. `let`→`$state`; Set/Map
+states are `$state` (deeply reactive — the `x = x` self-reassigns are now harmless
+no-ops, left in place). `<svelte:window on:*>` → `on*` event props;
+`<svelte:component this={renderer.component}>` → `{@const Renderer =
+renderer.component}` + `<Renderer/>` (the element is deprecated in 5). `items` kept
+deep `$state` (it is mutated IN PLACE by `rate`/`toggleCover`, so `$state.raw` — for
+wholesale reassignment — would break it). The feed-window transactions
+(`withFeedTransaction`/`loadMore`/`feedEpoch`) and the `fetchingBefore`/`fetchingAfter`
+guards were preserved verbatim, every `await tick()` intact.
+
+- **The one review bug — `$effect` vs `$effect.pre` timing (7 e2e failures → 0).**
+  The visible-range trigger `$: if (boxes) { updateVisibleRange(); … }` was first
+  converted to a plain `$effect`, which runs AFTER the DOM updates. A `$effect`
+  WRITES `renderStart`/`renderEnd`, which `visibleItems` (`$derived`) reads and the
+  grid `{#each visibleItems}` indexes into `boxes[i]`. So a fold/filter that
+  shortened `boxes` rendered the OLD range against the NEW, shorter `boxes` →
+  `boxes[i]` undefined → `Cannot read properties of undefined (reading 'y'/'kind')`,
+  crashing every snapshot/fold path. Fix: `$effect.pre`, which runs BEFORE the DOM
+  update — matching the Svelte-4 `$:`'s topological pre-render ordering, so the
+  range is refreshed before `visibleItems` is pulled. **General rule (now in §6):
+  a `$: `/side-effect that WRITES state a template reads synchronously in the SAME
+  flush must become `$effect.pre`, not `$effect`; a plain `$effect` (post-DOM) is
+  only safe when its writes feed the NEXT frame (e.g. bodies that `tick().then(…)`
+  or schedule an rAF).**
+- **Live-verified on the 114k library:** hard scroll/fling (the `$effect.pre`
+  region) — no crash; `Snapshot all` fold → strips render; optimistic rating
+  (★ appears instantly — the in-place `items` mutation); rating filter → feed
+  narrows to the matches with correct header counts. A transient `Failed to fetch`
+  seen only with the WHOLE 114k tree expanded is a pre-existing load-saturation
+  issue (the group tri-state indicator fires 1,000+ `/api/photos/ids` fetches, one
+  per expanded header, past Chrome's ~6-connection cap) — NOT a runes regression:
+  it vanishes with the tree collapsed, and the fetch logic was preserved verbatim.
 
 **App.svelte-vs-#124: chose (a) — decompose first, then convert.** Per §7's lean,
 we extract App.svelte's self-contained logic clusters into pure, unit-tested modules
@@ -204,6 +232,15 @@ file is known for), gated (build + unit + e2e) and committed on its own.
   the reassign ritual in one place. The fetch/status/scope orchestrators
   (`selectMatching`, `selectAllInView`, `bulk*`, group select) stay in App and call
   the helpers.
+- **#124 extraction 2 — fold subtree predicates (`foldPaths.js`).** `isPathUnder` /
+  `isKeyUnder` — the "is X at or beneath this group?" test the THREE fold writers
+  (`setGroupRenderer`, `cycleLeafPaths`, `cycleGroupLeaves`) all rely on to stay
+  consistent — moved into one tested module (+12 unit tests: the dimension+value
+  match, the JSON-key parse, the malformed-key guard). Pure, no reactivity change.
+  The remaining #124 clusters (loupe, stacks, scanning, albums, feed-window) already
+  have their pure logic in `snapshot.js`/`groupRenderers.js`/`folderTree.js` + the
+  consolidated feed-transaction guards, so the pure-extraction well was dry after
+  these two — the rest of the shrink is App's own runes conversion above.
 
 **Working rule that's held:** convert each cluster atomically (leaf child + every
 parent usage site in the same commit) so the app compiles and all 60 e2e stay green
@@ -455,6 +492,19 @@ by default in 5).
   Binding element refs into a collection (AlbumsView's `dividerEls`, `nameInputs`)
   needs the container to be `$state([])`, even when the array is only ever read
   imperatively (in handlers). Plain `let` compiles but warns at runtime.
+- **`$effect` runs AFTER the DOM; `$effect.pre` runs BEFORE it — a side-effecting
+  `$:` that writes state the template reads IN THE SAME FLUSH must become
+  `$effect.pre` (this bit App.svelte, 7 e2e failures).** Svelte-4 `$:` blocks run in
+  dependency order BEFORE render. App's `$: if (boxes) { updateVisibleRange() }`
+  writes `renderStart`/`renderEnd`, which the `$derived` `visibleItems` reads and the
+  grid `{#each}` indexes into `boxes[i]`. Converted to a plain `$effect` (post-DOM),
+  a fold/filter that shortened `boxes` rendered the OLD range against the NEW,
+  shorter `boxes` → `boxes[i]` undefined → `reading 'y'/'kind'` crash. `$effect.pre`
+  restores the pre-render timing. **Rule: `$effect` (post-DOM) is only safe when its
+  writes feed the NEXT frame — a body that `tick().then(…)` / schedules an rAF
+  (App's `focusPending`, jump/expand-pin reseeds are all fine as plain `$effect`).
+  If the write feeds a `$derived`/template read in the current render, use
+  `$effect.pre`.**
 - **A callback prop fired inside an `$effect` re-enters SYNCHRONOUSLY — Svelte 4's
   `dispatch` did not. This bit Thumb (the hot-path feed tile) and hung the whole
   feed.** Thumb's load effect read `src` AND, via `armAttempt`, called
