@@ -1,15 +1,13 @@
 <script>
-  import { createEventDispatcher } from "svelte";
   import { applyRatingClick } from "./filterSpec.js";
 
-  export let filter;
-  const dispatch = createEventDispatcher();
-  let hover = 0;
-  $: min = filter?.minRating ?? 0;
+  let { filter, onchange } = $props();
+  let hover = $state(0);
+  let min = $derived(filter?.minRating ?? 0);
   const STARS = [1, 2, 3, 4, 5];
 
   function click(k) {
-    dispatch("change", applyRatingClick(filter, k));
+    onchange?.(applyRatingClick(filter, k));
   }
 </script>
 
@@ -20,7 +18,7 @@
   class="rating"
   role="group"
   aria-label="Filter by minimum rating"
-  on:mouseleave={() => (hover = 0)}
+  onmouseleave={() => (hover = 0)}
 >
   <span class="ge" class:active={min > 0} aria-hidden="true">≥</span>
   <div class="stars">
@@ -30,8 +28,8 @@
         class="star"
         class:on={(hover || min) >= k}
         class:preview={hover >= k && hover !== min}
-        on:mouseenter={() => (hover = k)}
-        on:click={() => click(k)}
+        onmouseenter={() => (hover = k)}
+        onclick={() => click(k)}
         aria-label={`filter: ${k} star${k > 1 ? "s" : ""} or more`}
         aria-pressed={min >= k}>★</button
       >

@@ -32,7 +32,6 @@
    * sampled counts, view/focus markers) and every one is App's state. Threading
    * them through here would make this component about plumbing instead of layout.
    */
-  import { createEventDispatcher } from "svelte";
   import SourceControls from "./SourceControls.svelte";
   import FilterControls from "./FilterControls.svelte";
   import GroupByControl from "./GroupByControl.svelte";
@@ -43,44 +42,65 @@
   import ToolGroup from "./ToolGroup.svelte";
   import ToolbarRow from "./ToolbarRow.svelte";
 
-  export let appVersion = "";
+  let {
+    appVersion = "",
 
-  // Library (the ＋ menu + the add-folder popover).
-  export let scanning = false;
-  export let hasNativePicker = false;
-  export let alreadyIndexed = false;
-  export let subdirs = [];
-  export let subdirsLoading = false;
-  export let subdirsError = "";
-  export let subdirSelection = new Set();
-  export let addFolderOpen = false;
-  export let dir = "";
-  export let recursiveScan = true;
-  export let focusAfterAdd = false;
-  export let subdirsOpen = false;
+    // Library (the ＋ menu + the add-folder popover).
+    scanning = false,
+    hasNativePicker = false,
+    alreadyIndexed = false,
+    subdirs = [],
+    subdirsLoading = false,
+    subdirsError = "",
+    subdirSelection = new Set(),
+    addFolderOpen = $bindable(false),
+    dir = $bindable(""),
+    recursiveScan = $bindable(true),
+    focusAfterAdd = $bindable(false),
+    subdirsOpen = $bindable(false),
 
-  // Filter.
-  export let filter;
-  export let filterMode = "display";
+    // Filter.
+    filter,
+    filterMode = "display",
 
-  // Group.
-  export let groupBy = ["folder"];
-  export let sidebarMode = "tree";
+    // Group.
+    groupBy = ["folder"],
+    sidebarMode = $bindable("tree"),
 
-  // View.
-  export let cyclingAll = false;
-  export let globalViewMode = "full";
-  export let albumMode = false;
-  export let detectingAlbums = false;
+    // View.
+    cyclingAll = false,
+    globalViewMode = "full",
+    albumMode = $bindable(false),
+    detectingAlbums = false,
 
-  // Size / Sort.
-  export let zoom = 2;
-  export let zoomMax = 4;
-  export let burstEnabled = true;
-  export let burstGapMs = 3000;
-  export let sort;
+    // Size / Sort.
+    zoom = $bindable(2),
+    zoomMax = 4,
+    burstEnabled = $bindable(true),
+    burstGapMs = $bindable(3000),
+    sort,
 
-  const dispatch = createEventDispatcher();
+    // Callbacks (App owns the handlers).
+    onchoosefolder,
+    onsubmit,
+    onmanagelibrary,
+    onloadsubdirs,
+    ontoggledir,
+    onselectalldirs,
+    onselectnodirs,
+    onfiltermodechange,
+    onfilterchange,
+    ongroupbychange,
+    oncycleall,
+    onrevealcurrent,
+    ondetectalbums,
+    onsortchange,
+    onhelp,
+
+    // Slots forwarded from App.
+    timeline,
+    manageLibrary,
+  } = $props();
 </script>
 
 <header class="topbar">
@@ -106,26 +126,28 @@
       bind:recursiveScan
       bind:focusAfterAdd
       bind:subdirsOpen
-      on:choosefolder
-      on:submit
-      on:managelibrary
-      on:loadsubdirs
-      on:toggledir
-      on:selectalldirs
-      on:selectnodirs
+      {onchoosefolder}
+      {onsubmit}
+      {onmanagelibrary}
+      {onloadsubdirs}
+      {ontoggledir}
+      {onselectalldirs}
+      {onselectnodirs}
     />
 
-    <FilterControls {filter} {filterMode} on:filtermodechange on:filterchange>
-      <svelte:fragment slot="timeline">
-        <slot name="timeline" />
-      </svelte:fragment>
-    </FilterControls>
+    <FilterControls
+      {filter}
+      {filterMode}
+      {onfiltermodechange}
+      {onfilterchange}
+      {timeline}
+    />
 
     <button
       class="help-btn"
       title="Keyboard shortcuts (?)"
       aria-label="Keyboard shortcuts"
-      on:click={() => dispatch("help")}
+      onclick={() => onhelp?.()}
     >
       ?
     </button>
@@ -141,7 +163,7 @@
            that alignment stopped paying for itself: it just left ~200px of empty
            box, and the border already says what the group is. -->
       <SidebarModeToggle bind:sidebarMode />
-      <GroupByControl {groupBy} on:groupbychange />
+      <GroupByControl {groupBy} {ongroupbychange} />
     </ToolGroup>
 
     <!-- ONE group, not three. View, Size and Sort are all the same question asked
@@ -155,17 +177,17 @@
         {globalViewMode}
         bind:albumMode
         {detectingAlbums}
-        on:cycleall
-        on:revealcurrent
-        on:detectalbums
+        {oncycleall}
+        {onrevealcurrent}
+        {ondetectalbums}
       />
       <GridControls bind:zoom {zoomMax} bind:burstEnabled bind:burstGapMs />
       <div class="spacer"></div>
-      <SortControl {sort} on:sortchange />
+      <SortControl {sort} {onsortchange} />
     </ToolGroup>
   </ToolbarRow>
 
-  <slot name="manage-library" />
+  {@render manageLibrary?.()}
 </header>
 
 <style>

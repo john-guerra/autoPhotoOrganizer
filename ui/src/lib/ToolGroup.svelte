@@ -23,7 +23,7 @@
    * Nothing is unmounted and nothing is re-parented, so no control loses its state
    * and the shrink rules below go on applying inside the panel.
    */
-  import { getContext, onDestroy, tick } from "svelte";
+  import { getContext, tick } from "svelte";
   import {
     computePosition,
     autoUpdate,
@@ -32,25 +32,29 @@
     shift,
   } from "@floating-ui/dom";
 
-  export let label;
-  /** Lit border + legend: this group is currently DOING something (e.g. a filter
-   * is hiding photos). The answer to "why can't I see them?" should be visible
-   * from across the room — including when the group has folded away, which is
-   * exactly when the control doing it is no longer on screen. */
-  export let active = false;
-  /** "" | "filters" | "view" — see the layout rules below. */
-  export let flavor = "";
-  /** Identifies this group to ToolbarRow's fold order. A group with no id, or one
-   *  the row doesn't list, never folds. */
-  export let id = "";
+  let {
+    label,
+    /** Lit border + legend: this group is currently DOING something (e.g. a filter
+     * is hiding photos). The answer to "why can't I see them?" should be visible
+     * from across the room — including when the group has folded away, which is
+     * exactly when the control doing it is no longer on screen. */
+    active = false,
+    /** "" | "filters" | "view" — see the layout rules below. */
+    flavor = "",
+    /** Identifies this group to ToolbarRow's fold order. A group with no id, or one
+     *  the row doesn't list, never folds. */
+    id = "",
+    legendAction,
+    children,
+  } = $props();
 
   const foldedStore = getContext("toolbarOverflow")?.folded;
 
-  $: folded = Boolean(id) && Boolean($foldedStore?.has(id));
+  let folded = $derived(Boolean(id) && Boolean($foldedStore?.has(id)));
 
-  let open = false;
-  let triggerEl;
-  let panelEl;
+  let open = $state(false);
+  let triggerEl = $state();
+  let panelEl = $state();
   let stopAutoUpdate = null;
 
   /**
@@ -89,9 +93,11 @@
 
   // The row unfolds as the window widens; a panel still open then would be a
   // floating duplicate of controls that are already back in the toolbar.
-  $: if (!folded && open) close();
+  $effect(() => {
+    if (!folded && open) close();
+  });
 
-  onDestroy(() => stopAutoUpdate?.());
+  $effect(() => () => stopAutoUpdate?.());
 
   async function place() {
     const { x, y } = await computePosition(triggerEl, panelEl, {
@@ -110,8 +116,8 @@
 </script>
 
 <svelte:window
-  on:click={onWindowClick}
-  on:keydown={(e) => {
+  onclick={onWindowClick}
+  onkeydown={(e) => {
     if (e.key === "Escape" && open) close();
   }}
 />
@@ -129,7 +135,7 @@
       aria-expanded={open}
       aria-haspopup="true"
       title={`${label} — folded into a menu because the window is narrow`}
-      on:click={toggle}
+      onclick={toggle}
     >
       {label}
       <span class="chev" aria-hidden="true">▾</span>
@@ -149,9 +155,9 @@
          the row of controls. -->
     <legend>
       {label}
-      <slot name="legend-action" />
+      {@render legendAction?.()}
     </legend>
-    <slot />
+    {@render children?.()}
   </fieldset>
 </div>
 

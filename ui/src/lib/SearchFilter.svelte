@@ -12,26 +12,27 @@
    * Typing is debounced: every keystroke would otherwise re-query the feed, the
    * counts and the tree for a 114k library.
    */
-  import { createEventDispatcher, onDestroy } from "svelte";
+  import { untrack } from "svelte";
 
-  const dispatch = createEventDispatcher();
-
-  export let filter;
+  let { filter, onchange } = $props();
 
   const DEBOUNCE_MS = 200;
 
-  let value = filter?.text ?? "";
+  let value = $state(untrack(() => filter?.text ?? ""));
   let timer = null;
   let inputEl;
 
   // Follow the spec when it is changed from OUTSIDE (Clear filters, a reset) —
   // but never fight the user mid-keystroke.
-  $: if ((filter?.text ?? "") !== value && document.activeElement !== inputEl) {
-    value = filter?.text ?? "";
-  }
+  $effect(() => {
+    const text = filter?.text ?? "";
+    if (text !== value && document.activeElement !== inputEl) {
+      value = text;
+    }
+  });
 
   function emit(text) {
-    dispatch("change", { ...filter, text });
+    onchange?.({ ...filter, text });
   }
 
   function onInput() {
@@ -57,7 +58,7 @@
     emit("");
   }
 
-  onDestroy(() => clearTimeout(timer));
+  $effect(() => () => clearTimeout(timer));
 </script>
 
 <div class="search" class:active={value !== ""}>
@@ -80,8 +81,8 @@
     aria-label="Search by file name or folder"
     bind:value
     bind:this={inputEl}
-    on:input={onInput}
-    on:keydown={onKeydown}
+    oninput={onInput}
+    onkeydown={onKeydown}
     spellcheck="false"
   />
   {#if value}
@@ -89,7 +90,7 @@
       class="clear"
       title="Clear the search"
       aria-label="Clear the search"
-      on:click={clear}>×</button
+      onclick={clear}>×</button
     >
   {/if}
 </div>

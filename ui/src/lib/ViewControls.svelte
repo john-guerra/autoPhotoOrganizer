@@ -7,15 +7,17 @@
    * The Tree/Fisheye toggle used to live here; it went to SidebarModeToggle,
    * directly above the column it switches.
    */
-  import { createEventDispatcher } from "svelte";
   import { cycleAllLabel } from "./groupRenderers.js";
 
-  export let cyclingAll = false;
-  export let globalViewMode = "full";
-  export let albumMode = false;
-  export let detectingAlbums = false;
-
-  const dispatch = createEventDispatcher();
+  let {
+    cyclingAll = false,
+    globalViewMode = "full",
+    albumMode = $bindable(false),
+    detectingAlbums = false,
+    oncycleall,
+    onrevealcurrent,
+    ondetectalbums,
+  } = $props();
 </script>
 
 <div class="cluster view">
@@ -26,7 +28,7 @@
        pressing it was the thing you were trying to decide about. -->
   <button
     class="reveal-btn cycle-all"
-    on:click={() => dispatch("cycleall")}
+    onclick={() => oncycleall?.()}
     disabled={cyclingAll}
     title="Cycle every group: full view → snapshot all → collapse all"
   >
@@ -38,7 +40,7 @@
        is lost but the pixels. -->
   <button
     class="reveal-btn icon-only"
-    on:click={() => dispatch("revealcurrent")}
+    onclick={() => onrevealcurrent?.()}
     title="Locate — reveal the current photo's folder in the tree"
     aria-label="Locate the current photo in the tree"
   >
@@ -47,8 +49,7 @@
   <button
     class="reveal-btn"
     class:active={albumMode}
-    on:click={() =>
-      albumMode ? (albumMode = false) : dispatch("detectalbums")}
+    onclick={() => (albumMode ? (albumMode = false) : ondetectalbums?.())}
     disabled={detectingAlbums}
     title="Group the photos you're viewing into albums by the pauses between shots — a long gap starts a new album. Preview, rename, then save them into folders (photos and videos)."
   >

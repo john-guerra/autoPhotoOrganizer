@@ -23,7 +23,6 @@
    * Presentational — it renders the current filter/filterMode and emits an event
    * for every change; App owns the state and the feed rebuild.
    */
-  import { createEventDispatcher } from "svelte";
   import RatingFilter from "./RatingFilter.svelte";
   import SearchFilter from "./SearchFilter.svelte";
   import OrientationFilter from "./OrientationFilter.svelte";
@@ -31,10 +30,13 @@
   import { DEFAULT_FILTER, isActive as filterIsActive } from "./filterSpec.js";
   import ToolGroup from "./ToolGroup.svelte";
 
-  export let filter = { ...DEFAULT_FILTER };
-  export let filterMode = "display";
-
-  const dispatch = createEventDispatcher();
+  let {
+    filter = { ...DEFAULT_FILTER },
+    filterMode = "display",
+    onfiltermodechange,
+    onfilterchange,
+    timeline,
+  } = $props();
 </script>
 
 <ToolGroup
@@ -47,13 +49,13 @@
        undoes all of them at once. On the legend it is where you are already
        looking when you ask "why can't I see my photos?" — and it only exists when
        there is something to clear, so it never reads as a dead link. -->
-  <svelte:fragment slot="legend-action">
+  {#snippet legendAction()}
     {#if filterIsActive(filter)}
       <button
         class="clear-link"
         title="Clear every filter"
-        on:click={() =>
-          dispatch("filterchange", {
+        onclick={() =>
+          onfilterchange?.({
             ...DEFAULT_FILTER,
             dateAttr: filter.dateAttr,
           })}
@@ -61,7 +63,7 @@
         Clear
       </button>
     {/if}
-  </svelte:fragment>
+  {/snippet}
 
   <div class="seg-toggle icons" role="group" aria-label="Filter mode">
     <button
@@ -70,7 +72,7 @@
       title="Display: the filter narrows what's shown"
       aria-label="Display mode — filter narrows the view"
       aria-pressed={filterMode === "display"}
-      on:click={() => dispatch("filtermodechange", "display")}
+      onclick={() => onfiltermodechange?.("display")}
     >
       <!-- eye: what you see -->
       <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -89,7 +91,7 @@
       title="Select: matches join the selection instead of narrowing"
       aria-label="Select mode — filter adds matches to the selection"
       aria-pressed={filterMode === "select"}
-      on:click={() => dispatch("filtermodechange", "select")}
+      onclick={() => onfiltermodechange?.("select")}
     >
       <!-- check-square: adds to selection -->
       <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -115,30 +117,21 @@
     </button>
   </div>
 
-  <SearchFilter
-    {filter}
-    on:change={(e) => dispatch("filterchange", e.detail)}
-  />
-  <RatingFilter
-    {filter}
-    on:change={(e) => dispatch("filterchange", e.detail)}
-  />
-  <OrientationFilter
-    {filter}
-    on:change={(e) => dispatch("filterchange", e.detail)}
-  />
-  <KindFilter {filter} on:change={(e) => dispatch("filterchange", e.detail)} />
+  <SearchFilter {filter} onchange={(v) => onfilterchange?.(v)} />
+  <RatingFilter {filter} onchange={(v) => onfilterchange?.(v)} />
+  <OrientationFilter {filter} onchange={(v) => onfilterchange?.(v)} />
+  <KindFilter {filter} onchange={(v) => onfilterchange?.(v)} />
 
   <!-- The timeline: a filter like the rest, and the one that can use the width. -->
-  <slot name="timeline" />
+  {@render timeline?.()}
 
   {#if filterIsActive(filter)}
     <button
       class="clear-filter"
       title="Clear filters"
       aria-label="Clear filters"
-      on:click={() =>
-        dispatch("filterchange", {
+      onclick={() =>
+        onfilterchange?.({
           ...DEFAULT_FILTER,
           dateAttr: filter.dateAttr,
         })}

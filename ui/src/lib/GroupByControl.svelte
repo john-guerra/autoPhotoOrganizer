@@ -9,13 +9,10 @@
    *
    * Presentational: renders the current groupBy and emits `groupbychange`.
    */
-  import { createEventDispatcher } from "svelte";
   import { ALL_DIMENSIONS } from "./dimensions.js";
   import MultiAutoSelect from "multi-auto-select";
 
-  export let groupBy = ["folder"];
-
-  const dispatch = createEventDispatcher();
+  let { groupBy = ["folder"], ongroupbychange } = $props();
 
   /** Svelte action: mounts the real MultiAutoSelect DOM widget into the node,
    * seeds it with the current `groupBy`, and emits `groupbychange` when the
@@ -29,9 +26,7 @@
       sortable: true,
       layout: "compact",
     });
-    widget.addEventListener("input", () =>
-      dispatch("groupbychange", widget.value)
-    );
+    widget.addEventListener("input", () => ongroupbychange?.(widget.value));
     node.appendChild(widget);
     return {
       destroy() {

@@ -8,21 +8,24 @@
    * toolbarOverflow.js for why it is a measure-fold-remeasure loop and not a sum
    * of widths (two of these groups are elastic, so their width is a range).
    */
-  import { setContext, onMount, tick } from "svelte";
+  import { setContext, tick } from "svelte";
   import { writable } from "svelte/store";
   import { stepOverflow } from "./toolbarOverflow.js";
 
-  /** Group ids, FIRST to fold … LAST to fold. A group whose id isn't here never
-   *  folds — the ＋ menu is the only door into the library, and a door you have to
-   *  open a dropdown to find is a door you can't find. */
-  export let order = [];
-  /** Bump/change to re-measure when the CONTENT changed rather than the box: a
-   *  third grouping pill makes the row overflow without changing its size, so no
-   *  ResizeObserver fires. */
-  export let watch = null;
-  /** "primary" | "secondary" — names the row for tests and for anyone reading the
-   *  DOM. It carries no styling of its own. */
-  export let variant = "";
+  let {
+    /** Group ids, FIRST to fold … LAST to fold. A group whose id isn't here never
+     *  folds — the ＋ menu is the only door into the library, and a door you have to
+     *  open a dropdown to find is a door you can't find. */
+    order = [],
+    /** Bump/change to re-measure when the CONTENT changed rather than the box: a
+     *  third grouping pill makes the row overflow without changing its size, so no
+     *  ResizeObserver fires. */
+    watch = null,
+    /** "primary" | "secondary" — names the row for tests and for anyone reading the
+     *  DOM. It carries no styling of its own. */
+    variant = "",
+    children,
+  } = $props();
 
   const folded = writable(new Set());
   setContext("toolbarOverflow", { folded });
@@ -70,9 +73,13 @@
     settling = false;
   }
 
-  $: (watch, order, schedule());
+  $effect(() => {
+    void watch;
+    void order;
+    schedule();
+  });
 
-  onMount(() => {
+  $effect(() => {
     const ro = new ResizeObserver(schedule);
     ro.observe(rowEl);
     return () => {
@@ -83,7 +90,7 @@
 </script>
 
 <div class="topbar-row {variant}" bind:this={rowEl}>
-  <slot />
+  {@render children?.()}
 </div>
 
 <style>

@@ -5,12 +5,9 @@
    * control, rather than another boxed widget competing with the buttons beside
    * it. It sits at the far right of the View group, the last question you ask.
    */
-  import { createEventDispatcher } from "svelte";
   import { SORT_ATTRS, SORT_LABELS } from "./dimensions.js";
 
-  export let sort = { by: "date_taken", dir: "asc" };
-
-  const dispatch = createEventDispatcher();
+  let { sort = { by: "date_taken", dir: "asc" }, onsortchange } = $props();
 </script>
 
 <div class="sort-control" title="Sort photos">
@@ -20,7 +17,7 @@
       class="sort-by"
       aria-label="Sort by"
       value={sort.by}
-      on:change={(e) => dispatch("sortchange", { ...sort, by: e.target.value })}
+      onchange={(e) => onsortchange?.({ ...sort, by: e.target.value })}
     >
       {#each SORT_ATTRS as key}
         <option value={key}>{SORT_LABELS[key]}</option>
@@ -30,8 +27,8 @@
       class="sort-dir"
       title="Toggle ascending / descending"
       aria-label="Toggle sort direction"
-      on:click={() =>
-        dispatch("sortchange", {
+      onclick={() =>
+        onsortchange?.({
           ...sort,
           dir: sort.dir === "asc" ? "desc" : "asc",
         })}

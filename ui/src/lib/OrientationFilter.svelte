@@ -1,18 +1,16 @@
 <script>
-  import { createEventDispatcher } from "svelte";
   import { ORIENTATIONS, toggleOrientation } from "./filterSpec.js";
 
-  export let filter;
-  const dispatch = createEventDispatcher();
+  let { filter, onchange } = $props();
   const LABELS = {
     landscape: "Landscape",
     portrait: "Portrait",
     square: "Square",
   };
-  $: on = new Set(filter?.orientations ?? []);
+  let on = $derived(new Set(filter?.orientations ?? []));
 
   function toggle(o) {
-    dispatch("change", toggleOrientation(filter, o));
+    onchange?.(toggleOrientation(filter, o));
   }
 </script>
 
@@ -22,7 +20,7 @@
       type="button"
       class="shape {o}"
       class:on={on.has(o)}
-      on:click={() => toggle(o)}
+      onclick={() => toggle(o)}
       title={LABELS[o]}
       aria-label={LABELS[o]}
       aria-pressed={on.has(o)}><span class="glyph"></span></button

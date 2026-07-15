@@ -12,7 +12,6 @@
    * `value` change (e.g. a programmatic clear) is pushed to the widget silently
    * so it never loops back through `input`.
    */
-  import { createEventDispatcher } from "svelte";
   import { scaleTime, timeFormat } from "d3";
   import { zoomableAxisInput } from "@john-guerra/d3-zoomable-axis/input";
 
@@ -34,26 +33,43 @@
     size: 30, // scent height (px)
   };
 
-  export let min = null; // epoch ms, domain start (null = no data)
-  export let max = null; // epoch ms, domain end
-  export let times = []; // sampled timestamps (ms) for the KDE
-  /** True when `times` is a DOWN-SAMPLE of the working set rather than all of it
-   *  (the server caps it at 12k). Above that cap the curve you brush to find trip
-   *  boundaries can contain sampling artifacts that look exactly like real gaps —
-   *  in the one view that drives the album-boundary decision. A chart that is a
-   *  sample has to say so, so this is disclosed on the axis, not hidden in a
-   *  tooltip. */
-  export let sampled = false;
-  export let total = 0; // photos the density is drawn FROM (the working set)
-  export let value = null; // [fromMs|null, toMs|null] current brush, or null
-  export let viewTime = null; // epoch ms of the first photo on screen ("current view")
-  export let focusTime = null; // epoch ms of the focused/selected photo ("focused photo")
+  /**
+   * @typedef {Object} Props
+   * @property {number|null} [min] epoch ms, domain start (null = no data)
+   * @property {number|null} [max] epoch ms, domain end
+   * @property {number[]} [times] sampled timestamps (ms) for the KDE
+   * @property {boolean} [sampled] True when `times` is a DOWN-SAMPLE of the working
+   *   set rather than all of it (the server caps it at 12k). Above that cap the curve
+   *   you brush to find trip boundaries can contain sampling artifacts that look
+   *   exactly like real gaps — in the one view that drives the album-boundary
+   *   decision. A chart that is a sample has to say so, so this is disclosed on the
+   *   axis, not hidden in a tooltip.
+   * @property {number} [total] photos the density is drawn FROM (the working set)
+   * @property {Array|null} [value] [fromMs|null, toMs|null] current brush, or null
+   * @property {number|null} [viewTime] epoch ms of the first photo on screen ("current view")
+   * @property {number|null} [focusTime] epoch ms of the focused/selected photo ("focused photo")
+   * @property {(range: number[]) => void} [onrange]
+   * @property {() => void} [onclear]
+   */
 
-  const dispatch = createEventDispatcher();
+  /** @type {Props} */
+  let {
+    min = null,
+    max = null,
+    times = [],
+    sampled = false,
+    total = 0,
+    value = null,
+    viewTime = null,
+    focusTime = null,
+    onrange,
+    onclear,
+  } = $props();
+
   const AXIS_MARGIN = 22; // zoomableAxisInput's default side margin (px each side)
   const fmt = timeFormat("%b %e, %Y");
 
-  let width = 0; // measured via bind:clientWidth (SnapshotStrip lesson)
+  let width = $state(0); // measured via bind:clientWidth (SnapshotStrip lesson)
 
   // Map a data-space time to the axis pixel x. Uses the same geometry the widget
   // mounts with (AXIS_MARGIN + length), so markers line up with the axis by
@@ -68,29 +84,32 @@
         Math.max(60, width - AXIS_MARGIN * 2)
     );
   }
-  $: viewPx = pxForTime(viewTime);
-  $: focusPx = pxForTime(focusTime);
+  let viewPx = $derived(pxForTime(viewTime));
+  let focusPx = $derived(pxForTime(focusTime));
 
   // When the focused photo IS the top of the viewport the two anchors sit on top of
   // each other; collapse to just the amber focus marker so the caps don't overlap
   // into mush. As you scroll away, `viewPx` diverges and the eye marker reappears —
   // which is exactly the "two markers" the split is for.
   // TUNABLE: the coincidence threshold (px) and which marker wins on overlap.
-  $: markersCoincide =
-    viewPx != null && focusPx != null && Math.abs(viewPx - focusPx) < 7;
-  $: showViewMarker = viewPx != null && !markersCoincide;
-  $: showFocusMarker = focusPx != null;
+  let markersCoincide = $derived(
+    viewPx != null && focusPx != null && Math.abs(viewPx - focusPx) < 7
+  );
+  let showViewMarker = $derived(viewPx != null && !markersCoincide);
+  let showFocusMarker = $derived(focusPx != null);
 
   // Tooltips carry the anchor's date so hovering a marker says both what it is and
   // when it points to.
-  $: viewLabel =
+  let viewLabel = $derived(
     viewTime == null
       ? "Current view"
-      : `Current view — ${fmt(new Date(viewTime))}`;
-  $: focusLabel =
+      : `Current view — ${fmt(new Date(viewTime))}`
+  );
+  let focusLabel = $derived(
     focusTime == null
       ? "Focused photo"
-      : `Focused photo — ${fmt(new Date(focusTime))}`;
+      : `Focused photo — ${fmt(new Date(focusTime))}`
+  );
 
   // Resolve the brush endpoints from `value`, filling open bounds with the
   // domain edges. A null/empty value means "no time filter" → full span.
@@ -112,8 +131,8 @@
         const span = last.max - last.min || 1;
         const covered =
           lo - last.min <= span * 0.004 && last.max - hi <= span * 0.004;
-        if (covered) dispatch("clear");
-        else dispatch("range", [Math.round(lo), Math.round(hi)]);
+        if (covered) onclear?.();
+        else onrange?.([Math.round(lo), Math.round(hi)]);
       }, 120);
     };
 

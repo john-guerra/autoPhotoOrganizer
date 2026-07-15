@@ -13,12 +13,40 @@
    * makes this work with the drive unmounted, since the index is an offline
    * mirror), "Rescan" when it's already indexed and they don't.
    */
-  import { createEventDispatcher } from "svelte";
   import { clickOutside, onEscape } from "./actions.js";
   import { subtreeState } from "./subfolderSelection.js";
 
+  let {
+    scanning = false,
+    hasNativePicker = false,
+
+    addFolderOpen = $bindable(false),
+    dir = $bindable(""),
+    recursiveScan = $bindable(true),
+    focusAfterAdd = $bindable(false),
+    /** True when `dir` is already a library member (App computes it). */
+    alreadyIndexed = false,
+
+    // The subfolder checklist. Collapsed by default: the common case (import
+    // everything) stays one click and never waits on a directory walk of a big
+    // card. App owns the state and the fetch; this renders it.
+    subdirsOpen = $bindable(false),
+    subdirs = [],
+    subdirsLoading = false,
+    subdirsError = "",
+    subdirSelection = new Set(),
+
+    onmanagelibrary,
+    onchoosefolder,
+    onsubmit,
+    onloadsubdirs,
+    ontoggledir,
+    onselectalldirs,
+    onselectnodirs,
+  } = $props();
+
   /** The ＋ menu (Add folder… / Manage library). Both doors, one handle. */
-  let menuOpen = false;
+  let menuOpen = $state(false);
   /** Escape / a click outside must close whichever of the two is showing —
    * closing only the panel left the menu hanging over the grid. */
   function closeAll() {
@@ -26,39 +54,22 @@
     addFolderOpen = false;
   }
 
-  export let scanning = false;
-  export let hasNativePicker = false;
-
-  export let addFolderOpen = false;
-  export let dir = "";
-  export let recursiveScan = true;
-  export let focusAfterAdd = false;
-  /** True when `dir` is already a library member (App computes it). */
-  export let alreadyIndexed = false;
-
-  // The subfolder checklist. Collapsed by default: the common case (import
-  // everything) stays one click and never waits on a directory walk of a big
-  // card. App owns the state and the fetch; this renders it.
-  export let subdirsOpen = false;
-  export let subdirs = [];
-  export let subdirsLoading = false;
-  export let subdirsError = "";
-  export let subdirSelection = new Set();
-
-  const dispatch = createEventDispatcher();
-
   // A count only once a subset is actually in play — before the picker is
   // expanded nothing has been walked, so there's no honest number to show.
-  $: chosenCount = subdirsOpen && subdirs.length ? subdirSelection.size : null;
-  $: emptySelection = chosenCount === 0;
-  $: verb = !alreadyIndexed
-    ? chosenCount === null
-      ? "Add & scan"
-      : `Add & scan ${chosenCount} folder${chosenCount === 1 ? "" : "s"}`
-    : focusAfterAdd
-      ? "Open"
-      : "Rescan";
-  $: busyVerb = verb === "Open" ? "Opening…" : "Scanning…";
+  let chosenCount = $derived(
+    subdirsOpen && subdirs.length ? subdirSelection.size : null
+  );
+  let emptySelection = $derived(chosenCount === 0);
+  let verb = $derived(
+    !alreadyIndexed
+      ? chosenCount === null
+        ? "Add & scan"
+        : `Add & scan ${chosenCount} folder${chosenCount === 1 ? "" : "s"}`
+      : focusAfterAdd
+        ? "Open"
+        : "Rescan"
+  );
+  let busyVerb = $derived(verb === "Open" ? "Opening…" : "Scanning…");
 </script>
 
 <!-- No label, no border. A ＋ needs no legend telling you it adds things, and a
@@ -69,7 +80,7 @@
   <div class="add-folder" use:clickOutside={closeAll} use:onEscape={closeAll}>
     <button
       class="add-toggle"
-      on:click={() => (menuOpen = !menuOpen)}
+      onclick={() => (menuOpen = !menuOpen)}
       title="Add a folder, or manage the ones you already have"
       aria-label="Library"
       aria-haspopup="menu"
@@ -86,7 +97,7 @@
       <div class="source-menu" role="menu">
         <button
           role="menuitem"
-          on:click={() => {
+          onclick={() => {
             menuOpen = false;
             addFolderOpen = true;
           }}
@@ -95,9 +106,9 @@
         </button>
         <button
           role="menuitem"
-          on:click={() => {
+          onclick={() => {
             menuOpen = false;
-            dispatch("managelibrary");
+            onmanagelibrary?.();
           }}
         >
           Manage library
@@ -111,12 +122,12 @@
           class="popover-close"
           title="Close"
           aria-label="Close add folder"
-          on:click={() => (addFolderOpen = false)}>✕</button
+          onclick={() => (addFolderOpen = false)}>✕</button
         >
         {#if hasNativePicker}
           <button
             class="choose-folder primary"
-            on:click={() => dispatch("choosefolder")}
+            onclick={() => onchoosefolder?.()}
             disabled={scanning}
           >
             Choose folder…
@@ -129,13 +140,13 @@
             type="text"
             placeholder="/path/to/photos"
             bind:value={dir}
-            on:keydown={(e) =>
-              e.key === "Enter" && !emptySelection && dispatch("submit")}
+            onkeydown={(e) =>
+              e.key === "Enter" && !emptySelection && onsubmit?.()}
             spellcheck="false"
           />
           <button
             class="scan"
-            on:click={() => dispatch("submit")}
+            onclick={() => onsubmit?.()}
             disabled={scanning || !dir.trim() || emptySelection}
           >
             {scanning ? busyVerb : verb}
@@ -153,9 +164,9 @@
             <button
               class="link"
               disabled={!dir.trim()}
-              on:click={() => {
+              onclick={() => {
                 subdirsOpen = true;
-                dispatch("loadsubdirs");
+                onloadsubdirs?.();
               }}
             >
               Choose subfolders…
@@ -179,7 +190,7 @@
                       type="checkbox"
                       checked={state === "all"}
                       indeterminate={state === "some"}
-                      on:change={() => dispatch("toggledir", { path: d.path })}
+                      onchange={() => ontoggledir?.({ path: d.path })}
                     />
                     <span class="name"
                       >{d.relPath.split("/").pop() || "(this folder)"}</span
@@ -190,10 +201,10 @@
               {/each}
             </ul>
             <div class="subdir-actions">
-              <button class="link" on:click={() => dispatch("selectalldirs")}
+              <button class="link" onclick={() => onselectalldirs?.()}
                 >All</button
               >
-              <button class="link" on:click={() => dispatch("selectnodirs")}
+              <button class="link" onclick={() => onselectnodirs?.()}
                 >None</button
               >
             </div>

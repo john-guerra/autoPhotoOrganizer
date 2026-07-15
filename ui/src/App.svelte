@@ -4263,27 +4263,27 @@
     bind:burstEnabled
     bind:burstGapMs
     {sort}
-    on:choosefolder={chooseFolder}
-    on:submit={submitAddFolder}
-    on:managelibrary={() => {
+    onchoosefolder={chooseFolder}
+    onsubmit={submitAddFolder}
+    onmanagelibrary={() => {
       manageLibraryOpen = true;
       refreshPendingMeta(); // the count moves as you browse — never show a stale one
     }}
-    on:loadsubdirs={loadSubdirs}
-    on:toggledir={(e) =>
-      (subdirSelection = toggleSubdir(subdirSelection, e.detail.path, subdirs))}
-    on:selectalldirs={() => (subdirSelection = selectAll(subdirs))}
-    on:selectnodirs={() => (subdirSelection = selectNone())}
-    on:filtermodechange={(e) => onFilterModeChange(e.detail)}
-    on:filterchange={(e) => onFilterChange(e.detail)}
-    on:groupbychange={(e) => onGroupByChange(e.detail)}
-    on:cycleall={cycleAllGroups}
-    on:revealcurrent={revealCurrentLocation}
-    on:detectalbums={detectAlbums}
-    on:sortchange={(e) => onSortChange(e.detail)}
-    on:help={() => (shortcutsHelpOpen = true)}
+    onloadsubdirs={loadSubdirs}
+    ontoggledir={(payload) =>
+      (subdirSelection = toggleSubdir(subdirSelection, payload.path, subdirs))}
+    onselectalldirs={() => (subdirSelection = selectAll(subdirs))}
+    onselectnodirs={() => (subdirSelection = selectNone())}
+    onfiltermodechange={onFilterModeChange}
+    onfilterchange={onFilterChange}
+    ongroupbychange={onGroupByChange}
+    oncycleall={cycleAllGroups}
+    onrevealcurrent={revealCurrentLocation}
+    ondetectalbums={detectAlbums}
+    onsortchange={onSortChange}
+    onhelp={() => (shortcutsHelpOpen = true)}
   >
-    <svelte:fragment slot="timeline">
+    {#snippet timeline()}
       {#if timeMin != null && timeMax != null && timeMax > timeMin}
         <div
           class="time-filter"
@@ -4298,18 +4298,18 @@
             viewTime={viewMarkerTime}
             focusTime={focusMarkerTime}
             value={[filter.dateFrom ?? null, filter.dateTo ?? null]}
-            on:range={(e) =>
+            onrange={(range) =>
               onFilterChange({
                 ...filter,
-                dateFrom: e.detail[0],
-                dateTo: e.detail[1],
+                dateFrom: range[0],
+                dateTo: range[1],
               })}
           />
         </div>
       {/if}
-    </svelte:fragment>
+    {/snippet}
 
-    <svelte:fragment slot="manage-library">
+    {#snippet manageLibrary()}
       {#if manageLibraryOpen}
         <ManageLibrary
           {library}
@@ -4321,7 +4321,7 @@
           onlibraryReset={onLibraryReset}
         />
       {/if}
-    </svelte:fragment>
+    {/snippet}
   </Toolbar>
 
   <div class="app-body">

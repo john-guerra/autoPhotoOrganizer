@@ -2,20 +2,18 @@
   // Media-kind filter (image / raw / video), mirroring OrientationFilter.
   // Descriptive icons with a "Type" legend; all-on (or all-off) = no filter, a
   // strict subset narrows the view.
-  import { createEventDispatcher } from "svelte";
   import { KINDS, toggleKind } from "./filterSpec.js";
 
-  export let filter;
-  const dispatch = createEventDispatcher();
+  let { filter, onchange } = $props();
   const LABELS = {
     image: "Photos",
     raw: "RAW",
     video: "Videos",
   };
-  $: on = new Set(filter?.kinds ?? []);
+  let on = $derived(new Set(filter?.kinds ?? []));
 
   function toggle(k) {
-    dispatch("change", toggleKind(filter, k));
+    onchange?.(toggleKind(filter, k));
   }
 </script>
 
@@ -26,7 +24,7 @@
       type="button"
       class="kind"
       class:on={on.has(k)}
-      on:click={() => toggle(k)}
+      onclick={() => toggle(k)}
       title={`Show ${LABELS[k]}`}
       aria-label={`Show ${LABELS[k]}`}
       aria-pressed={on.has(k)}
