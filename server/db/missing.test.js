@@ -99,6 +99,34 @@ describe("classify + relocate", () => {
     ).toBeUndefined();
   });
 
+  it("relocateMissing preserves album and tag membership (id-stable repoint)", () => {
+    const db = getDb();
+    const [a] = upsertScan(db, "/a/trip", 1, [F]);
+    db.prepare("INSERT INTO albums (id, name) VALUES (1, 'Best')").run();
+    db.prepare(
+      "INSERT INTO photo_album (photo_id, album_id) VALUES (?, 1)"
+    ).run(a.id);
+    db.prepare(
+      "INSERT INTO tags (id, dimension_name, value) VALUES (1, 'keyword', 'kids')"
+    ).run();
+    db.prepare(
+      "INSERT INTO photo_tags (photo_id, tag_id, source) VALUES (?, 1, 'manual')"
+    ).run(a.id);
+    markStale(db, a.id);
+    upsertScan(db, "/a/moved", 1, [F]); // reappears at new location
+    relocateMissing(db, a.id, "/a/moved/IMG_1.jpg");
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS n FROM photo_album WHERE photo_id = ?")
+        .get(a.id).n
+    ).toBe(1);
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS n FROM photo_tags WHERE photo_id = ?")
+        .get(a.id).n
+    ).toBe(1);
+  });
+
   it("relocateMissing refuses to overwrite a DIFFERENT annotated photo at the destination", () => {
     const db = getDb();
     const [a] = upsertScan(db, "/a/trip", 1, [F]); // the vanished photo

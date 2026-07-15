@@ -674,6 +674,9 @@
   let manageLibraryOpen = $state(false);
   let missingReviewOpen = $state(false);
   let missingCount = $state(0);
+  // A calm, informational nudge ("N files went missing …") — its own channel so
+  // it renders in a neutral style, NOT the red error style. See reportScanMissing.
+  let missingNotice = $state("");
   // Scope to the folder once it's in? (The old "Open a folder…" entry, now an
   // option on the one Add panel rather than a second door to the same room.)
   let focusAfterAdd = $state(false);
@@ -1584,7 +1587,7 @@
           `${m.toReview} file${m.toReview === 1 ? "" : "s"} went missing`
         );
       if (m.autoRelocated > 0) parts.push(`${m.autoRelocated} auto-relocated`);
-      error = `${parts.join(", ")} — open “Review missing files” to sort them out`;
+      missingNotice = `${parts.join(", ")} — open “Review missing files” to sort them out`;
     }
   }
 
@@ -3406,6 +3409,7 @@
     scanRefreshAt = 0;
     if (!dir.trim()) return false;
     error = "";
+    missingNotice = ""; // a new scan supersedes any previous missing-file nudge
     scanning = true;
     status = "scanning…";
     let scanJob = null;
@@ -4552,6 +4556,7 @@
     }}
     onreviewmissing={() => {
       missingReviewOpen = true;
+      missingNotice = ""; // the nudge did its job; clear it once the pane is open
       refreshMissingCount();
     }}
     {missingCount}
@@ -4974,6 +4979,7 @@
     {selectedCount}
     {status}
     {error}
+    notice={missingNotice}
     {thumbProgress}
     {thumbCounts}
   >

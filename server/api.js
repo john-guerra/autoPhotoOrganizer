@@ -1351,12 +1351,16 @@ export function registerApi(app) {
   });
 
   // --- Missing files (vanished-from-disk review) ----------------------------
-  /** Volume ids whose last known mount path currently exists. */
+  /** Volume ids that are currently mounted (UUID-aware, same check as /api/library). */
   function mountedVolumeIds(db) {
     return db
-      .prepare(`SELECT id, last_mount_path FROM volumes`)
+      .prepare(`SELECT id, uuid, last_mount_path FROM volumes`)
       .all()
-      .filter((v) => v.last_mount_path && existsSync(v.last_mount_path))
+      .filter(
+        (v) =>
+          v.last_mount_path &&
+          isVolumeMounted({ uuid: v.uuid, last_mount_path: v.last_mount_path })
+      )
       .map((v) => v.id);
   }
 

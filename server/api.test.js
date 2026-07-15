@@ -3084,8 +3084,10 @@ describe("POST /api/enrich { ids } — re-read the selected photos", () => {
 describe("GET /api/missing", () => {
   it("lists stale rows on a mounted volume; dismiss tombstones them", async () => {
     const db = getDb();
+    // uuid = NULL → isVolumeMounted takes its existsSync(last_mount_path)
+    // fallback (internal-disk style), which tmpdir() satisfies deterministically.
     db.prepare(
-      `INSERT INTO volumes (id, label, uuid, last_mount_path, last_seen_at) VALUES (9, 'v', 'u9', ?, ?)`
+      `INSERT INTO volumes (id, label, uuid, last_mount_path, last_seen_at) VALUES (9, 'v', NULL, ?, ?)`
     ).run(tmpdir(), Date.now()); // a mounted path
     // Insert a folder on that volume with one stale photo.
     const fid = db
@@ -3110,5 +3112,109 @@ describe("GET /api/missing", () => {
     expect(await res.json()).toEqual({ dismissed: 1 });
     const after = await (await fetch(`${srv.base}/api/missing`)).json();
     expect(after.items.some((r) => r.id === pid)).toBe(false);
+  });
+});
+
+describe("POST /api/missing/relocate + /api/missing/carry", () => {
+  it("relocate repoints a stale row to a real file and clears stale", async () => {
+    const db = getDb();
+    const destDir = await mkdtemp(join(tmpdir(), "ag-reloc-"));
+    const destFile = join(destDir, "moved.jpg");
+    await writeFile(destFile, "x");
+    const fid = db
+      .prepare(
+        `INSERT INTO folders (abs_path, volume_id, last_scanned_at) VALUES ('/gone/orig', NULL, ?)`
+      )
+      .run(Date.now()).lastInsertRowid;
+    const pid = db
+      .prepare(
+        `INSERT INTO photos (folder_id, filename, size, mtime, kind, stale) VALUES (?, 'moved.jpg', 1, 1, 'image', 1)`
+      )
+      .run(fid).lastInsertRowid;
+    try {
+      const res = await fetch(`${srv.base}/api/missing/relocate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: pid, destAbsPath: destFile }),
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ relocated: true, id: pid });
+      expect(
+        db.prepare("SELECT stale FROM photos WHERE id = ?").get(pid).stale
+      ).toBe(0);
+    } finally {
+      await rm(destDir, { recursive: true, force: true });
+    }
+  });
+
+  it("relocate 409s when the destination holds a different rated photo of that name", async () => {
+    const db = getDb();
+    const destDir = await mkdtemp(join(tmpdir(), "ag-reloc-clash-"));
+    const destFile = join(destDir, "clash.jpg");
+    await writeFile(destFile, "x");
+    // The destination folder already indexes a DIFFERENT, rated photo named clash.jpg.
+    const destFid = db
+      .prepare(
+        `INSERT INTO folders (abs_path, volume_id, last_scanned_at) VALUES (?, NULL, ?)`
+      )
+      .run(destDir, Date.now()).lastInsertRowid;
+    db.prepare(
+      `INSERT INTO photos (folder_id, filename, size, mtime, kind, rating) VALUES (?, 'clash.jpg', 9, 9, 'image', 5)`
+    ).run(destFid);
+    // The vanished (stale) photo we're trying to relocate onto that slot.
+    const srcFid = db
+      .prepare(
+        `INSERT INTO folders (abs_path, volume_id, last_scanned_at) VALUES ('/gone/src', NULL, ?)`
+      )
+      .run(Date.now()).lastInsertRowid;
+    const pid = db
+      .prepare(
+        `INSERT INTO photos (folder_id, filename, size, mtime, kind, stale) VALUES (?, 'clash.jpg', 1, 1, 'image', 1)`
+      )
+      .run(srcFid).lastInsertRowid;
+    try {
+      const res = await fetch(`${srv.base}/api/missing/relocate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: pid, destAbsPath: destFile }),
+      });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toMatch(/already has/);
+      // Stale row untouched.
+      expect(
+        db.prepare("SELECT stale FROM photos WHERE id = ?").get(pid).stale
+      ).toBe(1);
+    } finally {
+      await rm(destDir, { recursive: true, force: true });
+    }
+  });
+
+  it("carry copies metadata from one row to an unannotated other", async () => {
+    const db = getDb();
+    const fid = db
+      .prepare(
+        `INSERT INTO folders (abs_path, volume_id, last_scanned_at) VALUES ('/carry/src', NULL, ?)`
+      )
+      .run(Date.now()).lastInsertRowid;
+    const fromId = db
+      .prepare(
+        `INSERT INTO photos (folder_id, filename, size, mtime, kind, rating) VALUES (?, 'c.jpg', 1, 1, 'image', 5)`
+      )
+      .run(fid).lastInsertRowid;
+    const toId = db
+      .prepare(
+        `INSERT INTO photos (folder_id, filename, size, mtime, kind, rating) VALUES (?, 'c2.jpg', 1, 1, 'image', 0)`
+      )
+      .run(fid).lastInsertRowid;
+    const res = await fetch(`${srv.base}/api/missing/carry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fromId, toId }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ carried: true });
+    expect(
+      db.prepare("SELECT rating FROM photos WHERE id = ?").get(toId).rating
+    ).toBe(5);
   });
 });

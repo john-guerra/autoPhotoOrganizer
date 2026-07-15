@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.15.18
+
+- **Missing-file review polish.** The "files went missing" notice reads as an
+  informational message instead of an error; the review list now uses the same
+  volume-mounted check as the library (so a drive remounted elsewhere isn't
+  mistaken for a missing one); and relocate/carry gained direct API tests. (#1)
+
 ## 2.15.17
 
 - **Missing-file review is safer and more complete.** A single-folder rescan now

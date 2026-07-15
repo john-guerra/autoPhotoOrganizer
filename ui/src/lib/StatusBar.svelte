@@ -15,6 +15,7 @@
     selectedCount = 0,
     status = "",
     error = "",
+    notice = "",
     thumbProgress = "",
     thumbCounts = { error: 0 },
     scope,
@@ -54,6 +55,12 @@
       <span class="status" class:err={!!error} title={error || status}
         >{error || status}</span
       >
+    {/if}
+    <!-- A calm, informational nudge (e.g. the missing-files review prompt): its
+         own neutral/blue style so it reads as a heads-up, not a failure. Same
+         truncation treatment as .status so a long message can't widen the app. -->
+    {#if notice}
+      <span class="notice" title={notice}>{notice}</span>
     {/if}
     {#if thumbProgress}
       <span class="thumb-progress" class:err={thumbCounts.error > 0}>
@@ -130,6 +137,17 @@
   }
   .status.err {
     color: #ff6b6b;
+  }
+  /* Neutral, attention-but-calm nudge — a muted blue, clearly distinct from the
+     red .err. Truncates exactly like .status (no width regression). */
+  .notice {
+    color: #7fb2ff;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .thumb-progress {
     color: #9a9a9a;
