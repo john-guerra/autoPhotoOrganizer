@@ -349,11 +349,13 @@
 <style>
   .thumb-wrap {
     position: absolute;
-    transition:
-      top 0.15s ease,
-      left 0.15s ease,
-      width 0.15s ease,
-      height 0.15s ease;
+    /* No position/size transition. Tiles are keyed by a stable entryDomId, so
+       Svelte reuses each node across a layout recompute and merely rewrites this
+       element's inline top/left/width/height. A transition here animated every
+       such rewrite — turning each instant reflow (metadata streaming in, resize,
+       zoom) into a 150ms glide of many tiles at once, which read as the grid
+       being "jumpy". Snapping to the final box is correct; scroll-anchoring in
+       App.svelte keeps the user's eye-point fixed so the snap is invisible. */
   }
   .thumb {
     position: absolute;

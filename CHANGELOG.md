@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.2
+
+- **The grid no longer jumps as photo details load, or when you resize or zoom.**
+  Tiles used to slide to their new positions whenever the layout recomputed
+  (metadata streaming in, a window resize, a zoom change), sliding whatever you
+  were looking at out from under you. Now the tile at the top of your view stays
+  put — the grid re-lays-out around it instead of scrolling away — and tiles snap
+  into place rather than gliding.
+
 ## 2.16.1
 
 - **`electron:dev` now opens the app instead of a blank window.** On machines

@@ -2,7 +2,12 @@
   import { onMount, tick, untrack } from "svelte";
   import { scale } from "svelte/transition";
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
-  import { visibleRange, runwayPx } from "./lib/layouts/windowing.js";
+  import {
+    visibleRange,
+    runwayPx,
+    topAnchorIndex,
+    anchorScrollTop,
+  } from "./lib/layouts/windowing.js";
   import { ZOOM_LEVELS, resolveZoom, gapFor } from "./lib/zoom.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
   import {
@@ -765,6 +770,13 @@
   let renderStart = $state(0);
   let renderEnd = $state(-1);
   let rafPending = false; // plain guard (scheduleVisibleRangeUpdate)
+  // Scroll anchoring (layout stability): domId + grid-local y of the top-most
+  // visible tile, captured on scroll/resize. When a layout recompute (metadata
+  // streaming in, resize, zoom) moves that tile, the anchor effect below shifts
+  // scrollTop by its delta so the user's eye-point never jumps. Plain `let`, NOT
+  // $state: capture/restore must not be reactive, or the restore effect would
+  // re-fire on its own write. Reset on a full window replace (see focusPending).
+  let layoutAnchor = null; // { domId: number|string, y: number } | null
   let focusPending = $state(false); // set after a scan; consumed once `boxes` exists
   let expandedStackIds = $state(new Set()); // stack ids currently expanded inline in the grid
 
@@ -3751,6 +3763,43 @@
   $effect(() => {
     if (expandPin && boxes) scheduleExpandPin();
   });
+  // Scroll anchor: keep the user's eye-point fixed across a layout recompute.
+  // `boxes` is a fresh array on every recompute (metadata streaming in, resize,
+  // zoom); when the anchor tile — the one that was at the top of the viewport —
+  // lands at a new grid-local y, shift scrollTop by exactly that delta so nothing
+  // under the user's gaze moves. Depends ONLY on `boxes` (the rest is untracked),
+  // so it fires per-recompute, not on scroll (scroll never rebuilds boxes).
+  // Yields to every mechanism that legitimately OWNS scroll: a full window
+  // replace (focusPending — it re-centers on the selected photo by design and
+  // clears the anchor), the group-jump / expand pins (they re-pin scrollTop
+  // themselves, above), and loadMore's own prepend compensation
+  // (fetchingBefore/After). What remains is exactly the uncompensated, jumpy set.
+  // Only touches scrollTop — never items / feedEpoch / the fetching flags — so it
+  // stays entirely outside the feed-window transaction machinery.
+  $effect(() => {
+    if (!boxes) return;
+    untrack(() => {
+      if (!layoutAnchor || !mainColumnEl) return;
+      if (
+        focusPending ||
+        jumpRevealPending ||
+        expandPin ||
+        fetchingBefore ||
+        fetchingAfter
+      )
+        return;
+      const anchor = layoutAnchor;
+      const nb = boxes.find((b) => b.id === anchor.domId);
+      if (!nb || nb.y === anchor.y) return;
+      mainColumnEl.scrollTop = anchorScrollTop(
+        mainColumnEl.scrollTop,
+        anchor.y,
+        nb.y
+      );
+      // Chain across back-to-back reflows before the next scroll re-captures.
+      layoutAnchor = { domId: anchor.domId, y: nb.y };
+    });
+  });
   let gridHeight = $derived(
     layoutResult ? layoutResult.totalHeight + 2 * PAD : 0
   );
@@ -3802,6 +3851,9 @@
   $effect(() => {
     if (focusPending && boxes) {
       focusPending = false;
+      // A window replace re-centers on the selected photo by design — any anchor
+      // captured against the OLD window is stale and must not fight that jump.
+      layoutAnchor = null;
       tick().then(() => {
         // Thumb's data-id attribute is always the resolved photo's raw id
         // (Thumb only ever receives `item`, never the display entry), so DOM
@@ -4007,7 +4059,7 @@
   /** Recompute [renderStart, renderEnd] from the grid's current position,
    * and trigger a fetch-more in either direction when the render window
    * is near a loaded edge. */
-  function updateVisibleRange() {
+  function updateVisibleRange({ capture = false } = {}) {
     if (!gridEl || !boxes) {
       renderStart = 0;
       renderEnd = -1;
@@ -4029,6 +4081,15 @@
     });
     renderStart = range.start;
     renderEnd = range.end;
+
+    // Capture the eye-point anchor (top-most visible tile) ONLY on a genuine
+    // scroll/resize. Never on the boxes-recompute path (the $effect.pre below),
+    // which would capture the POST-reflow position and cancel out the anchor
+    // effect's correction. See layoutAnchor + the anchor $effect.
+    if (capture) {
+      const ai = topAnchorIndex(boxes, { scrollTop: -rect.top });
+      layoutAnchor = ai === -1 ? null : { domId: boxes[ai].id, y: boxes[ai].y };
+    }
 
     // How far can the user still scroll before hitting blank space? Prefetch has
     // to fire while that runway is longer than a fetch takes to fly, or they
@@ -4072,7 +4133,9 @@
     rafPending = true;
     requestAnimationFrame(() => {
       rafPending = false;
-      updateVisibleRange();
+      // Scroll/resize path: capture the eye-point anchor (the boxes-recompute
+      // path calls updateVisibleRange() with capture off — see layoutAnchor).
+      updateVisibleRange({ capture: true });
     });
   }
 

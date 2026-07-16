@@ -66,6 +66,39 @@ export function runwayPx(boxes, { scrollTop, viewportHeight }) {
 }
 
 /**
+ * Index of the top-most box intersecting the viewport top — the tile to hold
+ * fixed across a layout recompute so the user's eye-point does not jump. It is
+ * the first box whose BOTTOM edge is still below `scrollTop` (i.e. on screen).
+ * Boxes are y-monotonic (see visibleRange), so this is a binary search.
+ *
+ * @param {Array<{y: number, height: number}>} boxes
+ * @param {{ scrollTop: number }} opts
+ * @returns {number} index into `boxes`, or -1 if nothing sits at/below the top.
+ */
+export function topAnchorIndex(boxes, { scrollTop }) {
+  if (!boxes.length) return -1;
+  const i = firstIndexWhere(boxes, (b) => b.y + b.height > scrollTop);
+  return i < boxes.length ? i : -1;
+}
+
+/**
+ * The scrollTop that keeps an anchor box at the same on-screen position after a
+ * layout recompute shifted it from `oldY` to `newY`. Scroll offset and box y
+ * share one coordinate system (grid-local px, 1:1), so the correction is just
+ * the box's vertical delta — no viewport/rect math needed. This is what makes a
+ * metadata/resize/zoom reflow invisible: content above the anchor grew or shrank,
+ * and we move the scroll by exactly that so the anchor tile does not budge.
+ *
+ * @param {number} currentScrollTop
+ * @param {number} oldY  anchor box y BEFORE the recompute
+ * @param {number} newY  anchor box y AFTER the recompute
+ * @returns {number} the scrollTop to apply
+ */
+export function anchorScrollTop(currentScrollTop, oldY, newY) {
+  return currentScrollTop + (newY - oldY);
+}
+
+/**
  * Binary search: predicate(boxes[i]) is false for a prefix and true for the
  * rest. Returns the first true index, or boxes.length if never true.
  */

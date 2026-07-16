@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { visibleRange, runwayPx } from "./windowing.js";
+import {
+  visibleRange,
+  runwayPx,
+  topAnchorIndex,
+  anchorScrollTop,
+} from "./windowing.js";
 
 /** N rows of `perRow` boxes each, height `rowHeight`, stacked with `gap`. */
 function buildRows(rowCount, { perRow = 2, rowHeight = 100, gap = 8 } = {}) {
@@ -127,5 +132,43 @@ describe("runwayPx", () => {
     expect(
       runwayPx(boxes, { scrollTop: 1000, viewportHeight: 600 }).above
     ).toBe(0);
+  });
+});
+
+describe("topAnchorIndex", () => {
+  it("returns -1 for no boxes", () => {
+    expect(topAnchorIndex([], { scrollTop: 0 })).toBe(-1);
+  });
+
+  it("picks the first box still on screen at the viewport top", () => {
+    // 5 rows, 2 boxes each: y = 0, 108, 216, 324, 432; each 100 tall.
+    const boxes = buildRows(5);
+    // scrollTop 150: row 0 (0-100) is fully above; row 1 (108-208) straddles
+    // the top, so its first box (index 2) is the anchor.
+    expect(topAnchorIndex(boxes, { scrollTop: 150 })).toBe(2);
+  });
+
+  it("returns index 0 when scrolled to the very top", () => {
+    expect(topAnchorIndex(buildRows(5), { scrollTop: 0 })).toBe(0);
+  });
+
+  it("returns -1 when scrolled past all content", () => {
+    expect(topAnchorIndex(buildRows(5), { scrollTop: 10000 })).toBe(-1);
+  });
+});
+
+describe("anchorScrollTop", () => {
+  it("shifts scroll by the anchor's vertical delta so it stays put", () => {
+    // Content above the anchor grew by 40px (300 -> 340): scroll down 40 to
+    // keep the anchor tile at the same screen position.
+    expect(anchorScrollTop(500, 300, 340)).toBe(540);
+  });
+
+  it("is a no-op when the anchor did not move", () => {
+    expect(anchorScrollTop(500, 300, 300)).toBe(500);
+  });
+
+  it("scrolls up when content above the anchor shrank", () => {
+    expect(anchorScrollTop(500, 300, 260)).toBe(460);
   });
 });
