@@ -875,6 +875,12 @@
   let scrubberAxis = $state(loadSetting("scrubberAxis", "count"));
   $effect(() => saveSetting("scrubberAxis", scrubberAxis));
 
+  // Whether the rail draws its text landmark labels. Off keeps the rail fully
+  // usable (density, thumb, drag-to-scrub, hover tooltip) minus the labels, for
+  // when they read as noise rather than wayfinding.
+  let scrubberLabels = $state(loadSetting("scrubberLabels", true));
+  $effect(() => saveSetting("scrubberLabels", scrubberLabels));
+
   let gridEl = $state();
   let mainColumnEl = $state();
   let gridWidth = $state(0);
@@ -5393,6 +5399,7 @@
         <Scrubber
           manifest={scrubberManifest}
           axis={scrubberAxis}
+          showLabels={scrubberLabels}
           {groupBy}
           {sort}
           topValue={scrubberTopValue}
@@ -5550,6 +5557,7 @@
     bind:custom={prefetchCustom}
     bind:adaptivePageSize
     bind:scrubberAxis
+    bind:scrubberLabels
   />
 {/if}
 

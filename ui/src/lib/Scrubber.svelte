@@ -14,6 +14,7 @@
   let {
     manifest,
     axis = "count",
+    showLabels = true,
     groupBy = [],
     sort = { by: "date_taken", dir: "asc" },
     topValue = null,
@@ -233,19 +234,21 @@
       {/if}
     </div>
 
-    {#each labels as l (l.key)}
-      {@const f = focus(scale.toY(l))}
-      <div
-        class="label"
-        class:focused={f > 0.35}
-        style="top:{scale.toY(l)}px; font-size:{10 + f * 4}px; z-index:{f > 0
-          ? 40 + Math.round(f * 20)
-          : 1};"
-        title={`${stopText(l)} · ${l.count.toLocaleString()}`}
-      >
-        <span class="label-text">{stopText(l)}</span>
-      </div>
-    {/each}
+    {#if showLabels}
+      {#each labels as l (l.key)}
+        {@const f = focus(scale.toY(l))}
+        <div
+          class="label"
+          class:focused={f > 0.35}
+          style="top:{scale.toY(l)}px; font-size:{10 + f * 4}px; z-index:{f > 0
+            ? 40 + Math.round(f * 20)
+            : 1};"
+          title={`${stopText(l)} · ${l.count.toLocaleString()}`}
+        >
+          <span class="label-text">{stopText(l)}</span>
+        </div>
+      {/each}
+    {/if}
 
     <div
       class="thumb"

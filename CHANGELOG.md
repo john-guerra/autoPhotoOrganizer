@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.14
+
+- **Scrubber: a Settings toggle to hide the landmark labels.** Settings → Scrubber
+  rail → "Show landmark labels". Off leaves the rail fully usable — density, viewport
+  marker, drag-to-scrub and the hover tooltip — just without the text labels.
+
 ## 2.16.13
 
 - **Scrubber: folder landmarks now follow the library tree.** The rail labels the

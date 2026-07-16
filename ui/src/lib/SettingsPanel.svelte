@@ -17,6 +17,7 @@
     custom = $bindable(),
     adaptivePageSize = $bindable(),
     scrubberAxis = $bindable(),
+    scrubberLabels = $bindable(),
   } = $props();
 
   const close = () => onclose?.();
@@ -78,6 +79,17 @@
 
     <section>
       <h3>Scrubber rail</h3>
+      <label class="toggle">
+        <input type="checkbox" bind:checked={scrubberLabels} />
+        <span>
+          Show landmark labels
+          <small
+            >Draw the text labels (years, folder names) alongside the rail. Turn
+            off to keep just the density, the viewport marker, drag-to-scrub and
+            the hover tooltip — without the labels.</small
+          >
+        </span>
+      </label>
       <label class="preset">
         <span>Position axis</span>
         <select bind:value={scrubberAxis}>
