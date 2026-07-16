@@ -25,6 +25,21 @@ Two principles drive the design:
 - **Burst stack detection** — photos taken within a configurable time gap are
   automatically grouped into collapsible stacks with a peeking-photos visual;
   press `C` to manually override which photo is the cover.
+- **Auto albums** — cluster a shoot into albums by the pauses between shots,
+  preview the boundaries, then move or copy the keepers into dated folders
+  (photos and videos together).
+- **Filter & organize** — filter the feed by rating, orientation, or camera;
+  group by folder, day, month, year, camera, or kind; sort by date, rating,
+  size, or name.
+- **Timeline scrubber** — a D3 date histogram of the working set; brush a
+  range to narrow the feed to a trip or a day.
+- **Tree & fisheye sidebars** — navigate the library hierarchy, with the group
+  you're currently in marked so you never lose your place; right-click a
+  section header for the same actions the folder tree offers.
+- **Missing-files review** — when a photo leaves disk, AutoGallery tells you and
+  opens a panel to relocate it (keeping its rating, albums, and tags) or dismiss
+  it; simple moves are relocated automatically.
+- **Reveal in Finder** and a native OS folder picker in the desktop app.
 - **A library of scanned folders**, persisted across sessions, with an
   offline badge for folders on a removable drive that isn't currently
   mounted.
@@ -33,12 +48,15 @@ Two principles drive the design:
 
 ## Status
 
-v2 is under active development. Done so far: folder scanning, thumbnail
-generation with an on-disk cache, star ratings, the loupe, the justified +
-virtualized grid, burst-stack detection with manual cover override, a
-persisted folder library, and Electron packaging with a native folder
-picker. See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the full status and
-backlog (tracked in
+v2 is stable and in active use (currently **2.16.x**, built on **Svelte 5
+(runes)** with an up-to-date dependency stack). Shipped so far: folder scanning,
+thumbnail generation with an on-disk cache, star ratings, the loupe, the
+justified + virtualized grid, burst-stack detection with manual cover override,
+auto-album clustering with move/copy into dated folders, feed filtering and
+grouping, a D3 timeline scrubber, tree + fisheye sidebars, missing-files review,
+a persisted folder library with offline browsing, and Electron packaging with a
+native folder picker. See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the full
+status and backlog (tracked in
 [GitHub Issues](https://github.com/john-guerra/autoPhotoOrganizer/issues)).
 
 The two previous generations of the app are archived under
@@ -72,13 +90,52 @@ Folder…" button (native OS dialog) instead of typing a path.
 To build an installable package for your platform:
 
 ```bash
-npm run electron:build:mac   # local smoke-test build (macOS)
+npm run electron:build:mac   # local smoke-test build (macOS) → release/
 npm run electron:build       # mac + win + linux (needs Wine for Windows, when run from macOS)
 ```
 
-Unsigned builds land in `release/`. Signed releases (Apple notarization,
-Windows code-signing) aren't set up yet — see
-[`docs/superpowers/specs/2026-07-06-electron-packaging-design.md`](./docs/superpowers/specs/2026-07-06-electron-packaging-design.md).
+Builds land in `release/` (e.g. `AutoGallery-2.16.1.dmg`).
+
+### Running a packaged build without code signing
+
+AutoGallery is **not signed** with a paid Apple Developer ID or Windows
+code-signing certificate (Apple notarization / Windows signing aren't set up —
+see
+[`docs/superpowers/specs/2026-07-06-electron-packaging-design.md`](./docs/superpowers/specs/2026-07-06-electron-packaging-design.md)).
+Each OS therefore warns you the first time you open it. These are one-time steps
+per download — here's how to run it anyway on each platform.
+
+**macOS** (`.dmg` / `.zip`) — the app is only _ad-hoc_ signed
+(`codesign --sign -`, which is required so the kernel doesn't kill it on Apple
+Silicon, but can't vouch for who built it):
+
+- **Right-click** (or Control-click) `AutoGallery.app` → **Open** → **Open** in
+  the dialog. First launch only; after that it opens normally by double-click.
+- If macOS says **"AutoGallery is damaged and can't be opened"** (what a
+  quarantined download shows on Apple Silicon), clear the quarantine flag, then
+  open it:
+  ```bash
+  xattr -cr /Applications/AutoGallery.app
+  ```
+  (`-c` clears extended attributes, `-r` recurses into the bundle; the
+  `com.apple.quarantine` flag is what triggers the block.)
+- Or go to **System Settings → Privacy & Security**, find the blocked-app
+  notice, and click **Open Anyway**.
+
+**Windows** (`.exe`, NSIS installer) — unsigned, so Microsoft SmartScreen steps
+in:
+
+- When you see **"Windows protected your PC"**, click **More info → Run anyway**.
+
+**Linux** (`.AppImage`) — no signing concept; just make it executable:
+
+```bash
+chmod +x AutoGallery-2.16.1.AppImage
+./AutoGallery-2.16.1.AppImage
+```
+
+If it complains about FUSE, either install `libfuse2` or run it with
+`./AutoGallery-2.16.1.AppImage --appimage-extract-and-run`.
 
 ### Other commands
 
