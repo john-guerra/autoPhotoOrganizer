@@ -14,7 +14,7 @@
   let {
     manifest,
     axis = "count",
-    showLabels = true,
+    landmarkMode = "uniform",
     groupBy = [],
     sort = { by: "date_taken", dir: "asc" },
     topValue = null,
@@ -39,20 +39,20 @@
   const scale = $derived(
     manifest && railH > 0 ? axisScale(axis, manifest, railH, { valueOf }) : null
   );
-  // Text labels come from labelStops, not the fine landmarks: folder grouping has
-  // one landmark per leaf folder (hundreds), so labelStops collapses them to one
-  // stop per leading-token run (→ years, for `2010_..` names) and each stop is
-  // tagged with `.token`. Other groupings pass through unchanged. Still thinned by
-  // pixel gap so a tall run never overlaps.
+  // Which set feeds the text labels. "uniform" = the fine per-folder landmarks
+  // evenly thinned down the rail (the original look). "tree" = labelStops, which
+  // collapse each library-tree branch to one label (folder grouping only; other
+  // groupings pass labelStops === landmarks through unchanged). Both are then pixel-
+  // thinned so a tall run never overlaps.
+  const labelSource = $derived(
+    !manifest
+      ? []
+      : landmarkMode === "tree"
+        ? (manifest.labelStops ?? manifest.landmarks)
+        : manifest.landmarks
+  );
   const labels = $derived(
-    manifest && scale
-      ? thinLabels(
-          manifest.labelStops ?? manifest.landmarks,
-          railH,
-          22,
-          scale.toY
-        )
-      : []
+    manifest && scale ? thinLabels(labelSource, railH, 22, scale.toY) : []
   );
   const total = $derived(manifest?.total ?? 0);
 
@@ -234,21 +234,19 @@
       {/if}
     </div>
 
-    {#if showLabels}
-      {#each labels as l (l.key)}
-        {@const f = focus(scale.toY(l))}
-        <div
-          class="label"
-          class:focused={f > 0.35}
-          style="top:{scale.toY(l)}px; font-size:{10 + f * 4}px; z-index:{f > 0
-            ? 40 + Math.round(f * 20)
-            : 1};"
-          title={`${stopText(l)} · ${l.count.toLocaleString()}`}
-        >
-          <span class="label-text">{stopText(l)}</span>
-        </div>
-      {/each}
-    {/if}
+    {#each labels as l (l.key)}
+      {@const f = focus(scale.toY(l))}
+      <div
+        class="label"
+        class:focused={f > 0.35}
+        style="top:{scale.toY(l)}px; font-size:{10 + f * 4}px; z-index:{f > 0
+          ? 40 + Math.round(f * 20)
+          : 1};"
+        title={`${stopText(l)} · ${l.count.toLocaleString()}`}
+      >
+        <span class="label-text">{stopText(l)}</span>
+      </div>
+    {/each}
 
     <div
       class="thumb"

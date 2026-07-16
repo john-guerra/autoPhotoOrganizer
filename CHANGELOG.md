@@ -6,11 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
-## 2.16.14
+## 2.16.15
 
-- **Scrubber: a Settings toggle to hide the landmark labels.** Settings → Scrubber
-  rail → "Show landmark labels". Off leaves the rail fully usable — density, viewport
-  marker, drag-to-scrub and the hover tooltip — just without the text labels.
+- **Scrubber: choose the folder landmark style.** Settings → Scrubber rail → "Folder
+  landmarks" switches between **Uniform** (leaf-folder names spaced evenly down the
+  rail — the original look) and **Tree** (one label per library-tree branch, like the
+  sidebar). Only affects folder grouping; year/month landmarks are the same either
+  way. (Replaces the short-lived 2.16.14 show/hide toggle.)
 
 ## 2.16.13
 

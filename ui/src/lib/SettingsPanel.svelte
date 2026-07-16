@@ -17,7 +17,7 @@
     custom = $bindable(),
     adaptivePageSize = $bindable(),
     scrubberAxis = $bindable(),
-    scrubberLabels = $bindable(),
+    scrubberLandmarks = $bindable(),
   } = $props();
 
   const close = () => onclose?.();
@@ -79,17 +79,19 @@
 
     <section>
       <h3>Scrubber rail</h3>
-      <label class="toggle">
-        <input type="checkbox" bind:checked={scrubberLabels} />
-        <span>
-          Show landmark labels
-          <small
-            >Draw the text labels (years, folder names) alongside the rail. Turn
-            off to keep just the density, the viewport marker, drag-to-scrub and
-            the hover tooltip — without the labels.</small
-          >
-        </span>
+      <label class="preset">
+        <span>Folder landmarks</span>
+        <select bind:value={scrubberLandmarks}>
+          <option value="uniform">Uniform — one label per folder</option>
+          <option value="tree">Tree — one label per branch</option>
+        </select>
       </label>
+      <small
+        >How folder grouping labels the rail. Uniform spaces leaf-folder names
+        evenly down the rail; Tree collapses sibling folders and labels each
+        library-tree branch (like the sidebar). Only affects folder grouping —
+        year/month landmarks are the same either way.</small
+      >
       <label class="preset">
         <span>Position axis</span>
         <select bind:value={scrubberAxis}>

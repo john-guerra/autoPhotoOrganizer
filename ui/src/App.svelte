@@ -875,11 +875,13 @@
   let scrubberAxis = $state(loadSetting("scrubberAxis", "count"));
   $effect(() => saveSetting("scrubberAxis", scrubberAxis));
 
-  // Whether the rail draws its text landmark labels. Off keeps the rail fully
-  // usable (density, thumb, drag-to-scrub, hover tooltip) minus the labels, for
-  // when they read as noise rather than wayfinding.
-  let scrubberLabels = $state(loadSetting("scrubberLabels", true));
-  $effect(() => saveSetting("scrubberLabels", scrubberLabels));
+  // Folder-grouping landmark style: "uniform" = the original evenly-spaced leaf
+  // folder names (position-thinned down the rail); "tree" = one label per library
+  // tree branch (collapses sibling folders, mirrors the sidebar). Only affects
+  // folder grouping — year/month/etc. landmarks are already coarse and identical
+  // either way. Persisted so it can be A/B'd.
+  let scrubberLandmarks = $state(loadSetting("scrubberLandmarks", "uniform"));
+  $effect(() => saveSetting("scrubberLandmarks", scrubberLandmarks));
 
   let gridEl = $state();
   let mainColumnEl = $state();
@@ -5399,7 +5401,7 @@
         <Scrubber
           manifest={scrubberManifest}
           axis={scrubberAxis}
-          showLabels={scrubberLabels}
+          landmarkMode={scrubberLandmarks}
           {groupBy}
           {sort}
           topValue={scrubberTopValue}
@@ -5557,7 +5559,7 @@
     bind:custom={prefetchCustom}
     bind:adaptivePageSize
     bind:scrubberAxis
-    bind:scrubberLabels
+    bind:scrubberLandmarks
   />
 {/if}
 
