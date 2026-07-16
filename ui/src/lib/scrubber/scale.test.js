@@ -7,6 +7,7 @@ import {
   axisScale,
   thinLabels,
   landmarkLabel,
+  densityBins,
 } from "./scale.js";
 
 const flat = {
@@ -87,6 +88,20 @@ describe("thinLabels", () => {
     const toY = (l) => l.startCount; // 1px per count for the test
     const kept = thinLabels(ls, 100, 10, toY).map((l) => l.value);
     expect(kept).toEqual(["a", "c"]); // b at y=1 is within 10px of a at y=0
+  });
+});
+
+describe("densityBins", () => {
+  it("buckets timestamps into equal-width bins", () => {
+    // width 2 over [0,10): [0,2)->{0,1}=2, [2,4)->{2}=1, [4,6)->0, [6,8)->0, [8,10)->{9}=1
+    expect(densityBins([0, 1, 2, 9], 0, 10, 5)).toEqual([2, 1, 0, 0, 1]);
+  });
+  it("clamps out-of-range values to the edge buckets", () => {
+    expect(densityBins([-5, 100], 0, 10, 2)).toEqual([1, 1]);
+  });
+  it("is safe for empty/degenerate input", () => {
+    expect(densityBins([], 0, 10, 4)).toEqual([0, 0, 0, 0]);
+    expect(densityBins([1, 2], 5, 5, 4)).toEqual([0, 0, 0, 0]); // max<=min
   });
 });
 

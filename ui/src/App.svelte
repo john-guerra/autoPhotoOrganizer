@@ -869,6 +869,12 @@
   $effect(() => saveSetting("prefetchCustom", $state.snapshot(prefetchCustom)));
   $effect(() => saveSetting("adaptivePageSize", adaptivePageSize));
 
+  // Scrubber rail axis: "count" (position ∝ cumulative photos — tracks scroll) or
+  // "value" (position ∝ sort value, e.g. time — like the top timeline). Persisted
+  // so it can be A/B'd like the prefetch presets.
+  let scrubberAxis = $state(loadSetting("scrubberAxis", "count"));
+  $effect(() => saveSetting("scrubberAxis", scrubberAxis));
+
   let gridEl = $state();
   let mainColumnEl = $state();
   let gridWidth = $state(0);
@@ -5347,11 +5353,14 @@
       <div class="scrubber-rail" style="flex-basis:{scrubberWidth}px">
         <Scrubber
           manifest={scrubberManifest}
-          axis="count"
+          axis={scrubberAxis}
           {groupBy}
           {sort}
           topCount={scrubberTopCount}
           viewportCount={scrubberViewportCount}
+          times={DATE_SORT_ATTRS.includes(sort.by) ? timeTimes : null}
+          {timeMin}
+          {timeMax}
           onjump={(path) => jumpToPath(path)}
         />
       </div>
@@ -5500,6 +5509,7 @@
     bind:preset={prefetchPreset}
     bind:custom={prefetchCustom}
     bind:adaptivePageSize
+    bind:scrubberAxis
   />
 {/if}
 

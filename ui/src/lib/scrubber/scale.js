@@ -105,6 +105,25 @@ export function thinLabels(landmarks, railH, minGapPx, toY) {
   return kept;
 }
 
+/**
+ * Bin ascending epoch-ms `times` into `bins` equal-width buckets over [min,max].
+ * Powers the date "scent" on the value axis (the same whole-library timestamps
+ * the top timeline samples). Out-of-range values clamp to the edge buckets.
+ * @returns {number[]} per-bucket counts (length `bins`)
+ */
+export function densityBins(times, min, max, bins) {
+  const out = new Array(Math.max(0, bins)).fill(0);
+  if (!times?.length || !(max > min) || bins < 1) return out;
+  const span = max - min;
+  for (const t of times) {
+    let i = Math.floor(((t - min) / span) * bins);
+    if (i < 0) i = 0;
+    if (i >= bins) i = bins - 1;
+    out[i]++;
+  }
+  return out;
+}
+
 const MONTHS = [
   "Jan",
   "Feb",

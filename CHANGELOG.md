@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.10
+
+- **Scrubber can now show a date "scent," and you can switch what the rail
+  measures.** A new Settings → Scrubber rail option toggles the rail between "by
+  photo count" (the thumb tracks your scroll) and "by sort value" (landmarks
+  spaced by date/number, like the top timeline, with a temporal-density scent).
+  Value spacing falls back to count for folder/categorical grouping.
+
 ## 2.16.9
 
 - **The scrubber is now draggable, resizable, and readable.** Drag anywhere on the

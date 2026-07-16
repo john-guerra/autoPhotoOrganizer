@@ -16,6 +16,7 @@
     preset = $bindable(),
     custom = $bindable(),
     adaptivePageSize = $bindable(),
+    scrubberAxis = $bindable(),
   } = $props();
 
   const close = () => onclose?.();
@@ -73,6 +74,23 @@
           >
         </span>
       </label>
+    </section>
+
+    <section>
+      <h3>Scrubber rail</h3>
+      <label class="preset">
+        <span>Position axis</span>
+        <select bind:value={scrubberAxis}>
+          <option value="count">By photo count (tracks scroll)</option>
+          <option value="value">By sort value (date &amp; numeric)</option>
+        </select>
+      </label>
+      <small
+        >Count keeps the thumb tracking your scroll; a busy month takes more
+        rail. Value spaces landmarks by the sort value (like the top timeline)
+        and shows a date "scent" — it falls back to count for folder/categorical
+        grouping.</small
+      >
     </section>
 
     <section>

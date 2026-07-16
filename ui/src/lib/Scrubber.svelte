@@ -9,6 +9,7 @@
     thinLabels,
     landmarkLabel,
     landmarkAtCount,
+    densityBins,
   } from "./scrubber/scale.js";
 
   let {
@@ -18,10 +19,14 @@
     sort = { by: "date_taken", dir: "asc" },
     topCount = 0,
     viewportCount = 0,
+    times = null,
+    timeMin = null,
+    timeMax = null,
     onjump,
   } = $props();
 
   let railH = $state(0);
+  let railW = $state(0);
 
   // Value getter for the value axis: finite only for numeric/date coarse dims
   // (year/day/rating/size); NaN for folder/camera/kind → axisScale falls back to
@@ -45,6 +50,29 @@
   );
 
   const nameOf = (l) => landmarkLabel(l, { groupBy });
+
+  // The value axis is only genuinely active when every coarse landmark has a
+  // finite value (year/day/rating/size); for folder/categorical grouping axisScale
+  // falls back to count, and so must the scent — else the time-linear scent would
+  // sit on a different scale than the count-positioned landmarks.
+  const valueActive = $derived(
+    axis === "value" &&
+      !!manifest &&
+      manifest.landmarks.every((l) => Number.isFinite(valueOf(l)))
+  );
+
+  // Date "scent": on the VALUE axis (position ∝ time) the /api/times timestamps
+  // draw a temporal-density profile — busy periods bulge — exactly like the top
+  // timeline. On the COUNT axis density is uniform by construction (equal photos
+  // per pixel), so we show the per-group count bars there instead.
+  const SCENT_BINS = 140;
+  const scent = $derived(
+    valueActive && times?.length && timeMax > timeMin
+      ? densityBins(times, timeMin, timeMax, SCENT_BINS)
+      : null
+  );
+  const scentMax = $derived(scent ? Math.max(1, ...scent) : 1);
+  const scentW = $derived(Math.max(20, railW * 0.6)); // px, scales with the rail
 
   // --- Drag to scrub -------------------------------------------------------
   // Dragging PREVIEWS the target landmark (a floating label + the thumb follows
@@ -100,6 +128,7 @@
   class="scrubber"
   class:dragging
   bind:clientHeight={railH}
+  bind:clientWidth={railW}
   role="scrollbar"
   aria-label="Feed scrubber — drag to scrub, click a landmark to jump"
   aria-orientation="vertical"
@@ -113,15 +142,26 @@
 >
   {#if manifest && scale}
     <div class="track">
-      {#each manifest.landmarks as l (l.key)}
-        <div
-          class="bar"
-          style="top:{scale.toY(l)}px; height:{Math.max(
-            1,
-            (l.count / total) * railH
-          )}px;"
-        ></div>
-      {/each}
+      {#if scent}
+        {#each scent as c, i (i)}
+          <div
+            class="scent"
+            style="top:{(i / SCENT_BINS) * railH}px; height:{railH /
+              SCENT_BINS +
+              0.6}px; width:{3 + (c / scentMax) * scentW}px;"
+          ></div>
+        {/each}
+      {:else}
+        {#each manifest.landmarks as l (l.key)}
+          <div
+            class="bar"
+            style="top:{scale.toY(l)}px; height:{Math.max(
+              1,
+              (l.count / total) * railH
+            )}px;"
+          ></div>
+        {/each}
+      {/if}
     </div>
 
     {#each labels as l (l.key)}
@@ -175,6 +215,13 @@
     width: 5px;
     background: #3a4a63;
     border-radius: 2px;
+    pointer-events: none;
+  }
+  /* Date scent: thin horizontal slices whose length encodes temporal density. */
+  .scent {
+    position: absolute;
+    right: 0;
+    background: #35506e;
     pointer-events: none;
   }
   .label {
