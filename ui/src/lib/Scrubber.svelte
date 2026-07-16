@@ -38,9 +38,19 @@
   const scale = $derived(
     manifest && railH > 0 ? axisScale(axis, manifest, railH, { valueOf }) : null
   );
+  // Text labels come from labelStops, not the fine landmarks: folder grouping has
+  // one landmark per leaf folder (hundreds), so labelStops collapses them to one
+  // stop per leading-token run (→ years, for `2010_..` names) and each stop is
+  // tagged with `.token`. Other groupings pass through unchanged. Still thinned by
+  // pixel gap so a tall run never overlaps.
   const labels = $derived(
     manifest && scale
-      ? thinLabels(manifest.landmarks, railH, 22, scale.toY)
+      ? thinLabels(
+          manifest.labelStops ?? manifest.landmarks,
+          railH,
+          22,
+          scale.toY
+        )
       : []
   );
   const total = $derived(manifest?.total ?? 0);
@@ -63,6 +73,9 @@
   );
 
   const nameOf = (l) => landmarkLabel(l, { groupBy });
+  // Rail text for a stop: the shared leading token when folder grouping coarsened
+  // it (e.g. "2010"), otherwise the normal landmark label.
+  const stopText = (l) => l.token ?? nameOf(l);
 
   // The value axis is only genuinely active when every coarse landmark has a
   // finite value (year/day/rating/size); for folder/categorical grouping axisScale
@@ -95,6 +108,19 @@
   let previewY = $state(0);
   let previewLandmark = $state(null);
   let hoverY = $state(null);
+
+  // The floating tooltip: dragging previews the target; otherwise a plain hover
+  // shows the fine folder name under the cursor. Same right-anchored chip either
+  // way, so hovering the rail always reveals the exact full name.
+  const tip = $derived.by(() => {
+    if (dragging && previewLandmark)
+      return { y: previewY, landmark: previewLandmark };
+    if (!dragging && hoverY != null) {
+      const l = landmarkAtY(hoverY);
+      if (l) return { y: hoverY, landmark: l };
+    }
+    return null;
+  });
 
   // Fisheye focus: 1 at the cursor, easing to 0 at FOCUS_R px away. Nearby labels
   // grow and lift so a dense rail stays scannable without resizing it.
@@ -215,9 +241,9 @@
         style="top:{scale.toY(l)}px; font-size:{10 + f * 4}px; z-index:{f > 0
           ? 40 + Math.round(f * 20)
           : 1};"
-        title={`${nameOf(l)} · ${l.count.toLocaleString()}`}
+        title={`${stopText(l)} · ${l.count.toLocaleString()}`}
       >
-        <span class="label-text">{nameOf(l)}</span>
+        <span class="label-text">{stopText(l)}</span>
       </div>
     {/each}
 
@@ -228,12 +254,14 @@
         : thumbH}px;"
     ></div>
 
-    {#if dragging && previewLandmark}
-      <div class="preview" style="top:{previewY}px;">
-        <span class="preview-name">{nameOf(previewLandmark)}</span>
-        <span class="preview-count"
-          >{previewLandmark.count.toLocaleString()}</span
-        >
+    <!-- One right-anchored floating tooltip, shown while dragging OR hovering. It
+         reads the FINE landmark under the cursor (landmarkAtY), so even when the
+         rail only labels sparse token stops the user still sees the exact full
+         folder name — anchored to the right edge so it never runs off-screen. -->
+    {#if tip}
+      <div class="preview" style="top:{tip.y}px;">
+        <span class="preview-name">{nameOf(tip.landmark)}</span>
+        <span class="preview-count">{tip.landmark.count.toLocaleString()}</span>
       </div>
     {/if}
   {/if}
@@ -294,21 +322,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  /* On hover the label lifts above the grid and shows its full name, extending
-     LEFT from the rail (the rail is the right-most column). */
-  .label:hover,
+  /* Fisheye emphasis only brightens the nearby label; the full name now lives in
+     the right-anchored .preview tooltip, so nothing extends LEFT over the grid. */
   .label.focused {
     color: #e8f0ff;
-    background: rgba(18, 20, 24, 0.97);
-    box-shadow: -3px 0 10px rgba(0, 0, 0, 0.45);
-  }
-  .label:hover {
-    z-index: 60;
-  }
-  .label:hover .label-text,
-  .label.focused .label-text {
-    max-width: none;
-    overflow: visible;
   }
   .thumb {
     position: absolute;

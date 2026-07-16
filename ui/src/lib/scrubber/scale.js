@@ -36,7 +36,47 @@ export function buildManifest(flat, { groupBy }) {
     current.count += leaf.count;
     running += leaf.count;
   }
-  return { total: flat.total ?? running, landmarks, cumStart };
+  return {
+    total: flat.total ?? running,
+    landmarks,
+    cumStart,
+    labelStops: labelStopsFor(landmarks, coarse),
+  };
+}
+
+/** Last non-empty path segment. */
+function basename(path) {
+  const parts = String(path).split("/").filter(Boolean);
+  return parts[parts.length - 1] || String(path);
+}
+
+/** Leading token of a name: everything before the first _ , - or space. */
+export function leadingToken(name) {
+  const m = String(name).match(/^[^_\s-]+/);
+  return m ? m[0] : String(name);
+}
+
+/**
+ * Which landmarks get a TEXT label on the rail. Folder grouping produces one
+ * landmark per (leaf) folder — hundreds of them — so instead of a wall of names
+ * we label only where the basename's leading token changes: for `2010_03Mar_…`
+ * folders that collapses to clean year labels; for other names it's whatever
+ * prefix they share, and unique names just each get their own stop (no worse than
+ * before). Other groupings (year, camera…) are already coarse — every landmark
+ * is a stop. The fine per-folder `landmarks` still drive density/scrub/hover.
+ */
+export function labelStopsFor(landmarks, coarse) {
+  if (coarse !== "folder" && coarse !== "folderName") return landmarks;
+  const stops = [];
+  let lastTok = null;
+  for (const lm of landmarks) {
+    const tok = leadingToken(basename(lm.value));
+    if (tok !== lastTok) {
+      stops.push({ ...lm, token: tok });
+      lastTok = tok;
+    }
+  }
+  return stops;
 }
 
 /** Cumulative count → rail pixel y. */

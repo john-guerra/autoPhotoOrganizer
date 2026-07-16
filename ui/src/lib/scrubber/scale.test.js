@@ -8,6 +8,8 @@ import {
   thinLabels,
   landmarkLabel,
   densityBins,
+  leadingToken,
+  labelStopsFor,
 } from "./scale.js";
 
 const flat = {
@@ -102,6 +104,40 @@ describe("densityBins", () => {
   it("is safe for empty/degenerate input", () => {
     expect(densityBins([], 0, 10, 4)).toEqual([0, 0, 0, 0]);
     expect(densityBins([1, 2], 5, 5, 4)).toEqual([0, 0, 0, 0]); // max<=min
+  });
+});
+
+describe("leadingToken", () => {
+  it("takes everything before the first _, - or space", () => {
+    expect(leadingToken("2010_03Mar_21_Trip")).toBe("2010");
+    expect(leadingToken("2010-03-21")).toBe("2010");
+    expect(leadingToken("Canon EOS shots")).toBe("Canon");
+    expect(leadingToken("fotos")).toBe("fotos");
+  });
+});
+
+describe("labelStopsFor (folder landmark coarsening)", () => {
+  const folderLandmarks = [
+    { key: "a", value: "/lib/2010_01Jan_Trip", startCount: 0, count: 4 },
+    { key: "b", value: "/lib/2010_03Mar_Home", startCount: 4, count: 6 },
+    { key: "c", value: "/lib/2011_05May_Beach", startCount: 10, count: 3 },
+    { key: "d", value: "/lib/2011_09Sep_Fall", startCount: 13, count: 2 },
+  ];
+
+  it("keeps only the first landmark of each leading-token run, tagged with .token", () => {
+    const stops = labelStopsFor(folderLandmarks, "folder");
+    expect(stops.map((s) => [s.token, s.value])).toEqual([
+      ["2010", "/lib/2010_01Jan_Trip"],
+      ["2011", "/lib/2011_05May_Beach"],
+    ]);
+  });
+
+  it("returns landmarks unchanged for non-folder dims (already coarse)", () => {
+    const yearLandmarks = [
+      { value: "2009", startCount: 0, count: 8 },
+      { value: "2010", startCount: 8, count: 2 },
+    ];
+    expect(labelStopsFor(yearLandmarks, "year")).toBe(yearLandmarks);
   });
 });
 

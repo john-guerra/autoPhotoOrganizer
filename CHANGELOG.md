@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.12
+
+- **Scrubber: readable folder landmarks + a right-anchored name tooltip.** When
+  grouping by folder the rail no longer stacks hundreds of folder names — it labels
+  where the folder's leading token changes (for `2010_..`-style names that reads as
+  clean year markers), while every fine folder still drives density and scrubbing.
+  Hovering or dragging the rail now shows the full folder name in a chip anchored to
+  the right edge, so long names stay readable instead of running off-screen.
+
 ## 2.16.11
 
 - **Scrubber: keyboard hops, a hover fisheye, and a marker that tracks smoothly.**
