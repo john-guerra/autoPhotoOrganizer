@@ -2237,16 +2237,45 @@
   // Thumb position: the top-visible group's coarsest-dim landmark start (group
   // granularity for v1 — see the design spec). viewportCount is a rough on-screen
   // entry count, enough to size a thin thumb.
-  let scrubberTopCount = $derived.by(() => {
-    const m = scrubberManifest;
-    const coarseVal = viewHerePath?.[0]?.value;
-    if (!m || coarseVal == null) return 0;
-    const lm = m.landmarks.find((l) => l.value === coarseVal);
-    return lm ? lm.startCount : 0;
+  // The coarse value of the top-visible group, plus how far the viewport has
+  // scrolled THROUGH that group (0..1). The scrubber positions its thumb by
+  // interpolating the active axis between this landmark and the next — so the
+  // thumb tracks smoothly within a big group AND sits on the same scale as the
+  // landmarks (count OR value), instead of a count-only position that drifts off
+  // the value axis.
+  let scrubberTopValue = $derived(viewHerePath?.[0]?.value ?? null);
+  let scrubberTopFrac = $derived.by(() => {
+    if (!scrubberManifest || !displayEntries.length) return 0;
+    const val = scrubberTopValue;
+    if (val == null) return 0;
+    const coarseAt = (i) =>
+      deriveCurrentPath(i, displayEntries, groupBy)?.[0]?.value;
+    let gi = renderStart;
+    while (gi > 0 && coarseAt(gi - 1) === val) gi--;
+    let ge = renderStart;
+    const n = displayEntries.length;
+    while (ge < n - 1 && coarseAt(ge + 1) === val) ge++;
+    const span = ge - gi + 1;
+    return span > 0 ? (renderStart - gi) / span : 0;
   });
   let scrubberViewportCount = $derived(
     Math.max(0, renderEnd - renderStart + 1)
   );
+
+  /** Hop to the previous/next scrubber landmark (coarsest-dim group) via the
+   * existing guarded value-seek. Driven by the `[` / `]` keys. */
+  function scrubberHop(dir) {
+    const m = scrubberManifest;
+    if (!m?.landmarks.length) return;
+    const coarseVal = viewHerePath?.[0]?.value;
+    let i = m.landmarks.findIndex((l) => l.value === coarseVal);
+    if (i < 0) i = 0;
+    const next = Math.max(
+      0,
+      Math.min(m.landmarks.length - 1, i + (dir === "next" ? 1 : -1))
+    );
+    if (next !== i || coarseVal == null) jumpToPath(m.landmarks[next].path);
+  }
 
   /** The abs folder path carried by a group path's "folder" or "folderName"
    * dimension, if present. Both dimensions carry the identical abs_path value
@@ -4532,6 +4561,14 @@
       return;
     }
 
+    // '[' / ']' hop to the previous / next scrubber landmark (the coarsest group —
+    // folder, year…). A keyboard mirror of clicking a rail landmark.
+    if ((e.key === "[" || e.key === "]") && !isTypingTarget(e.target)) {
+      e.preventDefault();
+      scrubberHop(e.key === "]" ? "next" : "prev");
+      return;
+    }
+
     if (!displayEntries.length) return;
     const key = e.key;
 
@@ -5058,6 +5095,7 @@
       {:else if items.length}
         <div
           class="grid"
+          id="feed-grid"
           bind:this={gridEl}
           bind:clientWidth={gridWidth}
           style={boxes ? `height:${gridHeight}px;` : ""}
@@ -5338,6 +5376,7 @@
     </div>
     {#if scrubberManifest && items.length}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
         class="scrubber-resizer"
         class:dragging={resizingScrubber}
@@ -5356,7 +5395,8 @@
           axis={scrubberAxis}
           {groupBy}
           {sort}
-          topCount={scrubberTopCount}
+          topValue={scrubberTopValue}
+          topFrac={scrubberTopFrac}
           viewportCount={scrubberViewportCount}
           times={DATE_SORT_ATTRS.includes(sort.by) ? timeTimes : null}
           {timeMin}

@@ -55,6 +55,8 @@
         },
         { keys: ["Home"], label: "Jump to the first photo" },
         { keys: ["End"], label: "Jump to the last photo" },
+        { keys: ["["], label: "Scrubber: jump to the previous landmark" },
+        { keys: ["]"], label: "Scrubber: jump to the next landmark" },
         { keys: ["Enter"], label: "Open in loupe (or expand a stack)" },
         { keys: ["Space"], label: "Open in loupe (or expand a stack)" },
         { keys: ["Esc"], label: "Collapse the current stack" },

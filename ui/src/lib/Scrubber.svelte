@@ -8,7 +8,6 @@
     axisScale,
     thinLabels,
     landmarkLabel,
-    landmarkAtCount,
     densityBins,
   } from "./scrubber/scale.js";
 
@@ -17,7 +16,8 @@
     axis = "count",
     groupBy = [],
     sort = { by: "date_taken", dir: "asc" },
-    topCount = 0,
+    topValue = null,
+    topFrac = 0,
     viewportCount = 0,
     times = null,
     timeMin = null,
@@ -44,7 +44,20 @@
       : []
   );
   const total = $derived(manifest?.total ?? 0);
-  const thumbTop = $derived(total > 0 ? (topCount / total) * railH : 0);
+
+  // Thumb position: interpolate the ACTIVE axis between the top-visible group's
+  // landmark and the next one, by how far the viewport has scrolled through it.
+  // Uses scale.toY (not a raw count), so the thumb sits on the same scale as the
+  // landmarks on both axes and tracks smoothly inside a big group.
+  const thumbTop = $derived.by(() => {
+    if (!manifest || !scale || topValue == null) return 0;
+    const ls = manifest.landmarks;
+    const i = ls.findIndex((l) => l.value === topValue);
+    if (i < 0) return 0;
+    const y0 = scale.toY(ls[i]);
+    const y1 = i + 1 < ls.length ? scale.toY(ls[i + 1]) : railH;
+    return y0 + Math.max(0, Math.min(1, topFrac)) * (y1 - y0);
+  });
   const thumbH = $derived(
     total > 0 ? Math.max(18, (viewportCount / total) * railH) : 0
   );
@@ -81,18 +94,39 @@
   let dragging = $state(false);
   let previewY = $state(0);
   let previewLandmark = $state(null);
+  let hoverY = $state(null);
+
+  // Fisheye focus: 1 at the cursor, easing to 0 at FOCUS_R px away. Nearby labels
+  // grow and lift so a dense rail stays scannable without resizing it.
+  const FOCUS_R = 64;
+  function focus(y) {
+    if (hoverY == null || dragging) return 0;
+    const d = Math.abs(y - hoverY);
+    return d < FOCUS_R ? 1 - d / FOCUS_R : 0;
+  }
 
   function railY(e) {
     const r = e.currentTarget.getBoundingClientRect();
     return Math.max(0, Math.min(railH, e.clientY - r.top));
   }
+  // The landmark at-or-before rail position `y`. Resolving by RENDERED position
+  // (toY) — not by fromY→count — is what makes scrub/click correct on BOTH axes:
+  // on the value axis fromY returns a sort value, not a count, so the old
+  // count-based lookup always landed on the wrong (early) landmark. Landmarks are
+  // monotonic in toY on either axis, so a single forward scan finds it.
+  function landmarkAtY(y) {
+    const ls = manifest?.landmarks;
+    if (!ls?.length || !scale) return null;
+    let pick = ls[0];
+    for (const l of ls) {
+      if (scale.toY(l) <= y + 0.5) pick = l;
+      else break;
+    }
+    return pick;
+  }
   function updatePreview(y) {
     previewY = y;
-    // count axis: fromY returns a cumulative count. (Value axis lands with the
-    // Settings toggle; while axis === "count" this is exact.)
-    previewLandmark = manifest
-      ? landmarkAtCount(manifest, scale.fromY(y))
-      : null;
+    previewLandmark = landmarkAtY(y);
   }
   function onPointerDown(e) {
     if (!scale || (e.button != null && e.button !== 0)) return;
@@ -108,8 +142,14 @@
     updatePreview(railY(e));
   }
   function onPointerMove(e) {
-    if (!dragging) return;
-    updatePreview(railY(e));
+    if (dragging) {
+      updatePreview(railY(e));
+    } else {
+      hoverY = railY(e);
+    }
+  }
+  function onPointerLeave() {
+    hoverY = null;
   }
   function commitDrag(e) {
     if (!dragging) return;
@@ -130,6 +170,8 @@
   bind:clientHeight={railH}
   bind:clientWidth={railW}
   role="scrollbar"
+  tabindex="-1"
+  aria-controls="feed-grid"
   aria-label="Feed scrubber — drag to scrub, click a landmark to jump"
   aria-orientation="vertical"
   aria-valuenow={Math.round(thumbTop)}
@@ -139,6 +181,7 @@
   onpointermove={onPointerMove}
   onpointerup={commitDrag}
   onpointercancel={commitDrag}
+  onpointerleave={onPointerLeave}
 >
   {#if manifest && scale}
     <div class="track">
@@ -165,9 +208,13 @@
     </div>
 
     {#each labels as l (l.key)}
+      {@const f = focus(scale.toY(l))}
       <div
         class="label"
-        style="top:{scale.toY(l)}px;"
+        class:focused={f > 0.35}
+        style="top:{scale.toY(l)}px; font-size:{10 + f * 4}px; z-index:{f > 0
+          ? 40 + Math.round(f * 20)
+          : 1};"
         title={`${nameOf(l)} · ${l.count.toLocaleString()}`}
       >
         <span class="label-text">{nameOf(l)}</span>
@@ -249,13 +296,17 @@
   }
   /* On hover the label lifts above the grid and shows its full name, extending
      LEFT from the rail (the rail is the right-most column). */
-  .label:hover {
+  .label:hover,
+  .label.focused {
     color: #e8f0ff;
     background: rgba(18, 20, 24, 0.97);
     box-shadow: -3px 0 10px rgba(0, 0, 0, 0.45);
+  }
+  .label:hover {
     z-index: 60;
   }
-  .label:hover .label-text {
+  .label:hover .label-text,
+  .label.focused .label-text {
     max-width: none;
     overflow: visible;
   }

@@ -444,6 +444,15 @@ export const tree = {
       .locator(".tree-fold-icon"),
 };
 
+// --- the right-edge scrubber rail --------------------------------------------
+
+export const scrubber = {
+  rail: (page) => page.locator(".scrubber"),
+  labels: (page) => page.locator(".scrubber .label"),
+  thumb: (page) => page.locator(".scrubber .thumb"),
+  labelTexts: (page) => page.locator(".scrubber .label-text").allInnerTexts(),
+};
+
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------
 
 export const menu = {

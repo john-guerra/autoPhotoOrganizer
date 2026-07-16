@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.11
+
+- **Scrubber: keyboard hops, a hover fisheye, and a marker that tracks smoothly.**
+  `[` and `]` jump to the previous/next landmark. Hovering the rail magnifies the
+  nearby labels so a dense rail stays scannable. The viewport marker now rides the
+  same scale as the landmarks and interpolates within a group, so it keeps moving
+  as you scroll through a big year/folder — and dragging to a spot leaves the
+  marker exactly there (it no longer snaps a couple of years off, and clicking a
+  year on the value axis lands on that year). The drag tooltip updates live.
+
 ## 2.16.10
 
 - **Scrubber can now show a date "scent," and you can switch what the rail
