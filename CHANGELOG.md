@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.17
+
+- **Scrubber: the viewport marker no longer hiccups backward while scrolling.**
+  Inside a group larger than one page (e.g. a camera or folder holding tens of
+  thousands of photos), each background page-load used to grow the marker's frame of
+  reference and jerk it back up a notch. The marker now measures your position
+  against the group's true size, so it only ever advances as you scroll down.
+
 ## 2.16.16
 
 - **Scrubber: big groups always get a label.** Rail labels are now thinned by group

@@ -111,6 +111,19 @@ export function labelStopsFor(landmarks, coarse) {
   return stops;
 }
 
+/**
+ * Fraction (0..1) of the way `indexIntoGroup` sits through a group of `groupTotal`
+ * items. The denominator MUST be the group's true total (from the manifest), never
+ * the group's extent in the loaded feed window: that extent grows every time an
+ * infinite-scroll page appends more of the same group, which shrinks the fraction
+ * mid-scroll and jerks the scrubber thumb backward (the reported hiccup). A fixed
+ * total keeps the fraction monotonic as you scroll down through a big group.
+ */
+export function groupFraction(indexIntoGroup, groupTotal) {
+  if (!(groupTotal > 0)) return 0;
+  return Math.max(0, Math.min(1, indexIntoGroup / groupTotal));
+}
+
 /** Cumulative count → rail pixel y. */
 export function countToY(n, total, railH) {
   if (!(total > 0)) return 0;

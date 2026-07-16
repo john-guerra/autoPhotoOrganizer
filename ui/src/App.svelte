@@ -89,7 +89,7 @@
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import SettingsPanel from "./lib/SettingsPanel.svelte";
   import Scrubber from "./lib/Scrubber.svelte";
-  import { buildManifest } from "./lib/scrubber/scale.js";
+  import { buildManifest, groupFraction } from "./lib/scrubber/scale.js";
   import {
     planPrefetch,
     normalizePrefetch,
@@ -2258,13 +2258,18 @@
     if (val == null) return 0;
     const coarseAt = (i) =>
       deriveCurrentPath(i, displayEntries, groupBy)?.[0]?.value;
+    // How far renderStart sits into its coarse group, as a 0..1 fraction. The
+    // numerator walks back to the group's start in the loaded window; the
+    // denominator is the group's TRUE size from the manifest — NOT its extent in
+    // the loaded window. Using the window extent made the thumb hiccup backward:
+    // scrolling inside a group larger than one page, each loadMore("after")
+    // appended more of the same group below, growing the denominator and shrinking
+    // the fraction even though renderStart hadn't moved back. The manifest total is
+    // fixed, so the fraction only ever grows as you scroll down through the group.
     let gi = renderStart;
     while (gi > 0 && coarseAt(gi - 1) === val) gi--;
-    let ge = renderStart;
-    const n = displayEntries.length;
-    while (ge < n - 1 && coarseAt(ge + 1) === val) ge++;
-    const span = ge - gi + 1;
-    return span > 0 ? (renderStart - gi) / span : 0;
+    const lm = scrubberManifest.landmarks.find((l) => l.value === val);
+    return groupFraction(renderStart - gi, lm?.count ?? 0);
   });
   let scrubberViewportCount = $derived(
     Math.max(0, renderEnd - renderStart + 1)

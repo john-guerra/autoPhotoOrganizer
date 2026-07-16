@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildManifest,
+  groupFraction,
   countToY,
   yToCount,
   landmarkAtCount,
@@ -34,6 +35,23 @@ describe("buildManifest", () => {
     expect(m.landmarks[0].path).toEqual([{ dimension: "year", value: "2009" }]);
     // prefix sums over the leaves (length n+1)
     expect(m.cumStart).toEqual([0, 3, 8, 10]);
+  });
+});
+
+describe("groupFraction", () => {
+  it("maps index→0..1 by the group's TRUE total, clamped and safe", () => {
+    expect(groupFraction(0, 100)).toBe(0);
+    expect(groupFraction(50, 100)).toBe(0.5);
+    expect(groupFraction(100, 100)).toBe(1);
+    expect(groupFraction(150, 100)).toBe(1); // clamps past the end
+    expect(groupFraction(10, 0)).toBe(0); // no divide-by-zero
+  });
+  it("is monotonic in index for a FIXED total (the anti-hiccup invariant)", () => {
+    // The denominator is the manifest total, so it never grows as more of the
+    // group loads — scrolling down only ever advances the fraction.
+    expect(groupFraction(20, 1000)).toBeLessThan(groupFraction(40, 1000));
+    // Same index, same total → same fraction regardless of how much is loaded.
+    expect(groupFraction(300, 32760)).toBe(groupFraction(300, 32760));
   });
 });
 
