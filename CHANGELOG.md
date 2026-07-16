@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.7
+
+- **Aggressive scrolling no longer "refreshes the whole page."** When a hard
+  fling overshot past the loaded rows into the scroll reserve, the grid used to
+  tear every tile down to nothing for a beat and then rebuild — a jarring blank
+  flash that lost your place. It now keeps the last screenful mounted until the
+  next rows load in, so the redraw is incremental and your context stays put.
+
 ## 2.16.6
 
 - **Fast flings no longer stop dead at a false "end of page."** While there are

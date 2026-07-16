@@ -4,6 +4,7 @@
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import {
     visibleRange,
+    retainWindow,
     runwayPx,
     topAnchorIndex,
     anchorScrollTop,
@@ -4214,8 +4215,18 @@
       viewportHeight: mainColumnEl.clientHeight,
       overscanPx: 300,
     });
-    renderStart = range.start;
-    renderEnd = range.end;
+    // Retain the previous window when a fling overshoots past the loaded content
+    // into the bottom reserve (visibleRange goes empty). Without this the whole
+    // grid tears down to `selected` alone — the "refreshes the whole page and I
+    // lose context" flash (measured live: 180 mounted tiles → 1). See
+    // windowing.retainWindow.
+    const win = retainWindow(
+      range,
+      { start: renderStart, end: renderEnd },
+      { entryCount: displayEntries.length }
+    );
+    renderStart = win.start;
+    renderEnd = win.end;
 
     // How far can the user still scroll before hitting blank space? Prefetch has
     // to fire while that runway is longer than a fetch takes to fly, or they

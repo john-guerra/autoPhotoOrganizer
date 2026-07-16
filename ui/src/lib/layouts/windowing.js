@@ -32,6 +32,39 @@ export function visibleRange(
 }
 
 /**
+ * Decide which index range to actually mount, retaining the previous window when
+ * a fling has overshot PAST the loaded content into the bottom scroll reserve.
+ *
+ * `visibleRange` returns empty (`end < start`) the moment `scrollTop` drops below
+ * the last laid-out box — which is exactly what a hard fling into the reserve
+ * does. If we honoured that empty range the grid would tear every mounted tile
+ * down to nothing (measured live: 180 tiles → 1 for ~130ms) and then rebuild it,
+ * the "it refreshes the whole page and I lose context" flash. Instead we keep the
+ * last real window mounted until `loadMore` backfills content the new position
+ * can render, so the redraw is incremental, never a full teardown.
+ *
+ * Retain ONLY when the new range is empty AND we had a real previous window AND
+ * that window's indices are still valid for the current entry count. That last
+ * guard is essential: a fold/filter can shrink the feed below the old window, and
+ * mounting stale indices past the end would read `undefined` boxes (a crash). In
+ * that case we fall through to the empty range and let the replace path recenter.
+ *
+ * Pure — no DOM.
+ *
+ * @param {{ start: number, end: number }} range   fresh visibleRange result
+ * @param {{ start: number, end: number }} prev     the currently-mounted window
+ * @param {{ entryCount: number }} opts             length of the current feed
+ * @returns {{ start: number, end: number }} the range to mount
+ */
+export function retainWindow(range, prev, { entryCount }) {
+  const rangeEmpty = range.end < range.start;
+  const hadWindow =
+    prev.end >= prev.start && prev.start >= 0 && prev.end < entryCount;
+  if (rangeEmpty && hadWindow) return { start: prev.start, end: prev.end };
+  return { start: range.start, end: range.end };
+}
+
+/**
  * How much laid-out content is left ABOVE and BELOW the viewport, in pixels.
  *
  * This is the runway: how far the user can scroll before they run out of loaded

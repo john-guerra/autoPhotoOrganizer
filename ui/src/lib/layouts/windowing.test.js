@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   visibleRange,
+  retainWindow,
   runwayPx,
   topAnchorIndex,
   anchorScrollTop,
@@ -21,6 +22,37 @@ function buildRows(rowCount, { perRow = 2, rowHeight = 100, gap = 8 } = {}) {
   }
   return boxes;
 }
+
+describe("retainWindow", () => {
+  const prev = { start: 40, end: 60 };
+
+  it("keeps the previous window when a fling overshoots past content (empty range)", () => {
+    // THE fix: visibleRange goes empty the moment scrollTop drops below the last
+    // box (a fling into the bottom reserve). Retaining prev keeps the grid from
+    // tearing every tile down to `selected` alone.
+    const empty = { start: 0, end: -1 };
+    expect(retainWindow(empty, prev, { entryCount: 200 })).toEqual(prev);
+  });
+
+  it("uses the fresh range whenever it is non-empty (normal scrolling)", () => {
+    const range = { start: 100, end: 130 };
+    expect(retainWindow(range, prev, { entryCount: 200 })).toEqual(range);
+  });
+
+  it("does NOT retain a stale window that a shrink left past the feed end", () => {
+    // A fold/filter can shorten the feed below the old window; mounting those
+    // indices would read undefined boxes (a crash). Fall through to empty and
+    // let the replace path recenter.
+    const empty = { start: 0, end: -1 };
+    expect(retainWindow(empty, prev, { entryCount: 50 })).toEqual(empty);
+  });
+
+  it("does NOT retain when there was no previous window (first empty render)", () => {
+    const empty = { start: 0, end: -1 };
+    const noPrev = { start: 0, end: -1 };
+    expect(retainWindow(empty, noPrev, { entryCount: 200 })).toEqual(empty);
+  });
+});
 
 describe("scrollableHeight", () => {
   it("is content + padding when nothing remains below (no false floor to hide)", () => {
