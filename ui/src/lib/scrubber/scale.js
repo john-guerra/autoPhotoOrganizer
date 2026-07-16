@@ -163,18 +163,40 @@ export function axisScale(axis, manifest, railH, { valueOf } = {}) {
   };
 }
 
-/** Greedy label thinning: keep the first, drop any whose y is within minGapPx. */
-export function thinLabels(landmarks, railH, minGapPx, toY) {
-  const kept = [];
-  let lastY = -Infinity;
-  for (const l of landmarks) {
-    const y = toY(l);
-    if (y - lastY >= minGapPx) {
-      kept.push(l);
-      lastY = y;
+/**
+ * Label thinning to a minimum pixel gap. Without `weight` it's the plain greedy
+ * top-to-bottom keep-first. With `weight` it's PRIORITY thinning: try the
+ * highest-weight landmarks first (weight by count), so a group that owns a big
+ * share of the rail always gets its label instead of being dropped because a tiny
+ * neighbour sorts just above it — e.g. a 70D camera holding a third of the library
+ * whose label sits 16px down and would otherwise lose to the cameras stacked above
+ * it. Rendering order (top→bottom) is restored at the end.
+ */
+export function thinLabels(landmarks, railH, minGapPx, toY, { weight } = {}) {
+  if (!weight) {
+    const kept = [];
+    let lastY = -Infinity;
+    for (const l of landmarks) {
+      const y = toY(l);
+      if (y - lastY >= minGapPx) {
+        kept.push(l);
+        lastY = y;
+      }
+    }
+    return kept;
+  }
+  const order = landmarks
+    .map((l, i) => ({ i, y: toY(l), w: weight(l) }))
+    .sort((a, b) => b.w - a.w || a.i - b.i);
+  const keptYs = [];
+  const keptIdx = new Set();
+  for (const { i, y } of order) {
+    if (keptYs.every((ky) => Math.abs(ky - y) >= minGapPx)) {
+      keptYs.push(y);
+      keptIdx.add(i);
     }
   }
-  return kept;
+  return landmarks.filter((_, i) => keptIdx.has(i));
 }
 
 /**

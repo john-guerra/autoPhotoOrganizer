@@ -51,8 +51,15 @@
         ? (manifest.labelStops ?? manifest.landmarks)
         : manifest.landmarks
   );
+  // Weight thinning by group size so a dominant group (a camera or folder that
+  // owns a big share of the library) always keeps its label instead of losing it
+  // to a tiny neighbour that merely sorts just above it.
   const labels = $derived(
-    manifest && scale ? thinLabels(labelSource, railH, 22, scale.toY) : []
+    manifest && scale
+      ? thinLabels(labelSource, railH, 22, scale.toY, {
+          weight: (l) => l.count,
+        })
+      : []
   );
   const total = $derived(manifest?.total ?? 0);
 

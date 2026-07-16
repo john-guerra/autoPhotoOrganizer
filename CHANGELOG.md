@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.16
+
+- **Scrubber: big groups always get a label.** Rail labels are now thinned by group
+  size, so a dominant group keeps its label instead of losing it to a tiny neighbour
+  that merely sorts just above it. Grouping by camera, a Canon 70D holding ~30% of the
+  library no longer goes unlabeled (its band previously showed the next camera's name);
+  the same helps large folders in the uniform folder view.
+
 ## 2.16.15
 
 - **Scrubber: choose the folder landmark style.** Settings → Scrubber rail → "Folder

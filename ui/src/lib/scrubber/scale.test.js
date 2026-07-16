@@ -92,6 +92,26 @@ describe("thinLabels", () => {
     const kept = thinLabels(ls, 100, 10, toY).map((l) => l.value);
     expect(kept).toEqual(["a", "c"]); // b at y=1 is within 10px of a at y=0
   });
+
+  it("with a weight, keeps a dominant landmark over a tiny neighbour above it", () => {
+    // "huge" sits 1px below "tiny" — greedy keeps tiny and drops huge (the 70D bug).
+    const ls = [
+      { value: "tiny", startCount: 0, count: 1 },
+      { value: "huge", startCount: 1, count: 100 },
+      { value: "far", startCount: 200, count: 5 },
+    ];
+    const toY = (l) => l.startCount; // 1px per count
+    expect(thinLabels(ls, 300, 22, toY).map((l) => l.value)).toEqual([
+      "tiny",
+      "far",
+    ]);
+    // Priority by count keeps "huge" instead of "tiny", still in top→bottom order.
+    expect(
+      thinLabels(ls, 300, 22, toY, { weight: (l) => l.count }).map(
+        (l) => l.value
+      )
+    ).toEqual(["huge", "far"]);
+  });
 });
 
 describe("densityBins", () => {
