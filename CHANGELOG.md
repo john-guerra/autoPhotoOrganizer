@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.6
+
+- **Fast flings no longer stop dead at a false "end of page."** While there are
+  more photos to load, the grid now keeps a scroll reserve below the loaded rows
+  so a quick flick keeps gliding and the loader fills in underneath, instead of
+  the scroll slamming to a halt because it thought it hit the bottom. (Part of
+  the Adaptive load-ahead setting.)
+
 ## 2.16.5
 
 - **Fast scrolling no longer reaches the end of the feed before more loads.**

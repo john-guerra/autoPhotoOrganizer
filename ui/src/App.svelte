@@ -9,6 +9,7 @@
     anchorScrollTop,
     aheadRange,
     pageForRunway,
+    scrollableHeight,
   } from "./lib/layouts/windowing.js";
   import { ZOOM_LEVELS, resolveZoom, gapFor } from "./lib/zoom.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
@@ -3852,8 +3853,20 @@
       layoutAnchor = { domId: anchor.domId, y: nb.y };
     });
   });
+  // Scroll runway kept BELOW the loaded content while more remains, so a fast
+  // fling scrolls into empty space instead of clamping at the loaded content's
+  // floor and stopping ("quick flings get stopped because it thinks I reached
+  // the end"). Bounded — loadMore backfills it as the user descends. Shares the
+  // adaptivePageSize switch (both keep the loader ahead of a fast scroll).
+  const BOTTOM_RESERVE_PX = 3000;
   let gridHeight = $derived(
-    layoutResult ? layoutResult.totalHeight + 2 * PAD : 0
+    layoutResult
+      ? scrollableHeight(layoutResult.totalHeight, {
+          pad: PAD,
+          hasMoreAfter: adaptivePageSize && hasMoreAfter,
+          reservePx: BOTTOM_RESERVE_PX,
+        })
+      : 0
   );
   // The first time this fires (right when `boxes` first becomes non-null,
   // e.g. after the initial feed load), the grid's layout/paint may not have

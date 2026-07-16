@@ -64,11 +64,12 @@
       <label class="toggle">
         <input type="checkbox" bind:checked={adaptivePageSize} />
         <span>
-          Adaptive page size
+          Adaptive load-ahead
           <small
-            >Fetch a full screen-plus of photos per load instead of a fixed 60,
-            so fast scrolling at small thumbnails doesn't outrun the loader. The
-            fix for "I reach the end before it loads more."</small
+            >Fetch a full screen-plus of photos per load (instead of a fixed 60)
+            and keep a scroll reserve below the loaded rows, so a fast fling at
+            small thumbnails doesn't outrun the loader or stop dead at a false
+            "end of page." The fix for "I reach the end before it loads more."</small
           >
         </span>
       </label>

@@ -157,6 +157,31 @@ export function pageForRunway(boxes, { runwayPx, min, max }) {
 }
 
 /**
+ * Height to give the scroll container: the laid-out content plus a bottom
+ * RESERVE while more content remains below. Without the reserve, the scroller is
+ * exactly as tall as the loaded items, so a momentum fling slams into that floor
+ * and stops — and native inertia does NOT resume when loadMore appends more a
+ * moment later ("quick flings get stopped because it thinks I reached the end").
+ * The reserve keeps a few screens of scrollable space below the real content, so
+ * a fling scrolls INTO it (briefly blank) instead of clamping, and loadMore
+ * backfills it. Bounded on purpose: an unbounded reserve (the whole remaining
+ * library) would need random-access windowing to fill, and a fast fling would
+ * land in a huge blank gap. The reserve is dropped once nothing remains
+ * (`hasMoreAfter` false), so you cannot scroll past the true end of the library.
+ *
+ * @param {number} totalHeight  laid-out content height (layoutResult.totalHeight)
+ * @param {{ pad?: number, hasMoreAfter?: boolean, reservePx?: number }} opts
+ * @returns {number} height for the scroll container (0 for no content)
+ */
+export function scrollableHeight(
+  totalHeight,
+  { pad = 0, hasMoreAfter = false, reservePx = 0 } = {}
+) {
+  if (!(totalHeight > 0)) return 0;
+  return totalHeight + 2 * pad + (hasMoreAfter ? Math.max(0, reservePx) : 0);
+}
+
+/**
  * Binary search: predicate(boxes[i]) is false for a prefix and true for the
  * rest. Returns the first true index, or boxes.length if never true.
  */

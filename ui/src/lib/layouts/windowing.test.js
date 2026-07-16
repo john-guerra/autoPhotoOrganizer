@@ -6,6 +6,7 @@ import {
   anchorScrollTop,
   aheadRange,
   pageForRunway,
+  scrollableHeight,
 } from "./windowing.js";
 
 /** N rows of `perRow` boxes each, height `rowHeight`, stacked with `gap`. */
@@ -20,6 +21,37 @@ function buildRows(rowCount, { perRow = 2, rowHeight = 100, gap = 8 } = {}) {
   }
   return boxes;
 }
+
+describe("scrollableHeight", () => {
+  it("is content + padding when nothing remains below (no false floor to hide)", () => {
+    expect(
+      scrollableHeight(10000, { pad: 8, hasMoreAfter: false, reservePx: 3000 })
+    ).toBe(10016);
+  });
+
+  it("adds the reserve while more content remains, so a fling can't clamp", () => {
+    // THE fix: with more to load, the scroller must be taller than the loaded
+    // content or a momentum fling stops at the loaded floor.
+    expect(
+      scrollableHeight(10000, { pad: 8, hasMoreAfter: true, reservePx: 3000 })
+    ).toBe(13016);
+  });
+
+  it("adds nothing when the reserve is zero or negative", () => {
+    expect(scrollableHeight(10000, { hasMoreAfter: true, reservePx: 0 })).toBe(
+      10000
+    );
+    expect(
+      scrollableHeight(10000, { hasMoreAfter: true, reservePx: -500 })
+    ).toBe(10000);
+  });
+
+  it("returns 0 for no content (nothing laid out yet)", () => {
+    expect(scrollableHeight(0, { hasMoreAfter: true, reservePx: 3000 })).toBe(
+      0
+    );
+  });
+});
 
 describe("pageForRunway", () => {
   it("falls back to min for no boxes / no runway / zero content", () => {
