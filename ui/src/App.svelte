@@ -577,6 +577,65 @@
     }
   }
 
+  // Scrubber rail width — resizable and persisted, so long folder/landmark names
+  // are readable as wide as you want (mirrors the sidebar resizer; the handle
+  // sits on the rail's LEFT edge, so dragging left widens it).
+  const DEFAULT_SCRUBBER_WIDTH = 54;
+  const MIN_SCRUBBER_WIDTH = 40;
+  const MAX_SCRUBBER_WIDTH = 360;
+  const LS_SCRUBBER_WIDTH = "autogallery.scrubberWidth";
+  const clampScrubber = (w) =>
+    Math.max(MIN_SCRUBBER_WIDTH, Math.min(MAX_SCRUBBER_WIDTH, Math.round(w)));
+  let scrubberWidth = $state(
+    (() => {
+      const stored = Number(localStorage.getItem(LS_SCRUBBER_WIDTH));
+      return Number.isFinite(stored) && stored > 0
+        ? clampScrubber(stored)
+        : DEFAULT_SCRUBBER_WIDTH;
+    })()
+  );
+  $effect(() => {
+    localStorage.setItem(LS_SCRUBBER_WIDTH, String(scrubberWidth));
+  });
+  let resizingScrubber = $state(false);
+
+  function startScrubberResize(e) {
+    e.preventDefault();
+    resizingScrubber = true;
+    const startX = e.clientX;
+    const startW = scrubberWidth;
+    const handle = e.currentTarget;
+    handle.setPointerCapture?.(e.pointerId);
+    // Handle is on the rail's left edge: moving the cursor LEFT (negative delta)
+    // widens the rail.
+    const onMove = (ev) =>
+      (scrubberWidth = clampScrubber(startW - (ev.clientX - startX)));
+    const onUp = (ev) => {
+      resizingScrubber = false;
+      handle.releasePointerCapture?.(ev.pointerId);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  }
+
+  function onScrubberResizeKey(e) {
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      scrubberWidth = clampScrubber(scrubberWidth + step); // left = wider
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      scrubberWidth = clampScrubber(scrubberWidth - step);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      scrubberWidth = DEFAULT_SCRUBBER_WIDTH;
+    }
+  }
+
   const LS_SIDEBAR_MODE = "autogallery.sidebarMode";
   let sidebarMode = $state(
     localStorage.getItem(LS_SIDEBAR_MODE) === "fisheye" ? "fisheye" : "tree"
@@ -5272,7 +5331,20 @@
       {/if}
     </div>
     {#if scrubberManifest && items.length}
-      <div class="scrubber-rail">
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div
+        class="scrubber-resizer"
+        class:dragging={resizingScrubber}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize scrubber (double-click to reset)"
+        tabindex="0"
+        title="Drag to resize the scrubber (double-click to reset)"
+        onpointerdown={startScrubberResize}
+        ondblclick={() => (scrubberWidth = DEFAULT_SCRUBBER_WIDTH)}
+        onkeydown={onScrubberResizeKey}
+      ></div>
+      <div class="scrubber-rail" style="flex-basis:{scrubberWidth}px">
         <Scrubber
           manifest={scrubberManifest}
           axis="count"
@@ -5489,11 +5561,31 @@
      .main-column (flex:1), it reserves its width cleanly — the grid reflows to
      fit — and never scrolls with the feed. */
   .scrubber-rail {
-    flex: 0 0 54px;
+    /* width comes from the inline flex-basis (resizable, persisted) */
+    flex: 0 0 auto;
     min-width: 0;
     padding: 6px 4px 6px 0;
-    border-left: 1px solid #23262b;
-    overflow: hidden;
+    /* visible + a stacking context above the grid so a hovered/dragged label can
+       expand LEFT over the feed and be fully readable */
+    overflow: visible;
+    position: relative;
+    z-index: 6;
+  }
+  /* Drag handle on the rail's LEFT edge (mirrors .sidebar-resizer). */
+  .scrubber-resizer {
+    flex: 0 0 6px;
+    cursor: col-resize;
+    background: #2a2a2a;
+    border: none;
+    padding: 0;
+    z-index: 6;
+    transition: background 0.12s;
+  }
+  .scrubber-resizer:hover,
+  .scrubber-resizer:focus-visible,
+  .scrubber-resizer.dragging {
+    background: #4c9aff;
+    outline: none;
   }
   /* The timeline, slotted into the toolbar's Filter group. It lives here because
      App renders it (a dozen props of App's own state), so it is in App's style

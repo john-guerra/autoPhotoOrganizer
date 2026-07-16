@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.9
+
+- **The scrubber is now draggable, resizable, and readable.** Drag anywhere on the
+  rail to scrub — a floating preview shows the target folder/landmark and the jump
+  commits when you release. Drag the rail's left edge to make it as wide as you
+  like (persisted), so long folder names are fully readable; hovering a label also
+  pops its full name out over the grid.
+
 ## 2.16.8
 
 - **New scrubber rail on the right edge of the feed.** It shows the whole
