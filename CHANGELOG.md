@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.3
+
+- **Nicer loading tiles.** A photo that hasn't loaded yet now shows a subtle
+  diagonal-striped placeholder with its filename centered on it, so you can see
+  which file a slow tile is before it renders (replacing the old spinner). Loaded
+  tiles get a soft gradient along the bottom edge behind the rating stars — and on
+  hover — so the stars stay legible over any photo without darkening the grid.
+
 ## 2.16.2
 
 - **The grid no longer jumps as photo details load, or when you resize or zoom.**

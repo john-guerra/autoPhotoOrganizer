@@ -72,6 +72,12 @@
           (retryNonce ? `&retry=${retryNonce}` : "")
       : null
   );
+  // Is there anything in the bottom-edge overlay (rating stars, video duration,
+  // or the size pill)? Drives the bottom scrim, which exists only to keep those
+  // legible over a photo — so it shows behind them, and otherwise only on hover.
+  let hasBottomBadge = $derived(
+    item.rating > 0 || item.duration != null || (showSize && item.size != null)
+  );
   $effect(() => {
     // Track ONLY `src` (a stable string). armAttempt runs untracked: it reads
     // `item` and calls `onattempt`, which synchronously updates App's thumbStatus
@@ -289,8 +295,12 @@
         />
       {/key}
     {/if}
-    {#if src && !loaded && !failed}
-      <span class="thumb-spinner" aria-hidden="true"></span>
+    {#if !loaded && !failed && !previewSrc}
+      <!-- Placeholder identity: the filename, centered over the diagonal-striped
+           empty tile, until the real image (or its fast preview) paints. Doubles
+           as the loading affordance the old spinner used to be — you can read
+           which file a slow tile is before it renders. -->
+      <span class="thumb-name" aria-hidden="true">{item.name}</span>
     {/if}
     {#if failed && item.kind !== "raw"}
       <!-- role="button" span, not <button> — same reason as .select-circle: no
@@ -313,6 +323,12 @@
         }}>⟳ Retry</span
       >
     {/if}
+    <!-- Bottom scrim: a soft dark gradient anchored to the bottom edge, so the
+         rating stars / duration / size pill stay legible over any photo. Shown
+         only when one of those is present, or on hover — the grid stays clean
+         otherwise. Paints above the cover (z-index 50), below the badges (100). -->
+    <span class="thumb-shade" class:show={hasBottomBadge} aria-hidden="true"
+    ></span>
     {#if item.kind === "video"}
       {#if loaded}
         <span class="play-badge" aria-hidden="true">▶</span>
@@ -379,7 +395,14 @@
     border: 2px solid transparent;
     border-radius: 4px;
     overflow: hidden;
-    background: #1a1a1a;
+    /* Diagonal-striped placeholder for an empty/loading tile — two nearly
+       identical darks 9px apart, so it reads as a subtle texture, not a flat
+       box. Fully hidden once the opaque object-fit:cover image paints over it. */
+    background: repeating-linear-gradient(
+      135deg,
+      hsl(240 4% 11%) 0 9px,
+      hsl(240 4% 14%) 9px 18px
+    );
     cursor: pointer;
     outline: none;
   }
@@ -529,23 +552,43 @@
   .badge {
     z-index: 100;
   }
-  .thumb-spinner {
+  .thumb-name {
     position: absolute;
     inset: 0;
     margin: auto;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    border-top-color: rgba(255, 255, 255, 0.7);
-    animation: thumb-spin 0.8s linear infinite;
-    z-index: 60;
+    width: fit-content;
+    height: fit-content;
+    max-width: 92%;
+    /* System monospace — no external font dependency (this app is local-first);
+       JetBrains Mono is honoured if the user happens to have it installed. */
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.28);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     pointer-events: none;
+    z-index: 2;
   }
-  @keyframes thumb-spin {
-    to {
-      transform: rotate(360deg);
-    }
+  .thumb-shade {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 44px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+    z-index: 60;
+  }
+  .thumb-shade.show {
+    opacity: 1;
+  }
+  .thumb:hover .thumb-shade {
+    opacity: 1;
   }
   .thumb-retry {
     position: absolute;
