@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.4
+
+- **Scrolling prefetches thumbnails in the direction you're heading**, scaled to
+  how fast you scroll, so tiles appear instantly instead of loading in behind the
+  scroll. The look-ahead is bounded so it never starves the tiles you're actually
+  looking at.
+
 ## 2.16.3
 
 - **Nicer loading tiles.** A photo that hasn't loaded yet now shows a subtle

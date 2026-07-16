@@ -99,6 +99,41 @@ export function anchorScrollTop(currentScrollTop, oldY, newY) {
 }
 
 /**
+ * Inclusive index range of boxes JUST BEYOND the viewport in the travel
+ * direction, within an `aheadPx` budget — the tiles to warm predictively so a
+ * fast scroll doesn't outrun the loader. "down" takes boxes whose top sits below
+ * the viewport's bottom edge (not yet visible); "up" takes boxes whose bottom
+ * sits above the viewport's top edge. Boxes are y-monotonic (see visibleRange),
+ * so both bounds are binary searches. Returns `{ start: 0, end: -1 }` (empty)
+ * for no boxes, a non-positive budget, or an unknown direction.
+ *
+ * @param {Array<{y: number, height: number}>} boxes
+ * @param {{ scrollTop: number, viewportHeight: number, aheadPx: number, direction: "up"|"down" }} opts
+ * @returns {{ start: number, end: number }} inclusive index range into `boxes`
+ */
+export function aheadRange(
+  boxes,
+  { scrollTop, viewportHeight, aheadPx, direction }
+) {
+  if (!boxes.length || !(aheadPx > 0)) return { start: 0, end: -1 };
+
+  let start, afterEnd;
+  if (direction === "down") {
+    const edge = scrollTop + viewportHeight;
+    start = firstIndexWhere(boxes, (b) => b.y >= edge);
+    afterEnd = firstIndexWhere(boxes, (b) => b.y > edge + aheadPx);
+  } else if (direction === "up") {
+    const edge = scrollTop;
+    start = firstIndexWhere(boxes, (b) => b.y + b.height >= edge - aheadPx);
+    afterEnd = firstIndexWhere(boxes, (b) => b.y + b.height > edge);
+  } else {
+    return { start: 0, end: -1 };
+  }
+  const end = afterEnd - 1;
+  return start > end ? { start: 0, end: -1 } : { start, end };
+}
+
+/**
  * Binary search: predicate(boxes[i]) is false for a prefix and true for the
  * rest. Returns the first true index, or boxes.length if never true.
  */

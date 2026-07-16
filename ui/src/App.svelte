@@ -7,6 +7,7 @@
     runwayPx,
     topAnchorIndex,
     anchorScrollTop,
+    aheadRange,
   } from "./lib/layouts/windowing.js";
   import { ZOOM_LEVELS, resolveZoom, gapFor } from "./lib/zoom.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
@@ -67,6 +68,7 @@
     revealSelection,
     revealFolder,
     fetchMissing,
+    thumbUrl,
   } from "./lib/api.js";
   import { buildTreeMenuItems } from "./lib/treeMenu.js";
   import Modal from "./lib/Modal.svelte";
@@ -4059,6 +4061,62 @@
   /** Recompute [renderStart, renderEnd] from the grid's current position,
    * and trigger a fetch-more in either direction when the render window
    * is near a loaded edge. */
+  // --- Predictive thumbnail prefetch --------------------------------------
+  // Warm the browser cache for tiles just beyond the viewport in the direction
+  // of travel, scaled to scroll velocity, so a fast scroll paints from cache
+  // instead of a cold fetch ("the album loading is slower than I can scroll").
+  // Thumbnails are served immutable (Cache-Control: 1yr), so a bare `new Image()`
+  // populates the HTTP cache and the real tile then hits Thumb's synchronous
+  // detectCache fast path. Warms BYTES ONLY for ids already in the loaded window
+  // — never calls loadMore or touches items/feedEpoch/the fetching flags, so it
+  // lives entirely outside the feed-window machinery.
+  const PREFETCH_LOOKAHEAD_MS = 600; // warm ~0.6s of travel ahead...
+  const PREFETCH_MAX_AHEAD_PX = 2500; // ...but never more than this
+  const PREFETCH_MIN_VELOCITY = 0.15; // px/ms; below this the user is idle/slow
+  const PREFETCH_MAX_PER_FRAME = 12; // cap new requests/frame (cold-cache contention)
+  let lastScrollTop = 0;
+  let lastScrollTs = 0;
+  const warmedThumbs = new Set(); // ids already warmed (browser cache holds the bytes)
+  const warmImages = new Map(); // id -> Image, held only until it loads then dropped
+
+  /** Fire `new Image()` warms for the ahead-window tiles. `scrollTop` is
+   *  grid-local (matches boxes.y), so aheadRange lines up with the layout. */
+  function warmAhead(direction, velocity, scrollTop, viewportHeight) {
+    if (velocity < PREFETCH_MIN_VELOCITY) return;
+    // Don't prefetch backward while a jump/expand landing is being pinned — the
+    // same reason loadMore("before") is suppressed there.
+    if (direction === "up" && (jumpRevealPending || expandPin)) return;
+    const aheadPx = Math.min(
+      PREFETCH_MAX_AHEAD_PX,
+      velocity * PREFETCH_LOOKAHEAD_MS
+    );
+    const { start, end } = aheadRange(boxes, {
+      scrollTop,
+      viewportHeight,
+      aheadPx,
+      direction,
+    });
+    let fired = 0;
+    for (let i = start; i <= end && fired < PREFETCH_MAX_PER_FRAME; i++) {
+      const entry = displayEntries[i];
+      if (!entry || entry.kind === "placeholder") continue;
+      const photo = resolvePhoto(entry);
+      if (!photo || photo.kind === "video") continue; // an Image() can't preload a video
+      const id = photo.id;
+      if (warmedThumbs.has(id)) continue;
+      const status = thumbStatus.get(id);
+      if (status === "ok" || status === "pending") continue; // already loaded / in flight
+      warmedThumbs.add(id);
+      const img = new Image();
+      img.onload = img.onerror = () => warmImages.delete(id);
+      // Same size bucket + v=mtimeMs the grid will request, so the URL matches
+      // byte-for-byte and the real tile load is a cache hit.
+      img.src = thumbUrl(photo.id, thumbSize, photo.mtimeMs);
+      warmImages.set(id, img);
+      fired++;
+    }
+  }
+
   function updateVisibleRange({ capture = false } = {}) {
     if (!gridEl || !boxes) {
       renderStart = 0;
@@ -4087,8 +4145,28 @@
     // which would capture the POST-reflow position and cancel out the anchor
     // effect's correction. See layoutAnchor + the anchor $effect.
     if (capture) {
-      const ai = topAnchorIndex(boxes, { scrollTop: -rect.top });
+      const scrollTopLocal = -rect.top;
+      const ai = topAnchorIndex(boxes, { scrollTop: scrollTopLocal });
       layoutAnchor = ai === -1 ? null : { domId: boxes[ai].id, y: boxes[ai].y };
+
+      // Scroll velocity + direction → predictive prefetch. Warm the tiles the
+      // user is scrolling toward, scaled to how fast they're going.
+      const now = performance.now();
+      const dt = now - lastScrollTs;
+      if (lastScrollTs > 0 && dt > 0) {
+        const dy = scrollTopLocal - lastScrollTop;
+        const direction = dy > 0 ? "down" : dy < 0 ? "up" : null;
+        if (direction) {
+          warmAhead(
+            direction,
+            Math.abs(dy) / dt,
+            scrollTopLocal,
+            mainColumnEl.clientHeight
+          );
+        }
+      }
+      lastScrollTop = scrollTopLocal;
+      lastScrollTs = now;
     }
 
     // How far can the user still scroll before hitting blank space? Prefetch has

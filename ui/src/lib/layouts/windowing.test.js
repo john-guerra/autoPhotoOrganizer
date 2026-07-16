@@ -4,6 +4,7 @@ import {
   runwayPx,
   topAnchorIndex,
   anchorScrollTop,
+  aheadRange,
 } from "./windowing.js";
 
 /** N rows of `perRow` boxes each, height `rowHeight`, stacked with `gap`. */
@@ -170,5 +171,73 @@ describe("anchorScrollTop", () => {
 
   it("scrolls up when content above the anchor shrank", () => {
     expect(anchorScrollTop(500, 300, 260)).toBe(460);
+  });
+});
+
+describe("aheadRange", () => {
+  const opts = (o) => ({ viewportHeight: 200, direction: "down", ...o });
+
+  it("is empty for no boxes", () => {
+    expect(aheadRange([], opts({ scrollTop: 0, aheadPx: 500 }))).toEqual({
+      start: 0,
+      end: -1,
+    });
+  });
+
+  it("is empty when the budget is zero or negative", () => {
+    const boxes = buildRows(6);
+    expect(aheadRange(boxes, opts({ scrollTop: 0, aheadPx: 0 })).end).toBe(-1);
+    expect(aheadRange(boxes, opts({ scrollTop: 0, aheadPx: -50 })).end).toBe(
+      -1
+    );
+  });
+
+  it("is empty for an unknown direction", () => {
+    const boxes = buildRows(6);
+    expect(
+      aheadRange(boxes, {
+        scrollTop: 0,
+        viewportHeight: 200,
+        aheadPx: 500,
+        direction: "sideways",
+      }).end
+    ).toBe(-1);
+  });
+
+  it("takes rows just below the viewport bottom when scrolling down", () => {
+    // rows at y = 0,108,216,324,432,540 (2 boxes each), height 100.
+    const boxes = buildRows(6);
+    // viewport [0, 208] (edge 208); budget 120 -> band tops in [208, 328]:
+    // row 2 (y=216) and row 3 (y=324). Indices 4..7.
+    const { start, end } = aheadRange(
+      boxes,
+      opts({ scrollTop: 0, viewportHeight: 208, aheadPx: 120 })
+    );
+    expect(start).toBe(4);
+    expect(end).toBe(7);
+  });
+
+  it("takes rows just above the viewport top when scrolling up", () => {
+    // viewport top at 500; budget 120 -> band bottoms in [380, 500]:
+    // row 3 (bottom 424) only. Indices 6..7.
+    const boxes = buildRows(6);
+    const { start, end } = aheadRange(boxes, {
+      scrollTop: 500,
+      viewportHeight: 200,
+      aheadPx: 120,
+      direction: "up",
+    });
+    expect(start).toBe(6);
+    expect(end).toBe(7);
+  });
+
+  it("clamps to the last row when the budget exceeds remaining content", () => {
+    const boxes = buildRows(6); // 12 boxes
+    const { start, end } = aheadRange(
+      boxes,
+      opts({ scrollTop: 0, viewportHeight: 100, aheadPx: 100000 })
+    );
+    expect(start).toBe(2); // first row below the fold
+    expect(end).toBe(11); // last box, not past the array
   });
 });
