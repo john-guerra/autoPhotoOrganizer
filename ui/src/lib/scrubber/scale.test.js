@@ -8,7 +8,8 @@ import {
   thinLabels,
   landmarkLabel,
   densityBins,
-  leadingToken,
+  commonPrefixLen,
+  folderLabelDepth,
   labelStopsFor,
 } from "./scale.js";
 
@@ -107,29 +108,73 @@ describe("densityBins", () => {
   });
 });
 
-describe("leadingToken", () => {
-  it("takes everything before the first _, - or space", () => {
-    expect(leadingToken("2010_03Mar_21_Trip")).toBe("2010");
-    expect(leadingToken("2010-03-21")).toBe("2010");
-    expect(leadingToken("Canon EOS shots")).toBe("Canon");
-    expect(leadingToken("fotos")).toBe("fotos");
+describe("commonPrefixLen", () => {
+  it("counts the path segments shared by every landmark", () => {
+    expect(
+      commonPrefixLen([
+        { value: "/lib/pics/A/x" },
+        { value: "/lib/pics/A/y" },
+        { value: "/lib/pics/B" },
+      ])
+    ).toBe(2); // /lib, /pics
   });
 });
 
-describe("labelStopsFor (folder landmark coarsening)", () => {
-  const folderLandmarks = [
-    { key: "a", value: "/lib/2010_01Jan_Trip", startCount: 0, count: 4 },
-    { key: "b", value: "/lib/2010_03Mar_Home", startCount: 4, count: 6 },
-    { key: "c", value: "/lib/2011_05May_Beach", startCount: 10, count: 3 },
-    { key: "d", value: "/lib/2011_09Sep_Fall", startCount: 13, count: 2 },
-  ];
+describe("folderLabelDepth", () => {
+  it("descends past a lopsided trunk to where the tree branches", () => {
+    // Everything shares /lib/pics/trunk; the branch level is depth 3 (trunk's kids).
+    const ls = [];
+    for (let i = 0; i < 10; i++)
+      ls.push({ value: `/lib/pics/trunk/child${i}/leaf` });
+    // common prefix = /lib,/pics,/trunk = 3; depth 3 has 10 distinct children.
+    expect(folderLabelDepth(ls, 8)).toBe(3);
+  });
+});
 
-  it("keeps only the first landmark of each leading-token run, tagged with .token", () => {
+describe("labelStopsFor (folder tree-ancestor landmarks)", () => {
+  // Depth-first tree order under a lopsided trunk (/lib/pics/trunk holds all).
+  // 8 branch nodes b0..b7 each with two leaf subfolders — the two leaves of a
+  // branch must collapse to ONE stop, labeled by the branch node (not the leaf,
+  // and NOT one stop per leaf).
+  const folderLandmarks = [];
+  let start = 0;
+  for (let b = 0; b < 8; b++) {
+    for (const leaf of ["photos", "video"]) {
+      folderLandmarks.push({
+        key: `b${b}-${leaf}`,
+        value: `/lib/pics/trunk/branch${b}/${leaf}`,
+        startCount: start,
+        count: 2,
+      });
+      start += 2;
+    }
+  }
+
+  it("collapses each ancestor run to one stop labeled by the branch node", () => {
     const stops = labelStopsFor(folderLandmarks, "folder");
-    expect(stops.map((s) => [s.token, s.value])).toEqual([
-      ["2010", "/lib/2010_01Jan_Trip"],
-      ["2011", "/lib/2011_05May_Beach"],
+    // common prefix = /lib,/pics,/trunk (3); depth 3 has 8 distinct branches → chosen.
+    // Each branch's two leaves collapse to one stop labeled by the branch folder.
+    expect(stops.map((s) => s.token)).toEqual([
+      "branch0",
+      "branch1",
+      "branch2",
+      "branch3",
+      "branch4",
+      "branch5",
+      "branch6",
+      "branch7",
     ]);
+    // 16 leaf landmarks → 8 stops (one per tree branch), not 16.
+    expect(stops.length).toBe(8);
+  });
+
+  it("leaves shallower than the branch depth label by their own name", () => {
+    const ls = [
+      { key: "t", value: "/lib/pics/trunk", startCount: 0, count: 1 },
+      ...folderLandmarks,
+    ];
+    const stops = labelStopsFor(ls, "folder");
+    expect(stops[0].token).toBe("trunk"); // the trunk itself, shallower than depth 3
   });
 
   it("returns landmarks unchanged for non-folder dims (already coarse)", () => {

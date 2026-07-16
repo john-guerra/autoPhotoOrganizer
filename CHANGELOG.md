@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.13
+
+- **Scrubber: folder landmarks now follow the library tree.** The rail labels the
+  folder branch you're in (the same level the sidebar shows) instead of each leaf
+  folder's first word — so sibling folders like `fotos_historia` and `fotos_pruebas`
+  no longer show up as two misleading "fotos" marks, and the labels stay meaningful
+  even when folder names don't start with a date.
+
 ## 2.16.12
 
 - **Scrubber: readable folder landmarks + a right-anchored name tooltip.** When

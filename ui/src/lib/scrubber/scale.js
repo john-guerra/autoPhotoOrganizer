@@ -44,36 +44,68 @@ export function buildManifest(flat, { groupBy }) {
   };
 }
 
-/** Last non-empty path segment. */
-function basename(path) {
-  const parts = String(path).split("/").filter(Boolean);
-  return parts[parts.length - 1] || String(path);
+/** Path split into non-empty segments. */
+export function segments(path) {
+  return String(path).split("/").filter(Boolean);
 }
 
-/** Leading token of a name: everything before the first _ , - or space. */
-export function leadingToken(name) {
-  const m = String(name).match(/^[^_\s-]+/);
-  return m ? m[0] : String(name);
+/** Number of leading path segments shared by EVERY landmark (the common trunk). */
+export function commonPrefixLen(landmarks) {
+  if (!landmarks.length) return 0;
+  const segs = landmarks.map((l) => segments(l.value));
+  const min = Math.min(...segs.map((s) => s.length));
+  let k = 0;
+  for (; k < min; k++) {
+    const v = segs[0][k];
+    if (!segs.every((s) => s[k] === v)) break;
+  }
+  return k;
+}
+
+/**
+ * The path depth to label folders at. Folder grouping lists leaves in depth-first
+ * TREE order, so contiguous runs share ancestors; we want to label by the ancestor
+ * at the level where the tree actually branches. Starting at the common trunk, we
+ * descend to the shallowest depth that has at least `minDistinct` distinct ancestor
+ * subtrees — that skips a lopsided trunk (e.g. `…/fotos_peq/DUTO` holding ~98% of a
+ * library) and lands on the level the sidebar shows.
+ */
+export function folderLabelDepth(landmarks, minDistinct = 8) {
+  const segs = landmarks.map((l) => segments(l.value));
+  const maxLen = Math.max(1, ...segs.map((s) => s.length));
+  const start = commonPrefixLen(landmarks);
+  for (let d = start; d < maxLen; d++) {
+    const set = new Set();
+    for (const s of segs)
+      if (s.length > d) set.add(s.slice(0, d + 1).join("/"));
+    if (set.size >= minDistinct) return d;
+  }
+  return Math.max(start, maxLen - 1);
 }
 
 /**
  * Which landmarks get a TEXT label on the rail. Folder grouping produces one
- * landmark per (leaf) folder — hundreds of them — so instead of a wall of names
- * we label only where the basename's leading token changes: for `2010_03Mar_…`
- * folders that collapses to clean year labels; for other names it's whatever
- * prefix they share, and unique names just each get their own stop (no worse than
- * before). Other groupings (year, camera…) are already coarse — every landmark
- * is a stop. The fine per-folder `landmarks` still drive density/scrub/hover.
+ * landmark per leaf folder — hundreds of them — so we collapse each contiguous run
+ * that shares the same tree ancestor (at `folderLabelDepth`) to a single stop
+ * labeled with that ancestor's name. This mirrors the library tree, avoids the
+ * misleading leaf-name repeats (`fotos_historia`/`fotos_pruebas` are not two "fotos"
+ * marks), and stays meaningful for non-date folder names. Other groupings (year,
+ * camera…) are already coarse — every landmark is a stop. The fine per-folder
+ * `landmarks` still drive density, scrubbing and the hover tooltip.
  */
 export function labelStopsFor(landmarks, coarse) {
   if (coarse !== "folder" && coarse !== "folderName") return landmarks;
+  if (!landmarks.length) return landmarks;
+  const d = folderLabelDepth(landmarks);
   const stops = [];
-  let lastTok = null;
+  let lastKey = null;
   for (const lm of landmarks) {
-    const tok = leadingToken(basename(lm.value));
-    if (tok !== lastTok) {
-      stops.push({ ...lm, token: tok });
-      lastTok = tok;
+    const segs = segments(lm.value);
+    const idx = Math.min(d, segs.length - 1); // shallower leaves label by their own name
+    const key = segs.slice(0, idx + 1).join("/"); // ancestor identity (full path)
+    if (key !== lastKey) {
+      stops.push({ ...lm, token: segs[idx] || lm.value });
+      lastKey = key;
     }
   }
   return stops;
