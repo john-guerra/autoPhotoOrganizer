@@ -64,6 +64,7 @@
     fetchPhotoCount,
     fetchAlbumTimeline,
     fetchTimes,
+    fetchFlatTree,
     setScope,
     removeFolderByPath,
     renameFolder,
@@ -87,6 +88,8 @@
   import ContextMenu from "./lib/ContextMenu.svelte";
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import SettingsPanel from "./lib/SettingsPanel.svelte";
+  import Scrubber from "./lib/Scrubber.svelte";
+  import { buildManifest } from "./lib/scrubber/scale.js";
   import {
     planPrefetch,
     normalizePrefetch,
@@ -2142,6 +2145,42 @@
   let viewHereKey = $derived(viewHerePath ? treeKey(viewHerePath) : null);
   let viewHereKeyDistinct = $derived(
     viewHereKey && viewHereKey !== focusHereKey ? viewHereKey : null
+  );
+
+  // --- Scrubber landmark manifest ------------------------------------------
+  // The right-edge rail reads one structural dataset: the ordered groups of the
+  // current feed with their counts (reuse /api/tree/flat — the fisheye's source).
+  // Fetched off (groupBy, sort, filter); the PREVIOUS manifest stays painted
+  // until the new one arrives (morph-don't-blank on a sort/filter change). This
+  // only ever reads — it never touches items/feedEpoch/the fetching flags, so it
+  // sits entirely outside the feed-window transaction machinery.
+  let scrubberManifest = $state(null);
+  let scrubberSig = "";
+  $effect(() => {
+    const sig = JSON.stringify({ groupBy, sort, filter: displayFilter });
+    if (sig === scrubberSig) return;
+    scrubberSig = sig;
+    const mine = sig;
+    fetchFlatTree(groupBy, displayFilter, sort)
+      .then((flat) => {
+        if (mine !== scrubberSig) return; // a newer request superseded this one
+        scrubberManifest = buildManifest(flat, { groupBy });
+      })
+      .catch(() => {}); // the rail is non-critical; never break the feed over it
+  });
+
+  // Thumb position: the top-visible group's coarsest-dim landmark start (group
+  // granularity for v1 — see the design spec). viewportCount is a rough on-screen
+  // entry count, enough to size a thin thumb.
+  let scrubberTopCount = $derived.by(() => {
+    const m = scrubberManifest;
+    const coarseVal = viewHerePath?.[0]?.value;
+    if (!m || coarseVal == null) return 0;
+    const lm = m.landmarks.find((l) => l.value === coarseVal);
+    return lm ? lm.startCount : 0;
+  });
+  let scrubberViewportCount = $derived(
+    Math.max(0, renderEnd - renderStart + 1)
   );
 
   /** The abs folder path carried by a group path's "folder" or "folderName"
@@ -5232,6 +5271,19 @@
         {/if}
       {/if}
     </div>
+    {#if scrubberManifest && items.length}
+      <div class="scrubber-rail">
+        <Scrubber
+          manifest={scrubberManifest}
+          axis="count"
+          {groupBy}
+          {sort}
+          topCount={scrubberTopCount}
+          viewportCount={scrubberViewportCount}
+          onjump={(path) => jumpToPath(path)}
+        />
+      </div>
+    {/if}
   </div>
 
   <StatusBar
@@ -5432,6 +5484,16 @@
     flex: 1;
     min-width: 0;
     overflow-y: auto;
+  }
+  /* Fixed-width right-edge column for the scrubber. As a flex sibling of
+     .main-column (flex:1), it reserves its width cleanly — the grid reflows to
+     fit — and never scrolls with the feed. */
+  .scrubber-rail {
+    flex: 0 0 54px;
+    min-width: 0;
+    padding: 6px 4px 6px 0;
+    border-left: 1px solid #23262b;
+    overflow: hidden;
   }
   /* The timeline, slotted into the toolbar's Filter group. It lives here because
      App renders it (a dozen props of App's own state), so it is in App's style

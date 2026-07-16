@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.8
+
+- **New scrubber rail on the right edge of the feed.** It shows the whole
+  library's shape for the current grouping — a density track and labeled
+  landmarks (folders, years…) — with a thumb that tracks where you are as you
+  scroll. Click a landmark to jump straight to it. (First slice; drag-to-scrub,
+  a date "scent", and a count/value axis toggle are coming next.)
+
 ## 2.16.7
 
 - **Aggressive scrolling no longer "refreshes the whole page."** When a hard
