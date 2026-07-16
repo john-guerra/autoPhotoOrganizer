@@ -5,6 +5,7 @@ import {
   topAnchorIndex,
   anchorScrollTop,
   aheadRange,
+  pageForRunway,
 } from "./windowing.js";
 
 /** N rows of `perRow` boxes each, height `rowHeight`, stacked with `gap`. */
@@ -19,6 +20,45 @@ function buildRows(rowCount, { perRow = 2, rowHeight = 100, gap = 8 } = {}) {
   }
   return boxes;
 }
+
+describe("pageForRunway", () => {
+  it("falls back to min for no boxes / no runway / zero content", () => {
+    const opts = { runwayPx: 2000, min: 60, max: 600 };
+    expect(pageForRunway([], opts)).toBe(60);
+    expect(
+      pageForRunway(buildRows(4), { runwayPx: 0, min: 60, max: 600 })
+    ).toBe(60);
+  });
+
+  it("scales the page UP at small (dense) thumbnails — the reach-the-end fix", () => {
+    // 200 rows of 18 tiny 30px tiles = 3600 items over ~7600px → ~0.47 items/px.
+    // Refilling 2×1200px of runway wants ~1137 items → clamped to max.
+    const small = buildRows(200, { perRow: 18, rowHeight: 30, gap: 8 });
+    expect(pageForRunway(small, { runwayPx: 2400, min: 60, max: 600 })).toBe(
+      600
+    );
+    // ...and comfortably more than the old fixed page even before the clamp.
+    expect(
+      pageForRunway(small, { runwayPx: 2400, min: 60, max: 100000 })
+    ).toBeGreaterThan(600);
+  });
+
+  it("stays near min at large (sparse) thumbnails", () => {
+    // 20 rows of 2 large 400px tiles = 40 items over ~8160px → ~0.005 items/px.
+    // Refilling 2400px wants only ~12 items → floored to min.
+    const large = buildRows(20, { perRow: 2, rowHeight: 400, gap: 8 });
+    expect(pageForRunway(large, { runwayPx: 2400, min: 60, max: 600 })).toBe(
+      60
+    );
+  });
+
+  it("never exceeds max", () => {
+    const dense = buildRows(500, { perRow: 30, rowHeight: 20, gap: 4 });
+    expect(
+      pageForRunway(dense, { runwayPx: 5000, min: 60, max: 480 })
+    ).toBeLessThanOrEqual(480);
+  });
+});
 
 describe("visibleRange", () => {
   it("returns an empty range for no boxes", () => {

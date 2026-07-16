@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.5
+
+- **Fast scrolling no longer reaches the end of the feed before more loads.**
+  Each load now fetches enough photos to cover the screen you're flinging past
+  instead of a fixed batch, so the smallest thumbnails keep up with the fastest
+  scroll (a benchmark measured ~70% blank frames → ~0%).
+- **New Scrolling & prefetch settings** (press <kbd>,</kbd> or the ⚙ button) let
+  you pick how aggressively the grid prefetches — Off, Baseline, Balanced
+  (default), Conservative, or Custom sliders — and toggle the adaptive page size,
+  all applied live so you can feel the difference on your own library.
+
 ## 2.16.4
 
 - **Scrolling prefetches thumbnails in the direction you're heading**, scaled to

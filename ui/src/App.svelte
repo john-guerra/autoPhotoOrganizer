@@ -8,6 +8,7 @@
     topAnchorIndex,
     anchorScrollTop,
     aheadRange,
+    pageForRunway,
   } from "./lib/layouts/windowing.js";
   import { ZOOM_LEVELS, resolveZoom, gapFor } from "./lib/zoom.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
@@ -83,6 +84,14 @@
   import Loupe from "./lib/Loupe.svelte";
   import ContextMenu from "./lib/ContextMenu.svelte";
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
+  import SettingsPanel from "./lib/SettingsPanel.svelte";
+  import {
+    planPrefetch,
+    normalizePrefetch,
+    PREFETCH_PRESETS,
+    PREFETCH_CONFIG,
+  } from "./lib/prefetchPolicy.js";
+  import { loadSetting, saveSetting } from "./lib/settings.js";
   import JobsPanel from "./lib/JobsPanel.svelte";
   import GroupStateIcon from "./lib/GroupStateIcon.svelte";
   import FolderIcon from "./lib/FolderIcon.svelte";
@@ -661,6 +670,13 @@
   let folderNodesByParentKey = $state(new Map()); // pathKey(parentPath) -> [{value,count}]
   let countsEpoch = $state(0);
   const PAGE_SIZE = 60;
+  // Ceiling for adaptive loadMore("after") pages. A fling at the smallest zoom
+  // consumes hundreds of items per fetch round-trip, so a fixed 60 lets the user
+  // out-scroll the loader (the reported "reach the end before it loads more").
+  // updateVisibleRange scales the page to the on-screen pixel density up to this
+  // cap; appended content lands BELOW the viewport so a large page never shifts
+  // what the user is looking at. See prefetchPolicy.bench.test.js (Experiment B).
+  const PAGE_SIZE_MAX = 600;
   const FETCH_THRESHOLD = 20; // floor: fetch when within this many entries of an edge
   // The real trigger (see updateVisibleRange): keep at least two viewports of
   // loaded content beyond each edge, so a fast scroll still has runway left while
@@ -763,6 +779,32 @@
 
   let loupeOpen = $state(false);
   let shortcutsHelpOpen = $state(false); // '?' toggles the keyboard-shortcuts overlay
+  let settingsOpen = $state(false); // ',' toggles the scrolling/prefetch settings
+
+  // --- Scrolling / prefetch settings (persisted) --------------------------
+  // Which prefetch strategy is live, plus the Custom knob values and the
+  // adaptive-page-size switch. The winner of prefetchPolicy.bench.test.js is the
+  // default; the settings panel lets the user A/B any preset live (John wanted
+  // visual controls to feel the difference on real hardware). Persisted via
+  // localStorage so a choice survives a reload.
+  let prefetchPreset = $state(loadSetting("prefetchPreset", "balanced"));
+  let prefetchCustom = $state(
+    normalizePrefetch(loadSetting("prefetchCustom", PREFETCH_PRESETS.balanced))
+  );
+  // The real "reach the end before it loads more" fix: scale each loadMore fetch
+  // to the on-screen pixel density instead of a fixed 60 items. On by default;
+  // the benchmark showed it takes small-thumb fling blanking from ~70% to 0%.
+  let adaptivePageSize = $state(loadSetting("adaptivePageSize", true));
+  // The config the grid actually runs with this frame.
+  const prefetchConfig = $derived(
+    prefetchPreset === "custom"
+      ? normalizePrefetch(prefetchCustom)
+      : (PREFETCH_PRESETS[prefetchPreset] ?? PREFETCH_CONFIG)
+  );
+  $effect(() => saveSetting("prefetchPreset", prefetchPreset));
+  $effect(() => saveSetting("prefetchCustom", $state.snapshot(prefetchCustom)));
+  $effect(() => saveSetting("adaptivePageSize", adaptivePageSize));
+
   let gridEl = $state();
   let mainColumnEl = $state();
   let gridWidth = $state(0);
@@ -3136,7 +3178,15 @@
    * already matches the current position, or some interruption) so this
    * can never leave the guard stuck permanently. */
 
-  async function loadMore(direction) {
+  async function loadMore(direction, afterSize = PAGE_SIZE) {
+    // Only "after" scales (forward scroll is where the user out-runs the
+    // loader); "before" keeps a fixed page so its scroll-compensation math stays
+    // simple. Clamp to [PAGE_SIZE, PAGE_SIZE_MAX] and use the SAME number for the
+    // fetch and mergeFeedPage's hasMore test.
+    const afterPage =
+      direction === "after"
+        ? Math.min(PAGE_SIZE_MAX, Math.max(PAGE_SIZE, Math.round(afterSize)))
+        : PAGE_SIZE;
     if (direction === "after") {
       if (fetchingAfter || !hasMoreAfter || !items.length) return;
       fetchingAfter = true;
@@ -3181,7 +3231,7 @@
         collapsed: collapsedPaths,
         focusId,
         before: direction === "before" ? PAGE_SIZE : 0,
-        after: direction === "after" ? PAGE_SIZE : 0,
+        after: direction === "after" ? afterPage : 0,
         filter: displayFilter,
         sort,
       });
@@ -3190,7 +3240,7 @@
         { items, hasMoreBefore, hasMoreAfter },
         { items: page },
         direction,
-        PAGE_SIZE
+        direction === "after" ? afterPage : PAGE_SIZE
       );
       items = merged.items;
       hasMoreBefore = merged.hasMoreBefore;
@@ -4070,34 +4120,48 @@
   // detectCache fast path. Warms BYTES ONLY for ids already in the loaded window
   // — never calls loadMore or touches items/feedEpoch/the fetching flags, so it
   // lives entirely outside the feed-window machinery.
-  const PREFETCH_LOOKAHEAD_MS = 600; // warm ~0.6s of travel ahead...
-  const PREFETCH_MAX_AHEAD_PX = 2500; // ...but never more than this
-  const PREFETCH_MIN_VELOCITY = 0.15; // px/ms; below this the user is idle/slow
-  const PREFETCH_MAX_PER_FRAME = 12; // cap new requests/frame (cold-cache contention)
+  //
+  // How much/how far to warm is decided by planPrefetch (ui/src/lib/prefetchPolicy.js)
+  // — the SAME pure policy the benchmark scores and the settings panel tunes — so
+  // there are no magic numbers here; the live `prefetchConfig` (a preset or the
+  // user's Custom knobs) drives it.
   let lastScrollTop = 0;
   let lastScrollTs = 0;
   const warmedThumbs = new Set(); // ids already warmed (browser cache holds the bytes)
   const warmImages = new Map(); // id -> Image, held only until it loads then dropped
 
   /** Fire `new Image()` warms for the ahead-window tiles. `scrollTop` is
-   *  grid-local (matches boxes.y), so aheadRange lines up with the layout. */
-  function warmAhead(direction, velocity, scrollTop, viewportHeight) {
-    if (velocity < PREFETCH_MIN_VELOCITY) return;
-    // Don't prefetch backward while a jump/expand landing is being pinned — the
-    // same reason loadMore("before") is suppressed there.
-    if (direction === "up" && (jumpRevealPending || expandPin)) return;
-    const aheadPx = Math.min(
-      PREFETCH_MAX_AHEAD_PX,
-      velocity * PREFETCH_LOOKAHEAD_MS
+   *  grid-local (matches boxes.y), so aheadRange lines up with the layout.
+   *  `belowRunwayPx`/`runwayPx` let the policy yield to an imminent loadMore. */
+  function warmAhead(
+    direction,
+    velocity,
+    scrollTop,
+    viewportHeight,
+    belowRunwayPx,
+    runwayPx
+  ) {
+    const plan = planPrefetch(
+      {
+        velocity,
+        direction,
+        jumpPinned: jumpRevealPending || expandPin,
+        fetchingFeed: fetchingAfter || fetchingBefore,
+        belowRunwayPx,
+        runwayPx,
+        inFlight: warmImages.size,
+      },
+      prefetchConfig
     );
+    if (plan.maxRequests <= 0) return;
     const { start, end } = aheadRange(boxes, {
       scrollTop,
       viewportHeight,
-      aheadPx,
+      aheadPx: plan.aheadPx,
       direction,
     });
     let fired = 0;
-    for (let i = start; i <= end && fired < PREFETCH_MAX_PER_FRAME; i++) {
+    for (let i = start; i <= end && fired < plan.maxRequests; i++) {
       const entry = displayEntries[i];
       if (!entry || entry.kind === "placeholder") continue;
       const photo = resolvePhoto(entry);
@@ -4140,6 +4204,20 @@
     renderStart = range.start;
     renderEnd = range.end;
 
+    // How far can the user still scroll before hitting blank space? Prefetch has
+    // to fire while that runway is longer than a fetch takes to fly, or they
+    // outrun the loader — the reported "the album loading is slower than I can
+    // scroll". FETCH_THRESHOLD alone can't express this: 20 display entries is a
+    // few hundred pixels of burst stacks and several screens of small thumbs, and
+    // the user scrolls in pixels. Keep it as a floor (it guarantees a trigger at
+    // the very end of the array) and add the real one. Computed BEFORE the
+    // capture block so warmAhead can yield to an imminent loadMore.
+    const { above, below } = runwayPx(boxes, {
+      scrollTop: -rect.top,
+      viewportHeight: mainColumnEl.clientHeight,
+    });
+    const runway = Math.max(MIN_RUNWAY_PX, mainColumnEl.clientHeight * 2);
+
     // Capture the eye-point anchor (top-most visible tile) ONLY on a genuine
     // scroll/resize. Never on the boxes-recompute path (the $effect.pre below),
     // which would capture the POST-reflow position and cancel out the anchor
@@ -4161,7 +4239,9 @@
             direction,
             Math.abs(dy) / dt,
             scrollTopLocal,
-            mainColumnEl.clientHeight
+            mainColumnEl.clientHeight,
+            below,
+            runway
           );
         }
       }
@@ -4169,24 +4249,22 @@
       lastScrollTs = now;
     }
 
-    // How far can the user still scroll before hitting blank space? Prefetch has
-    // to fire while that runway is longer than a fetch takes to fly, or they
-    // outrun the loader — the reported "the album loading is slower than I can
-    // scroll". FETCH_THRESHOLD alone can't express this: 20 display entries is a
-    // few hundred pixels of burst stacks and several screens of small thumbs, and
-    // the user scrolls in pixels. Keep it as a floor (it guarantees a trigger at
-    // the very end of the array) and add the real one.
-    const { above, below } = runwayPx(boxes, {
-      scrollTop: -rect.top,
-      viewportHeight: mainColumnEl.clientHeight,
-    });
-    const runway = Math.max(MIN_RUNWAY_PX, mainColumnEl.clientHeight * 2);
-
     if (
       renderEnd >= displayEntries.length - FETCH_THRESHOLD ||
       below < runway
     ) {
-      loadMore("after");
+      // Adaptive page size (the "reach the end" fix): fetch enough items to
+      // refill ~2× the runway in PIXELS, from the loaded layout's own density.
+      // At small thumbs that's many hundreds; at large thumbs it stays near
+      // PAGE_SIZE. See windowing.pageForRunway + prefetchPolicy.bench.test.js.
+      const afterSize = adaptivePageSize
+        ? pageForRunway(boxes, {
+            runwayPx: runway * 2,
+            min: PAGE_SIZE,
+            max: PAGE_SIZE_MAX,
+          })
+        : PAGE_SIZE;
+      loadMore("after", afterSize);
     }
     if (
       (renderStart <= FETCH_THRESHOLD || above < runway) &&
@@ -4261,6 +4339,15 @@
       }
       return;
     }
+    // Same contract for the settings panel: ',' toggles it closed, everything
+    // else is swallowed (its inputs handle their own keys; Modal owns Escape).
+    if (settingsOpen) {
+      if (e.key === "," && !isTypingTarget(e.target)) {
+        e.preventDefault();
+        settingsOpen = false;
+      }
+      return;
+    }
     // The user is driving now — cancel any pending post-jump pin (a jump
     // re-arms it at the end of jumpGroupBoundary, after this returns) and any
     // post-expand header pin (issue #74).
@@ -4306,6 +4393,14 @@
     if (e.key === "?") {
       e.preventDefault();
       shortcutsHelpOpen = true;
+      return;
+    }
+
+    // ',' opens the scrolling / prefetch settings (also before the empty-library
+    // guard). The convention for "preferences" everywhere from browsers to editors.
+    if (e.key === ",") {
+      e.preventDefault();
+      settingsOpen = true;
       return;
     }
 
@@ -4714,6 +4809,7 @@
     ondetectalbums={detectAlbums}
     onsortchange={onSortChange}
     onhelp={() => (shortcutsHelpOpen = true)}
+    onsettings={() => (settingsOpen = true)}
   >
     {#snippet timeline()}
       {#if timeMin != null && timeMax != null && timeMax > timeMin}
@@ -5248,6 +5344,15 @@
 
 {#if shortcutsHelpOpen}
   <ShortcutsOverlay onclose={() => (shortcutsHelpOpen = false)} />
+{/if}
+
+{#if settingsOpen}
+  <SettingsPanel
+    onclose={() => (settingsOpen = false)}
+    bind:preset={prefetchPreset}
+    bind:custom={prefetchCustom}
+    bind:adaptivePageSize
+  />
 {/if}
 
 <style>

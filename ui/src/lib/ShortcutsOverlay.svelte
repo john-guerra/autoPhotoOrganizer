@@ -76,6 +76,13 @@
       ],
     },
     {
+      heading: "General",
+      rows: [
+        { keys: [","], label: "Open scrolling & prefetch settings" },
+        { keys: ["?"], label: "Toggle this shortcuts list" },
+      ],
+    },
+    {
       heading: "Search & filter",
       rows: [
         { keys: ["/"], label: "Jump to the search box (name or folder)" },

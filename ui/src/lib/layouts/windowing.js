@@ -134,6 +134,29 @@ export function aheadRange(
 }
 
 /**
+ * How many ITEMS a loadMore("after") should fetch to refill roughly `runwayPx`
+ * of vertical space, given the loaded layout's own pixel density. A fixed page
+ * (60 items) is a few hundred px at the smallest zoom — far less than a fling
+ * consumes per fetch round-trip — so the user "reaches the end before it loads
+ * more". Scaling the page to the on-screen density (items ÷ content height)
+ * keeps the loader ahead at every zoom; at large thumbs the density is low and
+ * the result stays near `min`. Result is clamped to [min, max] and rounded.
+ *
+ * @param {Array<{y: number, height: number}>} boxes  loaded layout (y-monotonic)
+ * @param {{ runwayPx: number, min: number, max: number }} opts
+ * @returns {number} item count to request (always ≥ min, ≤ max)
+ */
+export function pageForRunway(boxes, { runwayPx, min, max }) {
+  if (!boxes.length) return min;
+  const last = boxes[boxes.length - 1];
+  const contentH = last.y + last.height - boxes[0].y;
+  if (!(contentH > 0) || !(runwayPx > 0)) return min;
+  const itemsPerPx = boxes.length / contentH;
+  const want = Math.ceil(runwayPx * itemsPerPx);
+  return Math.min(max, Math.max(min, want));
+}
+
+/**
  * Binary search: predicate(boxes[i]) is false for a prefix and true for the
  * rest. Returns the first true index, or boxes.length if never true.
  */

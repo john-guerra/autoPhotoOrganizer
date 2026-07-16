@@ -98,6 +98,7 @@
     ondetectalbums,
     onsortchange,
     onhelp,
+    onsettings,
 
     // Slots forwarded from App.
     timeline,
@@ -146,6 +147,15 @@
       {onfilterchange}
       {timeline}
     />
+
+    <button
+      class="help-btn"
+      title="Scrolling & prefetch settings (,)"
+      aria-label="Settings"
+      onclick={() => onsettings?.()}
+    >
+      ⚙
+    </button>
 
     <button
       class="help-btn"
