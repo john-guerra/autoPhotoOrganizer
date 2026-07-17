@@ -2014,6 +2014,19 @@
     detectingAlbums = true;
     error = "";
     try {
+      // Organize just the selection when there is one: apply it as the working
+      // scope (the same keep_scope path as "Keep only" — server-side, so it's
+      // unbounded, unlike an inline id list), so the album timeline AND the feed
+      // you return to show exactly the chosen photos. Only on entry, not on a
+      // relimit re-pull (albumMode already true), and the scope chip + status
+      // line surface the narrowing so it is never silent.
+      if (!albumMode && selectedIds.size > 0) {
+        const n = selectedIds.size;
+        await applyScope(idsScope([...selectedIds]));
+        status = `Organizing ${n.toLocaleString()} selected photo${
+          n === 1 ? "" : "s"
+        } into albums.`;
+      }
       const resp = await fetchAlbumTimeline(
         filterIsActive(displayFilter) ? displayFilter : null,
         albumLimit

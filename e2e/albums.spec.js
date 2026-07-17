@@ -1,5 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { trackPageErrors, openApp, albums } from "./helpers.js";
+import {
+  trackPageErrors,
+  openApp,
+  albums,
+  grid,
+  statusBar,
+} from "./helpers.js";
 
 /**
  * P0 — THE ALBUM TIMELINE. Both tests here are bugs that were live in the first
@@ -95,6 +101,36 @@ test.describe("@p0 album timeline", () => {
 
     expect(errors).toEqual([]);
   });
+});
+
+/**
+ * With photos selected, Auto Albums organizes JUST the selection — the global
+ * button auto-scopes to it. Lives here because it's the seam between selection
+ * state (App), the keep_scope server table, and the album timeline: exactly
+ * where a unit test can't see it.
+ */
+test("@p1 a selection makes Auto Albums organize only those photos", async ({
+  page,
+}) => {
+  const errors = trackPageErrors(page);
+  await openApp(page);
+
+  // Pick three photos (the select circle toggles selection without opening the
+  // loupe).
+  await grid.selectCircle(page, 0).click();
+  await grid.selectCircle(page, 1).click();
+  await grid.selectCircle(page, 2).click();
+  expect(await statusBar.selectedCount(page)).toBe(3);
+
+  await albums.open(page);
+
+  // The selection became the working scope — the chip says so — and the album
+  // timeline was built from exactly those photos, not the whole library.
+  await expect(statusBar.scopeChip(page)).toBeVisible();
+  await expect(statusBar.scopeChip(page)).toContainText("3 photos");
+  await expect(albums.bands(page).first()).toBeVisible();
+
+  expect(errors).toEqual([]);
 });
 
 /** "#4e79a7" -> "rgb(78, 121, 167)", the form getComputedStyle reports. */

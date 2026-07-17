@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.27
+
+- **Auto Albums works on your selection.** Select some photos, then hit Auto
+  Albums and it organizes just those instead of the whole view — the selection
+  becomes the working set (shown by the scope chip, clearable in one click). With
+  nothing selected, Auto Albums still uses the whole view as before.
+
 ## 2.16.26
 
 - **Press Esc in the Library tree to jump back to the photo feed.** After
