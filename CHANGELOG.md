@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.26
+
+- **Press Esc in the Library tree to jump back to the photo feed.** After
+  arrowing through folders, Esc hands keyboard control back to the grid so
+  arrows and rating keys work again — no reaching for the mouse. (Tab never did
+  this; it followed the browser's tab order, not the grid.)
+
 ## 2.16.25
 
 - **Folder-naming presets are pickable again.** The Auto Albums naming field now

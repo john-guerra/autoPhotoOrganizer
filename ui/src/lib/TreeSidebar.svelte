@@ -141,6 +141,15 @@
       case " ":
         row.querySelector(".tree-label")?.click(); // jump the feed
         break;
+      case "Escape":
+        // Hand keyboard control back to the photo feed. The feed's window-level
+        // shortcut handler stands down while focus is inside .tree-sidebar
+        // (App.svelte), so blurring the tree is all it takes for arrows / rating
+        // to act on the grid again — the feed's "focused photo" is app state, not
+        // DOM focus, so nothing else needs re-focusing. This is the way out that
+        // Tab isn't: Tab follows the browser's tab order, not "into the grid".
+        scrollEl.blur();
+        break;
       default:
         if (e.key.length === 1) {
           // type-ahead: accumulate, reset after a short idle (the standard buffer,

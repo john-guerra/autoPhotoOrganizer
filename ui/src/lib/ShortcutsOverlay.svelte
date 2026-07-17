@@ -121,6 +121,10 @@
           keys: ["type a name"],
           label: "Tree: jump the cursor to a folder by name (type-ahead)",
         },
+        {
+          keys: ["Esc"],
+          label: "Tree: hand keyboard control back to the photo feed",
+        },
       ],
     },
   ];

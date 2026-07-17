@@ -39,6 +39,36 @@ test("@p1 T focuses the tree; arrows + type-ahead move the cursor; Enter opens t
   expect(errors).toEqual([]);
 });
 
+test("@p1 Esc hands keyboard control back to the photo feed", async ({
+  page,
+}) => {
+  const errors = trackPageErrors(page);
+  await openApp(page, { groupBy: ["folder"] });
+
+  await grid.focus(page, 0);
+  await page.keyboard.press("t");
+  await expect(page.locator(".tree-scroll")).toBeFocused();
+
+  // Esc: focus leaves the tree, so the feed's window-level shortcuts (which
+  // stand down while the tree holds focus) can act on the grid again.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".tree-scroll")).not.toBeFocused();
+
+  // A feed shortcut now works: ArrowRight moves the grid's focused tile (the
+  // blue-bordered .thumb.selected), which it could not while the tree owned the
+  // keyboard. Identity is the tile's data-id, not a render index (virtualized).
+  const focusedId = () =>
+    page.locator(".thumb.selected").first().getAttribute("data-id");
+  const before = await focusedId();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator(".thumb.selected").first()).not.toHaveAttribute(
+    "data-id",
+    before
+  );
+
+  expect(errors).toEqual([]);
+});
+
 test("@p1 ← collapses the folder under the cursor", async ({ page }) => {
   const errors = trackPageErrors(page);
   await openApp(page, { groupBy: ["folder"] });
