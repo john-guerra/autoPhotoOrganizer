@@ -504,7 +504,6 @@
   const LS_EXPORT_DEST = "autogallery.exportDest";
   let exportOpen = $state(false);
   let exportDest = $state(localStorage.getItem(LS_EXPORT_DEST) || "");
-  let exportName = $state(defaultExportName());
   // MOVE the originals instead of copying. Off by default and never remembered:
   // a destructive default is how people lose photos. It is undoable (the job
   // carries a manifest), and the UI says so before you commit.
@@ -1953,30 +1952,28 @@
     }
   }
 
-  function defaultExportName() {
-    const d = new Date();
-    const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_selected`;
-  }
-
   /** Copy the selected photos into a new folder on disk (server copies, never
    * moves — originals are the read-only source of truth). Runs as a
    * cancelable background job; live progress shows in the JobsPanel, this
    * just waits for the terminal result to update the local UI. */
-  async function doExport() {
+  async function doExport(move = false) {
     if (selectedIds.size === 0) return;
-    if (!exportDest.trim() || !exportName.trim()) {
-      error = "Choose a destination folder and a name.";
+    if (!exportDest.trim()) {
+      error = "Choose a destination folder.";
       return;
     }
+    exportMove = move === true; // drives the in-flight button label
     exporting = true;
     exportResult = null;
     error = "";
     try {
       const { jobId } = await startExport({
         photoIds: [...selectedIds],
+        // The chosen folder IS the target: there's no separate name field —
+        // the user creates/picks the folder in the dialog. "." resolves to the
+        // destination itself (server-side safeResolve).
         destParent: exportDest.trim(),
-        folderName: exportName.trim(),
+        folderName: ".",
         move: exportMove,
       });
       localStorage.setItem(LS_EXPORT_DEST, exportDest.trim());
@@ -1984,13 +1981,17 @@
       if (job.status === "done") {
         const res = job.result;
         exportResult = res;
-        status = `Exported ${res.copied} photo${res.copied === 1 ? "" : "s"}${
+        // The dialog's work is done — close it and report in the status bar
+        // (a lingering popover over a finished job reads as "still running").
+        exportOpen = false;
+        const verb = res.move ? "Moved" : "Copied";
+        status = `${verb} ${res.copied} photo${res.copied === 1 ? "" : "s"}${
           res.skipped ? `, ${res.skipped} skipped` : ""
         } → ${res.target}`;
       } else if (job.status === "canceled") {
-        status = "Export canceled";
+        status = exportMove ? "Move canceled" : "Copy canceled";
       } else {
-        error = job.error || "Export failed";
+        error = job.error || (exportMove ? "Move failed" : "Copy failed");
       }
     } catch (e) {
       error = e.message;
@@ -3745,7 +3746,26 @@
       return;
     }
     const ok = await doScan(); // renders its own error when it fails
-    if (ok && focusAfterAdd) await applyScope(folderScope(p));
+    if (!ok) return;
+    if (focusAfterAdd) {
+      await applyScope(folderScope(p));
+      return;
+    }
+    // Not keeping-only: jump the feed to the folder we just added so its photos
+    // are on screen. This is a SCROLL, not a filter — the whole library stays
+    // loaded (unlike focusAfterAdd's keep-only scope above).
+    await jumpToFolder(p);
+  }
+
+  /** Scroll the feed to a folder by its absolute path, without filtering. The
+   * server represents a folder as a single {dimension:"folder"} path segment
+   * (see folderSections.js), and jumpToPath seeks the feed there. Only lands
+   * when the current grouping is folder-based (the default "folder" grouping) —
+   * a date/camera grouping has no folder group to scroll to, so we skip it
+   * rather than jump somewhere arbitrary. */
+  async function jumpToFolder(absPath) {
+    if (!groupBy.includes("folder") && !groupBy.includes("folderName")) return;
+    await jumpToPath([{ dimension: "folder", value: absPath }]);
   }
 
   /** The native picker fills the path in and leaves the panel open — it does NOT
@@ -5508,7 +5528,6 @@
         {exportResult}
         bind:exportOpen
         bind:exportDest
-        bind:exportName
         bind:exportMove
         {pendingBulk}
         pendingCount={pendingBulkCount}

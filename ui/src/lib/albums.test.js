@@ -99,6 +99,16 @@ describe("renderAlbumName", () => {
     expect(renderAlbumName("%Y/%Y_%m%b_%d", d, 1)).toBe("2017/2017_01Jan_09");
   });
 
+  it("substitutes %f with the source folder name (the default template)", () => {
+    expect(renderAlbumName("%Y_%m%b_%d_%f", d, 1, "Chicaque")).toBe(
+      "2017_01Jan_09_Chicaque"
+    );
+    // d3 reads a bare %f as microseconds — proving it's substituted BEFORE d3.
+    expect(renderAlbumName("%f", d, 1, "Trip")).toBe("Trip");
+    // No folder name → the token collapses and the dangling "_" is trimmed.
+    expect(renderAlbumName("%Y_%m%b_%d_%f", d, 1, "")).toBe("2017_01Jan_09");
+  });
+
   it("strips a leading slash and .. segments (stay relative, no traversal)", () => {
     expect(renderAlbumName("/%Y", d, 1)).toBe("2017");
     expect(renderAlbumName("../%Y", d, 1)).toBe("2017");
@@ -157,6 +167,12 @@ describe("computeAlbumNames", () => {
       "Album_1",
       "Album_2",
     ]);
+  });
+
+  it("substitutes %f in a non-empty template with the folder name", () => {
+    expect(
+      computeAlbumNames([A, B], new Map(), "%Y_%m%b_%d_%f", "Trip")
+    ).toEqual(["2017_01Jan_09_Trip", "2017_01Jan_11_Trip"]);
   });
 
   it("a non-empty template still renders and does not append the folder name", () => {

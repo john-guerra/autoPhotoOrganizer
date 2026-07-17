@@ -91,16 +91,19 @@ export function defaultAlbumName(startAtMs) {
  * it clean). Runs of "_" collapse to a single separator, and any
  * leading/trailing "_" is trimmed off each path segment. An empty render
  * falls back to `Album {n}`.
- * @param {string} template e.g. "%Y/%Y_%m%b_%d" or "Album %n"
+ * @param {string} template e.g. "%Y/%Y_%m%b_%d_%f" or "Album %n"
  * @param {Date} date album start date
  * @param {number} n 1-based album index
+ * @param {string} [folderName] the source folder's basename, substituted for %f
  * @returns {string}
  */
-export function renderAlbumName(template, date, n) {
-  // %n isn't a d3 token — substitute it first, then delegate the rest to
-  // d3.timeFormat. The try/catch below covers a template that d3 can't parse
-  // (e.g. a stray trailing "%") by falling back to the literal string.
-  const withIndex = String(template ?? "").replace(/%n/g, String(n));
+export function renderAlbumName(template, date, n, folderName = "") {
+  // %n and %f aren't d3 tokens — substitute them BEFORE d3.timeFormat (d3 reads
+  // a bare %f as microseconds). The try/catch below covers a template d3 can't
+  // parse (e.g. a stray trailing "%") by falling back to the literal string.
+  const withIndex = String(template ?? "")
+    .replace(/%n/g, String(n))
+    .replace(/%f/g, folderName || "");
   let rendered = "";
   try {
     rendered = d3.timeFormat(withIndex)(date);
@@ -132,8 +135,8 @@ export function renderAlbumName(template, date, n) {
  * @param {Map<number,string>} editedNames keyed by first-photo id
  * @param {string} template strftime template for un-edited albums; empty/blank
  *   means "<folderName>_<n>"
- * @param {string} [folderName] the current folder's basename, used only when
- *   `template` is empty/blank
+ * @param {string} [folderName] the current folder's basename — the fallback name
+ *   when `template` is empty/blank, and the value substituted for the `%f` token
  * @returns {string[]}
  */
 export function computeAlbumNames(
@@ -148,7 +151,7 @@ export function computeAlbumNames(
     const typed = editedNames.get(firstId);
     if (typed != null && typed !== "") return typed;
     if (isBlank) return `${folderName || "Album"}_${i + 1}`;
-    return renderAlbumName(template, new Date(a.startAt), i + 1);
+    return renderAlbumName(template, new Date(a.startAt), i + 1, folderName);
   });
 }
 

@@ -185,10 +185,10 @@ export const statusBar = {
     page.locator(".statusbar .sel-btn", { hasText: /^Keep only$/ }),
   exportBtn: (page) => page.locator(".statusbar .sel-btn.export"),
   /** ⌘A is a two-step (2.10.10): the first press takes the group you're in, the
-   * second ASKS before taking everything shown. This is the "yes" — in the status
-   * bar, deliberately not a modal. */
+   * second ASKS before taking everything shown. This is the "yes" — now in a
+   * modal dialog (the status-bar prompt was too easy to miss). */
   confirmSelectAll: (page) =>
-    page.locator(".statusbar button", { hasText: /^Select all$/ }),
+    page.locator("dialog.modal button", { hasText: /^Select all$/ }),
   /** The scope ("keep only" / folder) chip — it lives next to the counts it
    * explains, not up in the toolbar. */
   scopeChip: (page) => page.locator(".statusbar .scope-chip"),

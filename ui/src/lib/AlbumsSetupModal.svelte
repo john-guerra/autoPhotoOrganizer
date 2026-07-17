@@ -51,7 +51,7 @@
 
   const preview = $derived(
     template.trim()
-      ? renderAlbumName(template, sampleDate, 1)
+      ? renderAlbumName(template, sampleDate, 1, currentFolderName)
       : `${currentFolderName || "Album"}_1`
   );
 
@@ -64,7 +64,17 @@
     ["%H", "hour (24h)", "14"],
     ["%M", "minute", "30"],
     ["%n", "album number", "1, 2, 3…"],
+    ["%f", "this folder's name", currentFolderName || "Trip"],
     ["/", "make a subfolder", "subfolder"],
+  ];
+  // Ready-made naming schemes the user can pick from the combobox — or ignore
+  // and type their own (it's a plain <input> backed by a <datalist>).
+  const PRESETS = [
+    ["%Y_%m%b_%d_%f", "Date + folder — 2018_06Jun_30_Chicaque"],
+    ["%Y/%Y_%m%b_%d_%f", "Year ▸ date + folder"],
+    ["%Y-%m-%d_%f", "ISO date + folder"],
+    ["%Y-%m-%d", "ISO date only"],
+    ["%f_%n", "Folder + number"],
   ];
   function insertToken(tok) {
     template = template + tok;
@@ -156,11 +166,20 @@
     <span class="lbl">Folder naming</span>
     <input
       class="tpl"
+      list="tpl-presets"
       bind:value={template}
       spellcheck="false"
-      placeholder={`e.g. %Y/%Y_%m%b_%d — leave empty for ${currentFolderName || "<folder>"}_1, ${currentFolderName || "<folder>"}_2`}
+      placeholder={`e.g. %Y_%m%b_%d_%f — leave empty for ${currentFolderName || "<folder>"}_1, ${currentFolderName || "<folder>"}_2`}
     />
-    <p class="hint">e.g. <code>Album %n</code> → Album 1, Album 2</p>
+    <datalist id="tpl-presets">
+      {#each PRESETS as [value, label]}
+        <option {value} {label}></option>
+      {/each}
+    </datalist>
+    <p class="hint">
+      Pick a preset from the list or type your own. <code>%f</code> is this
+      folder's name; <code>%n</code> the album number.
+    </p>
     <div class="tokens">
       {#each TOKENS as [tok, desc, ex]}
         <button

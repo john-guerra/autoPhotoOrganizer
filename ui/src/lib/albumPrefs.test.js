@@ -25,9 +25,14 @@ describe("mergeAlbumPrefs", () => {
     expect(DEFAULT_ALBUM_PREFS.gapMode).toBe("fixed");
   });
 
-  it("defaults the naming template to empty (falls back to <folderName>_<n>)", () => {
-    expect(DEFAULT_ALBUM_PREFS.template).toBe("");
-    expect(mergeAlbumPrefs(null).template).toBe("");
+  it("defaults the naming template to the date+folder format", () => {
+    expect(DEFAULT_ALBUM_PREFS.template).toBe("%Y_%m%b_%d_%f");
+    // Absent (first run / garbage) → the default.
+    expect(mergeAlbumPrefs(null).template).toBe("%Y_%m%b_%d_%f");
+    expect(mergeAlbumPrefs({}).template).toBe("%Y_%m%b_%d_%f");
+    // A stored non-empty template is preserved verbatim.
+    expect(mergeAlbumPrefs({ template: "%Y-%m-%d" }).template).toBe("%Y-%m-%d");
+    // An EXPLICIT empty string is a real choice (the <folder>_<n> fallback).
     expect(mergeAlbumPrefs({ template: "" }).template).toBe("");
   });
 });

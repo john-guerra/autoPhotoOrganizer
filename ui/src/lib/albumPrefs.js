@@ -4,11 +4,12 @@
 const KEY = "autogallery.albumPrefs";
 
 export const DEFAULT_ALBUM_PREFS = {
-  // Empty by default: an un-edited album's name then falls back to
-  // "<currentFolderName>_<n>" (see albums.js computeAlbumNames) rather than a
-  // strftime-derived name — the simplest first-run default. Set a strftime
-  // template (e.g. "%Y/%Y_%m%b_%d") to switch to date-based naming.
-  template: "",
+  // Date-then-folder by default: "%Y_%m%b_%d_%f" → e.g. "2018_06Jun_30_Chicaque"
+  // (year, zero-padded month + short month name, day, then the source folder's
+  // name via the %f token — see albums.js renderAlbumName). Matches the
+  // photographer's existing on-disk convention. Clear the template to fall back
+  // to "<currentFolderName>_<n>"; add a leading "%Y/" to nest under a year folder.
+  template: "%Y_%m%b_%d_%f",
   gapMode: "fixed", // "fixed" (a concrete gap) | "auto" (mean + k·stddev)
   fixedGapMs: 86400000, // 1 day
   k: 2, // stddev multiplier for auto mode
@@ -24,8 +25,11 @@ export function mergeAlbumPrefs(stored) {
     : DEFAULT_ALBUM_PREFS.fixedGapMs;
   const k = Number.isFinite(s.k) ? s.k : DEFAULT_ALBUM_PREFS.k;
   return {
+    // An explicitly-stored empty string is a real choice — the "<folder>_<n>"
+    // fallback — and must survive a reload, distinct from an ABSENT key (garbage
+    // or first run) which takes the date+folder default.
     template:
-      typeof s.template === "string" && s.template.length
+      typeof s.template === "string"
         ? s.template
         : DEFAULT_ALBUM_PREFS.template,
     gapMode,
