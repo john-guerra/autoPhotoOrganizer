@@ -6,6 +6,35 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.0
+
+Packaged build. Bundles everything since 2.16.0 — headlined by the new
+**feed scrubber** and a **keyboard-navigable folder tree**.
+
+- **New feed scrubber on the right edge.** A full-height rail you can drag,
+  resize, and hop with the keyboard to move through the whole library at a
+  glance. It labels folders (following the library tree) and can show a date
+  "scent," with a hover fisheye, a name tooltip, and a marker that tracks your
+  position smoothly.
+- **Navigate the folder tree from the keyboard, VS Code-style.** Press **T** to
+  focus the tree, then arrows move a cursor, **→/←** expand / collapse,
+  **Home/End** and **PgUp/PgDn** jump, type a name to jump by type-ahead, **Enter**
+  opens the folder, and **Esc** hands control back to the photo feed.
+- **The tree keeps your place in view** — a new **👁 Follow** toggle scrolls the
+  tree to the folder you're browsing as you move through the feed.
+- **Auto Albums is smarter.** Run it on just your current selection, get numbered
+  album names by default (`2018_06Jun_30_Chicaque_1`) so same-day albums stay
+  distinct, and pick a naming scheme from a real dropdown.
+- **Smoother scrolling.** The grid predictively prefetches thumbnails in the
+  direction you're heading, no longer stops dead at a false "end of page," and a
+  hard fling no longer "refreshes the whole page." The grid also stops jumping as
+  details load or when you resize / zoom.
+- **Export is simpler** — pick the folder, then Copy or Move — and you can now
+  export straight into a scanned folder. Adding a folder jumps the feed to it.
+- Plus fixes to jumping to a folder (trailing-slash folders, scrolling up to
+  earlier folders, no more bouncing to a neighbouring album) and the release CI
+  checks. (#5, #128, #130, #132)
+
 ## 2.16.28
 
 - **Fixed the CI checks that gate releases.** The feed scrubber's viewport marker
