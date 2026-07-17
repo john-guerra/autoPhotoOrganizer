@@ -4,12 +4,15 @@
 const KEY = "autogallery.albumPrefs";
 
 export const DEFAULT_ALBUM_PREFS = {
-  // Date-then-folder by default: "%Y_%m%b_%d_%f" → e.g. "2018_06Jun_30_Chicaque"
-  // (year, zero-padded month + short month name, day, then the source folder's
-  // name via the %f token — see albums.js renderAlbumName). Matches the
-  // photographer's existing on-disk convention. Clear the template to fall back
-  // to "<currentFolderName>_<n>"; add a leading "%Y/" to nest under a year folder.
-  template: "%Y_%m%b_%d_%f",
+  // Date-then-folder by default: "%Y_%m%b_%d_%f_%n" → e.g.
+  // "2018_06Jun_30_Chicaque_1" (year, zero-padded month + short month name, day,
+  // the source folder's name via the %f token, then the 1-based album number via
+  // %n — see albums.js renderAlbumName). The trailing "_%n" gives every album a
+  // distinct name when a single folder splits into more than one album on the
+  // same date. Matches the photographer's existing on-disk convention. Clear the
+  // template to fall back to "<currentFolderName>_<n>"; add a leading "%Y/" to
+  // nest under a year folder.
+  template: "%Y_%m%b_%d_%f_%n",
   gapMode: "fixed", // "fixed" (a concrete gap) | "auto" (mean + k·stddev)
   fixedGapMs: 86400000, // 1 day
   k: 2, // stddev multiplier for auto mode

@@ -70,8 +70,9 @@
   // Ready-made naming schemes the user can pick from the combobox — or ignore
   // and type their own (it's a plain <input> backed by a <datalist>).
   const PRESETS = [
+    ["%Y_%m%b_%d_%f_%n", "Date + folder + number — 2018_06Jun_30_Chicaque_1"],
     ["%Y_%m%b_%d_%f", "Date + folder — 2018_06Jun_30_Chicaque"],
-    ["%Y/%Y_%m%b_%d_%f", "Year ▸ date + folder"],
+    ["%Y/%Y_%m%b_%d_%f_%n", "Year ▸ date + folder + number"],
     ["%Y-%m-%d_%f", "ISO date + folder"],
     ["%Y-%m-%d", "ISO date only"],
     ["%f_%n", "Folder + number"],
@@ -164,18 +165,32 @@
 
   <section class="field">
     <span class="lbl">Folder naming</span>
-    <input
-      class="tpl"
-      list="tpl-presets"
-      bind:value={template}
-      spellcheck="false"
-      placeholder={`e.g. %Y_%m%b_%d_%f — leave empty for ${currentFolderName || "<folder>"}_1, ${currentFolderName || "<folder>"}_2`}
-    />
-    <datalist id="tpl-presets">
-      {#each PRESETS as [value, label]}
-        <option {value} {label}></option>
-      {/each}
-    </datalist>
+    <!-- A real <select> (not a <datalist>): a datalist is autocomplete — the
+         browser hides every option that doesn't match the field's current text,
+         so once a preset is filled in, opening it showed nothing. The select lists
+         every preset outright; the text field beside it still takes a custom one.
+         Both bind the same `template`, so picking a preset fills the field and
+         typing a custom value flips the select to "Custom template". -->
+    <div class="tpl-row">
+      <select
+        class="tpl-preset"
+        bind:value={template}
+        aria-label="Folder-naming preset"
+      >
+        {#each PRESETS as [value, label]}
+          <option {value}>{label}</option>
+        {/each}
+        {#if !PRESETS.some(([v]) => v === template)}
+          <option value={template}>Custom template</option>
+        {/if}
+      </select>
+      <input
+        class="tpl"
+        bind:value={template}
+        spellcheck="false"
+        placeholder={`e.g. %Y_%m%b_%d_%f — leave empty for ${currentFolderName || "<folder>"}_1, ${currentFolderName || "<folder>"}_2`}
+      />
+    </div>
     <p class="hint">
       Pick a preset from the list or type your own. <code>%f</code> is this
       folder's name; <code>%n</code> the album number.
@@ -282,6 +297,27 @@
   }
   .tpl {
     width: 100%;
+  }
+  .tpl-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .tpl-row .tpl {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+  .tpl-preset {
+    flex: 0 0 auto;
+    max-width: 46%;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: inherit;
+    padding: 5px 8px;
+    font: inherit;
+    font-size: 0.85rem;
   }
   .dest {
     flex: 1;

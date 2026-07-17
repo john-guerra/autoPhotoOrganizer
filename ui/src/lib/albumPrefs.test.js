@@ -25,11 +25,13 @@ describe("mergeAlbumPrefs", () => {
     expect(DEFAULT_ALBUM_PREFS.gapMode).toBe("fixed");
   });
 
-  it("defaults the naming template to the date+folder format", () => {
-    expect(DEFAULT_ALBUM_PREFS.template).toBe("%Y_%m%b_%d_%f");
+  it("defaults the naming template to the date+folder+number format", () => {
+    // The trailing "_%n" keeps sibling albums distinct when one folder splits
+    // into several albums on the same date.
+    expect(DEFAULT_ALBUM_PREFS.template).toBe("%Y_%m%b_%d_%f_%n");
     // Absent (first run / garbage) → the default.
-    expect(mergeAlbumPrefs(null).template).toBe("%Y_%m%b_%d_%f");
-    expect(mergeAlbumPrefs({}).template).toBe("%Y_%m%b_%d_%f");
+    expect(mergeAlbumPrefs(null).template).toBe("%Y_%m%b_%d_%f_%n");
+    expect(mergeAlbumPrefs({}).template).toBe("%Y_%m%b_%d_%f_%n");
     // A stored non-empty template is preserved verbatim.
     expect(mergeAlbumPrefs({ template: "%Y-%m-%d" }).template).toBe("%Y-%m-%d");
     // An EXPLICIT empty string is a real choice (the <folder>_<n> fallback).

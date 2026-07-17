@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.25
+
+- **Folder-naming presets are pickable again.** The Auto Albums naming field now
+  has a real dropdown of preset schemes beside the text box — the old combobox
+  silently hid every option once a value was filled in.
+- **Album names get a number by default.** The default naming scheme is now
+  `%Y_%m%b_%d_%f_%n` (e.g. `2018_06Jun_30_Chicaque_1`), so a folder that splits
+  into several albums on the same day gets distinct, numbered names.
+
 ## 2.16.24
 
 - **Navigate the folder tree from the keyboard, VS Code-style.** Press **T** to
