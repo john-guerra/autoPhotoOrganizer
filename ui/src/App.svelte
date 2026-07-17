@@ -2142,15 +2142,16 @@
       } else {
         selected = nextSelectable(displayEntries, 0, 1) ?? 0;
         focusPending = true;
-        // Pin the landing exactly as the keyboard group-jump does
-        // (jumpGroupBoundaryInner). Without this, the jump lands at scrollTop≈0
-        // with hasMoreBefore=true, so updateVisibleRange immediately fires
-        // loadMore("before") (its guard is `!jumpRevealPending`), prepends the
-        // previous album, and the prepend flings the viewport onto THAT album —
-        // "jump to Hawaii, bounce to the album before it". Arming the pin blocks
-        // that prepend until the user scrolls up (onwheel/onKeydown clear it) and
-        // re-anchors the landing across the metadata reflow.
-        jumpRevealPending = true;
+        // NB: do NOT arm jumpRevealPending here. It blocks loadMore("before"),
+        // and this jump lands the target at the TOP (scrollTop 0, no before-page):
+        // with the pin on, scrolling up can't reach earlier folders (there's
+        // nothing above to scroll into, so no scroll event fires the backfill, and
+        // the pin only clears on that scroll) — you get stuck unable to see the
+        // previous folders. The bounce the pin was added for ("jump to X, slide
+        // onto the album before it") came from a STALE deep scrollTop, which the
+        // `mainColumnEl.scrollTop = 0` reset above already fixes; with that, the
+        // auto-loadMore("before") backfills earlier folders cleanly (its own
+        // scroll-compensation holds the landing) instead of flinging.
         status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       }
       enrichMeta(page.map((i) => i.id));

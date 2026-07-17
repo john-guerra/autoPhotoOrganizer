@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.21
+
+- **After jumping to a folder (tree or scrubber), you can scroll up to the
+  previous folders again.** A jump landed you at the top with the earlier folders
+  locked out; they now load above the landing as they did before, so scrolling up
+  keeps browsing backward. (Regression from the 2.16.18 jump-bounce fix.)
+
 ## 2.16.20
 
 - **Jumping to a folder from the tree no longer lands on an empty feed.** For a
