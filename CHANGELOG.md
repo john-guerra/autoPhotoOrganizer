@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.20
+
+- **Auto-albums now name folders `2018_06Jun_30_Chicaque` by default** — the date
+  (`%Y_%m%b_%d`) followed by the folder the photos came from. Open ⚙ Options to
+  pick a different scheme from the naming dropdown (year subfolder, ISO date, …)
+  or type your own; the new `%f` token drops in this folder's name.
+
 ## 2.16.19
 
 - **The tree now keeps your place in view as you scroll — new "👁 Follow" toggle,
