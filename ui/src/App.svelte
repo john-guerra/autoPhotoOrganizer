@@ -882,6 +882,11 @@
   // either way. Persisted so it can be A/B'd.
   let scrubberLandmarks = $state(loadSetting("scrubberLandmarks", "uniform"));
   $effect(() => saveSetting("scrubberLandmarks", scrubberLandmarks));
+  // "Follow here": keep the feed's VIEW location revealed + scrolled into view in
+  // the tree as the feed scrolls. On by default; persisted. The reveal effect is
+  // next to viewHereKey (which is what it tracks). See the design spec.
+  let treeFollowHere = $state(loadSetting("treeFollowHere", true));
+  $effect(() => saveSetting("treeFollowHere", treeFollowHere));
 
   let gridEl = $state();
   let mainColumnEl = $state();
@@ -2237,6 +2242,31 @@
   let viewHereKeyDistinct = $derived(
     viewHereKey && viewHereKey !== focusHereKey ? viewHereKey : null
   );
+
+  // "Follow here": when enabled, reveal the feed's VIEW group in the tree whenever
+  // it changes (i.e. as the feed scrolls), reusing TreeSidebar.revealPath (which
+  // auto-expands the branches + scrolls the row into view). Gate the effect on
+  // viewHereKey (a string that only changes when the view GROUP changes), and read
+  // viewHerePath untracked, so a scroll WITHIN a group — which mints a fresh path
+  // array every frame but the same key — does not re-fire the reveal.
+  $effect(() => {
+    if (!treeFollowHere) return;
+    const key = viewHereKey;
+    if (!key) return;
+    // Track ONLY treeFollowHere + viewHereKey (primitives). Everything read
+    // below is untracked — critically `treeSidebarRef`, a `bind:this` ref, whose
+    // read Svelte's safe_not_equal reports as "changed" on every flush, so
+    // tracking it re-fires this effect forever (effect_update_depth_exceeded —
+    // the exact bind:this-in-a-reactive-block trap CLAUDE.md warns about).
+    untrack(() => {
+      // respectManualCollapse: following must never reopen a folder the user
+      // deliberately collapsed (unlike the manual "reveal" button, which does).
+      if (viewHerePath)
+        treeSidebarRef?.revealPath(viewHerePath, {
+          respectManualCollapse: true,
+        });
+    });
+  });
 
   // --- Scrubber landmark manifest ------------------------------------------
   // The right-edge rail reads one structural dataset: the ordered groups of the
@@ -5071,6 +5101,8 @@
           {tokenStats}
           focusKey={focusHereKey}
           viewKey={viewHereKeyDistinct}
+          followHere={treeFollowHere}
+          onfollowtoggle={(v) => (treeFollowHere = v)}
           ontoggle={(d) => onGroupToggle(d.path, d.event, d.paths)}
           onjump={(p) => jumpToPath(p)}
           oncontextmenu={(d) => openTreeMenu(d)}

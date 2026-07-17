@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.19
+
+- **The tree now keeps your place in view as you scroll — new "👁 Follow" toggle,
+  on by default.** The tree scrolls to (and opens) whichever folder is at the top
+  of the feed as you scroll, centring it in the list. A folder you've collapsed by
+  hand stays collapsed — Follow won't reopen it. Turn it off next to Expand all /
+  Collapse all. The Library header and the tree's buttons now stay pinned while
+  the folder list scrolls.
+
 ## 2.16.18
 
 - **Jumping to an album (scrubber, tree, or fisheye) no longer bounces to a
