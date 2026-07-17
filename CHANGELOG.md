@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.20
+
+- **Jumping to a folder from the tree no longer lands on an empty feed.** For a
+  rare folder whose stored path ended in a slash, clicking it in the tree showed
+  "No photos to show here" (the scrubber worked); the tree now jumps to the
+  folder's exact value like the scrubber does.
+
 ## 2.16.19
 
 - **The tree now keeps your place in view as you scroll — new "👁 Follow" toggle,

@@ -140,8 +140,17 @@
   }
 
   // A virtual ancestor is not a group, so there is no section to scroll to —
-  // jump to the first real group beneath it instead.
-  let jumpPath = $derived(isVirtual ? (groupPaths[0] ?? null) : path);
+  // jump to the first real group beneath it instead. For a real folder group,
+  // jump to its EXACT server value (node.groupValue): `path` carries the rebuilt
+  // value, which drops a rare trailing slash and would land on an empty feed. For
+  // every normal folder groupValue === the path value, so this is a no-op there.
+  let jumpPath = $derived(
+    isVirtual
+      ? (groupPaths[0] ?? null)
+      : node?.groupValue && node.groupValue !== path.at(-1)?.value
+        ? [...path.slice(0, -1), { ...path.at(-1), value: node.groupValue }]
+        : path
+  );
 
   /** Right-click. Ships the facts App CANNOT recompute from the path alone —
    * isVirtual, groupPaths and the row's own subfolders come out of folderTree's

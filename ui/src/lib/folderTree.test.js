@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildFolderTree } from "./folderTree.js";
+import { buildFolderTree, chainTo } from "./folderTree.js";
 
 /** The server hands us a flat list of every folder that has photos, as
  * {value: absPath, count}. These tests pin the shape we turn that into. */
@@ -109,5 +109,29 @@ describe("buildFolderTree", () => {
     const one = buildFolderTree([{ value: "/lib/only", count: 1 }]);
     expect(one.map((n) => n.label)).toEqual(["lib/only"]);
     expect(one[0].isGroup).toBe(true);
+  });
+
+  it("keeps a folder's EXACT server value in groupValue, trailing slash and all", () => {
+    // A rare abs_path carries a trailing slash. The rebuilt `value` drops it
+    // (splitPath ignores empty segments), so a jump built from `value` would miss
+    // the group the feed/seek key on — "jump to that folder" showed no photos.
+    // `groupValue` preserves the verbatim string so the jump lands.
+    const roots = buildFolderTree([
+      { value: "/lib/normal", count: 1 },
+      { value: "/lib/odd/", count: 2 }, // trailing slash
+    ]);
+    const normal = at(roots, "lib", "normal");
+    const odd = at(roots, "lib", "odd");
+    expect(odd.value).toBe("/lib/odd"); // rebuilt — no trailing slash
+    expect(odd.groupValue).toBe("/lib/odd/"); // verbatim — keeps it
+    expect(normal.groupValue).toBe(normal.value); // identical for normal folders
+  });
+
+  it("chainTo tolerates the trailing slash the feed hands back", () => {
+    // reveal/Follow looks the row up by the feed's raw group value ("/lib/odd/"),
+    // but tree node values are normalised ("/lib/odd") — chainTo must still find it.
+    const roots = buildFolderTree([{ value: "/lib/odd/", count: 2 }]);
+    expect(chainTo(roots, "/lib/odd/").at(-1)?.value).toBe("/lib/odd");
+    expect(chainTo(roots, "/lib/odd").at(-1)?.value).toBe("/lib/odd");
   });
 });

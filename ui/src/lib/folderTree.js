@@ -50,6 +50,13 @@ export function buildFolderTree(entries) {
     // += keeps a duplicate from silently dropping photos out of the totals.
     node.ownCount += entry.count;
     node.isGroup = true;
+    // Keep the RAW server group value verbatim. `value` above is REBUILT from the
+    // path segments (splitPath drops empty segments), so a rare abs_path with a
+    // trailing slash — /a/b/c/ — loses it and no longer matches the group the
+    // feed/seek key on. Jumps must use this exact string, or "jump to that folder"
+    // silently finds no photos (only the scrubber, which keeps the raw value,
+    // worked). Normal folders: groupValue === value.
+    node.groupValue = entry.value;
   }
   return [...root.childByName.values()].map(finalize);
 }
@@ -60,6 +67,7 @@ function makeNode(label, value) {
     label,
     ownCount: 0,
     isGroup: false,
+    groupValue: null,
     childByName: new Map(),
   };
 }
@@ -76,6 +84,10 @@ function finalize(node) {
   const children = [...node.childByName.values()].map(finalize);
   return {
     value: node.value,
+    // The exact server group value (verbatim abs_path); falls back to the rebuilt
+    // `value` for the common case where they're identical. Used by the jump so it
+    // hits the group the feed/seek actually key on. See buildFolderTree.
+    groupValue: node.groupValue ?? node.value,
     label: node.label,
     ownCount: node.ownCount,
     count: node.ownCount + children.reduce((sum, c) => sum + c.count, 0),
@@ -111,6 +123,10 @@ export function relativeTo(absPath, prefix) {
  * the chain cannot be derived from the path string alone — it has to be walked.
  * Used to reveal (and expand down to) the folder the feed is currently showing. */
 export function chainTo(roots, value) {
+  // Node values are rebuilt from path segments (no trailing slash); the feed hands
+  // us the raw group value, which for a rare folder carries a trailing slash. Strip
+  // it so reveal/Follow can still locate the row. See buildFolderTree.
+  value = String(value).replace(/\/+$/, "");
   for (const node of roots) {
     if (node.value === value) return [node];
     if (value.startsWith(`${node.value}/`)) {
