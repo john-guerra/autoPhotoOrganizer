@@ -4565,6 +4565,11 @@
     }
     if (e.metaKey || e.ctrlKey) return; // browser shortcuts
 
+    // The Library tree owns the keyboard while it's focused — its own handler
+    // drives arrows / type-ahead / Enter and stops them reaching here; stand every
+    // feed shortcut down so a key it ignores can't act on the grid behind it.
+    if (e.target.closest?.(".tree-sidebar")) return;
+
     // The shortcuts-help overlay owns the keyboard while open: '?' toggles
     // it closed, everything else is swallowed so keys don't act on the grid
     // behind it. Escape is NOT handled here — the overlay's Modal (native
@@ -4612,6 +4617,14 @@
     // Never steal keystrokes from a focused input (e.g. typing a folder
     // path with digits in it must not rate photos).
     if (isTypingTarget(e.target)) return;
+
+    // T — jump keyboard focus to the Library tree (VS Code-style), from where
+    // arrows / Enter navigate it. Only in tree mode (focusTree is bound there).
+    if ((e.key === "t" || e.key === "T") && treeSidebarRef?.focusTree) {
+      e.preventDefault();
+      treeSidebarRef.focusTree();
+      return;
+    }
 
     // '/' jumps to the search box — the convention everywhere from Gmail to
     // GitHub, and this is a keyboard-first app: a search you have to reach for

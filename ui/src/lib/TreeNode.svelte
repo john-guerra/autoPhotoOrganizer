@@ -1,5 +1,6 @@
 <script>
   import { treeKey } from "./treeState.js";
+  import { rowDomId } from "./treeKeyboard.js";
   import { pathKey } from "./feed.js";
   import { shortLeafLabel } from "./labels.js";
   import { labelParts, EMPTY_STATS } from "./folderLabel.js";
@@ -22,6 +23,7 @@
     highlightedKey, // string|null
     focusKey = null, // treeKey of the FOCUS group ("you are here" — amber dot)
     viewKey = null, // treeKey of the VIEW group (top of viewport — eye glyph)
+    cursorKey = null, // treeKey of the KEYBOARD cursor row (roving focus)
     collapsedPaths, // Array<Array<{dimension,value}>>
     snapshotKeys = new Set(), // pathKeys rendered as a snapshot strip
     tokenStats = EMPTY_STATS, // library-wide token df, for folder labels
@@ -254,7 +256,18 @@
 
 <li class="tree-node" class:highlighted={highlightedKey === key}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="tree-node-row" oncontextmenu={onContextMenu}>
+  <div
+    class="tree-node-row"
+    class:tree-cursor={cursorKey != null && cursorKey === key}
+    role="treeitem"
+    tabindex="-1"
+    id={rowDomId(key)}
+    data-tree-key={key}
+    data-depth={depth}
+    aria-selected={cursorKey != null && cursorKey === key}
+    aria-expanded={hasChildren ? expanded : undefined}
+    oncontextmenu={onContextMenu}
+  >
     <!-- TREE structure: a disclosure triangle — shows/hides this node's CHILD
          folders here in the sidebar. -->
     {#if hasChildren}
@@ -350,6 +363,7 @@
           {highlightedKey}
           {focusKey}
           {viewKey}
+          {cursorKey}
           {collapsedPaths}
           {snapshotKeys}
           {tokenStats}
@@ -377,6 +391,7 @@
               {highlightedKey}
               {focusKey}
               {viewKey}
+              {cursorKey}
               {collapsedPaths}
               {snapshotKeys}
               {tokenStats}
@@ -511,6 +526,13 @@
   }
   .tree-node.highlighted > .tree-node-row {
     background: #2a2a2a;
+    border-radius: 4px;
+  }
+  /* The keyboard cursor — a blue selection ring, distinct from the grey reveal
+     highlight and the amber-dot / eye "you are here" markers. */
+  .tree-node-row.tree-cursor {
+    background: rgba(76, 154, 255, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(76, 154, 255, 0.55);
     border-radius: 4px;
   }
   .tree-loading,

@@ -105,6 +105,22 @@
           label:
             "Slide a clipped folder name back into view (its full path is in the tooltip)",
         },
+        { keys: ["T"], label: "Focus the tree (then arrow through it)" },
+        { keys: ["↑", "↓"], label: "Tree: move the cursor between folders" },
+        {
+          keys: ["→", "←"],
+          label: "Tree: expand / collapse (or step to a child / parent)",
+        },
+        { keys: ["Home", "End"], label: "Tree: first / last folder" },
+        { keys: ["PgUp", "PgDn"], label: "Tree: jump a page of folders" },
+        {
+          keys: ["Enter"],
+          label: "Tree: open the cursor's folder in the feed",
+        },
+        {
+          keys: ["type a name"],
+          label: "Tree: jump the cursor to a folder by name (type-ahead)",
+        },
       ],
     },
   ];

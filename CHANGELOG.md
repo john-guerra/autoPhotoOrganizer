@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.24
+
+- **Navigate the folder tree from the keyboard, VS Code-style.** Press **T** to
+  focus the tree, then **↑/↓** move a cursor between folders, **→/←** expand /
+  collapse (or step to a child / parent), **Home/End** and **PageUp/PageDown**
+  jump around, **type a name** to move the cursor to a matching folder, and
+  **Enter** opens the cursor's folder in the feed. While the tree is focused the
+  grid's shortcuts stand down. All listed in the **?** shortcuts overlay.
+
 ## 2.16.23
 
 - **"Select all" now asks in a modal, not the easy-to-miss status bar** — both the

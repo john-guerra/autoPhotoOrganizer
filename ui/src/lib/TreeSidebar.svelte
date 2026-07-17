@@ -1,5 +1,6 @@
 <script>
   import { tick } from "svelte";
+  import { moveCursor, typeAheadTarget, rowDomId } from "./treeKeyboard.js";
   import { fetchTreeNode } from "./api.js";
   import { treeKey, collapseDescendants } from "./treeState.js";
   import { buildFolderTree, isFolderNode, chainTo } from "./folderTree.js";
@@ -35,6 +36,130 @@
   } = $props();
 
   let navEl = $state(); // for revealPath's scrollIntoView
+
+  // --- Keyboard navigation (VS Code-style) ----------------------------------
+  // The .tree-scroll region is one tab stop; treeCursorKey is the roving cursor.
+  // Movement reads the ACTUAL rendered rows (`.tree-node-row`, in order) so it
+  // always matches what's on screen across any grouping/compaction, and reuses the
+  // rows' own fold-icon / label handlers for expand-collapse / jump. See
+  // docs/superpowers/specs/2026-07-17-tree-keyboard-nav-design.md.
+  let scrollEl = $state();
+  let treeCursorKey = $state(null);
+  let typeAheadBuffer = "";
+  let typeAheadTimer;
+
+  /** Focus the tree (called by App's `T` shortcut via bind:this). */
+  export function focusTree() {
+    scrollEl?.focus();
+  }
+
+  const visibleRows = () => [
+    ...(scrollEl?.querySelectorAll(".tree-node-row") ?? []),
+  ];
+  const cursorIndexIn = (rows) =>
+    rows.findIndex((r) => r.dataset.treeKey === treeCursorKey);
+
+  /** Move the cursor to row `index` and scroll it into view. */
+  function cursorTo(rows, index) {
+    if (index < 0 || index >= rows.length) return;
+    treeCursorKey = rows[index].dataset.treeKey;
+    rows[index].scrollIntoView({ block: "nearest" });
+  }
+
+  function onTreeFocus() {
+    // Land the cursor somewhere sensible the first time (or after it scrolled
+    // out of the rendered set): the current view/focus row if visible, else top.
+    const rows = visibleRows();
+    if (!rows.length) return;
+    if (cursorIndexIn(rows) >= 0) return;
+    const here = rows.findIndex(
+      (r) => r.dataset.treeKey === viewKey || r.dataset.treeKey === focusKey
+    );
+    cursorTo(rows, here >= 0 ? here : 0);
+  }
+
+  /** A click anywhere in a row moves the cursor there too, so keyboard and mouse
+   *  agree on "where I am". */
+  function onTreeClick(e) {
+    const row = e.target.closest?.(".tree-node-row");
+    if (row?.dataset.treeKey) treeCursorKey = row.dataset.treeKey;
+  }
+
+  function onTreeKeydown(e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // leave browser combos alone
+    const rows = visibleRows();
+    if (!rows.length) return;
+    let idx = cursorIndexIn(rows);
+    if (idx < 0) idx = 0;
+    const row = rows[idx];
+    const fold = row.querySelector(".tree-fold-icon");
+    const expanded = fold?.getAttribute("aria-expanded") === "true";
+    const rowH = row.getBoundingClientRect().height || 24;
+    const pageSize = Math.max(1, Math.floor(scrollEl.clientHeight / rowH) - 1);
+
+    let handled = true;
+    switch (e.key) {
+      case "ArrowDown":
+        cursorTo(rows, moveCursor(rows.length, idx, "down"));
+        break;
+      case "ArrowUp":
+        cursorTo(rows, moveCursor(rows.length, idx, "up"));
+        break;
+      case "Home":
+        cursorTo(rows, moveCursor(rows.length, idx, "home"));
+        break;
+      case "End":
+        cursorTo(rows, moveCursor(rows.length, idx, "end"));
+        break;
+      case "PageDown":
+        cursorTo(rows, moveCursor(rows.length, idx, "pagedown", pageSize));
+        break;
+      case "PageUp":
+        cursorTo(rows, moveCursor(rows.length, idx, "pageup", pageSize));
+        break;
+      case "ArrowRight":
+        if (fold && !expanded)
+          fold.click(); // expand
+        else if (fold && expanded) cursorTo(rows, idx + 1); // first child
+        // leaf: nothing to do
+        break;
+      case "ArrowLeft":
+        if (fold && expanded)
+          fold.click(); // collapse
+        else {
+          // move to the parent: nearest row above at a shallower depth
+          const depth = Number(row.dataset.depth);
+          for (let j = idx - 1; j >= 0; j--) {
+            if (Number(rows[j].dataset.depth) < depth) {
+              cursorTo(rows, j);
+              break;
+            }
+          }
+        }
+        break;
+      case "Enter":
+      case " ":
+        row.querySelector(".tree-label")?.click(); // jump the feed
+        break;
+      default:
+        if (e.key.length === 1) {
+          // type-ahead: accumulate, reset after a short idle (the standard buffer,
+          // not a state "settle" — there is no event for "stopped typing").
+          clearTimeout(typeAheadTimer);
+          typeAheadBuffer += e.key;
+          typeAheadTimer = setTimeout(() => (typeAheadBuffer = ""), 800);
+          const labels = rows.map((r) =>
+            (r.querySelector(".tree-label")?.textContent ?? "").trim()
+          );
+          const target = typeAheadTarget(labels, idx, typeAheadBuffer);
+          if (target >= 0) cursorTo(rows, target);
+        } else handled = false;
+    }
+    if (handled) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
 
   let rootTotal = $state(null);
   let rootNodes = $state([]);
@@ -494,8 +619,21 @@
   {/if}
   <!-- Only the node list scrolls; the Library header + actions row above stay
        pinned (so Expand/Collapse/Follow are always reachable, and "Follow here"
-       auto-scrolling this list never carries the controls off-screen). -->
-  <div class="tree-scroll">
+       auto-scrolling this list never carries the controls off-screen). This is
+       ALSO the keyboard tree: one tab stop (role=tree), a roving cursor exposed
+       via aria-activedescendant, driven by onTreeKeydown. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div
+    class="tree-scroll"
+    bind:this={scrollEl}
+    role="tree"
+    tabindex="0"
+    aria-label="Library folders — arrow keys to navigate, Enter to open"
+    aria-activedescendant={treeCursorKey ? rowDomId(treeCursorKey) : undefined}
+    onkeydown={onTreeKeydown}
+    onclick={onTreeClick}
+    onfocus={onTreeFocus}
+  >
     <ul class="tree-level">
       {#each rootNodes as node (node.value)}
         <TreeNode
@@ -508,6 +646,7 @@
           {highlightedKey}
           {focusKey}
           {viewKey}
+          cursorKey={treeCursorKey}
           {collapsedPaths}
           {snapshotKeys}
           {tokenStats}
@@ -542,6 +681,14 @@
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+  }
+  .tree-scroll:focus {
+    outline: none; /* the cursor row shows focus; no ring on the whole list… */
+  }
+  .tree-scroll:focus-visible {
+    outline: 2px solid #4c9aff; /* …except for keyboard focus, which gets a ring */
+    outline-offset: -2px;
+    border-radius: 4px;
   }
   .tree-actions {
     display: flex;
