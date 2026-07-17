@@ -14,6 +14,7 @@
    */
   import { clickOutside, onEscape, clampToViewport } from "./actions.js";
   import { combo } from "./platform.js";
+  import Modal from "./Modal.svelte";
 
   let {
     selectedCount = 0,
@@ -24,7 +25,8 @@
 
     exportOpen = $bindable(false),
     exportDest = $bindable(""),
-    exportName = $bindable(""),
+    // Which mode is in flight, so the right button shows its spinner label. Set
+    // by whichever button (Copy/Move) launched the export. Not persisted.
     exportMove = $bindable(false),
 
     /** The pending ⌘A / ⌘⇧A question, if one is up. @type {null|"select"|"deselect"} */
@@ -52,52 +54,69 @@
   } = $props();
 </script>
 
-<!-- Stays up while there's a selection OR a clear still waiting to be undone.
-     `selectedCount > 0` alone meant Clear removed the Undo button along with the
-     selection, so the "undoable" clear had no way to be undone (#97).
-     It also stays up for the ⌘A / ⌘⇧A question, which can be asked from an
-     empty selection. -->
-{#if selectedCount > 0 || lastClearedSelection || pendingBulk || pendingGroup}
-  <div class="cluster selection">
-    <!-- The inline answer to "⌘A again": asking in the status bar rather than a
-         blocking confirm() (#97 — the native dialog froze the whole UI). Press
-         the shortcut again, click, or Escape. -->
-    {#if pendingBulk}
-      <span class="ask">
-        <!-- Select names its count (it really will take that many). Deselect
-             can't: only the shown photos that are ALSO selected get removed, and
-             we don't know how many that is without fetching the ids. Quoting the
-             shown-count here would promise a number the action won't deliver, so
-             it stays unnumbered and the status line reports the true count after. -->
-        {pendingBulk === "select"
-          ? `Select all ${pendingCount.toLocaleString()} photos shown?`
-          : "Remove everything shown from the selection?"}
-      </span>
+<!-- The ⌘A / ⌘⇧A and per-folder select-all questions are MODALS (below), not
+     inline: the status-bar prompt was too easy to miss. They can be asked from
+     an empty selection, so they live outside the bar's own visibility gate. -->
+{#if pendingBulk}
+  <Modal
+    open={true}
+    title={pendingBulk === "select"
+      ? "Select all photos?"
+      : "Remove from selection?"}
+    size="sm"
+    onclose={() => onbulkcancel?.()}
+  >
+    <p class="confirm-body">
+      <!-- Select names its count (it really will take that many). Deselect
+           can't: only the shown photos that are ALSO selected get removed, and
+           we don't know how many that is without fetching the ids. Quoting the
+           shown-count here would promise a number the action won't deliver, so
+           it stays unnumbered and the status line reports the true count after. -->
+      {pendingBulk === "select"
+        ? `Select all ${pendingCount.toLocaleString()} photos shown?`
+        : "Remove everything shown from the selection?"}
+    </p>
+    {#snippet footer()}
+      <button class="sel-btn" onclick={() => onbulkcancel?.()}>Cancel</button>
       <button
         class="sel-btn confirm"
         onclick={() => onbulkconfirm?.()}
         title={`${combo("A", { shift: pendingBulk === "deselect" })} again also confirms`}
         >{pendingBulk === "select" ? "Select all" : "Remove all"}</button
       >
-      <button class="sel-btn" onclick={() => onbulkcancel?.()}> Cancel </button>
-    {/if}
-    <!-- The same question, asked of one folder instead of the whole view. It
-         names the folder, because "select all 12,431 photos?" without saying
-         WHERE is not something anyone can answer. -->
-    {#if pendingGroup}
-      <span class="ask">
-        Select all {pendingGroup.count.toLocaleString()} photos in {pendingGroup.label}?
-      </span>
+    {/snippet}
+  </Modal>
+{/if}
+<!-- The same question, asked of one folder instead of the whole view. It
+     names the folder, because "select all 12,431 photos?" without saying
+     WHERE is not something anyone can answer. -->
+{#if pendingGroup}
+  <Modal
+    open={true}
+    title="Select all photos in this folder?"
+    size="sm"
+    onclose={() => ongroupcancel?.()}
+  >
+    <p class="confirm-body">
+      Select all {pendingGroup.count.toLocaleString()} photos in {pendingGroup.label}?
+    </p>
+    {#snippet footer()}
+      <button class="sel-btn" onclick={() => ongroupcancel?.()}>Cancel</button>
       <button
         class="sel-btn confirm"
         onclick={() => ongroupconfirm?.()}
         title="Select every photo in this folder and the folders under it"
         >Select all</button
       >
-      <button class="sel-btn" onclick={() => ongroupcancel?.()}>
-        Cancel
-      </button>
-    {/if}
+    {/snippet}
+  </Modal>
+{/if}
+
+<!-- Stays up while there's a selection OR a clear still waiting to be undone.
+     `selectedCount > 0` alone meant Clear removed the Undo button along with the
+     selection, so the "undoable" clear had no way to be undone (#97). -->
+{#if selectedCount > 0 || lastClearedSelection}
+  <div class="cluster selection">
     {#if selectedCount > 0}
       <button
         class="sel-btn"
@@ -159,56 +178,46 @@
                   <button
                     class="choose-folder"
                     onclick={() => onchoosedest?.()}
+                    title="Pick or create the destination folder"
                   >
                     Choose…
                   </button>
                 {/if}
               </div>
+              <span class="export-hint">
+                Files go straight into this folder.
+                {#if hasNativePicker}
+                  Use <strong>Choose…</strong> to make a new one.
+                {:else}
+                  Type the path of an existing folder.
+                {/if}
+              </span>
             </label>
-            <label class="export-field">
-              <span>New folder name</span>
-              <input
-                class="dir"
-                type="text"
-                placeholder="album-name"
-                bind:value={exportName}
-                spellcheck="false"
-              />
-            </label>
-            <label
-              class="export-move"
-              title="Move the originals out of their current folder instead of copying them"
-            >
-              <input type="checkbox" bind:checked={exportMove} />
-              <span>Move the files instead of copying</span>
-            </label>
-            {#if exportMove}
-              <p class="export-warn" role="note">
-                The originals will be <strong>moved out</strong> of their current
-                folders. You can undo this from the jobs panel afterwards.
-              </p>
-            {/if}
+            <!-- Two buttons, not a checkbox: Move is destructive (it relocates
+                 the originals), so it wears its own warm colour and never hides
+                 behind a toggle you might not notice. Both launch the same
+                 audited, undoable job — Move just passes move=true. -->
             <div class="export-actions">
               <button
-                class="scan"
-                class:danger={exportMove}
-                onclick={() => onexport?.()}
-                disabled={exporting || !exportDest.trim() || !exportName.trim()}
+                class="scan copy"
+                onclick={() => onexport?.(false)}
+                disabled={exporting || !exportDest.trim()}
               >
-                {exporting
-                  ? exportMove
-                    ? "Moving…"
-                    : "Copying…"
-                  : `${exportMove ? "Move" : "Copy"} ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
+                {exporting && !exportMove
+                  ? "Copying…"
+                  : `Copy ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
+              </button>
+              <button
+                class="scan move"
+                onclick={() => onexport?.(true)}
+                disabled={exporting || !exportDest.trim()}
+                title="Move the originals out of their current folders (undoable from the jobs panel)"
+              >
+                {exporting && exportMove
+                  ? "Moving…"
+                  : `Move ${selectedCount} photo${selectedCount === 1 ? "" : "s"}`}
               </button>
             </div>
-            {#if exportResult}
-              <p class="export-result">
-                Copied {exportResult.copied}{exportResult.skipped
-                  ? `, skipped ${exportResult.skipped}`
-                  : ""} → {exportResult.target}
-              </p>
-            {/if}
           </div>
         {/if}
       </div>
@@ -254,10 +263,11 @@
     color: #06121f;
     font-weight: 600;
   }
-  .ask {
-    font-size: 0.8rem;
-    color: #ffd24c;
-    white-space: nowrap;
+  .confirm-body {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    color: #e8e8e8;
   }
   .export-wrap {
     position: relative;
@@ -308,30 +318,15 @@
   }
   .export-actions {
     display: flex;
+    gap: 8px;
   }
-  .export-move {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.78rem;
-    color: #cfcfcf;
-    cursor: pointer;
-  }
-  .export-warn {
-    margin: 0;
-    font-size: 0.75rem;
-    color: #ffd24c;
+  .export-hint {
+    font-size: 0.72rem;
+    color: #7a7a7a;
     line-height: 1.35;
   }
-  .scan.danger {
-    background: #b3541e;
-    color: #fff;
-  }
-  .export-result {
-    margin: 0;
-    font-size: 0.75rem;
-    color: #8fd18f;
-    word-break: break-all;
+  .export-hint strong {
+    color: #9a9a9a;
   }
   .dir {
     flex: 1;
@@ -349,13 +344,23 @@
     border-color: #4c9aff;
   }
   .scan {
+    flex: 1;
     padding: 0.45rem 1rem;
-    background: #4c9aff;
-    color: #06121f;
     border: none;
     border-radius: 6px;
     font-weight: 600;
     cursor: pointer;
+    white-space: nowrap;
+  }
+  /* Copy is the safe default (blue); Move is destructive and wears a warm
+     colour so it never reads as "the same button, other label". */
+  .scan.copy {
+    background: #4c9aff;
+    color: #06121f;
+  }
+  .scan.move {
+    background: #d2691e;
+    color: #fff;
   }
   .scan:disabled {
     opacity: 0.6;

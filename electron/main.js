@@ -54,7 +54,10 @@ async function createWindow() {
 ipcMain.handle("pick-folder", async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const result = await dialog.showOpenDialog(win, {
-    properties: ["openDirectory"],
+    // `createDirectory` surfaces the "New Folder" button so the user can make
+    // the destination folder right in the picker — the app no longer asks for a
+    // separate folder name; the chosen folder IS the export target.
+    properties: ["openDirectory", "createDirectory"],
   });
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];

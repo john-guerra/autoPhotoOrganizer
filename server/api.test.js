@@ -1741,7 +1741,10 @@ describe("POST /api/export", () => {
     expect(res.status).toBe(400);
   });
 
-  it("refuses a target nested inside a scanned source folder", async () => {
+  it("ALLOWS a target inside a scanned source folder (the user picked it — #5)", async () => {
+    // Export is a deliberate, user-chosen copy/move, so writing into a scanned
+    // source folder is permitted (unlike unattended writes). The cache and
+    // traversal guards above still apply; only the source-folder block is lifted.
     const scanBody = await scan(srv.base, exportSrcDir);
     const res = await fetch(`${srv.base}/api/export`, {
       method: "POST",
@@ -1752,7 +1755,8 @@ describe("POST /api/export", () => {
         folderName: "nested-in-source",
       }),
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(202);
+    expect((await res.json()).jobId).toBeTruthy();
   });
 });
 

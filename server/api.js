@@ -1961,7 +1961,13 @@ export function registerApi(app) {
     }
 
     const db = getDb();
-    const resolved = resolveExportTarget(db, destParent, folderName);
+    // Export may write inside a scanned source folder: the user explicitly
+    // picked it, and a copy/move into it never corrupts the read-only invariant
+    // the way an unattended write would (issue #5). The cache + traversal guards
+    // inside resolveExportTarget still apply.
+    const resolved = resolveExportTarget(db, destParent, folderName, {
+      allowInsideSource: true,
+    });
     if (resolved.error) return res.status(400).json({ error: resolved.error });
 
     const job = registry.create("export", {

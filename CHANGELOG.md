@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.21
+
+- **"Select all" now asks in a modal, not the easy-to-miss status bar** — both the
+  ⌘A whole-view prompt and the per-folder "select all N photos?" prompt.
+- **Export is simpler: pick the folder, then Copy or Move.** The separate "new
+  folder name" box is gone — the folder you pick (or create in the Choose… dialog)
+  is the destination. Move is now its own coloured button instead of a checkbox,
+  and finishing closes the dialog with a "Moved N → …" / "Copied N → …" status.
+- **You can now export straight into a scanned folder** (it was wrongly blocked).
+- **Adding a folder jumps the feed to it** so its photos are on screen right away.
+
 ## 2.16.20
 
 - **Auto-albums now name folders `2018_06Jun_30_Chicaque` by default** — the date
