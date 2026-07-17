@@ -255,8 +255,12 @@
       </div>
     {/each}
 
+    <!-- The draggable viewport marker (a scrollbar "thumb"). Deliberately NOT
+         class "thumb": that's the grid's photo-thumbnail class, and a global
+         `.thumb` selector (tests, helpers) would otherwise count this scrollbar
+         handle as a sixth photo. -->
     <div
-      class="thumb"
+      class="scrubber-thumb"
       style="top:{dragging ? previewY : thumbTop}px; height:{dragging
         ? 3
         : thumbH}px;"
@@ -335,7 +339,7 @@
   .label.focused {
     color: #e8f0ff;
   }
-  .thumb {
+  .scrubber-thumb {
     position: absolute;
     right: 0;
     width: 9px;

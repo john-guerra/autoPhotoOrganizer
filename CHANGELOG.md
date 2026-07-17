@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.28
+
+- **Fixed the CI checks that gate releases.** The feed scrubber's viewport marker
+  shared a CSS class (`thumb`) with grid photos, so an automated check counted it
+  as an extra photo and stayed red; the marker now has its own class. No visible
+  change to the app.
+
 ## 2.16.27
 
 - **Auto Albums works on your selection.** Select some photos, then hit Auto

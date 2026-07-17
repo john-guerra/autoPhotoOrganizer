@@ -64,7 +64,7 @@ Two consequences drive the current pain:
   seeks the sorted/grouped/filtered order and returns up to `before` items before
   it and `after` items after it. `rowToItem(r, dims)` shapes each row into the
   client item: `{ id, name, size, mtimeMs, rating, preferredCover, width|null,
-  height|null, taken_at, btime, kind, duration }`.
+height|null, taken_at, btime, kind, duration }`.
 - Ordering is served by `groupBy` + `sort` (date/name/…) with generated
   expression indexes (see `docs/`/memory on "expression index rot"). The window is
   **relative to a focus row**, not an absolute offset — there is no
@@ -128,7 +128,7 @@ misunderstood.
 ## 3. The layout pass (`ui/src/lib/layouts/`)
 
 - **`justified.js`** — `justifiedLayout(items, {targetRowHeight, containerWidth,
-  gap})`. Classic Flickr/Photos row-packing: accumulate items into a row until
+gap})`. Classic Flickr/Photos row-packing: accumulate items into a row until
   their natural widths (at `targetRowHeight`) fill `containerWidth`, then scale the
   row to justify. Pure function of **aspect ratios + container width + row height +
   gap**. **No `document`, no measurement.**
@@ -157,13 +157,13 @@ virtualized, so band heights must be known up front).
 
 Pure helpers over the `boxes` array (all y-monotonic, so all binary searches):
 
-| Helper | Purpose |
-|---|---|
-| `visibleRange(boxes, {scrollTop, viewportHeight, overscanPx})` | which `[start..end]` boxes to MOUNT (300px overscan) |
-| `runwayPx(boxes, {scrollTop, viewportHeight})` | pixels of loaded content beyond each viewport edge — the real "how much road is left" |
-| `topAnchorIndex` / `anchorScrollTop` | keep the eye-point tile fixed across a reflow (metadata/resize/zoom), so the guess→truth correction is invisible |
-| `aheadRange` | indices just beyond the viewport in the travel direction — the predictive-prefetch target |
-| `pageForRunway(boxes, {runwayPx, min, max})` | **adaptive loadMore page size** — scale the fetch to on-screen density so a fling doesn't out-run a fixed 60 (2.16.5) |
+| Helper                                                          | Purpose                                                                                                                            |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `visibleRange(boxes, {scrollTop, viewportHeight, overscanPx})`  | which `[start..end]` boxes to MOUNT (300px overscan)                                                                               |
+| `runwayPx(boxes, {scrollTop, viewportHeight})`                  | pixels of loaded content beyond each viewport edge — the real "how much road is left"                                              |
+| `topAnchorIndex` / `anchorScrollTop`                            | keep the eye-point tile fixed across a reflow (metadata/resize/zoom), so the guess→truth correction is invisible                   |
+| `aheadRange`                                                    | indices just beyond the viewport in the travel direction — the predictive-prefetch target                                          |
+| `pageForRunway(boxes, {runwayPx, min, max})`                    | **adaptive loadMore page size** — scale the fetch to on-screen density so a fling doesn't out-run a fixed 60 (2.16.5)              |
 | `scrollableHeight(totalHeight, {pad, hasMoreAfter, reservePx})` | scroller height = content **+ a bounded bottom reserve while more remains**, so a fling doesn't clamp at the loaded floor (2.16.6) |
 
 `updateVisibleRange()` (rAF-coalesced on scroll/resize) recomputes
@@ -201,13 +201,13 @@ working through.
 
 ## 5. Endpoint reference
 
-| Endpoint | Returns | Notes |
-|---|---|---|
-| `GET /api/feed?groupBy&filter&sort&focusId&before&after` | windowed `items[]` (+ focus) | window is **relative to a focus row**, not an absolute offset |
-| `GET /api/meta?ids=1,2,3` | `[{id, takenAt, width, height, duration}]` | **reads dimensions on demand** (sharp) and persists them |
-| `POST /api/enrich` | `202 {jobId}` | background sweep draining `WHERE width IS NULL`; currently inert in practice |
-| `GET /api/enrich/pending` | `{pending}` | count still un-enriched |
-| `GET /api/thumb/:id?size=…` | image bytes | generated on demand, `Cache-Control: immutable 1yr`; browser ~6-socket HTTP/1.1 limit is the thumbnail-throughput ceiling |
+| Endpoint                                                 | Returns                                    | Notes                                                                                                                     |
+| -------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/feed?groupBy&filter&sort&focusId&before&after` | windowed `items[]` (+ focus)               | window is **relative to a focus row**, not an absolute offset                                                             |
+| `GET /api/meta?ids=1,2,3`                                | `[{id, takenAt, width, height, duration}]` | **reads dimensions on demand** (sharp) and persists them                                                                  |
+| `POST /api/enrich`                                       | `202 {jobId}`                              | background sweep draining `WHERE width IS NULL`; currently inert in practice                                              |
+| `GET /api/enrich/pending`                                | `{pending}`                                | count still un-enriched                                                                                                   |
+| `GET /api/thumb/:id?size=…`                              | image bytes                                | generated on demand, `Cache-Control: immutable 1yr`; browser ~6-socket HTTP/1.1 limit is the thumbnail-throughput ceiling |
 
 ---
 

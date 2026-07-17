@@ -449,7 +449,7 @@ export const tree = {
 export const scrubber = {
   rail: (page) => page.locator(".scrubber"),
   labels: (page) => page.locator(".scrubber .label"),
-  thumb: (page) => page.locator(".scrubber .thumb"),
+  thumb: (page) => page.locator(".scrubber .scrubber-thumb"),
   labelTexts: (page) => page.locator(".scrubber .label-text").allInnerTexts(),
 };
 

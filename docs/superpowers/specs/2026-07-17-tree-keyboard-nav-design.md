@@ -3,7 +3,7 @@
 ## Goal
 
 Make the Library tree keyboard-navigable like VS Code's file explorer: focus it,
-arrow through the *visible* rows, expand/collapse with ←/→, Home/End, PageUp/Down,
+arrow through the _visible_ rows, expand/collapse with ←/→, Home/End, PageUp/Down,
 type-ahead to a folder, and **Enter/Space jumps the feed** to the cursor's folder.
 
 ## Model
