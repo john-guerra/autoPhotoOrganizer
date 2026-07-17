@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.16.18
+
+- **Jumping to an album (scrubber, tree, or fisheye) no longer bounces to a
+  neighbouring album.** When you dragged the scrubber to an album from a
+  scrolled-down position, the feed would land on the right album and then slide
+  onto the one before it (most visibly when that album followed a tiny one).
+  Jumps now reset the scroll and pin the landing exactly like the keyboard
+  group-jump already did.
+
 ## 2.16.17
 
 - **Scrubber: the viewport marker no longer hiccups backward while scrolling.**

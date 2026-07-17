@@ -2095,6 +2095,15 @@
         "after",
         PAGE_SIZE
       );
+      // A jump can land anywhere, arbitrarily far from wherever the user was
+      // scrolled. Reset scrollTop to 0 *before* items/boxes update, exactly as
+      // jumpGroupBoundaryInner does: otherwise the reactive updateVisibleRange
+      // (which fires the moment boxes recomputes, before focusPending's reveal
+      // runs) reads the OLD, deep-scrolled offset against a document that is now
+      // far shorter — the render window snaps to a stale position and the landing
+      // visibly jumps to a different group. (The scrubber makes this easy to hit:
+      // drag from deep in the library to a distant album.)
+      if (mainColumnEl) mainColumnEl.scrollTop = 0;
       items = merged.items;
       hasMoreBefore = merged.hasMoreBefore;
       hasMoreAfter = merged.hasMoreAfter;
@@ -2128,6 +2137,15 @@
       } else {
         selected = nextSelectable(displayEntries, 0, 1) ?? 0;
         focusPending = true;
+        // Pin the landing exactly as the keyboard group-jump does
+        // (jumpGroupBoundaryInner). Without this, the jump lands at scrollTop≈0
+        // with hasMoreBefore=true, so updateVisibleRange immediately fires
+        // loadMore("before") (its guard is `!jumpRevealPending`), prepends the
+        // previous album, and the prepend flings the viewport onto THAT album —
+        // "jump to Hawaii, bounce to the album before it". Arming the pin blocks
+        // that prepend until the user scrolls up (onwheel/onKeydown clear it) and
+        // re-anchors the landing across the metadata reflow.
+        jumpRevealPending = true;
         status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       }
       enrichMeta(page.map((i) => i.id));
