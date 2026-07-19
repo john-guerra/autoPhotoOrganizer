@@ -1,14 +1,27 @@
 name: Release
 
-# Cut a release by pushing a version tag:
-#   npm version 2.0.0-alpha.1 && git push origin main --follow-tags
-# Each OS runner builds its native installers and electron-builder's
-# `--publish always` uploads them + the update metadata (latest*.yml) to the
-# tag's GitHub Release; installed apps read that metadata via electron-updater.
+# Cut a release by pushing a version tag (e.g. `git push origin v2.17.1`).
+# TWO PHASES, deliberately:
+#   1. `build` — one job per OS builds its native installers with
+#      `--publish never` and uploads them (installers + `latest*.yml`) as
+#      workflow artifacts. NOTHING is published here.
+#   2. `publish` — a single job downloads every OS's artifacts and creates ONE
+#      draft GitHub Release holding all of them.
+#
+# Why not `electron-builder --publish always` per OS (the old way): GitHub's
+# get-release-by-tag API does NOT return DRAFT releases, so each leg failed to
+# find the draft and created its OWN. The release ended up split across 2-3
+# drafts, each missing other platforms — v2.17.0 first shipped with no Linux
+# build and a broken mac update `.zip`, and `max-parallel: 1` didn't help (the
+# dup is the tag lookup, not parallelism). A single publish job can't race with
+# itself, so the draft is always complete.
+#
+# The release is a DRAFT: publishing is a deliberate manual step (it pushes an
+# auto-update to installed apps) — `gh release edit v<version> --draft=false`.
 #
 # NOTE: macOS auto-update needs a SIGNED + notarized build. Until Developer ID
-# secrets are added below, mac artifacts install fine but won't auto-update;
-# Windows/Linux auto-update works from these unsigned builds.
+# secrets are added, mac artifacts install fine (ad-hoc signed) but won't
+# auto-update; Windows/Linux auto-update works from these unsigned builds.
 
 on:
   push:
@@ -22,13 +35,6 @@ jobs:
   build:
     strategy:
       fail-fast: false
-      # Publish the OS legs ONE AT A TIME. Each leg runs `electron-builder
-      # --publish always` against the SAME draft release; run in parallel, a
-      # later leg's release update races and drops assets an earlier leg already
-      # uploaded (v2.17.0's first build shipped with no Linux AppImage and no
-      # mac update .zip, both uploaded then clobbered). Serialized, each leg
-      # publishes to a settled release. Slower, but the release is complete.
-      max-parallel: 1
       matrix:
         include:
           - os: macos-latest
@@ -53,15 +59,9 @@ jobs:
       # arg mis-parsed on the Windows runner as a bogus config-file path and
       # failed every Windows build).
       - run: npx electron-rebuild -f -w better-sqlite3
-      - run: npx electron-builder ${{ matrix.flag }} --publish always
+      # Build ONLY — no publish. Phase 2 publishes, once, from a single job.
+      - run: npx electron-builder ${{ matrix.flag }} --publish never
         env:
-          # WHO THE RELEASE IS BY. GitHub credits a release to whoever's token
-          # created it, and it can't be reassigned afterwards — with the default
-          # GITHUB_TOKEN every release reads "github-actions[bot]". Add a personal
-          # access token (repo scope) as the RELEASE_TOKEN secret and releases are
-          # authored by John instead. Falls back to the built-in token so a fork
-          # without the secret still builds.
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           # No Developer ID certs in CI — keep the mac build from stalling on
           # signing. The build still gets an AD-HOC signature (see
           # build/adhoc-sign.cjs): the bundle is sealed and runs on Apple
@@ -69,3 +69,55 @@ jobs:
           # launch needs right-click → Open and macOS auto-update stays off.
           # Both are fixed by adding Developer ID secrets here.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # Upload just the distributables (installers + update metadata) — never the
+      # unpacked app dirs or builder debug files. Each OS matches only its own
+      # subset; a glob line that matches nothing on a given OS is simply skipped,
+      # and `if-no-files-found: error` still fails loudly if a build produced NO
+      # distributable at all.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          if-no-files-found: error
+          retention-days: 5
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.AppImage
+            release/*.blockmap
+            release/latest*.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Pull every OS's artifacts into one flat directory. Filenames are unique
+      # across platforms (…-mac.zip / Setup-….exe / ….AppImage,
+      # latest{,-mac,-linux}.yml), so merge-multiple has no collisions.
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -la dist
+      # Create the draft ONCE with all assets; on a re-run just re-upload
+      # (--clobber), so the job is idempotent. One job → no dup-draft race.
+      # ref_name / repository go through env (never inline ${{ }} in a shell
+      # command) so nothing can be interpreted as shell.
+      - name: Publish draft release
+        env:
+          # WHO THE RELEASE IS BY — GitHub credits it to the token's owner and it
+          # can't be reassigned. RELEASE_TOKEN (a PAT) makes John the author;
+          # falls back to the built-in token (github-actions[bot]) on a fork.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG exists — re-uploading assets (clobber)."
+            gh release upload "$TAG" dist/* --repo "$REPO" --clobber
+          else
+            echo "Creating draft release $TAG."
+            gh release create "$TAG" dist/* --repo "$REPO" --draft \
+              --title "$TAG" \
+              --notes "Automated draft for $TAG. Add notes from CHANGELOG.md, then publish with: gh release edit $TAG --draft=false --latest"
+          fi

@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.1
+
+- **Release builds now publish reliably across all three platforms.** The per-OS
+  installers are gathered and published in a single step, so a release always
+  ships macOS, Windows, and Linux together — previously the OS builds could land
+  in separate draft releases and silently drop each other's files.
+
 ## 2.17.0
 
 Packaged build. Bundles everything since 2.16.0 — headlined by the new
