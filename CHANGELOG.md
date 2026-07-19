@@ -32,8 +32,9 @@ Packaged build. Bundles everything since 2.16.0 — headlined by the new
 - **Export is simpler** — pick the folder, then Copy or Move — and you can now
   export straight into a scanned folder. Adding a folder jumps the feed to it.
 - Plus fixes to jumping to a folder (trailing-slash folders, scrolling up to
-  earlier folders, no more bouncing to a neighbouring album) and the release CI
-  checks. (#5, #128, #130, #132)
+  earlier folders, no more bouncing to a neighbouring album), the release CI
+  checks, and the release build itself (the per-OS installers now publish one at
+  a time, so a release always ships all three platforms). (#5, #128, #130, #132)
 
 ## 2.16.28
 

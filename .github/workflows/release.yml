@@ -22,6 +22,13 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # Publish the OS legs ONE AT A TIME. Each leg runs `electron-builder
+      # --publish always` against the SAME draft release; run in parallel, a
+      # later leg's release update races and drops assets an earlier leg already
+      # uploaded (v2.17.0's first build shipped with no Linux AppImage and no
+      # mac update .zip, both uploaded then clobbered). Serialized, each leg
+      # publishes to a settled release. Slower, but the release is complete.
+      max-parallel: 1
       matrix:
         include:
           - os: macos-latest
