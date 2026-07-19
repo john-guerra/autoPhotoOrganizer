@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.3
+
+- **Auto Albums now uses the names you type.** Editing an album's name in the
+  review took visually but was dropped when you materialized — the folders came
+  out with the default names. They now match what you typed.
+- **The feed no longer goes blank after materializing.** Once the album folders
+  are created, the feed reloads to show the new state instead of a stale, mostly-
+  black grid pointing at photos that just moved.
+
 ## 2.17.2
 
 - **The album-name fields in Auto Albums now fill the row.** Each editable name

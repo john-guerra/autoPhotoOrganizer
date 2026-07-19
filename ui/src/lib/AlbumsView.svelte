@@ -160,8 +160,13 @@
   // Editable album folder names, keyed by each album's first-photo id so a
   // typed name survives re-clustering (slider/Auto move boundaries) as long
   // as that photo still starts the album. Un-edited albums render from
-  // `template`. A deeply-reactive $state Map: mutating it in place (.set/
-  // .delete) notifies without the Svelte-4 reassignment ritual.
+  // `template`.
+  //
+  // MUST reassign a new Map on every edit — a `$state` Map is NOT reactive when
+  // mutated in place (`.set`/`.delete` aren't instrumented), so `names` (and
+  // therefore materialize) kept reading the OLD map and shipped the default
+  // names while the input showed the typed one. See docs/svelte-5-migration.md
+  // §Set/Map reactivity, and snapshotGroupKeys in App.svelte for the same idiom.
   let editedNames = $state(new Map()); // firstPhotoId -> typed name
   const names = $derived(
     computeAlbumNames(albums, editedNames, template, currentFolderName)
@@ -169,8 +174,10 @@
 
   function onNameInput(i, value) {
     const firstId = albums[i].ids[0];
-    if (value == null || value === "") editedNames.delete(firstId);
-    else editedNames.set(firstId, value);
+    const next = new Map(editedNames);
+    if (value == null || value === "") next.delete(firstId);
+    else next.set(firstId, value);
+    editedNames = next; // new reference → `names` recomputes
   }
 
   // Bound album-name <input> elements, indexed like `albums`/`names` — lets

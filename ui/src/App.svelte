@@ -3635,7 +3635,15 @@
         status = "";
         return;
       }
+      // Reload the FEED, not just the library metadata. A materialize (default
+      // MOVE) relocates the photos into the new album folders, so the window the
+      // feed was showing is now stale — leaving album mode revealed a grid of
+      // broken/black tiles pointing at moved files. refreshLibrary() alone only
+      // refetches folder metadata; the feed needs a real reload (same as the
+      // folder-remove path).
       await refreshLibrary();
+      await loadInitialFeed();
+      refreshCounts();
       libraryVersion++;
       status = "";
       await reportScanMissing(job);

@@ -158,6 +158,49 @@ test("@p1 the album-name input grows to fill the row", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+/**
+ * Editing an album's name feeds through to the materialize request. The name
+ * input is one-way (`value={names[i]}` + oninput → editedNames), so a reactivity
+ * slip would silently send the DEFAULT name and the folders on disk wouldn't
+ * match what you typed. We intercept the POST (fulfilling with an error so
+ * nothing is written to disk or indexed — the shared e2e DB stays hermetic) and
+ * assert the payload carries the edit.
+ */
+test("@p1 materialize sends the edited album names, not the defaults", async ({
+  page,
+}) => {
+  const errors = trackPageErrors(page);
+  await openApp(page);
+  await albums.open(page);
+
+  const before = await albums.nameInput(page, 0).inputValue();
+  await albums.nameInput(page, 0).fill("MyCustomTrip");
+  expect(await albums.nameInput(page, 0).inputValue()).toBe("MyCustomTrip");
+
+  let payload = null;
+  await page.route("**/api/albums/materialize", async (route) => {
+    payload = route.request().postDataJSON();
+    // Fulfil with an error so doMaterialize stops here — no files copied/moved,
+    // no rescan, nothing added to the shared fixture DB.
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "stubbed after capturing payload" }),
+    });
+  });
+
+  await albums.dest(page).fill("/tmp/autogallery-e2e-noop");
+  await albums.materializeBtn(page).click();
+
+  await expect.poll(() => payload).not.toBeNull();
+  const names = payload.albums.map((a) => a.name);
+  expect(names, `edited "${before}" → "MyCustomTrip"`).toContain(
+    "MyCustomTrip"
+  );
+
+  expect(errors).toEqual([]);
+});
+
 /** "#4e79a7" -> "rgb(78, 121, 167)", the form getComputedStyle reports. */
 function hexToRgb(hex) {
   const n = parseInt(hex.slice(1), 16);

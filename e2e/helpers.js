@@ -389,6 +389,10 @@ export const albums = {
   /** The "N photos · date" meta text in divider `i` (right of the name field). */
   meta: (page, i) =>
     page.locator(".album-divider").nth(i).locator(".album-meta"),
+  /** The materialize destination-folder field. */
+  dest: (page) => page.locator(".albums-view .dest"),
+  /** The "Materialize to folders" button. */
+  materializeBtn: (page) => page.locator(".albums-view .mat-btn.primary"),
   /** One rect per album, in album order. */
   band: (page, i) => page.locator(".album-timeline .band").nth(i),
   bands: (page) => page.locator(".album-timeline .band"),
