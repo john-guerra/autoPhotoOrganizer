@@ -290,6 +290,33 @@ export async function removeFolderByPath(path) {
   return res.json();
 }
 
+/** Remove photos from the index by id — how a non-folder group header drops its
+ * subtree (there's no folder to delete). Files on disk are untouched. Chunked so
+ * a huge group (a whole year) stays under the endpoint's per-request cap; the
+ * counts are summed across chunks.
+ * @param {number[]} ids
+ * @returns {Promise<{removed:boolean, photos:number, folders:number}>} */
+export async function removePhotosByIds(ids) {
+  const CHUNK = 10000;
+  let photos = 0;
+  let folders = 0;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const res = await fetch(`/api/photos/remove`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids.slice(i, i + CHUNK) }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `remove photos failed (${res.status})`);
+    }
+    const r = await res.json();
+    photos += r.photos ?? 0;
+    folders += r.folders ?? 0;
+  }
+  return { removed: true, photos, folders };
+}
+
 /** Rename a scanned folder on disk (and update the index). `path` is the
  * folder's absolute path, `newName` a bare folder name (no separators).
  * @param {string} path @param {string} newName

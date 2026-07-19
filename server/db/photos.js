@@ -266,6 +266,54 @@ export function deleteFolderSubtree(db, absPath) {
 }
 
 /**
+ * Remove specific photos from the index by id — the by-selection / by-group
+ * companion to deleteFolderSubtree (which removes by folder). Used to drop
+ * everything under a non-folder group header (a year, a camera, a day), where
+ * there's no folder to delete. Files on disk are NEVER touched; only the SQLite
+ * rows. The removed photos' tag/album junction rows go too, and any folder these
+ * photos emptied is pruned so it doesn't linger in the tree.
+ * @param {import("better-sqlite3").Database} db
+ * @param {number[]} ids
+ * @returns {{photos:number, folders:number}} rows actually deleted
+ */
+export function deletePhotosByIds(db, ids) {
+  const clean = [...new Set((ids ?? []).map(Number).filter(Number.isInteger))];
+  if (!clean.length) return { photos: 0, folders: 0 };
+  const ph = clean.map(() => "?").join(",");
+  const tx = db.transaction(() => {
+    // Folders holding at least one doomed photo — candidates to prune once the
+    // photos are gone. Captured BEFORE the delete, while the rows still exist.
+    const affected = db
+      .prepare(
+        `SELECT DISTINCT folder_id AS id FROM photos WHERE id IN (${ph})`
+      )
+      .all(...clean)
+      .map((r) => r.id);
+    db.prepare(`DELETE FROM photo_tags WHERE photo_id IN (${ph})`).run(
+      ...clean
+    );
+    db.prepare(`DELETE FROM photo_album WHERE photo_id IN (${ph})`).run(
+      ...clean
+    );
+    const photos = db
+      .prepare(`DELETE FROM photos WHERE id IN (${ph})`)
+      .run(...clean).changes;
+    let folders = 0;
+    if (affected.length) {
+      const aph = affected.map(() => "?").join(",");
+      folders = db
+        .prepare(
+          `DELETE FROM folders WHERE id IN (${aph})
+             AND id NOT IN (SELECT DISTINCT folder_id FROM photos)`
+        )
+        .run(...affected).changes;
+    }
+    return { photos, folders };
+  });
+  return tx();
+}
+
+/**
  * Wipe the entire index — every scanned folder, photo, album, tag, and known
  * volume — in one transaction. This is the "start over" nuclear option (see
  * POST /api/library/reset); real files on disk are never touched, only the

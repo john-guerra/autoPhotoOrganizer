@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.5
+
+- **Remove any group from the library, not just folders (#135).** The Remove
+  action on a group header now works for every grouping — a year, a camera, a
+  day, or a folder. It drops all the photos in that group (and everything nested
+  under it) from the library; files on disk are untouched (a rescan brings them
+  back), though ratings for those photos are lost. Two-click confirm, and the
+  feed, tree, and counts refresh afterward.
+
 ## 2.17.4
 
 - **Folder pickers open where the input already points.** Choosing a destination

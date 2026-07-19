@@ -10,6 +10,7 @@ import {
   setPhotoCover,
   deleteFolder,
   deleteFolderSubtree,
+  deletePhotosByIds,
   resetLibrary,
   repointPhoto,
 } from "./photos.js";
@@ -326,6 +327,70 @@ describe("repointPhoto", () => {
       .prepare(`SELECT COUNT(*) AS c FROM folders WHERE abs_path = ?`)
       .get("/photos/album").c;
     expect(count).toBe(1);
+  });
+});
+
+describe("deletePhotosByIds", () => {
+  it("removes only the named photos and their tag/album links", () => {
+    const db = getDb();
+    const [p1, p2, p3] = upsertScan(db, "/photos/mix", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "2.jpg", size: 2, mtimeMs: 2, kind: "image" },
+      { name: "3.jpg", size: 3, mtimeMs: 3, kind: "image" },
+    ]);
+    db.prepare(`INSERT INTO albums (id, name) VALUES (1, 'Trip')`).run();
+    db.prepare(
+      `INSERT INTO photo_album (photo_id, album_id) VALUES (?, 1)`
+    ).run(p1.id);
+    db.prepare(
+      `INSERT INTO tags (id, dimension_name, value) VALUES (1, 'kind', 'x')`
+    ).run();
+    db.prepare(
+      `INSERT INTO photo_tags (photo_id, tag_id, source) VALUES (?, 1, 'manual')`
+    ).run(p1.id);
+
+    const res = deletePhotosByIds(db, [p1.id, p2.id]);
+    expect(res.photos).toBe(2);
+
+    // p3 survives; p1/p2 and p1's junction rows are gone.
+    expect(getPhotoById(db, p3.id)).toBeTruthy();
+    expect(getPhotoById(db, p1.id)).toBeFalsy();
+    expect(getPhotoById(db, p2.id)).toBeFalsy();
+    expect(db.prepare(`SELECT COUNT(*) AS c FROM photo_album`).get().c).toBe(0);
+    expect(db.prepare(`SELECT COUNT(*) AS c FROM photo_tags`).get().c).toBe(0);
+    // The folder still has p3, so it is NOT pruned.
+    expect(res.folders).toBe(0);
+    expect(db.prepare(`SELECT COUNT(*) AS c FROM folders`).get().c).toBe(1);
+  });
+
+  it("prunes a folder emptied by the removal, but not one still holding photos", () => {
+    const db = getDb();
+    const [a] = upsertScan(db, "/photos/solo", 1, [
+      { name: "only.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const [b] = upsertScan(db, "/photos/keep", 1, [
+      { name: "stay.jpg", size: 2, mtimeMs: 2, kind: "image" },
+      { name: "also.jpg", size: 3, mtimeMs: 3, kind: "image" },
+    ]);
+    // Remove the only photo in /solo and ONE of two in /keep.
+    const res = deletePhotosByIds(db, [a.id, b.id]);
+    expect(res.photos).toBe(2);
+    expect(res.folders).toBe(1); // /solo pruned, /keep kept
+    const paths = db
+      .prepare(`SELECT abs_path FROM folders ORDER BY abs_path`)
+      .all()
+      .map((r) => r.abs_path);
+    expect(paths).toEqual(["/photos/keep"]);
+  });
+
+  it("is a no-op for an empty or garbage id list", () => {
+    const db = getDb();
+    upsertScan(db, "/photos/x", 1, [
+      { name: "1.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    expect(deletePhotosByIds(db, [])).toEqual({ photos: 0, folders: 0 });
+    expect(deletePhotosByIds(db, null)).toEqual({ photos: 0, folders: 0 });
+    expect(db.prepare(`SELECT COUNT(*) AS c FROM photos`).get().c).toBe(1);
   });
 });
 

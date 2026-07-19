@@ -13,8 +13,9 @@
   let {
     /** @type {"none"|"some"|"all"|"loading"} tri-state select indicator */
     selectState = "none",
-    /** show the Remove action (only meaningful for a folder leaf group) */
-    isFolder = false,
+    /** show the Remove action — true for any group that can be removed from the
+     *  library (a folder subtree, or a non-folder group removed by its photos) */
+    canRemove = false,
     /** Remove is armed (first click) → show "Confirm remove" in danger style */
     removeArmed = false,
     ontoggleselect,
@@ -88,11 +89,13 @@
     >
       Keep only
     </button>
-    {#if isFolder}
+    {#if canRemove}
       <button
         class="section-act"
         class:danger={removeArmed}
-        title="Remove this album from the library (files on disk are untouched; ratings are lost)"
+        title={removeArmed
+          ? "Click again to remove every photo in this group from the library"
+          : "Remove every photo in this group from the library (files on disk are untouched; ratings are lost)"}
         onclick={(e) => {
           e.stopPropagation();
           onremove?.();

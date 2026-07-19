@@ -67,6 +67,7 @@
     fetchFlatTree,
     setScope,
     removeFolderByPath,
+    removePhotosByIds,
     renameFolder,
     revealInFinder,
     revealSelection,
@@ -1516,6 +1517,56 @@
     }
   }
 
+  /** Remove everything under ANY group header from the library (#135). A group
+   *  whose path is PURELY folder segments IS a folder subtree, so it removes by
+   *  path (deleteFolderSubtree, which also drops the folder rows). Any other
+   *  group — a non-folder dim (year/camera/day) OR a folder constrained by a
+   *  non-folder ancestor like [year › folder], where removing the whole folder
+   *  would over-remove — removes exactly its own photos by id. Each branch arms
+   *  its own two-click confirm on `removeArmedKey`, and the dispatch is fixed per
+   *  header, so it always arms and executes down the same branch. */
+  function removeGroup(path, groupPaths) {
+    const pureFolder =
+      path?.length && path.every((p) => REMOVABLE_FOLDER_DIMS.has(p.dimension));
+    return pureFolder ? removeAlbum(path) : removeGroupByIds(path, groupPaths);
+  }
+
+  async function removeGroupByIds(path, groupPaths) {
+    const key = pathKey(path);
+    if (removeArmedKey !== key) {
+      removeArmedKey = key; // first click arms the confirm
+      return;
+    }
+    removeArmedKey = null;
+    const label = groupLabel(path) || "this group";
+    try {
+      status = `Removing ${label} from the library…`;
+      const ids = await fetchGroupIds(path, groupPaths);
+      if (!ids.length) {
+        status = "";
+        error = `Nothing to remove in ${label}.`;
+        return;
+      }
+      const res = await removePhotosByIds(ids);
+      // The removed photos are gone — drop them from the selection and clear the
+      // group's collapse/snapshot keys so no stale key survives the rebuild.
+      const gone = new Set(ids);
+      selectedIds = new Set([...selectedIds].filter((id) => !gone.has(id)));
+      collapsedPaths = collapsedPaths.filter((p) => pathKey(p) !== key);
+      const nextSnaps = new Set(snapshotGroupKeys);
+      nextSnaps.delete(key);
+      snapshotGroupKeys = nextSnaps;
+      await onFolderRemoved(); // feed + sidebar tree + counts
+      const p = res?.photos ?? 0;
+      status =
+        `Removed ${p.toLocaleString()} photo${p === 1 ? "" : "s"} in ${label} ` +
+        `from the library. Files on disk are untouched.`;
+    } catch (e) {
+      status = "";
+      error = `Couldn't remove ${label}: ${e.message}`;
+    }
+  }
+
   // --- Rename a folder group in place (issue #68 Slice B) ------------------
   // Inline-edit the folder's section header; commit renames the real folder on
   // disk and reloads the feed. `renamingKey` is the pathKey being edited.
@@ -2628,14 +2679,10 @@
     }
   }
 
-  /** Which group labels offer "Remove from library". A group is a real folder on
-   * disk whether it's keyed by `folder` (the full path) or `folderName` (the
-   * leaf) — Remove was only offered for the former, so grouping by folderName
-   * hid it for no good reason. */
+  /** Folder dimensions — a group keyed by `folder` (full path) or `folderName`
+   * (leaf) is a real directory on disk, so it removes by PATH (deleteFolderSubtree);
+   * every other grouping removes by photo id. Also drives the folder icon. */
   const REMOVABLE_FOLDER_DIMS = new Set(["folder", "folderName"]);
-  function isRemovableFolder(path) {
-    return REMOVABLE_FOLDER_DIMS.has(path?.at(-1)?.dimension);
-  }
 
   // Watch the backend. If it dies or restarts (a crash, or `node --watch`
   // reloading it after a server edit), ServerBanner says so and we refetch once
@@ -5355,8 +5402,7 @@
                         groupIdCacheVersion,
                         groupSelSig
                       )}
-                      isFolder={!header.isVirtual &&
-                        isRemovableFolder(header.path)}
+                      canRemove={true}
                       removeArmed={removeArmedKey === pathKey(header.path)}
                       ontoggleselect={(e) =>
                         toggleGroupSelectAll(header.path, header.groupPaths, e)}
@@ -5364,7 +5410,8 @@
                         keepOnlyGroup(header.path, header.groupPaths)}
                       onjumpprev={() => jumpFromGroup(header.path, "prev")}
                       onjumpnext={() => jumpFromGroup(header.path, "next")}
-                      onremove={() => removeAlbum(header.path)}
+                      onremove={() =>
+                        removeGroup(header.path, header.groupPaths)}
                     />
                   {/if}
                 </div>

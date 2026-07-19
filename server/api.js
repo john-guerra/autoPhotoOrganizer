@@ -50,6 +50,7 @@ import {
   setPhotoCover,
   deleteFolder,
   deleteFolderSubtree,
+  deletePhotosByIds,
   resetLibrary,
   resolveDestFolderId,
   repointPhotoToFolder,
@@ -1462,6 +1463,31 @@ export function registerApi(app) {
       return res.status(404).json({ error: `not indexed: ${path}` });
     }
     res.json({ removed: true, folders, photos });
+  });
+
+  // Remove photos from the index by id — how a NON-folder group header (a year,
+  // a camera, a day) drops its whole subtree, since there's no folder to delete.
+  // Files on disk are untouched; only the SQLite rows. Capped to keep a single
+  // request bounded — the client removes a very large group in chunks.
+  app.post("/api/photos/remove", (req, res) => {
+    const ids = req.body?.ids;
+    if (
+      !Array.isArray(ids) ||
+      ids.length === 0 ||
+      !ids.every((n) => Number.isInteger(n))
+    ) {
+      return res
+        .status(400)
+        .json({ error: "ids must be a non-empty array of integers" });
+    }
+    if (ids.length > 50000) {
+      return res
+        .status(413)
+        .json({ error: "too many ids in one request (max 50000)" });
+    }
+    const db = getDb();
+    const { photos, folders } = deletePhotosByIds(db, ids);
+    res.json({ removed: true, photos, folders });
   });
 
   // Rename a scanned folder on disk and update the index (issue #68 Slice B).
