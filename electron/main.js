@@ -51,9 +51,16 @@ async function createWindow() {
   }
 }
 
-ipcMain.handle("pick-folder", async (event) => {
+ipcMain.handle("pick-folder", async (event, startIn) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const result = await dialog.showOpenDialog(win, {
+    // Open where the matching input already points (export dest, album dest, the
+    // folder being added) instead of $HOME. A blank/whitespace value falls back
+    // to the OS default; a path that no longer exists is handled by the OS.
+    defaultPath:
+      typeof startIn === "string" && startIn.trim()
+        ? startIn.trim()
+        : undefined,
     // `createDirectory` surfaces the "New Folder" button so the user can make
     // the destination folder right in the picker — the app no longer asks for a
     // separate folder name; the chosen folder IS the export target.

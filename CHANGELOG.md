@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.4
+
+- **Folder pickers open where the input already points.** Choosing a destination
+  for export, Auto Albums, adding a folder, or relocating a missing file now
+  starts browsing in the folder currently typed in that field, instead of your
+  home directory.
+- **The feed updates after moving photos.** Moving photos out via Export now
+  reloads the feed (and counts) so they leave their old spot, instead of
+  lingering as stale, broken tiles.
+
 ## 2.17.3
 
 - **Auto Albums now uses the names you type.** Editing an album's name in the

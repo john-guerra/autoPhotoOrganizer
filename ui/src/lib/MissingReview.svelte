@@ -91,7 +91,7 @@
 
   async function pickDest() {
     try {
-      const p = await window.autogallery?.pickFolder?.();
+      const p = await window.autogallery?.pickFolder?.(destPath.trim());
       if (p) destPath = p;
     } catch (e) {
       error = e.message;

@@ -1988,6 +1988,17 @@
         status = `${verb} ${res.copied} photo${res.copied === 1 ? "" : "s"}${
           res.skipped ? `, ${res.skipped} skipped` : ""
         } → ${res.target}`;
+        // A MOVE relocates the originals and repoints their index rows, so the
+        // current feed window is now stale — reload it (and the counts/tree) so
+        // the moved photos leave their old spot instead of lingering as broken
+        // tiles. A COPY leaves the originals in place and doesn't reindex, so the
+        // feed is unchanged. Same reload the materialize + folder-remove paths do.
+        if (res.move) {
+          await refreshLibrary();
+          await loadInitialFeed();
+          refreshCounts();
+          libraryVersion++;
+        }
       } else if (job.status === "canceled") {
         status = exportMove ? "Move canceled" : "Copy canceled";
       } else {
@@ -2002,7 +2013,7 @@
 
   /** Electron-only native picker for the export destination parent folder. */
   async function chooseExportDest() {
-    const path = await window.autogallery?.pickFolder();
+    const path = await window.autogallery?.pickFolder(exportDest.trim());
     if (path) exportDest = path;
   }
 
@@ -3795,7 +3806,7 @@
    * with a native picker, i.e. the packaged app: the scan would already be
    * running by the time the panel came back. The user commits with the button. */
   async function chooseFolder() {
-    const path = await window.autogallery?.pickFolder();
+    const path = await window.autogallery?.pickFolder(dir?.trim());
     if (!path) return;
     dir = path;
     addFolderOpen = true;

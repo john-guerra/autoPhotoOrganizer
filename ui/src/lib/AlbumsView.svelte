@@ -320,7 +320,7 @@
   }
 
   async function pickDest() {
-    const p = await window.autogallery?.pickFolder();
+    const p = await window.autogallery?.pickFolder(dest.trim());
     if (p) dest = p;
   }
 
