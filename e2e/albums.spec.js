@@ -133,6 +133,31 @@ test("@p1 a selection makes Auto Albums organize only those photos", async ({
   expect(errors).toEqual([]);
 });
 
+/**
+ * The album-name field grows to fill the divider row. An <input>'s default width
+ * is a fixed ~20ch that ignores its container, so without flex-grow the name
+ * field stays cramped in a wide panel and the row's right half is dead space.
+ * Only a real layout can show this — assert the field pushes the meta text to
+ * the row's right edge.
+ */
+test("@p1 the album-name input grows to fill the row", async ({ page }) => {
+  const errors = trackPageErrors(page);
+  await openApp(page);
+  await albums.open(page);
+
+  await expect(albums.nameInput(page, 0)).toBeVisible();
+  const divider = await albums.divider(page, 0).boundingBox();
+  const meta = await albums.meta(page, 0).boundingBox();
+
+  // The meta sits at the row's right edge (within the 4px right padding + a
+  // little tolerance) — which is only true if the name field expanded to take
+  // the slack. With the old fixed-width input, a large gap sat to meta's right.
+  const gapToEdge = divider.x + divider.width - (meta.x + meta.width);
+  expect(gapToEdge).toBeLessThan(12);
+
+  expect(errors).toEqual([]);
+});
+
 /** "#4e79a7" -> "rgb(78, 121, 167)", the form getComputedStyle reports. */
 function hexToRgb(hex) {
   const n = parseInt(hex.slice(1), 16);

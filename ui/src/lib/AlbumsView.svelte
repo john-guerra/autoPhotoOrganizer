@@ -752,6 +752,10 @@
     border: 1px solid transparent;
     border-radius: 5px;
     padding: 2px 6px;
+    /* Grow to fill the row between the colour chip and the meta text — an
+       <input>'s default width is a fixed ~20ch that ignores the space it's in,
+       so without flex-grow the name field stays cramped in a wide panel. */
+    flex: 1 1 auto;
     min-width: 8ch;
     width: auto;
   }
@@ -766,6 +770,9 @@
   .album-meta {
     font-size: 0.8rem;
     color: #9a9a9a;
+    /* Stays intact on the right; the name field (flex: 1) takes the slack. */
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
   .album-snapshot {
     margin-bottom: 18px;

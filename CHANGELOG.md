@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.2
+
+- **The album-name fields in Auto Albums now fill the row.** Each editable name
+  used a fixed, cramped width that ignored the panel; it now grows to use the
+  available space, so long album names are readable while you edit them.
+
 ## 2.17.1
 
 - **Release builds now publish reliably across all three platforms.** The per-OS

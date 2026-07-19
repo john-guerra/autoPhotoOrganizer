@@ -384,6 +384,11 @@ export const albums = {
     await expect(page.locator(".album-timeline")).toBeVisible();
   },
   timeline: (page) => page.locator(".album-timeline"),
+  /** The editable album-folder-name field in divider `i`. */
+  nameInput: (page, i) => page.locator(".album-name-edit").nth(i),
+  /** The "N photos · date" meta text in divider `i` (right of the name field). */
+  meta: (page, i) =>
+    page.locator(".album-divider").nth(i).locator(".album-meta"),
   /** One rect per album, in album order. */
   band: (page, i) => page.locator(".album-timeline .band").nth(i),
   bands: (page) => page.locator(".album-timeline .band"),
