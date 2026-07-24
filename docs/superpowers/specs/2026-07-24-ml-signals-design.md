@@ -544,29 +544,29 @@ Ordered by dependency. **Four are unblocked today** — places, the view contrac
 the tile registry, and the sidecar are mutually independent, and the whole
 modularity track needs no models at all.
 
-| #   | Slice                                                                 | Depends on | Relates              |
-| --- | --------------------------------------------------------------------- | ---------- | -------------------- |
-| 1   | GPS extraction + offline reverse geocoding + place dimension          | —          | —                    |
-| 2   | View contract + registry (grid becomes its first client)              | —          | **#124**             |
-| 3   | Photo treemap view                                                    | 2          | —                    |
-| 4   | Time-based view                                                       | 2          | #98                  |
-| 5   | Tile renderer registry (extract `Thumb.svelte`) + a 2nd tile          | —          | **#124**             |
-| 6   | More group-band renderers (2nd real widget for the existing registry) | —          | —                    |
-| 7   | ML sidecar foundation + generalized idle sweep                        | —          | #67 (ABI), #136, #94 |
-| 8   | Image embeddings over cached thumbnails                               | 7          | —                    |
-| 9   | Near-duplicate detection → suggested stacks                           | 8          | #14, #86, #12        |
-| 10  | Semantic clusters + "more like this"                                  | 8          | #17                  |
-| 11  | Open-vocabulary scene tags (zero-shot, text encoder)                  | 8          | #79                  |
-| 12  | Embedding scatter view (UMAP)                                         | 2, 8       | #10                  |
-| 13  | Face detection + embedding                                            | 7          | —                    |
-| 14  | Face clustering, naming, person filter                                | 13         | —                    |
+| #    | Slice                                                                 | Depends on | Relates              |
+| ---- | --------------------------------------------------------------------- | ---------- | -------------------- |
+| #154 | GPS extraction + offline reverse geocoding + place dimension          | —          | —                    |
+| #155 | View contract + registry (grid becomes its first client)              | —          | **#124**             |
+| #156 | Photo treemap view                                                    | #155       | —                    |
+| #157 | Time-based view                                                       | #155       | #98                  |
+| #158 | Tile renderer registry (extract `Thumb.svelte`) + a 2nd tile          | —          | **#124**             |
+| #159 | More group-band renderers (2nd real widget for the existing registry) | —          | —                    |
+| #160 | ML sidecar foundation + generalized idle sweep                        | —          | #67 (ABI), #136, #94 |
+| #161 | Image embeddings over cached thumbnails                               | #160       | —                    |
+| #162 | Near-duplicate detection → suggested stacks                           | #161       | #14, #86, #12        |
+| #163 | Semantic clusters + "more like this"                                  | #161       | #17                  |
+| #164 | Open-vocabulary scene tags (zero-shot, text encoder)                  | #161       | #79                  |
+| #165 | Embedding scatter view (UMAP)                                         | #155, #161 | #10                  |
+| #166 | Face detection + embedding                                            | #160       | —                    |
+| #167 | Face clustering, naming, person filter                                | #166       | —                    |
 
-**Three independent tracks**, meeting only at the scatter (12):
+**Three independent tracks**, meeting only at the scatter (#165):
 
-- **Modularity** — 2 → 3, 4 (view scale); 5 (tile scale); 6 (group scale). No
-  models, no packaging risk, and it is the standing answer to #124.
-- **Signals without ML** — 1 (places).
-- **ML** — 7 → 8 → 9, 10, 11 / 13 → 14.
+- **Modularity** — #155 → #156, #157 (view scale); #158 (tile scale); #159 (group
+  scale). No models, no packaging risk, and it is the standing answer to #124.
+- **Signals without ML** — #154 (places).
+- **ML** — #160 → #161 → #162, #163, #164 / #166 → #167.
 
 The modularity track deliberately ships real second implementations at each scale
 before the ML views need them, because a registry validated by one client is a
