@@ -40,6 +40,14 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
         WHEN photos.size = excluded.size AND photos.mtime = excluded.mtime
         THEN photos.content_hash
         ELSE NULL
+      END,
+      -- A changed file (new size/mtime) must be re-hashed: null the hash AND
+      -- clear the attempted marker, or a file that once failed to hash (or whose
+      -- bytes changed) would stay excluded from the sweep forever.
+      hash_attempted = CASE
+        WHEN photos.size = excluded.size AND photos.mtime = excluded.mtime
+        THEN photos.hash_attempted
+        ELSE 0
       END
   `);
   const markAllStale = db.prepare(

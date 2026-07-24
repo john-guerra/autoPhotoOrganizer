@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.14
+
+- **Content signatures now index the whole library in the background.** After a
+  scan, AutoGallery hashes every photo's content (idle-gated, so it never slows
+  browsing; resumable across restarts) instead of stopping after ~50. This is the
+  foundation for cross-drive backup coverage and duplicate detection (#12, #86)
+  and content-based relocation of missing files (#129).
+
 ## 2.17.13
 
 - **Fold a whole folder as one, or peek at its subfolders (#142).** When grouped
