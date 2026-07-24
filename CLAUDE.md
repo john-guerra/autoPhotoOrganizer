@@ -5,9 +5,14 @@ culling → best photos organized into dated album folders. Built for a photogra
 who returns from trips with thousands of JPEGs/videos (occasional RAW) and finds
 Lightroom too slow.
 
-**Start here: `docs/ROADMAP.md`** — current status, v0.2 backlog, working
-agreements (including read-only test folders and moderate use of browser
-verification), and decisions already made.
+**Start here:**
+- **Current status** → `CHANGELOG.md` (newest first) + open
+  [GitHub Issues](https://github.com/john-guerra/autoPhotoOrganizer/issues). The
+  app is a stable `2.17.x` release.
+- **Working agreements & decisions already made** → `docs/ROADMAP.md` (its
+  "Where the project was" log is prototype history, not current status).
+- **Operational notes** (release process, test isolation, dependency landmines,
+  data-layer traps) → `docs/AGENT-NOTES.md`. Cross-agent summary → `AGENTS.md`.
 
 ## Two invariants (do not violate)
 
@@ -54,8 +59,13 @@ verification), and decisions already made.
   and that was never true of the shipped code.
 - **Frontend: Svelte + d3 (Vite).** Virtualized grid, loupe, keyboard-first stars
   1–5 (single keystroke + auto-advance), d3 timeline for album boundaries.
-- **Album clustering** is a pure, framework-free module (`server/albums/`) ported
-  from the legacy time-gap algorithm.
+- **Album clustering** is a pure, DOM-free **client** module
+  (`ui/src/lib/albums.js`, unit-tested by `albums.test.js`) ported from the legacy
+  time-gap algorithm. It runs client-side so the tuning slider re-clusters
+  instantly with no round trip; the server only copies the id-groups it produces
+  (materialize). It imports d3 for gap statistics, so it is DOM-free but not
+  dependency-free. (There is no `server/albums/` code — an earlier `server/albums/
+  README.md` claimed there was; it was removed as inaccurate.)
 
 ## Commands
 
@@ -66,8 +76,9 @@ verification), and decisions already made.
 
 ## Repo map
 
-- `server/` — Express API + `ProcessingService` + `albums/` clustering.
-- `ui/` — Vite + Svelte frontend (config in `ui/vite.config.js`, `vite ui`).
+- `server/` — Express API + `ProcessingService`.
+- `ui/` — Vite + Svelte frontend (config in `ui/vite.config.js`, `vite ui`);
+  album clustering is the pure client module `ui/src/lib/albums.js`.
 - `docs/superpowers/specs/` — design docs (the **why**; some are cited from
   source, so don't move them). Start with `2026-07-06-photo-triage-design.md`.
 - `docs/superpowers/completed_plans/` — build plans whose feature has shipped.

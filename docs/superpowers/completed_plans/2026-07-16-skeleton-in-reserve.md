@@ -1,3 +1,9 @@
+> ⛔ **ABANDONED — do not execute.** This feature was built and then reverted:
+> `loadMore` already wins and the scrollbar stayed tiny, so the skeleton/
+> manifest-height approach added complexity without a payoff. The work is
+> recoverable at commit `dad4746` if revisited (use a bounded reserve, not a full
+> manifest height). Kept here as history only. — 2026-07-24
+
 # Skeleton-in-Reserve Implementation Plan (closes #132)
 
 > **For agentic workers:** execute task-by-task; each task ends green + committed.
