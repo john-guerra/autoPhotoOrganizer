@@ -48,21 +48,42 @@ the thumbnails the user is scrolling through — the exact failure already measu
 and documented in `server/lib/interactive.js:1-17` (thumbnails 15ms → 90ms under
 a sweep, tiles abandoned mid-scroll, "N thumbnails failed to load").
 
-**2. A sweep that does not drain is worse than no sweep.** `hashPendingPhotos`
-(`server/db/hashing.js:23`) runs once per scan with `limit: 50` and both callers
-drop its `remaining` flag, so **100 of 114,125 rows are hashed** and
-`backupCoverage` is silently inert — a feature that appears to exist, reports
-plausible numbers, and is wrong. An ML sweep built that way would be the same
-bug with a bigger surface.
+**2. A sweep that does not drain is worse than no sweep** — and the codebase has
+now made this mistake, fixed it, and in fixing it demonstrated the second
+mistake.
 
-The good pattern is already in the repo: **`/api/enrich`
-(`server/api.js:742-801`) is a correct sweep** and every ML pass should be that
-loop, not a new one. It drains (`for(;;)` re-querying `nextBatch()` until empty),
-stands aside for the user (`await whenIdle()` between batches), isolates poison
-files (batch failure → retry one at a time), writes a sentinel so a permanently
-unreadable file leaves the pending set (`writeMeta(db, p.id, {})`), and honours
-`job.controller.signal`. Generalising that loop is the foundation of this whole
-program.
+Until 2.17.14, `hashPendingPhotos` ran once per scan with `limit: 50` while both
+callers dropped its `remaining` flag, so **100 of 114,125 rows were ever hashed**
+and `backupCoverage` was silently inert — a feature that appeared to exist,
+reported plausible numbers, and was wrong. That is fixed: `hashAllPending`
+(`server/db/hashing.js`) now loops to completion behind `whenIdle()`, is
+single-flight, keeps its state in the DB so it resumes across restarts, and
+marks unreadable files `hash_attempted` so it terminates.
+
+**The fix is the point.** It is a good implementation, and it re-derived — by
+hand, in a second file — the same four properties `/api/enrich` already had:
+drain-until-empty, idle gating, a failure sentinel, single-flight. The two
+implementations are now subtly different: enrich has a `registry` job, progress
+reporting, cancellation via `job.controller.signal`, and per-file isolation on a
+batch failure; `hashAllPending` has none of those. Same pattern, two authors, two
+feature sets, no shared code.
+
+And the hand-rolled version shipped a termination bug that the shared one would
+not have: an unmount mid-sweep marks every unreachable file `hash_attempted`, and
+because `upsertScan` only clears that flag when size/mtime _change_, an unchanged
+file that returns with the drive is **excluded from hashing forever** (#169,
+reproduced).
+
+So the conclusion is not "avoid the bad pattern" — it is **stop writing the
+pattern by hand**. `/api/enrich` (`server/api.js:742-801`) is the most complete
+version: it drains (`for(;;)` re-querying `nextBatch()` until empty), stands
+aside for the user (`await whenIdle()` between batches), isolates poison files
+(batch failure → retry one at a time), writes a sentinel so a permanently
+unreadable file leaves the pending set, and honours `job.controller.signal`.
+Extracting it — and migrating **both** existing callers onto it — is the
+foundation of this program. The ML sweeps would otherwise be the third and fourth
+hand-copies, and the feed-window guard (six copies, two shipped bugs) is the
+standing evidence for where that ends.
 
 ## Goal
 
@@ -119,8 +140,11 @@ opts in, the binary stays clean.
 
 ### 2. `server/ml/sweep.js` — one drain, reused by every pass
 
-Extract the loop from `/api/enrich` into a reusable function and have enrich call
-it too, so there is one implementation and it cannot drift:
+Extract the loop from `/api/enrich` into a reusable function and migrate **both**
+existing sweeps onto it — enrich and `hashAllPending` (`server/db/hashing.js`) —
+so there is one implementation and it cannot drift. It already has: the two
+differ today in cancellation, progress reporting, and job-registry visibility,
+and the hand-rolled one shipped #169.
 
 ```js
 runSweep(job, {
@@ -489,8 +513,15 @@ message — not a console error and not a dead control:
   the app stays fully usable without ML.
 - A photo permanently failed a stage → it leaves the pending set (sentinel) and
   is _countable_, so "12,431 of 114,125 embedded, 37 failed" is reportable rather
-  than an unexplained shortfall. This is the specific way `backupCoverage`
-  currently misleads, and the reason the `ml_status` table exists.
+  than an unexplained shortfall. This is the reason the `ml_status` table exists,
+  and it is the specific way pre-2.17.14 `backupCoverage` misled.
+- **A sentinel must distinguish "this photo cannot be processed" from "the drive
+  was not there".** The first is a permanent property of the photo; the second is
+  a property of the moment, and on a library that lives on a removable drive it
+  is the common case. Conflating them is #169: an unmount mid-sweep marked every
+  unreachable file attempted, and nothing clears that unless the file's bytes
+  change. `ml_status.attempts` + the error string exist so an ML stage can retry
+  a transient failure and give up only on a durable one.
 - Sweep progress and completion go through the JobsPanel like every other job,
   with a per-type summary branch (`JobsPanel.svelte:134-178`).
 - An empty result from a person/tag/similarity filter must read as "no matches"
