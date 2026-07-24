@@ -40,12 +40,20 @@ const NO_AGG = Number.POSITIVE_INFINITY;
  *   has photos: its absolute path, and the aggregate of the sort attribute over
  *   its OWN photos (MIN for ascending, MAX for descending — see buildFolderOrder).
  * @param {boolean} desc is the sort descending?
- * @returns {{dfs: Map<string, number>, flat: Map<string, number>}}
+ * @returns {{dfs: Map<string, number>, flat: Map<string, number>, dfsAncestors: Map<string, number>}}
  *   `dfs`  — depth-first, siblings ranked by their subtree's aggregate. For the
- *            `folder` dimension, which nests.
+ *            `folder` dimension, which nests. Keyed only by REAL folders (ones
+ *            with photos of their own) — the set `applyFolderOrder` populates
+ *            `folder_order` from.
  *   `flat` — every folder ranked by its own aggregate, ignoring the tree. For
  *            `folderName`, which is a flat list (a NAME has no parent — see
  *            FOLDER_DIMS in ui/src/lib/folderSections.js).
+ *   `dfsAncestors` — rank for a photo-less ancestor folder (invented by the
+ *            trie, not in `dfs`), keyed by its own path: the position it would
+ *            occupy in the walk, i.e. its first real descendant's rank. Used
+ *            only as a fallback so a subtree-collapsed placeholder — which
+ *            names such a folder directly (#142) — sorts at its parent's
+ *            position instead of falling through to UNRANKED.
  */
 export function assignFolderOrder(rows, desc = false) {
   // A folder that holds only sub-folders has no row of its own here (the index
@@ -95,9 +103,23 @@ export function assignFolderOrder(rows, desc = false) {
   subtreeAgg(root);
 
   const dfs = new Map();
+  // A folder that holds only sub-folders (no photos of its own) is invented by
+  // the trie above and never gets a `real` rank in `dfs` — but a
+  // subtree-collapsed placeholder names exactly such a folder directly (#142).
+  // Track its rank separately (rather than folding it into `dfs`, whose exact
+  // key set — real folders only — existing callers and tests pin down) so
+  // `dfsAncestors` can be consulted as a fallback: the rank of whatever comes
+  // next in the walk (its own first real descendant, pre-order), so the
+  // placeholder splices in at the parent's position among its siblings
+  // instead of falling through to UNRANKED and sinking to the end of the feed.
+  const dfsAncestors = new Map();
   let seq = 0;
   const walk = (node) => {
-    if (node.real) dfs.set(node.rawPath, seq++);
+    if (node.real) {
+      dfs.set(node.rawPath, seq++);
+    } else if (node.path) {
+      dfsAncestors.set(node.path, seq);
+    }
     const kids = [...node.children.values()].sort((a, b) => {
       // Unrankable branches (nothing under them matches the filter) sink to the
       // bottom rather than floating to the top on a null.
@@ -125,7 +147,7 @@ export function assignFolderOrder(rows, desc = false) {
   });
   byAgg.forEach((r, i) => flat.set(r.path, i));
 
-  return { dfs, flat };
+  return { dfs, flat, dfsAncestors };
 }
 
 /** Ranks above every real folder — for a value the map has never heard of, which
@@ -168,7 +190,7 @@ export function applyFolderOrder(db, dims, { filterSpec = {}, sort }) {
     )
     .all(...filter.params);
 
-  const { dfs, flat } = assignFolderOrder(rows, desc);
+  const { dfs, flat, dfsAncestors } = assignFolderOrder(rows, desc);
 
   db.exec(`CREATE TEMP TABLE IF NOT EXISTS folder_order (
              folder_id INTEGER PRIMARY KEY,
@@ -202,7 +224,23 @@ export function applyFolderOrder(db, dims, { filterSpec = {}, sort }) {
       // direction is already baked into it (which end the oldest photo went).
       direction: "ASC",
       sortExpr: rank(d.name === "folder" ? "dfs" : "flat"),
-      sortKey: (v) => map.get(String(v)) ?? UNRANKED,
+      // `dfsAncestors` is consulted only for the `folder` dim, and only when
+      // `dfs` misses: a real folder value is always in `dfs` (every photo
+      // belongs to one), so the fallback only ever fires for a value that
+      // names a photo-less ancestor — i.e. a subtree-collapsed placeholder's
+      // own path (#142). SQL never needs the equivalent: a placeholder is a
+      // JS-only construct spliced in after the query runs (spliceInPlaceholders
+      // in feed.js), so only this JS-side `sortKey` twin sees such a value.
+      sortKey: (v) => {
+        const key = String(v);
+        const primary = map.get(key);
+        if (primary !== undefined) return primary;
+        if (d.name === "folder") {
+          const ancestor = dfsAncestors.get(key);
+          if (ancestor !== undefined) return ancestor;
+        }
+        return UNRANKED;
+      },
     };
   });
 }

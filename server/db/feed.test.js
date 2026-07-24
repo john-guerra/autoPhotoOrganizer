@@ -694,6 +694,40 @@ describe("getFeedPage — collapse-exclusion", () => {
     expect(placeholders[0].count).toBe(3); // 2 + 1 across the subtree
     expect(reals).toHaveLength(0); // no descendant photos leak in
   });
+
+  it("orders a subtree placeholder at its parent's pre-order position (#142)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    // Same mtime (and no EXIF date) on all three: the feed's default sort
+    // (date_taken) can't distinguish them, so folder order falls through to
+    // its tie-break — plain alphabetical path order — which is exactly the
+    // pre-order this test targets, independent of the date-ranking
+    // (folderOrder.js) that would otherwise dominate sibling order.
+    upsertScan(db, "/p/AAA/x", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/p/Cards/Cam 1", 1, [
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/p/ZZZ/y", 1, [
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      after: 100,
+      collapsed: [[{ dimension: "folder", value: "/p/Cards", subtree: true }]],
+    });
+    const order = items.map((i) =>
+      i.collapsed ? "PH:" + i.path[0].value : i.groupValues.folder
+    );
+    // AAA's photo, then the Cards placeholder, then ZZZ's photo (pre-order by path)
+    expect(order.indexOf("PH:/p/Cards")).toBeGreaterThan(
+      order.indexOf("/p/AAA/x")
+    );
+    expect(order.indexOf("PH:/p/Cards")).toBeLessThan(
+      order.indexOf("/p/ZZZ/y")
+    );
+  });
 });
 
 describe("getFeedPage — in-place collapsed placeholder", () => {
