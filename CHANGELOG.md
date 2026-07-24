@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.11
+
+- **Fold a whole folder as one, or peek at its subfolders (#142).** When grouped
+  by folder, clicking a parent folder's fold icon now snapshots its ENTIRE
+  subtree as one strip (sampled across every subfolder), then collapses it to one
+  bar, then expands — so a card with camera subfolders folds in a single click.
+  Shift-click instead fans out to one snapshot strip per subfolder (VS Code–style
+  region fold). Works from both the feed header and the sidebar tree.
+
 ## 2.17.10
 
 - **The Add-folder "Choose subfolders" list now behaves like a tree (#137).** A
