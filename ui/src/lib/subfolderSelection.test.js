@@ -108,4 +108,69 @@ describe("subfolder selection", () => {
       expect(subtreeState(selectNone(), "/c/trip/raw", DIRS)).toBe("none");
     });
   });
+
+  // A media-less parent ("Cards" holds no photos of its own, only camera
+  // subfolders do) is a VIRTUAL grouping row: it exists so its subtree can be
+  // toggled as one, but it never itself becomes a folders row, so its own path
+  // is never part of the selection sent to the scan (#137).
+  describe("virtual (media-less) parent rows", () => {
+    const VDIRS = [
+      {
+        path: "/c/Cards",
+        relPath: "Cards",
+        depth: 1,
+        mediaCount: 2,
+        virtual: true,
+      },
+      {
+        path: "/c/Cards/Cam 1",
+        relPath: "Cards/Cam 1",
+        depth: 2,
+        mediaCount: 1,
+        virtual: false,
+      },
+      {
+        path: "/c/Cards/Cam 10",
+        relPath: "Cards/Cam 10",
+        depth: 2,
+        mediaCount: 1,
+        virtual: false,
+      },
+    ];
+
+    it("selectAll never checks the virtual parent's own path (it makes no folders row)", () => {
+      expect(selectAll(VDIRS)).toEqual(
+        new Set(["/c/Cards/Cam 1", "/c/Cards/Cam 10"])
+      );
+    });
+
+    it("unchecking the virtual parent unchecks all its descendants", () => {
+      const sel = toggle(selectAll(VDIRS), "/c/Cards", VDIRS);
+      expect(selectedDirs(sel, VDIRS)).toEqual([]);
+    });
+
+    it("checking the virtual parent checks all its descendants", () => {
+      const sel = toggle(selectNone(), "/c/Cards", VDIRS);
+      expect(selectedDirs(sel, VDIRS)).toEqual([
+        "/c/Cards/Cam 1",
+        "/c/Cards/Cam 10",
+      ]);
+    });
+
+    it("the virtual parent's checkbox reflects its real descendants", () => {
+      expect(subtreeState(selectAll(VDIRS), "/c/Cards", VDIRS)).toBe("all");
+      expect(subtreeState(selectNone(), "/c/Cards", VDIRS)).toBe("none");
+      const sel = toggle(selectAll(VDIRS), "/c/Cards/Cam 1", VDIRS);
+      expect(subtreeState(sel, "/c/Cards", VDIRS)).toBe("some");
+    });
+
+    it("checking all real leaves individually makes the parent read 'all'", () => {
+      // No dependence on the virtual parent's own membership — else a parent you
+      // filled child-by-child would sit stuck at indeterminate.
+      let sel = selectNone();
+      sel = toggle(sel, "/c/Cards/Cam 1", VDIRS);
+      sel = toggle(sel, "/c/Cards/Cam 10", VDIRS);
+      expect(subtreeState(sel, "/c/Cards", VDIRS)).toBe("all");
+    });
+  });
 });

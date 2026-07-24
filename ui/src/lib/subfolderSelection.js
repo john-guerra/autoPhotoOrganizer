@@ -12,26 +12,33 @@
  * mutation, so `selected = toggle(selected, p, dirs)` is the only thing that
  * updates the UI.
  *
- * @typedef {{path:string, relPath:string, depth:number, mediaCount:number}} SubdirRow
+ * A `virtual` row is a media-less ANCESTOR (e.g. a "Cards" folder whose photos
+ * all live in camera subfolders): it exists so the checklist can offer a parent
+ * checkbox that toggles the whole subtree, but it never itself becomes a
+ * `folders` row, so its own path is never part of the selection. Every
+ * cascade/state decision therefore runs over the REAL (media) descendants only.
+ *
+ * @typedef {{path:string, relPath:string, depth:number, mediaCount:number, virtual?:boolean}} SubdirRow
  */
 
 /**
- * `path` and every directory beneath it. The trailing separator matters: a
- * plain startsWith(path) would also match a SIBLING that merely shares a name
- * prefix (/c/tripX is not inside /c/trip) — the same class of bug the server's
+ * The REAL (non-virtual) directories at `path` and beneath it — the ones that
+ * actually get scanned. The trailing separator matters: a plain
+ * startsWith(path) would also match a SIBLING that merely shares a name prefix
+ * (/c/tripX is not inside /c/trip) — the same class of bug the server's
  * isInsideDir guard exists to prevent.
  * @param {SubdirRow[]} dirs @param {string} path @returns {string[]}
  */
-function subtree(dirs, path) {
+function realDescendants(dirs, path) {
   const prefix = path.endsWith("/") ? path : path + "/";
   return dirs
-    .map((d) => d.path)
-    .filter((p) => p === path || p.startsWith(prefix));
+    .filter((d) => !d.virtual && (d.path === path || d.path.startsWith(prefix)))
+    .map((d) => d.path);
 }
 
 /** @param {SubdirRow[]} dirs @returns {Set<string>} */
 export function selectAll(dirs) {
-  return new Set(dirs.map((d) => d.path));
+  return new Set(dirs.filter((d) => !d.virtual).map((d) => d.path));
 }
 
 /** @returns {Set<string>} */
@@ -40,9 +47,12 @@ export function selectNone() {
 }
 
 /**
- * Toggle a folder and cascade to its descendants. The folder's own current
- * state decides the direction: checking it checks the subtree, unchecking it
- * clears the subtree.
+ * Toggle a folder and cascade to its subtree. Direction comes from the subtree,
+ * not the row's own membership: if every real descendant is already checked the
+ * click clears them, otherwise it checks them all. That's the standard tree
+ * behaviour (clicking a full parent empties it; clicking an empty OR partial one
+ * fills it) and the only thing that works for a virtual parent, whose own path
+ * is never in the set.
  * @param {Set<string>} selected
  * @param {string} path
  * @param {SubdirRow[]} dirs
@@ -50,9 +60,10 @@ export function selectNone() {
  */
 export function toggle(selected, path, dirs = []) {
   const next = new Set(selected);
-  const turningOff = next.has(path);
-  for (const p of subtree(dirs, path)) {
-    if (turningOff) next.delete(p);
+  const reals = realDescendants(dirs, path);
+  const allOn = reals.length > 0 && reals.every((p) => next.has(p));
+  for (const p of reals) {
+    if (allOn) next.delete(p);
     else next.add(p);
   }
   return next;
@@ -71,10 +82,11 @@ export function toggle(selected, path, dirs = []) {
  * @returns {"all"|"none"|"some"}
  */
 export function subtreeState(selected, path, dirs = []) {
-  const paths = subtree(dirs, path);
-  const on = paths.filter((p) => selected.has(p)).length;
+  const reals = realDescendants(dirs, path);
+  if (reals.length === 0) return "none";
+  const on = reals.filter((p) => selected.has(p)).length;
   if (on === 0) return "none";
-  if (on === paths.length) return "all";
+  if (on === reals.length) return "all";
   return "some";
 }
 

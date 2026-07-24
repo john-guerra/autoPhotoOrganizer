@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.10
+
+- **The Add-folder "Choose subfolders" list now behaves like a tree (#137).** A
+  parent folder that holds no photos of its own but has camera/date subfolders
+  (e.g. `Cards/Cam 1`) now appears as its own parent row — so one click checks or
+  unchecks the whole card, and unchecking a parent clears every subfolder under
+  it. Partly-selected parents show an indeterminate checkbox.
+
 ## 2.17.9
 
 - **A big shift-click range now asks first (#141).** Click a photo, then
