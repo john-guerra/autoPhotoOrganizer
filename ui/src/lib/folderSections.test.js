@@ -220,6 +220,141 @@ describe("nestFolderHeaders", () => {
   });
 });
 
+describe("aggregate subtree state (#142)", () => {
+  // The identity of an aggregated PARENT: the subtree's own path, with
+  // subtree:true on its last segment (docs/superpowers/plans/2026-07-24-
+  // subtree-fold-and-snapshot.md's data model). pathKey only encodes
+  // dimension+value, so the flag doesn't change the key — it only rides the
+  // emitted header's `path` for downstream consumers (App.svelte later) to
+  // read back off.
+  const cardsKey = pathKey([
+    { dimension: "folder", value: "/L/Cards", subtree: true },
+  ]);
+
+  function cardsRoots() {
+    return rootsFor([
+      { value: "/L/Cards/Cam1", count: 1 },
+      { value: "/L/Cards/Cam10", count: 1 },
+    ]);
+  }
+
+  it("emits ONE aggregate-collapsed header for the subtree and suppresses both children", () => {
+    const out = nestFolderHeaders(
+      [folderHeader(0, "/L/Cards/Cam1"), folderHeader(1, "/L/Cards/Cam10")],
+      {
+        groupBy: ["folder"],
+        rootsByParentKey: cardsRoots(),
+        aggregateKeys: new Set([cardsKey]),
+      }
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].value).toBe("/L/Cards");
+    expect(out[0].rendererId).toBe("aggregate-collapsed");
+    expect(out[0].path).toEqual([
+      { dimension: "folder", value: "/L/Cards", subtree: true },
+    ]);
+    // Rolled up across the whole subtree — the same total the aggregate bar
+    // must show.
+    expect(out[0].count).toBe(2);
+    expect(out.some((h) => h.value === "/L/Cards/Cam1")).toBe(false);
+    expect(out.some((h) => h.value === "/L/Cards/Cam10")).toBe(false);
+  });
+
+  it("flavors as aggregate-snapshot when the key is also in aggregateSnapshotKeys", () => {
+    const out = nestFolderHeaders(
+      [folderHeader(0, "/L/Cards/Cam1"), folderHeader(1, "/L/Cards/Cam10")],
+      {
+        groupBy: ["folder"],
+        rootsByParentKey: cardsRoots(),
+        aggregateKeys: new Set([cardsKey]),
+        aggregateSnapshotKeys: new Set([cardsKey]),
+      }
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].rendererId).toBe("aggregate-snapshot");
+  });
+
+  it("still carries every real descendant group, for select-all/keep-only over the collapsed subtree", () => {
+    const out = nestFolderHeaders(
+      [folderHeader(0, "/L/Cards/Cam1"), folderHeader(1, "/L/Cards/Cam10")],
+      {
+        groupBy: ["folder"],
+        rootsByParentKey: cardsRoots(),
+        aggregateKeys: new Set([cardsKey]),
+      }
+    );
+    expect(out[0].groupPaths).toEqual([
+      [{ dimension: "folder", value: "/L/Cards/Cam1" }],
+      [{ dimension: "folder", value: "/L/Cards/Cam10" }],
+    ]);
+  });
+
+  it("also suppresses a second grouping dimension nested under the aggregated folder", () => {
+    const out = nestFolderHeaders(
+      [
+        folderHeader(0, "/L/Cards/Cam1"),
+        header(0, 1, "day", "2024-01-01", [
+          { dimension: "folder", value: "/L/Cards/Cam1" },
+          { dimension: "day", value: "2024-01-01" },
+        ]),
+        folderHeader(1, "/L/Cards/Cam10"),
+      ],
+      {
+        groupBy: ["folder", "day"],
+        rootsByParentKey: cardsRoots(),
+        aggregateKeys: new Set([cardsKey]),
+      }
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].value).toBe("/L/Cards");
+  });
+
+  it("does not aggregate — and nests normally — when the key isn't in aggregateKeys (no regression)", () => {
+    // Same fixture as "marks a photo-less ancestor virtual" above, but this
+    // time explicitly passing empty aggregate sets, to prove they're inert
+    // when a caller has nothing collapsed yet.
+    const out = nestFolderHeaders(
+      [folderHeader(0, "/L/Cards/Cam1"), folderHeader(1, "/L/Cards/Cam10")],
+      {
+        groupBy: ["folder"],
+        rootsByParentKey: cardsRoots(),
+        aggregateKeys: new Set(),
+        aggregateSnapshotKeys: new Set(),
+      }
+    );
+    expect(out.map((h) => h.value)).toEqual([
+      "/L/Cards",
+      "/L/Cards/Cam1",
+      "/L/Cards/Cam10",
+    ]);
+    expect(out.every((h) => h.rendererId === undefined)).toBe(true);
+  });
+
+  it("a sibling folder outside the aggregated subtree still renders normally", () => {
+    const roots = rootsFor([
+      { value: "/L/Cards/Cam1", count: 1 },
+      { value: "/L/Cards/Cam10", count: 1 },
+      { value: "/L/Other", count: 1 },
+    ]);
+    const out = nestFolderHeaders(
+      [
+        folderHeader(0, "/L/Cards/Cam1"),
+        folderHeader(1, "/L/Cards/Cam10"),
+        folderHeader(2, "/L/Other"),
+      ],
+      {
+        groupBy: ["folder"],
+        rootsByParentKey: roots,
+        aggregateKeys: new Set([cardsKey]),
+      }
+    );
+    // "/L" survives as its own virtual row here (it now has two children,
+    // Cards and Other, so folderTree no longer compacts it away) — the point
+    // of the assertion is that Cam1/Cam10 are gone and Other is untouched.
+    expect(out.map((h) => h.value)).toEqual(["/L", "/L/Cards", "/L/Other"]);
+  });
+});
+
 describe("folderName is FLAT", () => {
   /** Same shape as folderHeader, but the `folderName` dimension. It carries the
    *  same absolute path (that is the group's identity server-side); only the
