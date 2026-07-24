@@ -596,3 +596,59 @@ guess — which is precisely the state `GROUP_RENDERERS` is in today.
 - **Near-duplicates suggest stacks, never act.** Nothing moved, nothing deleted.
 - **No vector database.** Brute-force over quantized vectors until measurement
   says otherwise.
+- **Stay on SQLite / better-sqlite3 — do not migrate to DuckDB.** See below.
+
+## Why not DuckDB (asked and answered 2026-07-24)
+
+DuckDB is the obvious candidate for this work — native `FLOAT[N]` arrays,
+`array_cosine_similarity`, an HNSW extension, and columnar execution for the
+aggregate-heavy treemap/scatter/density queries. It is still the wrong move, for
+four reasons, and this is recorded so it is not relitigated from first
+principles later.
+
+**1. It is a data-layer rewrite, not a driver swap.** `@duckdb/node-api` is
+Promise-first (the callback client is deprecated as of DuckDB 1.5.x);
+`better-sqlite3` is synchronous, and this codebase depends on that at **69
+`db.prepare` / `.transaction()` call sites across 14 server files**. A
+better-sqlite3 `db.transaction(() => …)` is synchronous _by contract_ — you
+cannot await inside one — which is exactly what makes `enrichBatch` and
+`upsertScan` crash-safe. Every one of those would need redesigning, not porting.
+
+**2. The feature we would migrate _for_ is the one DuckDB is least ready for.**
+Persistent HNSW is experimental, gated behind
+`hnsw_enable_experimental_persistence`, and **WAL recovery is not implemented for
+custom indexes** — an unclean shutdown can corrupt the index or lose data, and
+the DuckDB docs warn against relying on it in production. For a desktop app that
+gets force-quit, that is disqualifying. And per §4 we do not need ANN anyway: 58 MB
+of int8 vectors brute-forced in the sidecar is well under 100 ms, off the event
+loop.
+
+**3. The workload is the wrong shape.** The hot path is not analytical — it is a
+keyset-paginated point lookup ("200 rows after this key, ordered by these four
+dimensions"), which is what B-tree expression indexes are best at. `sort.js:149-170`
+records the measured wins: 33 ms → 0.2 ms, 224 ms → 17 ms, tree counts 18 ms →
+0.4 ms. DuckDB has no comparable secondary B-tree story (it leans on zone maps),
+so the likely outcome is the _primary_ workload regresses to speed up a secondary
+one that is not a bottleneck. We would also have to re-engineer the `sort_path`
+generated column, the fingerprinted expression indexes, the partial indexes, the
+`PRAGMA table_xinfo` migration helper, and the `EXPLAIN QUERY PLAN` assertions in
+`queryPlan.test.js` that are the only guard against silent index rot.
+
+**4. Two costs that are easy to under-count.** It is another native addon
+(#67's ABI trap and #136's arch matrix, doubled, at the same moment we add
+`onnxruntime-node`). And **not all of the index is rebuildable**: invariant 2
+holds for derived columns, but `rating`, `keep_scope`, `manual_stacks`,
+`preferred_cover`, `dismissed`, and album names are real user data with no source
+on disk, so a migration has to carry them correctly, once, with no second chance.
+
+### The trigger conditions that would change this answer
+
+- **~1M+ photos.** At 1M, int8 vectors are ~512 MB and brute force stops being
+  free. That is when ANN indexing earns its keep.
+- **Ad-hoc analytics outgrowing SQLite** — if the treemap/scatter/density
+  aggregates stop being comfortable.
+
+If either lands, the move is still **not** migration. It is DuckDB as a
+**second, read-only, derived store inside the ML sidecar** — rebuildable from
+SQLite, never the system of record. That preserves invariant 2, leaves ratings
+where they are, and costs no rewrite.
