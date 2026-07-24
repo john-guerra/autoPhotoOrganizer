@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.7
+
+- **The search box shows a focus ring for keyboard users.** Tabbing into the
+  toolbar search now has a visible outline (keyboard only — the clean borderless
+  look stays for mouse users).
+
 ## 2.17.6
 
 - **Status messages are now announced to screen readers.** The status bar's

@@ -1010,10 +1010,7 @@
     // A rescan can add/remove photos, changing group counts — invalidate the
     // header-count cache so it refetches (bumping the epoch also discards any
     // count fetch still in flight from the previous window).
-    countsEpoch++;
-    headerCounts = {};
-    fetchedParents = new Set();
-    inFlightParents = new Set();
+    invalidateCounts();
     await withFeedTransaction(async (epoch) => {
       const { items: page } = await fetchFeed({
         groupBy,
@@ -1110,10 +1107,7 @@
       refreshCounts();
       return;
     }
-    countsEpoch++;
-    headerCounts = {};
-    fetchedParents = new Set();
-    inFlightParents = new Set();
+    invalidateCounts();
     rebuildFeedForFilterOrSort();
     refreshCounts();
   }
@@ -1138,10 +1132,7 @@
   function onFilterModeChange(mode) {
     if (mode === filterMode) return;
     filterMode = mode;
-    countsEpoch++;
-    headerCounts = {};
-    fetchedParents = new Set();
-    inFlightParents = new Set();
+    invalidateCounts();
     onGroupByChange(groupBy);
     refreshCounts();
     if (mode === "select" && filterIsActive(filter)) selectMatching(filter);
@@ -1630,10 +1621,7 @@
       return; // scope unchanged — the UI still matches what the server holds
     }
     scope = next;
-    countsEpoch++;
-    headerCounts = {};
-    fetchedParents = new Set();
-    inFlightParents = new Set();
+    invalidateCounts();
     // displayFilter is a `$:` derived value keyed on `scope`; it hasn't
     // recomputed yet. Flush before rebuilding so the feed loader reads the new
     // filter — otherwise the rebuild fetches with the stale, unscoped filter and
@@ -1989,6 +1977,18 @@
     status = n
       ? `Selection restored (${n.toLocaleString()} photo${n === 1 ? "" : "s"})`
       : "Selection restored (was empty)";
+  }
+
+  /** Invalidate the header-count cache so it refetches for the NEW feed window.
+   *  Bumping the epoch also discards any count fetch still in flight from the
+   *  previous window. Every window-replace path (rescan, filter/sort change,
+   *  filter-mode change, scope change) needs exactly these four resets — so they
+   *  call this instead of re-typing the block (was copy-pasted 4×). */
+  function invalidateCounts() {
+    countsEpoch++;
+    headerCounts = {};
+    fetchedParents = new Set();
+    inFlightParents = new Set();
   }
 
   /** Refresh the library-total and showing counts (cheap COUNT queries). */

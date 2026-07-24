@@ -129,6 +129,13 @@
     color: #e6e6e6;
     font-size: 12px;
   }
+  /* Keyboard users need to see where focus landed; mouse users keep the clean
+     borderless pill. :focus-visible draws the ring only for keyboard focus. */
+  .search-input:focus-visible {
+    outline: 2px solid #4c9aff;
+    outline-offset: 1px;
+    border-radius: 3px;
+  }
   /* The type=search cancel button is inconsistent across platforms and doesn't
      match the rest of the toolbar — we draw our own. */
   .search-input::-webkit-search-cancel-button {
