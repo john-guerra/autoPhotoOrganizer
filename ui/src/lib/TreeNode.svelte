@@ -5,9 +5,17 @@
   import { shortLeafLabel } from "./labels.js";
   import { labelParts, EMPTY_STATS } from "./folderLabel.js";
   import { descendantGroups } from "./folderTree.js";
+  import {
+    AGGREGATE_SNAPSHOT_RENDERER_ID,
+    AGGREGATE_COLLAPSED_RENDERER_ID,
+  } from "./folderSections.js";
   import GroupStateIcon from "./GroupStateIcon.svelte";
   import FolderIcon from "./FolderIcon.svelte";
-  import { getRenderer, nextRendererId } from "./groupRenderers.js";
+  import {
+    getRenderer,
+    nextRendererId,
+    DEFAULT_RENDERER_ID,
+  } from "./groupRenderers.js";
   // Svelte 5 deprecates <svelte:self> in favor of a self-import — same
   // recursive component, no deprecation warning.
   import TreeNode from "./TreeNode.svelte";
@@ -26,6 +34,12 @@
     cursorKey = null, // treeKey of the KEYBOARD cursor row (roving focus)
     collapsedPaths, // Array<Array<{dimension,value}>>
     snapshotKeys = new Set(), // pathKeys rendered as a snapshot strip
+    // Parent-SUBTREE fold state (#142) — see TreeSidebar's own doc comment:
+    // mirrors collapsedPaths/snapshotKeys, keyed the same way (pathKey
+    // ignores the `subtree` flag, so a folder's plain and subtree keys are
+    // the SAME string).
+    aggregateKeys = new Set(),
+    aggregateSnapshotKeys = new Set(),
     tokenStats = EMPTY_STATS, // library-wide token df, for folder labels
     siblingLabels = [], // every label at THIS level — the redundancy to strip
     ontoggleexpand,
@@ -100,6 +114,30 @@
     isFolderLevel ? descendantGroups(node).map(subfolderPath) : [path]
   );
 
+  // Does this row stand for more than itself? (#142) The ONLY signal App's
+  // onGroupToggle needs to pick aggregate-vs-per-leaf-vs-plain — see
+  // foldPaths.js's foldTargetFor. Only `folder` ever nests, so this is false
+  // for every non-folder dimension and for a folder leaf.
+  let isParent = $derived(groupPaths.length > 1);
+  // This row's own SUBTREE key (#142) — the same shape App's
+  // cycleSubtreeAggregate writes: pathKey encodes only [dimension,value], so
+  // it's the IDENTICAL string to this row's plain `pathKey(path)` — the
+  // `subtree` flag never changes the key, only which Set it's tracked in.
+  let subtreeKey = $derived(
+    pathKey([...path.slice(0, -1), { ...path.at(-1), subtree: true }])
+  );
+  // A PARENT row can itself be folded as one whole-subtree band. Checked
+  // before the per-group/virtual-ancestor cases below so an aggregated
+  // parent's icon reflects that (a strip or a bar), never its (suppressed)
+  // descendants' individual states.
+  let aggregateRendererId = $derived(
+    isParent && aggregateKeys.has(subtreeKey)
+      ? aggregateSnapshotKeys.has(subtreeKey)
+        ? AGGREGATE_SNAPSHOT_RENDERER_ID
+        : AGGREGATE_COLLAPSED_RENDERER_ID
+      : null
+  );
+
   // A virtual ancestor has no state of its own — it reports what its descendants
   // are collectively doing, and says "mixed" when they disagree rather than
   // picking one and lying about the rest.
@@ -111,34 +149,50 @@
     })
   );
   let rendererId = $derived(
-    !isVirtual
-      ? ownRendererId
-      : descendantStates.length &&
-          descendantStates.every((s) => s === descendantStates[0])
-        ? descendantStates[0]
-        : "mixed"
+    aggregateRendererId ??
+      (!isVirtual
+        ? ownRendererId
+        : descendantStates.length &&
+            descendantStates.every((s) => s === descendantStates[0])
+          ? descendantStates[0]
+          : "mixed")
   );
   let iconState = $derived(
     rendererId === "mixed" ? "mixed" : getRenderer(rendererId).icon
   );
+  // The aggregate cycle's own order (#142) — grid → aggregate-snapshot →
+  // aggregate-collapsed → grid — mirrors App.svelte's AGGREGATE_CYCLE (kept
+  // out of GROUP_RENDERERS itself; see groupRenderers.js's note). Only used
+  // for a PARENT row's tooltip, so a plain leaf's preview still comes from
+  // the ordinary per-group nextRendererId.
+  const AGGREGATE_CYCLE = [
+    DEFAULT_RENDERER_ID,
+    AGGREGATE_SNAPSHOT_RENDERER_ID,
+    AGGREGATE_COLLAPSED_RENDERER_ID,
+  ];
+  function nextAggregateRendererId(id) {
+    const i = AGGREGATE_CYCLE.indexOf(id);
+    return AGGREGATE_CYCLE[((i === -1 ? 0 : i) + 1) % AGGREGATE_CYCLE.length];
+  }
   let toggleTitle = $derived(
     rendererId === "mixed"
       ? "The groups under here are shown differently — click to show them all"
       : `${getRenderer(rendererId).label} — click for ${getRenderer(
-          nextRendererId(rendererId)
+          isParent
+            ? nextAggregateRendererId(rendererId)
+            : nextRendererId(rendererId)
         ).label.toLowerCase()}`
   );
 
-  // Clicking a virtual ancestor's icon has to act on the groups beneath it —
-  // it has none of its own. Shift-click does the same for a real folder that
-  // also has sub-folders ("fold this whole trip").
+  // Plain click: a PARENT folds/aggregates its WHOLE subtree, a leaf cycles
+  // itself. Shift-click: a PARENT fans out to each of its groups instead
+  // (VS Code-style region fold) — a leaf has nothing to fan out (no-op,
+  // identical to plain). App.svelte's onGroupToggle/foldTargetFor makes this
+  // call (#142); this row just hands over what it stands for (`groupPaths`)
+  // always, not only when Shift/virtual — the decision moved up to App so
+  // the feed header and the tree agree on it in exactly one place.
   function onToggleCollapse(event) {
-    const foldSubtree = isVirtual || (event.shiftKey && subfolders.length > 0);
-    ontogglecollapse?.({
-      path,
-      event,
-      paths: foldSubtree ? groupPaths : undefined,
-    });
+    ontogglecollapse?.({ path, event, paths: groupPaths });
   }
 
   // A virtual ancestor is not a group, so there is no section to scroll to —
@@ -291,7 +345,9 @@
       class="tree-collapse-icon"
       class:not-grid={rendererId !== "grid"}
       title={toggleTitle}
-      aria-label="Cycle this group in the feed: full grid → snapshot strip → collapsed"
+      aria-label={isParent
+        ? "Cycle this folder's whole subtree: full grid → aggregate snapshot → aggregate collapsed (Shift-click to fold each group beneath it instead)"
+        : "Cycle this group in the feed: full grid → snapshot strip → collapsed"}
       onclick={onToggleCollapse}
     >
       <GroupStateIcon state={iconState} />
@@ -366,6 +422,8 @@
           {cursorKey}
           {collapsedPaths}
           {snapshotKeys}
+          {aggregateKeys}
+          {aggregateSnapshotKeys}
           {tokenStats}
           siblingLabels={subfolderLabels}
           {ontoggleexpand}
@@ -394,6 +452,8 @@
               {cursorKey}
               {collapsedPaths}
               {snapshotKeys}
+              {aggregateKeys}
+              {aggregateSnapshotKeys}
               {tokenStats}
               siblingLabels={children.map((n) => n.label)}
               {ontoggleexpand}

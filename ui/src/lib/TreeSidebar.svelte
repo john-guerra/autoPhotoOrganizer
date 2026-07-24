@@ -11,6 +11,14 @@
     groupBy, // string[]
     collapsedPaths, // Array<Array<{dimension,value}>>
     snapshotKeys = new Set(), // pathKeys rendered as a snapshot strip
+    // Parent-SUBTREE fold state (#142) — mirrors collapsedPaths/snapshotKeys:
+    // aggregateKeys is the subset of collapsed groups that are a whole-subtree
+    // fold (keyed the SAME way — pathKey ignores the `subtree` flag, so a
+    // folder's plain and subtree keys coincide), aggregateSnapshotKeys the
+    // subset of those shown as a strip rather than a bar. Owned by App;
+    // TreeNode only reads them, exactly like the other two.
+    aggregateKeys = new Set(),
+    aggregateSnapshotKeys = new Set(),
     filter = null,
     sort = null, // feed sort — date sorts change the date-group order
     refreshToken = 0, // bump to force a reload when the index changes
@@ -658,6 +666,8 @@
           cursorKey={treeCursorKey}
           {collapsedPaths}
           {snapshotKeys}
+          {aggregateKeys}
+          {aggregateSnapshotKeys}
           {tokenStats}
           siblingLabels={rootLabels}
           ontoggleexpand={handleToggleExpand}

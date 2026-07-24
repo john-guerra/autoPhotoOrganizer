@@ -108,7 +108,7 @@
     DEFAULT_RENDERER_ID,
     SNAPSHOT_ID,
   } from "./lib/groupRenderers.js";
-  import { isPathUnder, isKeyUnder } from "./lib/foldPaths.js";
+  import { isPathUnder, isKeyUnder, foldTargetFor } from "./lib/foldPaths.js";
   import ServerBanner from "./lib/ServerBanner.svelte";
   import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
@@ -119,7 +119,11 @@
     dirname,
   } from "./lib/folderLabel.js";
   import { buildFolderTree, relativeTo } from "./lib/folderTree.js";
-  import { nestFolderHeaders } from "./lib/folderSections.js";
+  import {
+    nestFolderHeaders,
+    AGGREGATE_SNAPSHOT_RENDERER_ID,
+    AGGREGATE_COLLAPSED_RENDERER_ID,
+  } from "./lib/folderSections.js";
   import FisheyeSidebar from "./lib/FisheyeSidebar.svelte";
   import UpdateBanner from "./lib/UpdateBanner.svelte";
   import Toolbar from "./lib/Toolbar.svelte";
@@ -658,6 +662,20 @@
   // this set only decides how the client renders that collapsed placeholder.
   // Keyed by pathKey(path), reset on hierarchy change alongside collapsedPaths.
   let snapshotGroupKeys = $state(new Set());
+  // Parent-SUBTREE fold state (#142) — a whole folder subtree collapsed into
+  // ONE band (a sampled strip, or a bar with the subtree total) instead of
+  // nested per-leaf sections. Mirrors collapsedPaths/snapshotGroupKeys
+  // exactly: `aggregateKeys` is the subset of collapsed groups that are a
+  // WHOLE-SUBTREE fold (keyed by pathKey of the parent's OWN path — pathKey
+  // encodes only [dimension,value] pairs, so a subtree entry's key is
+  // IDENTICAL to the same folder's plain-leaf key; that's what lets
+  // cycleSubtreeAggregate supersede a prior plain fold of the same folder for
+  // free, by key equality alone), and `aggregateSnapshotKeys` is the subset
+  // of THOSE shown as a strip rather than a bar. Both reset alongside
+  // collapsedPaths/snapshotGroupKeys on a hierarchy change: a subtree fold
+  // only means something for the folder chain it was folded in.
+  let aggregateKeys = $state(new Set());
+  let aggregateSnapshotKeys = $state(new Set());
   // A snapshot band is exactly ONE GRID ROW tall — it follows the zoom, like the
   // photos it stands in for. It used to be a fixed 148px ("group label row on top
   // + the strip beneath"), which stopped being true when the label moved into the
@@ -1056,6 +1074,8 @@
     groupBy = newGroupBy;
     collapsedPaths = [];
     snapshotGroupKeys = new Set();
+    aggregateKeys = new Set();
+    aggregateSnapshotKeys = new Set();
     await recenterFeedOnId(safeFocusId(selected));
   }
 
@@ -2783,11 +2803,30 @@
    * `_collapsed`/`_snapshots` are taken as ARGS (not closed over) so Svelte's
    * dependency tracking — which reads the expression's source text — actually
    * re-runs this in the template when either changes.
-   * @returns {string} a GROUP_RENDERERS id
+   *
+   * `_aggregateKeys`/`_aggregateSnapshots` (#142, both default empty so every
+   * pre-#142 3-arg call site is unchanged) are the SAME kind of flavor-of-
+   * "collapsed" pair aggregateKeys/aggregateSnapshotKeys are — `_collapsed` is
+   * still the one gate (a subtree fold's own path IS pushed into
+   * collapsedPaths, see cycleSubtreeAggregate), and once collapsed, the
+   * aggregate set says "whole-subtree" instead of "just this one group".
+   * @returns {string} a GROUP_RENDERERS id (or an aggregate id — see
+   *   groupRenderers.js's AGGREGATE_SNAPSHOT/AGGREGATE_COLLAPSED)
    */
-  function rendererIdFor(path, _collapsedKeys, _snapshots) {
+  function rendererIdFor(
+    path,
+    _collapsedKeys,
+    _snapshots,
+    _aggregateKeys = new Set(),
+    _aggregateSnapshots = new Set()
+  ) {
     const key = pathKey(path);
     if (!_collapsedKeys.has(key)) return "grid";
+    if (_aggregateKeys.has(key)) {
+      return _aggregateSnapshots.has(key)
+        ? AGGREGATE_SNAPSHOT_RENDERER_ID
+        : AGGREGATE_COLLAPSED_RENDERER_ID;
+    }
     return _snapshots.has(key) ? "snapshot" : "collapsed";
   }
 
@@ -2875,10 +2914,11 @@
               detail.path,
               detail.isVirtual ? detail.groupPaths : undefined
             ),
-          cycleView: () =>
-            detail.isVirtual
-              ? cycleLeafPaths(detail.groupPaths)
-              : cycleGroupState(detail.path),
+          // No Shift gesture in a context menu, so a parent always gets the
+          // aggregate cycle here (the menu's one "cycle view" action mirrors a
+          // PLAIN click on the icon) — same dispatch onGroupToggle uses, just
+          // without an event to read a modifier from (#142).
+          cycleView: () => onGroupToggle(detail.path, null, detail.groupPaths),
           // expandedKeys is TreeSidebar's own state, so the sidebar handed us a
           // closure rather than us reaching into it.
           toggleDescendants: detail.toggleDescendants,
@@ -2916,7 +2956,13 @@
       isFolder: !!folderPath,
       hasChildren: false,
       expanded: false,
-      rendererId: rendererIdFor(header.path, collapsedKeys, snapshotGroupKeys),
+      rendererId: rendererIdFor(
+        header.path,
+        collapsedKeys,
+        snapshotGroupKeys,
+        aggregateKeys,
+        aggregateSnapshotKeys
+      ),
       jumpPath: header.path,
     });
   }
@@ -3039,16 +3085,42 @@
     return { update: mark };
   }
 
+  /** The aggregate cycle's own order (#142) — grid → aggregate-snapshot →
+   *  aggregate-collapsed → grid — the whole-subtree counterpart of
+   *  GROUP_RENDERERS' plain grid → snapshot → collapsed cycle. Kept out of
+   *  GROUP_RENDERERS itself (see groupRenderers.js's own note): that array is
+   *  the per-group toggle's cycle, and mixing the two would let a plain
+   *  single-group click land on an aggregate id, or vice versa. */
+  const AGGREGATE_CYCLE = [
+    DEFAULT_RENDERER_ID,
+    AGGREGATE_SNAPSHOT_RENDERER_ID,
+    AGGREGATE_COLLAPSED_RENDERER_ID,
+  ];
+  function nextAggregateRendererId(id) {
+    const i = AGGREGATE_CYCLE.indexOf(id);
+    return AGGREGATE_CYCLE[((i === -1 ? 0 : i) + 1) % AGGREGATE_CYCLE.length];
+  }
+
   /** Tooltip for the group toggle, from the registry (no parallel string table:
-   *  a new renderer must not need a second edit somewhere else). */
-  function groupToggleTitle(rendererId) {
+   *  a new renderer must not need a second edit somewhere else). `isParent`
+   *  (#142) picks which cycle a plain click on THIS row would advance —
+   *  a parent's icon aggregates the whole subtree, so its "next" preview must
+   *  come from AGGREGATE_CYCLE, not the plain per-group one, or the tooltip
+   *  would promise the wrong click behaviour. */
+  function groupToggleTitle(rendererId, isParent = false) {
     const now = getRenderer(rendererId);
-    const then = getRenderer(nextRendererId(rendererId));
+    const nextId = isParent
+      ? nextAggregateRendererId(rendererId)
+      : nextRendererId(rendererId);
+    const then = getRenderer(nextId);
     return `${now.label} — click for ${then.label.toLowerCase()}`;
   }
 
   /** Feed group tri-state: expanded → snapshot → collapsed → expanded.
-   * snapshot is a server-collapsed group the client renders as a strip. */
+   * snapshot is a server-collapsed group the client renders as a strip. Only
+   * ever the target for a LEAF (no descendant folder groups) — a PARENT's
+   * plain click goes through cycleSubtreeAggregate instead (see
+   * onGroupToggle / foldTargetFor, #142). */
   async function cycleGroupState(path) {
     // A path with a missing level would poison collapsedPaths and blank the feed
     // (the undefined value crashed formatGroupValue). Refuse it, loudly.
@@ -3063,6 +3135,101 @@
     }
     const current = rendererIdFor(path, collapsedKeys, snapshotGroupKeys);
     await setGroupRenderer(path, nextRendererId(current));
+  }
+
+  /**
+   * Plain click on a PARENT folder's fold icon (feed header OR tree row,
+   * #142): cycle the WHOLE SUBTREE as one unit — expanded → one aggregate
+   * snapshot strip (sampling every descendant) → one aggregate collapsed bar
+   * (the subtree total) → expanded — rather than only this folder's own
+   * photos (cycleGroupState/setGroupRenderer's job, still used for a leaf).
+   *
+   * Rebuilds via loadInitialFeed, mirroring cycleLeafPaths/cycleAllGroups (a
+   * COMPOUND change touching more than this one group) rather than
+   * recenterFeedOnId's single-group anchor pin: that pin's exclusion test
+   * (safeFocusEntry's `excludePath`) is an EXACT dimension/value match, not a
+   * subtree/prefix test, so it cannot safely say "exclude any photo under
+   * this folder" the way a subtree fold needs. Goes through the SAME
+   * feed-replace machinery every fold uses (withFeedTransaction, inside
+   * loadInitialFeed) — never a new epoch/fetching guard (CLAUDE.md's "no 7th
+   * copy" rule).
+   *
+   * `path` is this folder's OWN group path (plain — `subtree:true` is added
+   * here, never by the caller). `groupPaths` is the SAME descendant list
+   * (this folder's own group, if any, plus every folder group beneath it)
+   * nestFolderHeaders/TreeNode already compute via folderTree's
+   * descendantGroups — reused here, not re-derived, to supersede any of
+   * THOSE groups' own plain fold state (and any PRIOR aggregate fold of this
+   * same subtree — pathKey ignores the `subtree` flag, so the parent's own
+   * key already coincides with its subtree key; see aggregateKeys' doc
+   * comment), the same way setGroupRenderer supersedes a single group's
+   * descendants.
+   *
+   * @param {Array<{dimension:string,value:string}>} path
+   * @param {Array<Array<{dimension:string,value:string}>>} [groupPaths]
+   */
+  async function cycleSubtreeAggregate(path, groupPaths) {
+    if (
+      !Array.isArray(path) ||
+      !path.length ||
+      path.some((p) => p?.value == null)
+    ) {
+      error =
+        "Couldn't fold that subtree — its grouping values are incomplete. Try a different grouping.";
+      return;
+    }
+    const subtreePath = [
+      ...path.slice(0, -1),
+      { ...path.at(-1), subtree: true },
+    ];
+    // pathKey encodes only [dimension,value] — the `subtree` flag never
+    // changes the key, so this folder's plain leaf key and its subtree key
+    // are the SAME string (deliberate; see aggregateKeys' comment).
+    const key = pathKey(subtreePath);
+    // Always include the parent's own key, even for a virtual ancestor whose
+    // `groupPaths` (descendantGroups) never lists ITS OWN value — a prior
+    // aggregate fold of this exact subtree is keyed by that value regardless.
+    const descendantKeys = new Set([path, ...(groupPaths ?? [])].map(pathKey));
+
+    const current = !aggregateKeys.has(key)
+      ? DEFAULT_RENDERER_ID
+      : aggregateSnapshotKeys.has(key)
+        ? SNAPSHOT_ID
+        : AGGREGATE_COLLAPSED_RENDERER_ID; // the aggregate cycle's 3rd/"collapsed" slot
+    const next = nextAggregateRendererId(current);
+
+    // A subtree fold supersedes every plain fold beneath it — this folder's
+    // own leaf entry (and any prior aggregate fold of it) included.
+    const nextCollapsed = collapsedPaths.filter(
+      (p) => !descendantKeys.has(pathKey(p))
+    );
+    const nextSnaps = new Set(
+      [...snapshotGroupKeys].filter((k) => !descendantKeys.has(k))
+    );
+    const nextAgg = new Set(
+      [...aggregateKeys].filter((k) => !descendantKeys.has(k))
+    );
+    const nextAggSnaps = new Set(
+      [...aggregateSnapshotKeys].filter((k) => !descendantKeys.has(k))
+    );
+    if (next !== DEFAULT_RENDERER_ID) {
+      nextAgg.add(key);
+      nextCollapsed.push(subtreePath);
+      if (next === AGGREGATE_SNAPSHOT_RENDERER_ID) nextAggSnaps.add(key);
+    }
+
+    beginFold();
+    collapsedPaths = nextCollapsed;
+    snapshotGroupKeys = nextSnaps;
+    aggregateKeys = nextAgg;
+    aggregateSnapshotKeys = nextAggSnaps;
+    try {
+      await loadInitialFeed();
+    } catch (e) {
+      error = e.message;
+    } finally {
+      endFold();
+    }
   }
 
   /**
@@ -3234,6 +3401,15 @@
     const nextSnaps = new Set(
       [...snapshotGroupKeys].filter((k) => !isInsideKey(k))
     );
+    // A per-leaf fan-out supersedes any AGGREGATE fold of this same subtree
+    // (#142) — e.g. Shift-clicking a parent that was previously plain-clicked
+    // into one snapshot strip must drop that whole-subtree entry, or the
+    // stale aggregate key would coexist with the fresh per-leaf ones and the
+    // feed would carry two contradictory folds of the same photos.
+    const nextAgg = new Set([...aggregateKeys].filter((k) => !isInsideKey(k)));
+    const nextAggSnaps = new Set(
+      [...aggregateSnapshotKeys].filter((k) => !isInsideKey(k))
+    );
     if (isServerCollapsed(next)) {
       for (const lp of leaves) {
         nextCollapsed.push(lp);
@@ -3243,6 +3419,8 @@
     beginFold();
     collapsedPaths = nextCollapsed;
     snapshotGroupKeys = nextSnaps;
+    aggregateKeys = nextAgg;
+    aggregateSnapshotKeys = nextAggSnaps;
     try {
       await loadInitialFeed();
     } catch (e) {
@@ -3252,14 +3430,43 @@
     }
   }
 
-  /** Entry point for every group toggle (feed header + tree icon): Shift folds
-   * the leaves, a plain click aggregates the group itself.
+  /** Entry point for EVERY group toggle (feed header icon + tree icon +
+   * "cycle view" context-menu item, #142).
    *
-   * `paths` arrives from the tree when a row speaks for more than one group — a
-   * folder row that has sub-folders beneath it, or a virtual ancestor that has no
-   * group of its own. Those cycle together. */
-  function onGroupToggle(path, event, paths) {
-    if (paths?.length) return cycleLeafPaths(paths);
+   * `groupPaths` is this row's own descendant-group list — `[path]` for a
+   * leaf, `[path, ...descendants]` or `[...descendants]` for a folder parent
+   * (own value included only when it's a real group) — the SAME array
+   * nestFolderHeaders (feed headers) and TreeNode.svelte (tree rows) already
+   * build via folderTree.js's descendantGroups. `groupPaths.length > 1` IS
+   * "is this a parent": only `folder` ever produces more than one entry (see
+   * foldTargetFor's doc comment), so no separate "is this a folder" test is
+   * needed.
+   *
+   * - Parent, plain click  → cycleSubtreeAggregate: fold the WHOLE subtree
+   *   into one strip/bar.
+   * - Parent, Shift-click  → cycleLeafPaths(groupPaths): VS Code-style
+   *   region-fold — each real group in the subtree gets its OWN strip/bar,
+   *   the parent stays expanded around them. Superseding predicates cover the
+   *   whole subtree (own key + every descendant's), so a prior aggregate fold
+   *   of the same parent is cleared before the per-leaf state is applied.
+   * - Leaf, either         → unchanged: `cycleGroupLeaves` (which itself
+   *   falls back to `cycleGroupState` once there's truly nothing beneath —
+   *   see its own `path.length >= groupBy.length` check) on Shift, plain
+   *   `cycleGroupState` otherwise. This ALSO covers every non-folder
+   *   dimension (year, camera, …), which never produces a `groupPaths` longer
+   *   than one and so is untouched by #142's aggregate/per-leaf split.
+   */
+  function onGroupToggle(path, event, groupPaths) {
+    const isParent = (groupPaths?.length ?? 0) > 1;
+    const target = foldTargetFor({ isParent, shiftKey: !!event?.shiftKey });
+    if (target === "aggregate") return cycleSubtreeAggregate(path, groupPaths);
+    if (target === "perLeaf") {
+      const keys = new Set([path, ...(groupPaths ?? [])].map(pathKey));
+      return cycleLeafPaths(groupPaths, {
+        insidePath: (p) => keys.has(pathKey(p)),
+        insideKey: (k) => keys.has(k),
+      });
+    }
     return event?.shiftKey ? cycleGroupLeaves(path) : cycleGroupState(path);
   }
 
@@ -3992,7 +4199,12 @@
   let sectionHeaders = $derived(
     nestFolderHeaders(
       computeHeaderPaths(deriveSectionHeaders(resolvedPhotos, groupBy)),
-      { groupBy, rootsByParentKey }
+      {
+        groupBy,
+        rootsByParentKey,
+        aggregateKeys,
+        aggregateSnapshotKeys,
+      }
     )
   );
   // Fetch each visible group's total photo count, one query per *parent*
@@ -4055,7 +4267,13 @@
               // The band under the header is the RENDERER's, and its height must
               // be known before anything mounts (the feed is virtualized).
               const r = getRenderer(
-                rendererIdFor(e.item.path, collapsedKeys, snapshotGroupKeys)
+                rendererIdFor(
+                  e.item.path,
+                  collapsedKeys,
+                  snapshotGroupKeys,
+                  aggregateKeys,
+                  aggregateSnapshotKeys
+                )
               );
               return {
                 id: entryDomId(e),
@@ -4355,7 +4573,19 @@
     // Remember what it was, and put it back when the loupe closes.
     if (groupPath) {
       const key = pathKey(groupPath);
-      const was = rendererIdFor(groupPath, collapsedKeys, snapshotGroupKeys);
+      // groupPath already carries `subtree:true` when it names an AGGREGATE
+      // parent (it's the placeholder item's own path, exactly what
+      // folderSections.js/the server put on it — see cycleSubtreeAggregate's
+      // doc comment on why that flag doesn't change pathKey), so this one
+      // call correctly reads back "aggregate-snapshot"/"aggregate-collapsed"
+      // too (#142).
+      const was = rendererIdFor(
+        groupPath,
+        collapsedKeys,
+        snapshotGroupKeys,
+        aggregateKeys,
+        aggregateSnapshotKeys
+      );
       loupeRestore =
         was === DEFAULT_RENDERER_ID
           ? null
@@ -4364,10 +4594,18 @@
       const nextSnaps = new Set(snapshotGroupKeys);
       nextSnaps.delete(key);
       snapshotGroupKeys = nextSnaps; // new ref — a $state Set isn't reactive in place
+      const nextAgg = new Set(aggregateKeys);
+      nextAgg.delete(key);
+      aggregateKeys = nextAgg;
+      const nextAggSnaps = new Set(aggregateSnapshotKeys);
+      nextAggSnaps.delete(key);
+      aggregateSnapshotKeys = nextAggSnaps;
     } else {
       loupeRestore = null;
       collapsedPaths = [];
       snapshotGroupKeys = new Set();
+      aggregateKeys = new Set();
+      aggregateSnapshotKeys = new Set();
     }
     await recenterFeedOnId(id);
     const idx = findEntryIndexForId(displayEntries, id);
@@ -4383,7 +4621,35 @@
     if (loupeRestore) {
       const { path, rendererId } = loupeRestore;
       loupeRestore = null;
-      await setGroupRenderer(path, rendererId);
+      if (
+        rendererId === AGGREGATE_SNAPSHOT_RENDERER_ID ||
+        rendererId === AGGREGATE_COLLAPSED_RENDERER_ID
+      ) {
+        // setGroupRenderer only knows the plain grid/snapshot/collapsed cycle
+        // — an aggregate id restores directly (#142): re-add the subtree
+        // entry and re-fetch, mirroring cycleSubtreeAggregate's own writes.
+        const key = pathKey(path); // already carries `subtree:true`
+        const nextAgg = new Set(aggregateKeys).add(key);
+        const nextAggSnaps = new Set(aggregateSnapshotKeys);
+        if (rendererId === AGGREGATE_SNAPSHOT_RENDERER_ID)
+          nextAggSnaps.add(key);
+        else nextAggSnaps.delete(key);
+        aggregateKeys = nextAgg;
+        aggregateSnapshotKeys = nextAggSnaps;
+        if (!collapsedPaths.some((p) => pathKey(p) === key)) {
+          collapsedPaths = [...collapsedPaths, path];
+        }
+        beginFold();
+        try {
+          await loadInitialFeed();
+        } catch (e) {
+          error = e.message;
+        } finally {
+          endFold();
+        }
+      } else {
+        await setGroupRenderer(path, rendererId);
+      }
     }
 
     await tick();
@@ -5230,6 +5496,8 @@
           {groupBy}
           {collapsedPaths}
           snapshotKeys={snapshotGroupKeys}
+          {aggregateKeys}
+          {aggregateSnapshotKeys}
           {sort}
           filter={displayFilter}
           refreshToken={libraryVersion}
@@ -5330,29 +5598,34 @@
                     class:not-grid={rendererIdFor(
                       header.path,
                       collapsedKeys,
-                      snapshotGroupKeys
+                      snapshotGroupKeys,
+                      aggregateKeys,
+                      aggregateSnapshotKeys
                     ) !== DEFAULT_RENDERER_ID}
                     title={groupToggleTitle(
                       rendererIdFor(
                         header.path,
                         collapsedKeys,
-                        snapshotGroupKeys
-                      )
+                        snapshotGroupKeys,
+                        aggregateKeys,
+                        aggregateSnapshotKeys
+                      ),
+                      (header.groupPaths?.length ?? 0) > 1
                     )}
-                    aria-label="Cycle this group: full grid → snapshot strip → collapsed"
+                    aria-label={(header.groupPaths?.length ?? 0) > 1
+                      ? "Cycle this folder's whole subtree: full grid → aggregate snapshot → aggregate collapsed (Shift-click to fold each group beneath it instead)"
+                      : "Cycle this group: full grid → snapshot strip → collapsed"}
                     onclick={(e) =>
-                      onGroupToggle(
-                        header.path,
-                        e,
-                        header.isVirtual ? header.groupPaths : undefined
-                      )}
+                      onGroupToggle(header.path, e, header.groupPaths)}
                   >
                     <GroupStateIcon
                       state={getRenderer(
                         rendererIdFor(
                           header.path,
                           collapsedKeys,
-                          snapshotGroupKeys
+                          snapshotGroupKeys,
+                          aggregateKeys,
+                          aggregateSnapshotKeys
                         )
                       ).icon}
                     />
@@ -5452,7 +5725,9 @@
                   rendererIdFor(
                     entry.item.path,
                     collapsedKeys,
-                    snapshotGroupKeys
+                    snapshotGroupKeys,
+                    aggregateKeys,
+                    aggregateSnapshotKeys
                   )
                 )}
                 {#if renderer.component && boxes[i].height > 0}

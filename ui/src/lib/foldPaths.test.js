@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isPathUnder, isKeyUnder } from "./foldPaths.js";
+import { isPathUnder, isKeyUnder, foldTargetFor } from "./foldPaths.js";
 
 const seg = (dimension, value) => ({ dimension, value });
 // pathKey's shape: a JSON string of [[dimension, value], …].
@@ -65,5 +65,25 @@ describe("isKeyUnder", () => {
   it("a malformed key is treated as not-under, never throws", () => {
     expect(isKeyUnder("{not json", YEAR_2025)).toBe(false);
     expect(isKeyUnder(JSON.stringify({ a: 1 }), YEAR_2025)).toBe(false);
+  });
+});
+
+describe("foldTargetFor (#142 parent-fold gesture)", () => {
+  it("a parent, plain click, aggregates the whole subtree", () => {
+    expect(foldTargetFor({ isParent: true, shiftKey: false })).toBe(
+      "aggregate"
+    );
+  });
+
+  it("a parent, shift-click, fans out to per-leaf snapshots", () => {
+    expect(foldTargetFor({ isParent: true, shiftKey: true })).toBe("perLeaf");
+  });
+
+  it("a leaf, plain click, is just a leaf (its ordinary single-group cycle)", () => {
+    expect(foldTargetFor({ isParent: false, shiftKey: false })).toBe("leaf");
+  });
+
+  it("a leaf, shift-click, is STILL a leaf — shift has nothing to fan out", () => {
+    expect(foldTargetFor({ isParent: false, shiftKey: true })).toBe("leaf");
   });
 });

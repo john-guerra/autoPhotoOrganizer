@@ -41,3 +41,31 @@ export function isKeyUnder(key, parent) {
     (seg, i) => pairs[i]?.[0] === seg.dimension && pairs[i]?.[1] === seg.value
   );
 }
+
+/**
+ * The pure decision behind every fold-icon click (feed header AND tree row,
+ * #142): does this click aggregate the whole subtree as one band, fan out to
+ * a per-leaf snapshot each, or just cycle this one group?
+ *
+ * `isParent` means "this path stands for more than itself" — it has
+ * descendant folder groups of its own. Callers derive it as
+ * `groupPaths.length > 1`, reusing the SAME `groupPaths` App.svelte's
+ * `nestFolderHeaders` (feed headers) and `TreeNode.svelte` (tree rows) already
+ * compute from folderTree.js's `descendantGroups` — `[path]` (length 1) for a
+ * folder leaf AND for every non-folder dimension (year, camera, …, which never
+ * nest), `[path, ...descendants]` or `[...descendants]` for a real or virtual
+ * folder parent. No second "is this a folder" test is needed: only `folder`
+ * ever produces a `groupPaths` longer than one.
+ *
+ * A LEAF (no descendant groups) ignores Shift entirely — "leaf" either way,
+ * per the design's resolved Q3 ("shift on a leaf ≡ plain": nothing to fan out
+ * beneath it, so the caller keeps its ordinary single-group cycle regardless
+ * of the modifier).
+ *
+ * @param {{isParent: boolean, shiftKey: boolean}} args
+ * @returns {"aggregate"|"perLeaf"|"leaf"}
+ */
+export function foldTargetFor({ isParent, shiftKey }) {
+  if (!isParent) return "leaf";
+  return shiftKey ? "perLeaf" : "aggregate";
+}

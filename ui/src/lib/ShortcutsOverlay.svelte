@@ -97,8 +97,17 @@
       rows: [
         {
           keys: ["Shift", "+", "click"],
+          label: "On a folder's ▸ triangle: fold every sub-folder under it",
+        },
+        {
+          keys: ["click"],
           label:
-            "On a folder's ▸ triangle: fold every sub-folder under it. On its grid/strip/bar icon: cycle every group beneath it at once",
+            "On a PARENT folder's grid/strip/bar icon: fold its WHOLE subtree into one strip, then one bar (same icon + feed header)",
+        },
+        {
+          keys: ["Shift", "+", "click"],
+          label:
+            "On a PARENT folder's grid/strip/bar icon: fold each group beneath it individually instead of the whole subtree",
         },
         {
           keys: ["hover"],
