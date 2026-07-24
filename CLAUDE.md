@@ -6,6 +6,7 @@ who returns from trips with thousands of JPEGs/videos (occasional RAW) and finds
 Lightroom too slow.
 
 **Start here:**
+
 - **Current status** → `CHANGELOG.md` (newest first) + open
   [GitHub Issues](https://github.com/john-guerra/autoPhotoOrganizer/issues). The
   app is a stable `2.17.x` release.
@@ -65,7 +66,7 @@ Lightroom too slow.
   instantly with no round trip; the server only copies the id-groups it produces
   (materialize). It imports d3 for gap statistics, so it is DOM-free but not
   dependency-free. (There is no `server/albums/` code — an earlier `server/albums/
-  README.md` claimed there was; it was removed as inaccurate.)
+README.md` claimed there was; it was removed as inaccurate.)
 
 ## Commands
 

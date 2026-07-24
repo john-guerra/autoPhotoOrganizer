@@ -10,7 +10,8 @@ usability contracts. This file is the short, tool-agnostic summary.
 
 Fast, local-first photo triage. Plug in an SD card → instant grid → keyboard-fast
 culling → best photos organized into dated album folders. Svelte 5 (runes) + Vite
-+ d3 UI (`ui/`), Node/Express backend (`server/`), packaged with Electron.
+
+- d3 UI (`ui/`), Node/Express backend (`server/`), packaged with Electron.
 
 ## Two invariants (do not violate)
 
