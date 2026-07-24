@@ -1588,11 +1588,70 @@ describe("folderPath focus scope — subtree matching", () => {
 });
 
 describe("folderSubtreeCondition (#142)", () => {
-  it("matches the folder itself and any descendant, escaping LIKE metachars", () => {
+  // A regex/params-only check once passed while the produced SQL contained a
+  // broken ESCAPE literal (two backslashes instead of one), which SQLite
+  // rejects at execution time ("ESCAPE expression must be a single
+  // character"). These tests actually EXECUTE the condition's SQL against a
+  // real db, which is the only way to catch that.
+  const one = (name) => [{ name, size: 1, mtimeMs: 1, kind: "image" }];
+
+  it("executes without throwing and matches only the folder itself + its descendants (not a name-prefix sibling)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/L/Cards", 1, one("cards.jpg"));
+    upsertScan(db, "/L/Cards/Cam 1", 1, one("cam1.jpg"));
+    // Decoy: shares a name PREFIX with /L/Cards but is a sibling, not nested
+    // under it — the required "/" before the wildcard must exclude it.
+    upsertScan(db, "/L/CardsX", 1, one("decoy.jpg"));
+
     const { sql, params } = folderSubtreeCondition("/L/Cards");
-    // exact OR prefix; prefix uses ESCAPE so a literal % / _ can't wildcard
+    const rows = db
+      .prepare(`SELECT abs_path FROM folders WHERE ${sql} ORDER BY abs_path`)
+      .all(...params);
+
+    expect(rows.map((r) => r.abs_path)).toEqual(["/L/Cards", "/L/Cards/Cam 1"]);
+  });
+
+  it("treats a literal '_' or '%' in the folder path as a literal character, not a LIKE wildcard", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    // "_" is a LIKE single-char wildcard and "%" is a multi-char wildcard.
+    // Without ESCAPE, the generated pattern for "/L/Cards_1/%" would also
+    // match a sibling like "/L/CardsX1/..." (any char in place of "_"), and a
+    // "%" in the path could swallow arbitrary text.
+    upsertScan(db, "/L/Cards_1", 1, one("underscore.jpg"));
+    upsertScan(db, "/L/Cards_1/sub", 1, one("underscore-sub.jpg"));
+    upsertScan(db, "/L/CardsX1", 1, one("underscore-decoy.jpg"));
+    upsertScan(db, "/L/Cards%2", 1, one("percent.jpg"));
+    upsertScan(db, "/L/Cards%2/sub", 1, one("percent-sub.jpg"));
+
+    const underscoreCond = folderSubtreeCondition("/L/Cards_1");
+    const underscoreRows = db
+      .prepare(
+        `SELECT abs_path FROM folders WHERE ${underscoreCond.sql} ORDER BY abs_path`
+      )
+      .all(...underscoreCond.params);
+    expect(underscoreRows.map((r) => r.abs_path)).toEqual([
+      "/L/Cards_1",
+      "/L/Cards_1/sub",
+    ]);
+
+    const percentCond = folderSubtreeCondition("/L/Cards%2");
+    const percentRows = db
+      .prepare(
+        `SELECT abs_path FROM folders WHERE ${percentCond.sql} ORDER BY abs_path`
+      )
+      .all(...percentCond.params);
+    expect(percentRows.map((r) => r.abs_path)).toEqual([
+      "/L/Cards%2",
+      "/L/Cards%2/sub",
+    ]);
+  });
+
+  it("still reports the expected SQL shape and params (exact path, then escaped prefix)", () => {
+    const { sql, params } = folderSubtreeCondition("/L/Cards");
     expect(sql).toMatch(/folders\.abs_path = \?/);
-    expect(sql).toMatch(/LIKE \? ESCAPE/);
+    expect(sql).toMatch(/LIKE \? ESCAPE '\\'/);
     expect(params).toEqual(["/L/Cards", "/L/Cards/%"]);
   });
 });

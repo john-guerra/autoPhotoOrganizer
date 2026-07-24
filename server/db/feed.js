@@ -132,7 +132,7 @@ function collapsedPathCondition(path, dims) {
 export function folderSubtreeCondition(absPath) {
   const escaped = absPath.replace(/([\\%_])/g, "\\$1");
   return {
-    sql: "(folders.abs_path = ? OR folders.abs_path LIKE ? ESCAPE '\\\\')",
+    sql: `(folders.abs_path = ? OR folders.abs_path LIKE ? ESCAPE '\\')`,
     params: [absPath, escaped + "/%"],
   };
 }
