@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.1
+
+- **Under the hood:** the dev / CI / build toolchain now targets **Node 24** (the
+  current stable), up from Node 22.12 — `engines`, both CI workflows, the release
+  workflow, and a new `.nvmrc`. The packaged app is unaffected (its Node ships
+  inside Electron); this only sets what contributors and CI build with.
+
 ## 2.18.0
 
 - **Packaged release of the 2.17.x line** — cut as native macOS / Windows /
