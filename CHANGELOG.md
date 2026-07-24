@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.8
+
+- **The feed no longer goes blank after materializing albums (#139).** When you
+  had a folder open (scoped) and moved its photos into albums elsewhere, the
+  grid came back empty because it was still pointed at the now-emptied source.
+  It now follows the photos to the destination and shows the new albums.
+
 ## 2.17.7
 
 - **Reveal in Finder now works for huge selections (#140).** Selecting more

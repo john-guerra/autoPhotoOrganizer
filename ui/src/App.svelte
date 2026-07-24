@@ -3701,9 +3701,19 @@
       // refetches folder metadata; the feed needs a real reload (same as the
       // folder-remove path).
       await refreshLibrary();
-      await loadInitialFeed();
-      refreshCounts();
-      libraryVersion++;
+      // If the feed was scoped to a FOLDER (e.g. the source card you opened),
+      // a move-materialize just emptied that folder — its photos now live under
+      // destParent — so reloading the same scope shows a blank grid (#139).
+      // Point the feed at the destination instead, where the new albums are.
+      // A kept-selection (ids) scope or no scope still contains the moved
+      // photos (ids survive a repoint), so those just reload in place.
+      if (scope?.kind === "folder") {
+        await applyScope(folderScope(destParent));
+      } else {
+        await loadInitialFeed();
+        refreshCounts();
+        libraryVersion++;
+      }
       status = "";
       await reportScanMissing(job);
     } catch (e) {
