@@ -728,6 +728,40 @@ describe("getFeedPage — collapse-exclusion", () => {
       order.indexOf("/p/ZZZ/y")
     );
   });
+
+  it("orders a subtree placeholder correctly on a focusId SEEK page (#142)", () => {
+    // The plain-page test above proves splice order; this proves the SEEK path
+    // (selectPlaceholders + keyPassesSeek), which is where feed-window ordering
+    // bugs hide (CLAUDE.md). Same equal-mtime fixture → alphabetical pre-order:
+    // full feed is AAA, PH:/p/Cards, ZZZ.
+    const db = getDb();
+    seedVolume(db, 1);
+    const [aaa] = upsertScan(db, "/p/AAA/x", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/p/Cards/Cam 1", 1, [
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    upsertScan(db, "/p/ZZZ/y", 1, [
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    // Seek FORWARD from AAA's photo: the subtree placeholder must pass the keyset
+    // seek (it sorts after AAA) and still land BEFORE ZZZ on the paged window.
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      focusId: aaa.id,
+      before: 0,
+      after: 100,
+      collapsed: [[{ dimension: "folder", value: "/p/Cards", subtree: true }]],
+    });
+    const order = items.map((i) =>
+      i.collapsed ? "PH:" + i.path[0].value : i.groupValues.folder
+    );
+    expect(order).toContain("PH:/p/Cards");
+    expect(order.indexOf("PH:/p/Cards")).toBeLessThan(
+      order.indexOf("/p/ZZZ/y")
+    );
+  });
 });
 
 describe("getFeedPage — in-place collapsed placeholder", () => {
