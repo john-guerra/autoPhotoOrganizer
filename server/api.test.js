@@ -2476,6 +2476,82 @@ describe("GET /api/group/sample", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  describe("subtree=1 (aggregate snapshot across a folder's whole subtree)", () => {
+    let cardsRoot;
+
+    // <cardsRoot>/Cards/Cam 1/*.jpg (3), <cardsRoot>/Cards/Cam 10/*.jpg (3) —
+    // "Cards" itself holds no photos of its own, only its camera subfolders
+    // do, so it never gets a `folders` row and the exact-group query is
+    // empty; that's exactly the case subtree=1 is for.
+    beforeAll(async () => {
+      cardsRoot = await mkdtemp(join(tmpdir(), "ag-cards-"));
+      await mkdir(join(cardsRoot, "Cards", "Cam 1"), { recursive: true });
+      await mkdir(join(cardsRoot, "Cards", "Cam 10"), { recursive: true });
+      const jpg = (path, background) =>
+        sharp({ create: { width: 16, height: 16, channels: 3, background } })
+          .jpeg()
+          .toFile(path);
+      for (let i = 0; i < 3; i++) {
+        await jpg(join(cardsRoot, "Cards", "Cam 1", `a${i}.jpg`), {
+          r: 10 + i,
+          g: 10,
+          b: 10,
+        });
+        await jpg(join(cardsRoot, "Cards", "Cam 10", `b${i}.jpg`), {
+          r: 20 + i,
+          g: 20,
+          b: 20,
+        });
+      }
+    });
+
+    afterAll(async () => {
+      await rm(cardsRoot, { recursive: true, force: true });
+    });
+
+    async function scanCardsRoot() {
+      const res = await fetch(`${srv.base}/api/scan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dir: cardsRoot, recursive: true }),
+      });
+      expect(res.status).toBe(202);
+      const job = await waitJob((await res.json()).jobId);
+      expect(job.status).toBe("done");
+    }
+
+    it("counts and samples across the whole subtree, drawing from both cameras — and the exact group is empty without the flag", async () => {
+      await scanCardsRoot();
+      const cardsPath = join(cardsRoot, "Cards");
+      const path = encodeURIComponent(
+        JSON.stringify([{ dimension: "folder", value: cardsPath }])
+      );
+
+      const subtreeRes = await fetch(
+        `${srv.base}/api/group/sample?groupBy=folder&subtree=1&path=${path}&slots=4`
+      );
+      expect(subtreeRes.status).toBe(200);
+      const subtreeBody = await subtreeRes.json();
+      expect(subtreeBody.count).toBe(6);
+      const sampleFolders = new Set(
+        subtreeBody.samples.map((s) => s.groupValues.folder)
+      );
+      expect(sampleFolders.has(join(cardsPath, "Cam 1"))).toBe(true);
+      expect(sampleFolders.has(join(cardsPath, "Cam 10"))).toBe(true);
+
+      // Without subtree=1, the same path names the exact "/Cards" group,
+      // which is empty — proving the flag (not groupBy or the fixture) is
+      // what switches behavior.
+      const exactRes = await fetch(
+        `${srv.base}/api/group/sample?groupBy=folder&path=${path}&slots=4`
+      );
+      expect(exactRes.status).toBe(200);
+      const exactBody = await exactRes.json();
+      expect(exactBody.count).toBe(0);
+      expect(exactBody.samples).toHaveLength(0);
+    });
+  });
 });
 
 describe("jobs endpoints", () => {

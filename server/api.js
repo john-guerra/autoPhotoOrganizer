@@ -1777,6 +1777,19 @@ export function registerApi(app) {
       return res.status(400).json({ error: "path is required" });
     }
 
+    // Aggregate snapshot for a folder PARENT: the exact group at that path is
+    // usually empty (a "Cards"-style folder holds no photos of its own, only
+    // its camera subfolders do), so `subtree=1` samples across the whole
+    // subtree instead. Marking the last path segment `subtree: true` is the
+    // same flag `collapsedPathCondition`/`countCollapsedPaths` already read
+    // for subtree-collapsed groups (see server/db/feed.js), so countGroupPath
+    // and fetchGroupRowsAtOffsets need no changes — they already swap in
+    // `folderSubtreeCondition`'s prefix predicate for a flagged segment.
+    const subtree = req.query.subtree === "1";
+    if (subtree && path.length === 1 && path[0].dimension === "folder") {
+      path = [{ ...path[0], subtree: true }];
+    }
+
     const slots = Math.min(64, Math.max(1, Number(req.query.slots) || 12));
 
     const db = getDb();
