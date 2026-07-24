@@ -6,6 +6,29 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.2
+
+- **Content signatures now index the whole library in the background.** After a
+  scan, AutoGallery hashes every photo's content (idle-gated, so it never slows
+  browsing; resumable across restarts) instead of stopping after ~50. This is the
+  foundation for cross-drive backup coverage and duplicate detection (#12, #86)
+  and content-based relocation of missing files (#129).
+
+## 2.18.1
+
+- **Under the hood:** the dev / CI / build toolchain now targets **Node 24** (the
+  current stable), up from Node 22.12 — `engines`, both CI workflows, the release
+  workflow, and a new `.nvmrc`. The packaged app is unaffected (its Node ships
+  inside Electron); this only sets what contributors and CI build with.
+
+## 2.18.0
+
+- **Packaged release of the 2.17.x line** — cut as native macOS / Windows /
+  Linux builds. Bundles: the trailing-slash feed de-dup (#138), reveal-in-Finder
+  for huge selections (#140), the empty-feed-after-materialize fix (#139), the
+  shift-click range confirmation (#141), the Add-folder subfolder-tree cascade
+  (#137), and whole-folder subtree fold + aggregate snapshot (#142).
+
 ## 2.17.13
 
 - **Fold a whole folder as one, or peek at its subfolders (#142).** When grouped

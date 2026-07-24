@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.12"
+          node-version: "24"
           cache: npm
       - run: npm ci
       # Supply-chain backstop (slopsquatting / known-CVE): fail on a high or
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.12"
+          node-version: "24"
           cache: npm
       - run: npm ci
       # Chromium only — the app ships inside Electron, which is Chromium.

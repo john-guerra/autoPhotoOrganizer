@@ -33,8 +33,15 @@ test.describe("@p1 snapshot / full view alignment", () => {
         return { left: el.style.left, height: Math.round(r.height) };
       });
 
-    // Toggle THAT group (the header directly above its photos) to the strip.
-    const header = group.header(page, 0);
+    // Toggle the LEAF group that OWNS the first tile. Grouping by folder nests,
+    // so the first HEADER is a photo-less virtual ancestor (the library-root
+    // breadcrumb, over "Trip"/"Party"/"Cards"…); plain-toggling THAT — or any
+    // parent — now aggregates its whole subtree into one band at the PARENT's
+    // indent (#142), a different behaviour covered by subtree-fold.spec.js. This
+    // test is about a single group's strip staying aligned with its own photos,
+    // so target "Trip": the first top-level LEAF folder, which owns the first
+    // tile (its photos sort first) and has no subfolders to aggregate.
+    const header = group.folderHeaderExact(page, "Trip").first();
     await group.toggle(header).click();
     const band = group.bands(page).first();
     await expect(band).toBeVisible();

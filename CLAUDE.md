@@ -27,12 +27,14 @@ Lightroom too slow.
    "offline" badge). Ratings live in SQLite so rating works offline; only
    export/moves/resizes require the drive mounted.
 
-   Identity is **path + mtime + size**, not content hash. `content_hash` exists in
-   the schema but `hashPendingPhotos` runs once per scan with `limit: 50` and both
-   callers drop its `remaining` flag, so on the real library **100 of 114,125 rows
-   are hashed** and `backupCoverage` is effectively inert. Don't reason as if
-   content-hash identity holds — either finish it (loop on `remaining` behind
-   `whenIdle()`) or drop the column.
+   Scan/feed **identity is path + mtime + size**, not content hash — that key is
+   unchanged. Separately, `content_hash` (SHA-1) is now hashed for the WHOLE
+   library: `hashAllPending` (`db/hashing.js`) runs after every scan, idle-gated
+   (`whenIdle`) and to completion, marking unreadable files `hash_attempted` so it
+   always terminates; the next scan of any folder finishes the backlog. So
+   backup-coverage / cross-drive dedup (#12/#86) and missing-file
+   relocation-by-content (#129) now have real data to work with. (Before 2.17.8
+   only ~50 rows were ever hashed and `backupCoverage` was inert.)
 
 ## Performance thesis
 
