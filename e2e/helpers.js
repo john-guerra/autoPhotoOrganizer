@@ -354,6 +354,39 @@ export const group = {
       .filter({ hasText: name })
       .first(),
 
+  /**
+   * The header for a folder named EXACTLY `name` — unlike `folderHeader`,
+   * which substring-matches and so cannot tell "Cam 1" from "Cam 10" (the
+   * fixture's nested pair on purpose: the latter contains the former as a
+   * literal prefix). Needed whenever a spec asserts one of the pair is GONE —
+   * `folderHeader(page, "Cam 1")` would keep "finding" it via "Cam 10"'s own
+   * markup even after the real "Cam 1" header had been removed from the DOM.
+   *
+   * Matched against `.section-label` only (the folder-name button), never the
+   * whole header: the header also carries `.section-count` ("3 items"), whose
+   * digits sit right next to the label in the concatenated text and would
+   * otherwise spoil the very digit-boundary check this exists to do. The
+   * regex requires the name not be followed by another digit, so "Cam 1"
+   * matches only the header whose name doesn't continue past the 1.
+   */
+  folderHeaderExact: (page, name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return page.locator(".section-header").filter({
+      has: page.locator(".section-label", {
+        hasText: new RegExp(`${escaped}(?!\\d)`),
+      }),
+    });
+  },
+
+  /** The "N items" count on a header, as a number — the subtree roll-up for a
+   *  folder (real or virtual), parsed the same way `statusBar` parses its own
+   *  counts. `NaN` if the header is showing no count at all. */
+  countOf: async (header) => {
+    const text = await header.locator(".section-count").innerText();
+    const m = text.match(/([\d,]+)\s+items/);
+    return m ? Number(m[1].replace(/,/g, "")) : NaN;
+  },
+
   /** The group's tri-state select checkbox. */
   selectBox: (header) => header.locator(".gla-select"),
   /** "none" | "some" | "all" | "loading" — read off the checkbox's own class,
