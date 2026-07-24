@@ -126,6 +126,17 @@ function collapsedPathCondition(path, dims) {
   return { sql: clauses.join(" AND "), params };
 }
 
+/** POSITIVE predicate: a row whose folder IS `absPath` or is nested under it.
+ * Mirrors server/db/filters.js's folderPath branch verbatim so subtree collapse,
+ * subtree sample, and the folderPath filter all mean the same set of rows. */
+export function folderSubtreeCondition(absPath) {
+  const escaped = absPath.replace(/([\\%_])/g, "\\$1");
+  return {
+    sql: "(folders.abs_path = ? OR folders.abs_path LIKE ? ESCAPE '\\\\')",
+    params: [absPath, escaped + "/%"],
+  };
+}
+
 /** A collapsed path's "shape": which dimensions it pins, in order. Two paths of
  *  the same shape differ only in their values, so they can share one NOT IN. */
 function shapeOf(path) {

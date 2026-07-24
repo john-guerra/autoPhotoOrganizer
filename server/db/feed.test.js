@@ -11,6 +11,7 @@ import {
   photoCountMatchingFilter,
   workingSetTimeline,
   workingSetTimes,
+  folderSubtreeCondition,
 } from "./feed.js";
 
 let cacheDir;
@@ -1583,5 +1584,15 @@ describe("folderPath focus scope — subtree matching", () => {
     expect(
       photoCountMatchingFilter(db, { folderPath: "/photos/trip", minRating: 5 })
     ).toBe(1);
+  });
+});
+
+describe("folderSubtreeCondition (#142)", () => {
+  it("matches the folder itself and any descendant, escaping LIKE metachars", () => {
+    const { sql, params } = folderSubtreeCondition("/L/Cards");
+    // exact OR prefix; prefix uses ESCAPE so a literal % / _ can't wildcard
+    expect(sql).toMatch(/folders\.abs_path = \?/);
+    expect(sql).toMatch(/LIKE \? ESCAPE/);
+    expect(params).toEqual(["/L/Cards", "/L/Cards/%"]);
   });
 });
