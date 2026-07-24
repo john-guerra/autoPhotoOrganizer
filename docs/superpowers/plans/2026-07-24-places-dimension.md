@@ -44,10 +44,10 @@ These were established empirically before writing the plan. Do not re-derive the
 | `server/db/schema.js`                        | `lat`, `lon`, `place_country`, `place_city`, `gps_checked` columns                   | Modify |
 | `server/db/enrich.js`                        | Persist the new fields; extend `PENDING_CONDITION` so already-enriched rows backfill | Modify |
 | `server/db/feed.js`                          | `country` / `city` entries in `DIMENSIONS`                                           | Modify |
-| `server/db/tree.js`                          | `formatTreeLabel` branch                                                             | Modify |
+| `server/db/tree.js`                          | `formatTreeLabel` — verify no branch needed; add a note                              | Modify |
 | `server/db/filters.js`                       | Extend the free-text clause to match place                                           | Modify |
 | `ui/src/lib/dimensions.js`                   | `country` / `city` in `ALL_DIMENSIONS`                                               | Modify |
-| `ui/src/lib/feed.js`                         | `formatGroupValue` branch (twin of `formatTreeLabel`)                                | Modify |
+| `ui/src/lib/feed.js`                         | `formatGroupValue` — same verification as its server twin                            | Modify |
 | `e2e/fixture.mjs`                            | Give some fixture photos GPS                                                         | Modify |
 | `e2e/places.spec.js`                         | End-to-end: group by country, tree counts, search                                    | Create |
 
@@ -63,19 +63,21 @@ These were established empirically before writing the plan. Do not re-derive the
 
 - Create: `server/lib/exifGps.js`
 - Create: `server/lib/exifGps.test.js`
+- Create: `e2e/gpsJpeg.mjs` (Step 7 — shared with the e2e fixture in Task 5)
 - Modify: `server/processing/NodeProcessingService.js` (the `pick` array at ~:330, and `exifToMeta` at :152)
+- Modify: `server/processing/ProcessingService.js` (`MediaMetadata` typedef, ~:36)
 
 **Interfaces:**
 
 - Consumes: nothing from earlier tasks.
 - Produces:
-  - `gpsFromExif(exif) => { lat: number|null, lon: number|null }`
-  - `writeGpsJpeg(path, { lat, lon })` (test helper, exported from the test file's sibling — see Step 1)
+  - `gpsFromExif(exif) => { lat: number|null, lon: number|null }` — from `server/lib/exifGps.js`
+  - `withDateAndGps(jpegBuffer, { date, lat, lon }) => Buffer` — from `e2e/gpsJpeg.mjs`, used by this task's test and by Task 5's fixture
   - `NodeProcessingService.metadata()` results gain `lat` and `lon` (both `number|null`) on the `MediaMetadata` object.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `server/lib/exifGps.test.js`. The fixture helper hand-builds the EXIF APP1 segment because **sharp drops GPS** (verified fact 2).
+Create `server/lib/exifGps.test.js`. Start with the pure mapper only — no files, no exifr. The JPEG round-trip arrives in Step 8, once there is something to round-trip.
 
 ```js
 import { describe, it, expect } from "vitest";
