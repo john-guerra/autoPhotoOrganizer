@@ -4,12 +4,17 @@
  * Everything that decodes, extracts, or measures a media file lives behind this
  * boundary so the engine can be swapped without touching the scanner, index, or
  * UI. Planned adapters:
- *   - NodeProcessingService  (MVP: exiftool-vendored + sharp/libvips + ffmpeg)
+ *   - NodeProcessingService  (current: exifr + sharp/libvips + ffmpeg — NOT
+ *                             exiftool; an earlier docstring said exiftool-vendored
+ *                             and that was never a dependency of the shipped code)
  *   - WasmProcessingService  (future: browser / mobile, no native deps)
  *   - PythonProcessingService (future: ML sidecar for Phase 2 ranking/embeddings)
  *
- * Core performance rule enforced by implementations: NEVER fully decode a RAW
- * during culling. Extract the camera's embedded JPEG preview instead.
+ * Core performance rule the implementations are MEANT to enforce: NEVER fully
+ * decode a RAW during culling — extract the camera's embedded JPEG preview
+ * instead. NOTE: this is not yet implemented (exifr.thumbnail() returns only the
+ * ~160px EXIF thumbnail and throws for many RAWs; no PreviewImage/JpgFromRaw
+ * extractor is wired up). See docs/AI-CODING-REVIEW-2026-07-24.md (Rec 8).
  *
  * This file documents the contract with JSDoc typedefs. Implementations should
  * `extends ProcessingService`.

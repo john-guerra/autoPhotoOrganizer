@@ -1,0 +1,21 @@
+{
+  "$comment": "Shared, checked-in permission baseline so every contributor's agent starts from the same safe allowlist (Rec 6 of docs/AI-CODING-REVIEW-2026-07-24.md). Personal/extra allows go in the gitignored .claude/settings.local.json. Only clearly-safe, read-only or project-local commands belong here — nothing destructive.",
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm test)",
+      "Bash(npm ci)",
+      "Bash(npx vitest *)",
+      "Bash(npx playwright test *)",
+      "Bash(npx prettier *)",
+      "Bash(git status)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(git grep *)",
+      "Bash(curl -s http://127.0.0.1:*)",
+      "Bash(curl -s http://localhost:*)",
+      "mcp__ide__getDiagnostics"
+    ]
+  }
+}

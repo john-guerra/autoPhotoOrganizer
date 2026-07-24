@@ -31,6 +31,13 @@ jobs:
           node-version: "22.12"
           cache: npm
       - run: npm ci
+      # Supply-chain backstop (slopsquatting / known-CVE): fail on a high or
+      # critical advisory in the PRODUCTION dependency tree. Dev-only tooling
+      # advisories don't ship in the Electron bundle (build.files is server/ +
+      # electron/ + dist/ only), so --omit=dev keeps the gate about what users
+      # actually run. Dependabot handles the routine bumps; this catches the ones
+      # that land between its runs.
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run format:check
       - run: npm test
       # A build failure is a shipped-app failure: vitest imports modules

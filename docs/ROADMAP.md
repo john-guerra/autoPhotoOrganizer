@@ -1,10 +1,19 @@
 # AutoGallery v2 — status & roadmap
 
-_Last updated: 2026-07-06. This file is the handoff document: read it together
-with `CLAUDE.md` and `docs/superpowers/specs/2026-07-06-photo-triage-design.md`
-to continue the work with full context._
+> **⚠️ For CURRENT status, read `CHANGELOG.md` (newest first) and the open
+> [GitHub Issues](https://github.com/john-guerra/autoPhotoOrganizer/issues), not
+> this file.** The app is a stable `2.17.x` release; the "Where the project is"
+> log below is **prototype history (v0.1–v0.2)**, kept for context, not a current
+> snapshot. What stays evergreen here is the **Working agreements** section — read
+> that. (Freshness noted 2026-07-24; see `docs/AI-CODING-REVIEW-2026-07-24.md`
+> Rec 2.)
 
-## Where the project is
+_This file is a handoff document: read it together with `CLAUDE.md` and
+`docs/superpowers/specs/2026-07-06-photo-triage-design.md` for full context._
+
+## Where the project was — prototype history (v0.1–v0.2)
+
+_Historical build log; current status lives in `CHANGELOG.md` + GitHub Issues._
 
 **Stage 0 (done)** — repo reorganized: legacy apps archived under `legacy/`
 (read-only reference; the `legacy-snapshot` git tag preserves the pre-reorg

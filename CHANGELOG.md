@@ -6,7 +6,7 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
-## 2.17.11
+## 2.17.13
 
 - **Fold a whole folder as one, or peek at its subfolders (#142).** When grouped
   by folder, clicking a parent folder's fold icon now snapshots its ENTIRE
@@ -18,7 +18,7 @@ user-facing — what you can now do, not how it's built.
   e.g. year then folder falls back to the per-subfolder fold, since a single
   folder can span multiple years.)
 
-## 2.17.10
+## 2.17.12
 
 - **The Add-folder "Choose subfolders" list now behaves like a tree (#137).** A
   parent folder that holds no photos of its own but has camera/date subfolders
@@ -26,7 +26,7 @@ user-facing — what you can now do, not how it's built.
   unchecks the whole card, and unchecking a parent clears every subfolder under
   it. Partly-selected parents show an indeterminate checkbox.
 
-## 2.17.9
+## 2.17.11
 
 - **A big shift-click range now asks first (#141).** Click a photo, then
   shift-click another to select everything in between. If that range is more
@@ -34,25 +34,38 @@ user-facing — what you can now do, not how it's built.
   confirmation appears (with Undo), so a stray shift-click across a big grid
   can't silently grab hundreds.
 
-## 2.17.8
+## 2.17.10
 
 - **The feed no longer goes blank after materializing albums (#139).** When you
   had a folder open (scoped) and moved its photos into albums elsewhere, the
   grid came back empty because it was still pointed at the now-emptied source.
   It now follows the photos to the destination and shows the new albums.
 
-## 2.17.7
+## 2.17.9
 
 - **Reveal in Finder now works for huge selections (#140).** Selecting more
   than 500 photos and choosing Reveal used to be rejected outright. It now
   highlights the first 500 and tells you the rest were omitted (e.g. "Revealed
   500 of 1500 — narrow the selection to highlight specific files").
 
-## 2.17.6
+## 2.17.8
 
 - **A folder path with a trailing slash no longer duplicates its photos in the
   feed (#138).** Scanning `/trip/` and `/trip` now resolve to the same folder
   instead of two, so each photo appears once.
+
+## 2.17.7
+
+- **The search box shows a focus ring for keyboard users.** Tabbing into the
+  toolbar search now has a visible outline (keyboard only — the clean borderless
+  look stays for mouse users).
+
+## 2.17.6
+
+- **Status messages are now announced to screen readers.** The status bar's
+  transient line — "Path copied", "Select all failed", "Removed N — Undo",
+  "Reading metadata…" — is now a live region, so assistive-tech users hear the
+  same "never fail silently" feedback sighted users always got.
 
 ## 2.17.5
 
