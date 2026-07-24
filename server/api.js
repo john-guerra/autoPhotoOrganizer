@@ -57,7 +57,7 @@ import {
   repointPhotoToFolder,
   renameFolderPath,
 } from "./db/photos.js";
-import { hashPendingPhotos } from "./db/hashing.js";
+import { hashAllPending } from "./db/hashing.js";
 import { interactiveRoute, whenIdle } from "./lib/interactive.js";
 import { whyTranscode, playbackPlan } from "./lib/videoPlayback.js";
 import {
@@ -628,7 +628,7 @@ export function registerApi(app) {
             });
           }
           const elapsedMs = Math.round(performance.now() - t0);
-          hashPendingPhotos(db).catch(() => {});
+          hashAllPending(db).catch(() => {});
           const missing = classifyMissing(db, scanStartedAt);
           registry.finish(job.id, {
             root: scanRoot,
@@ -649,7 +649,7 @@ export function registerApi(app) {
     const elapsedMs = Math.round(performance.now() - t0);
 
     // Never blocks the response — see server/db/hashing.js.
-    hashPendingPhotos(db).catch(() => {});
+    hashAllPending(db).catch(() => {});
 
     const items = rows.map((r) => ({
       id: r.id,

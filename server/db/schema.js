@@ -131,6 +131,15 @@ export function applySchema(db) {
   // indexed before this column existed; playback probes those on demand.
   ensureColumn(db, "photos", "video_codec", "TEXT");
   ensureColumn(db, "photos", "pix_fmt", "TEXT");
+  // Content-hash sweep bookkeeping (#12/#86). `hash_attempted` mirrors the
+  // metadata sweep's "mark attempted" trick: an unreadable file keeps
+  // content_hash NULL but sets hash_attempted=1 so the background hasher
+  // (db/hashing.js hashAllPending) can't re-select the same failing rows forever.
+  // No dedicated pending-index is needed (unlike idx_photos_pending_meta): the
+  // existing idx_photos_content_hash already turns the per-batch
+  // "content_hash IS NULL" lookup into an index SEARCH, not a 100k full scan
+  // (verified via EXPLAIN QUERY PLAN), and LIMIT caps it regardless.
+  ensureColumn(db, "photos", "hash_attempted", "INTEGER NOT NULL DEFAULT 0");
   // The metadata sweep's to-do list is "width IS NULL" (see db/enrich.js). It
   // runs once per batch over the whole table, so without this it re-scans 100k+
   // rows on every one of the ~2,000 batches a full sweep takes.
