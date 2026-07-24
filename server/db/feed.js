@@ -115,12 +115,19 @@ function pathDims(path, dims) {
 }
 
 /**
- * @param {Array<{dimension:string, value:string}>} path
+ * @param {Array<{dimension:string, value:string, subtree?:boolean}>} path
  * @param {Array<{name:string, expr:string}>} dims
  * @returns {{sql:string, params:any[]}} the POSITIVE condition ("this row is
  *   inside that collapsed group"), used for its count.
  */
 function collapsedPathCondition(path, dims) {
+  // A subtree-collapsed folder segment (only ever the sole/last segment —
+  // subtree folding is a whole-folder-and-everything-under-it fold, not a
+  // per-value exact match) needs the prefix predicate, not `expr = ?`.
+  const last = path[path.length - 1];
+  if (last?.subtree) {
+    return folderSubtreeCondition(last.value);
+  }
   const clauses = pathDims(path, dims).map((d) => `${d.expr} = ?`);
   const params = path.map((p) => p.value);
   return { sql: clauses.join(" AND "), params };
@@ -156,16 +163,27 @@ function shapeOf(path) {
  * SQLITE_MAX_VARIABLE_NUMBER (32,766), which is far past any plausible group
  * count.
  *
- * @param {Array<Array<{dimension:string, value:string}>>} collapsedPaths
+ * @param {Array<Array<{dimension:string, value:string, subtree?:boolean}>>} collapsedPaths
  * @param {Array<{name:string, expr:string}>} dims
  * @returns {{sql:string, params:any[]}}
  */
 function exclusionClause(collapsedPaths, dims) {
   if (!collapsedPaths.length) return { sql: "1=1", params: [] };
 
+  // Subtree folds are a handful at most (a user manually folding a couple of
+  // parent folders), never one-per-group like "Collapse all" — so the
+  // expression-tree-depth ceiling that forced the tuple NOT IN optimisation
+  // below doesn't apply to them, and they're each just AND'd in directly.
+  const exactPaths = collapsedPaths.filter(
+    (path) => !path[path.length - 1]?.subtree
+  );
+  const subtreePaths = collapsedPaths.filter(
+    (path) => path[path.length - 1]?.subtree
+  );
+
   /** @type {Map<string, Array<Array<{dimension:string, value:string}>>>} */
   const byShape = new Map();
-  for (const path of collapsedPaths) {
+  for (const path of exactPaths) {
     const shape = shapeOf(path);
     if (!byShape.has(shape)) byShape.set(shape, []);
     byShape.get(shape).push(path);
@@ -181,6 +199,14 @@ function exclusionClause(collapsedPaths, dims) {
     for (const path of paths) params.push(...path.map((p) => p.value));
   }
   // One term per shape — in practice one or two, never one per group.
+
+  for (const path of subtreePaths) {
+    const last = path[path.length - 1];
+    const { sql, params: subParams } = folderSubtreeCondition(last.value);
+    parts.push(`NOT (${sql})`);
+    params.push(...subParams);
+  }
+
   return { sql: parts.join(" AND "), params };
 }
 
@@ -348,16 +374,38 @@ function keyPassesSeek(key, focusValues, dims, wantAfter) {
  * feed page, and better-sqlite3 is synchronous, so that ran on the event loop
  * with thumbnails queued behind it.
  *
- * @param {Array<Array<{dimension:string, value:string}>>} paths
+ * @param {Array<Array<{dimension:string, value:string, subtree?:boolean}>>} paths
  */
 function countCollapsedPaths(db, paths, dims, filter) {
   /** @type {Map<string, number>} */
   const counts = new Map();
   if (!paths.length) return counts;
 
+  const exactPaths = paths.filter((path) => !path[path.length - 1]?.subtree);
+  const subtreePaths = paths.filter((path) => path[path.length - 1]?.subtree);
+
+  // Subtree folds are a handful at most, so a per-path COUNT (rather than the
+  // grouped-by-shape query below) is fine — the same reasoning as
+  // exclusionClause's subtree branch.
+  for (const path of subtreePaths) {
+    const last = path[path.length - 1];
+    const { sql, params: subParams } = folderSubtreeCondition(last.value);
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) AS count
+           FROM photos JOIN folders ON folders.id = photos.folder_id
+          WHERE photos.stale = 0 AND (${filter.sql})
+            AND ${sql}`
+      )
+      .get(...filter.params, ...subParams);
+    counts.set(placeholderId(path), row.count);
+  }
+
+  if (!exactPaths.length) return counts;
+
   /** @type {Map<string, Array<Array<{dimension:string,value:string}>>>} */
   const byShape = new Map();
-  for (const path of paths) {
+  for (const path of exactPaths) {
     const shape = shapeOf(path);
     if (!byShape.has(shape)) byShape.set(shape, []);
     byShape.get(shape).push(path);

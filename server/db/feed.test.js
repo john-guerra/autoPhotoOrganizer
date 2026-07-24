@@ -672,6 +672,28 @@ describe("getFeedPage — collapse-exclusion", () => {
     expect(placeholders).toHaveLength(FOLDERS);
     expect(placeholders.every((p) => p.count === 1)).toBe(true);
   });
+
+  it("a subtree-collapsed folder yields ONE placeholder with the whole-subtree count and hides descendants (#142)", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    upsertScan(db, "/p/Cards/Cam 1", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 2, kind: "image" },
+    ]);
+    upsertScan(db, "/p/Cards/Cam 10", 1, [
+      { name: "c.jpg", size: 1, mtimeMs: 3, kind: "image" },
+    ]);
+    const { items } = getFeedPage(db, {
+      groupBy: ["folder"],
+      collapsed: [[{ dimension: "folder", value: "/p/Cards", subtree: true }]],
+      after: 100,
+    });
+    const placeholders = items.filter((i) => i.collapsed);
+    const reals = items.filter((i) => !i.collapsed && i.kind);
+    expect(placeholders).toHaveLength(1);
+    expect(placeholders[0].count).toBe(3); // 2 + 1 across the subtree
+    expect(reals).toHaveLength(0); // no descendant photos leak in
+  });
 });
 
 describe("getFeedPage — in-place collapsed placeholder", () => {
