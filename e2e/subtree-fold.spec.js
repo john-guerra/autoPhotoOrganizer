@@ -91,11 +91,16 @@ test.describe("@p1 subtree fold (#142)", () => {
 
     await group.toggle(cards).click({ modifiers: ["Shift"] });
     // Bands are virtualized (see the plain-click test); scroll both cameras'
-    // rows into view so their strips have actually mounted.
-    await group
-      .folderHeaderExact(page, "Cam 10")
-      .first()
-      .scrollIntoViewIfNeeded();
+    // rows into view so their strips have actually mounted. The shift-fold
+    // rebuilds the feed, so the row can DETACH mid-scroll ("Element is not
+    // attached to the DOM" — seen only under CI's slower timing); retry through
+    // the rebuild by re-resolving the locator each attempt.
+    await expect(async () => {
+      await group
+        .folderHeaderExact(page, "Cam 10")
+        .first()
+        .scrollIntoViewIfNeeded();
+    }).toPass();
 
     // Both cameras still have their OWN header, and their own strip — not one
     // aggregated band standing in for both.
