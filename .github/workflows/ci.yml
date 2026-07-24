@@ -59,7 +59,7 @@ jobs:
       - run: npm run test:e2e
       # A red e2e run is worth nothing if you can't see WHAT the page looked
       # like: the config already keeps a trace and a screenshot on failure.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
