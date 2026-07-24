@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.0
+
+- **Packaged release of the 2.17.x line** — cut as native macOS / Windows /
+  Linux builds. Bundles: the trailing-slash feed de-dup (#138), reveal-in-Finder
+  for huge selections (#140), the empty-feed-after-materialize fix (#139), the
+  shift-click range confirmation (#141), the Add-folder subfolder-tree cascade
+  (#137), and whole-folder subtree fold + aggregate snapshot (#142).
+
 ## 2.17.13
 
 - **Fold a whole folder as one, or peek at its subfolders (#142).** When grouped
