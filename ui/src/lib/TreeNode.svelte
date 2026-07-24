@@ -5,16 +5,13 @@
   import { shortLeafLabel } from "./labels.js";
   import { labelParts, EMPTY_STATS } from "./folderLabel.js";
   import { descendantGroups } from "./folderTree.js";
-  import {
-    AGGREGATE_SNAPSHOT_RENDERER_ID,
-    AGGREGATE_COLLAPSED_RENDERER_ID,
-  } from "./folderSections.js";
   import GroupStateIcon from "./GroupStateIcon.svelte";
   import FolderIcon from "./FolderIcon.svelte";
   import {
     getRenderer,
     nextRendererId,
-    DEFAULT_RENDERER_ID,
+    nextAggregateRendererId,
+    currentAggregateRendererId,
   } from "./groupRenderers.js";
   // Svelte 5 deprecates <svelte:self> in favor of a self-import — same
   // recursive component, no deprecation warning.
@@ -129,12 +126,20 @@
   // A PARENT row can itself be folded as one whole-subtree band. Checked
   // before the per-group/virtual-ancestor cases below so an aggregated
   // parent's icon reflects that (a strip or a bar), never its (suppressed)
-  // descendants' individual states.
+  // descendants' individual states. currentAggregateRendererId (groupRenderers.js)
+  // is the SAME read App.svelte's cycleSubtreeAggregate uses — one pure
+  // function, not two hand-kept ternaries that can drift (#142 review: this
+  // one used to duplicate App.svelte's, and App's copy had gone stale with
+  // the wrong constant). Guarded by aggregateKeys.has(subtreeKey) first, so
+  // it's never asked to return "grid" here — isParent is false for anything
+  // that isn't a real/virtual folder parent.
   let aggregateRendererId = $derived(
     isParent && aggregateKeys.has(subtreeKey)
-      ? aggregateSnapshotKeys.has(subtreeKey)
-        ? AGGREGATE_SNAPSHOT_RENDERER_ID
-        : AGGREGATE_COLLAPSED_RENDERER_ID
+      ? currentAggregateRendererId(
+          subtreeKey,
+          aggregateKeys,
+          aggregateSnapshotKeys
+        )
       : null
   );
 
@@ -160,20 +165,10 @@
   let iconState = $derived(
     rendererId === "mixed" ? "mixed" : getRenderer(rendererId).icon
   );
-  // The aggregate cycle's own order (#142) — grid → aggregate-snapshot →
-  // aggregate-collapsed → grid — mirrors App.svelte's AGGREGATE_CYCLE (kept
-  // out of GROUP_RENDERERS itself; see groupRenderers.js's note). Only used
-  // for a PARENT row's tooltip, so a plain leaf's preview still comes from
-  // the ordinary per-group nextRendererId.
-  const AGGREGATE_CYCLE = [
-    DEFAULT_RENDERER_ID,
-    AGGREGATE_SNAPSHOT_RENDERER_ID,
-    AGGREGATE_COLLAPSED_RENDERER_ID,
-  ];
-  function nextAggregateRendererId(id) {
-    const i = AGGREGATE_CYCLE.indexOf(id);
-    return AGGREGATE_CYCLE[((i === -1 ? 0 : i) + 1) % AGGREGATE_CYCLE.length];
-  }
+  // nextAggregateRendererId (groupRenderers.js, shared with App.svelte's
+  // cycleSubtreeAggregate — no more hand-copied AGGREGATE_CYCLE here). Only
+  // used for a PARENT row's tooltip, so a plain leaf's preview still comes
+  // from the ordinary per-group nextRendererId.
   let toggleTitle = $derived(
     rendererId === "mixed"
       ? "The groups under here are shown differently — click to show them all"

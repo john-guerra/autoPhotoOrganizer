@@ -69,3 +69,83 @@ export function foldTargetFor({ isParent, shiftKey }) {
   if (!isParent) return "leaf";
   return shiftKey ? "perLeaf" : "aggregate";
 }
+
+/**
+ * If `path` is inside (at, or a descendant of) any subtree currently folded
+ * as one AGGREGATE unit (#142), the key of that aggregated ANCESTOR — the
+ * key jumpToPath must actually look for in the DOM, since a descendant's own
+ * placeholder row doesn't exist once an ancestor stands for its whole
+ * subtree. `null` if `path` isn't under anything aggregated.
+ *
+ * `aggregateKeys` holds each aggregated ancestor's OWN `pathKey` — the
+ * identical string its plain leaf entry would have (`pathKey` encodes only
+ * `[dimension, value]`; the `subtree` flag never changes it — see
+ * App.svelte's `aggregateKeys` doc comment) — so this can't be answered by
+ * `isPathUnder`/`isKeyUnder`'s ARRAY-prefix test: a folder always occupies
+ * exactly one `{dimension:"folder"}` path segment, however deep it sits
+ * (folderTree.js's trie, not extra path length, carries the nesting), so a
+ * descendant folder's path is the SAME LENGTH as its ancestor's, just a
+ * different string value.
+ *
+ * Folder nesting is a fact about the `abs_path` STRING instead (see
+ * folderTree.js's `chainTo`/`relativeTo`, the existing precedent for this
+ * exact test): "/L/Cards/Cam1" is under "/L/Cards" because the string is a
+ * `/`-prefix of it, not because of array shape.
+ *
+ * Every OTHER groupBy segment (year, camera, … anything above the folder
+ * dimension) must match EXACTLY — an aggregated "2024/Cards" must not also
+ * swallow "2023/Cards", which merely shares a folder value.
+ *
+ * @param {Array<{dimension:string,value:string}>} path
+ * @param {Set<string>} aggregateKeys  pathKey() of every aggregated ancestor
+ * @returns {string|null}
+ */
+export function aggregateAncestorKeyFor(path, aggregateKeys) {
+  if (!Array.isArray(path) || !path.length || !aggregateKeys?.size) {
+    return null;
+  }
+  const folderIdx = path.findIndex((seg) => seg?.dimension === "folder");
+  if (folderIdx === -1) return null;
+  const value = path[folderIdx]?.value;
+  if (value == null) return null;
+
+  for (const rawKey of aggregateKeys) {
+    let pairs;
+    try {
+      pairs = JSON.parse(rawKey);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(pairs) || pairs.length !== folderIdx + 1) continue;
+    const prefixMatches = path
+      .slice(0, folderIdx)
+      .every(
+        (seg, i) =>
+          pairs[i]?.[0] === seg.dimension && pairs[i]?.[1] === seg.value
+      );
+    if (!prefixMatches) continue;
+    const ancestorValue = pairs[folderIdx]?.[1];
+    if (ancestorValue == null) continue;
+    if (value === ancestorValue || value.startsWith(`${ancestorValue}/`)) {
+      return rawKey;
+    }
+  }
+  return null;
+}
+
+/**
+ * Is `path` inside (at, or a descendant of) any aggregated subtree? Used by
+ * `jumpToPath`'s folded-check: a jump/scan can target a real folder group
+ * whose OWN collapsedPaths entry was purged by `cycleSubtreeAggregate`
+ * because an ANCESTOR now stands for its whole subtree (it has no entry of
+ * its own to find) — so the 3-arg `rendererIdFor` alone reports "grid" for
+ * it, and this closes that gap. See `aggregateAncestorKeyFor` for the actual
+ * containment test.
+ *
+ * @param {Array<{dimension:string,value:string}>} path
+ * @param {Set<string>} aggregateKeys
+ * @returns {boolean}
+ */
+export function isPathUnderAggregate(path, aggregateKeys) {
+  return aggregateAncestorKeyFor(path, aggregateKeys) != null;
+}

@@ -105,6 +105,62 @@ export const AGGREGATE_COLLAPSED = {
 /** Resolvable by `getRenderer` but never cycled through. */
 const AGGREGATE_RENDERERS = [AGGREGATE_SNAPSHOT, AGGREGATE_COLLAPSED];
 
+/**
+ * The aggregate cycle's own order (#142) — grid → aggregate-snapshot →
+ * aggregate-collapsed → grid — the whole-subtree counterpart of
+ * GROUP_RENDERERS' plain grid → snapshot → collapsed cycle. Deliberately a
+ * SEPARATE array from GROUP_RENDERERS (see its own note above): mixing the
+ * two would let a plain single-group click land on an aggregate id, or vice
+ * versa.
+ *
+ * Single source of truth: this used to be hand-copied in both App.svelte and
+ * TreeNode.svelte (#142 review) — a real risk, since the two copies could
+ * silently drift. Both now import this one array (and the two functions
+ * below) instead.
+ */
+export const AGGREGATE_CYCLE = [
+  DEFAULT_RENDERER_ID,
+  AGGREGATE_SNAPSHOT.id,
+  AGGREGATE_COLLAPSED.id,
+];
+
+/** Next renderer in the AGGREGATE cycle (wraps). An id not in the cycle
+ *  (including `undefined`) is treated as "grid" — `indexOf` returns -1, and
+ *  `-1 + 1 === 0` would otherwise silently re-select "grid" itself instead of
+ *  advancing to "aggregate-snapshot". @param {string|undefined} id */
+export function nextAggregateRendererId(id) {
+  const i = AGGREGATE_CYCLE.indexOf(id);
+  return AGGREGATE_CYCLE[((i === -1 ? 0 : i) + 1) % AGGREGATE_CYCLE.length];
+}
+
+/**
+ * The pure "what aggregate state is this key currently in?" read — the
+ * counterpart to `rendererIdFor`'s per-leaf read, but for a whole aggregated
+ * subtree. Reused by cycleSubtreeAggregate (App.svelte) and by the tree row's
+ * own icon state (TreeNode.svelte) so both agree on the SAME three answers by
+ * construction, rather than by keeping two inline ternaries in sync by hand.
+ *
+ * `key` must be checked against `aggregateKeys` FIRST: `aggregateSnapshotKeys`
+ * is only ever a subset of it, and a key present in the snapshot set alone
+ * (with a stale/missing aggregate entry) must still read as "grid", not
+ * "aggregate-snapshot".
+ *
+ * @param {string} key                        pathKey() of the subtree's own path
+ * @param {Set<string>} aggregateKeys         every key currently aggregated (either flavor)
+ * @param {Set<string>} aggregateSnapshotKeys  the subset shown as a strip, not a bar
+ * @returns {"grid"|"aggregate-snapshot"|"aggregate-collapsed"}
+ */
+export function currentAggregateRendererId(
+  key,
+  aggregateKeys,
+  aggregateSnapshotKeys
+) {
+  if (!aggregateKeys.has(key)) return DEFAULT_RENDERER_ID;
+  return aggregateSnapshotKeys.has(key)
+    ? AGGREGATE_SNAPSHOT.id
+    : AGGREGATE_COLLAPSED.id;
+}
+
 /** @param {string|undefined} id @returns {GroupRenderer} */
 export function getRenderer(id) {
   return (

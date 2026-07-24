@@ -6,6 +6,9 @@ import {
   nextRendererId,
   isServerCollapsed,
   cycleAllLabel,
+  AGGREGATE_CYCLE,
+  nextAggregateRendererId,
+  currentAggregateRendererId,
 } from "./groupRenderers.js";
 import SnapshotStrip from "./SnapshotStrip.svelte";
 
@@ -80,6 +83,93 @@ describe("aggregate subtree renderers (#142)", () => {
     // nextRendererId only ever cycles grid/snapshot/collapsed, unaffected by
     // the aggregate ids being resolvable via getRenderer.
     expect(nextRendererId("collapsed")).toBe("grid");
+  });
+});
+
+describe("the aggregate cycle (#142 review)", () => {
+  // The bug that shipped in 3a38c4d: cycleSubtreeAggregate's `current` read
+  // used SNAPSHOT_ID ("snapshot") where AGGREGATE_SNAPSHOT_RENDERER_ID
+  // ("aggregate-snapshot") belonged — a DIFFERENT string that AGGREGATE_CYCLE
+  // never contains, so `indexOf` returned -1, `current` silently fell back to
+  // "grid", and a parent's 2nd plain-click recomputed "aggregate-snapshot"
+  // forever: it could never advance to the collapsed bar or return to grid.
+  // These assertions fail immediately if that swap is reintroduced (verified
+  // by hand: temporarily changing AGGREGATE_SNAPSHOT.id back to "snapshot" in
+  // groupRenderers.js turns both `currentAggregateRendererId` cases red).
+
+  it("currentAggregateRendererId reads grid/aggregate-snapshot/aggregate-collapsed, never plain snapshot", () => {
+    const key = "the-key";
+    expect(currentAggregateRendererId(key, new Set(), new Set())).toBe("grid");
+    expect(
+      currentAggregateRendererId(key, new Set([key]), new Set([key]))
+    ).toBe("aggregate-snapshot"); // NOT "snapshot" — that's a different renderer id
+    expect(currentAggregateRendererId(key, new Set([key]), new Set())).toBe(
+      "aggregate-collapsed"
+    );
+  });
+
+  it("a key only in aggregateSnapshotKeys (no aggregateKeys entry) is still grid", () => {
+    // aggregateSnapshotKeys is documented as always a SUBSET of aggregateKeys;
+    // a stale/missing aggregateKeys entry must not be masked by the snapshot set.
+    const key = "orphaned-snapshot-key";
+    expect(currentAggregateRendererId(key, new Set(), new Set([key]))).toBe(
+      "grid"
+    );
+  });
+
+  it("cycles grid → aggregate-snapshot → aggregate-collapsed → grid", () => {
+    expect(nextAggregateRendererId("grid")).toBe("aggregate-snapshot");
+    expect(nextAggregateRendererId("aggregate-snapshot")).toBe(
+      "aggregate-collapsed"
+    );
+    expect(nextAggregateRendererId("aggregate-collapsed")).toBe("grid");
+  });
+
+  it("full round trip via currentAggregateRendererId + nextAggregateRendererId, from real Set state", () => {
+    const key = "cards-subtree";
+    let aggregateKeys = new Set();
+    let aggregateSnapshotKeys = new Set();
+
+    // 1st click: grid → aggregate-snapshot
+    let current = currentAggregateRendererId(
+      key,
+      aggregateKeys,
+      aggregateSnapshotKeys
+    );
+    expect(current).toBe("grid");
+    let next = nextAggregateRendererId(current);
+    expect(next).toBe("aggregate-snapshot");
+    aggregateKeys = new Set([key]);
+    aggregateSnapshotKeys = new Set([key]);
+
+    // 2nd click: aggregate-snapshot → aggregate-collapsed (this is the step
+    // that stayed stuck on aggregate-snapshot before the fix).
+    current = currentAggregateRendererId(
+      key,
+      aggregateKeys,
+      aggregateSnapshotKeys
+    );
+    expect(current).toBe("aggregate-snapshot");
+    next = nextAggregateRendererId(current);
+    expect(next).toBe("aggregate-collapsed");
+    aggregateSnapshotKeys = new Set(); // no longer the snapshot flavor
+
+    // 3rd click: aggregate-collapsed → grid
+    current = currentAggregateRendererId(
+      key,
+      aggregateKeys,
+      aggregateSnapshotKeys
+    );
+    expect(current).toBe("aggregate-collapsed");
+    next = nextAggregateRendererId(current);
+    expect(next).toBe("grid");
+  });
+
+  it("AGGREGATE_CYCLE never mixes with the plain per-group GROUP_RENDERERS cycle", () => {
+    const plainIds = GROUP_RENDERERS.map((r) => r.id);
+    for (const id of AGGREGATE_CYCLE) {
+      if (id !== DEFAULT_RENDERER_ID) expect(plainIds).not.toContain(id);
+    }
   });
 });
 

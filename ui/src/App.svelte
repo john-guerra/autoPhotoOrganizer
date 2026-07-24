@@ -107,8 +107,15 @@
     nextRendererId,
     DEFAULT_RENDERER_ID,
     SNAPSHOT_ID,
+    nextAggregateRendererId,
+    currentAggregateRendererId,
   } from "./lib/groupRenderers.js";
-  import { isPathUnder, isKeyUnder, foldTargetFor } from "./lib/foldPaths.js";
+  import {
+    isPathUnder,
+    isKeyUnder,
+    foldTargetFor,
+    aggregateAncestorKeyFor,
+  } from "./lib/foldPaths.js";
   import ServerBanner from "./lib/ServerBanner.svelte";
   import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
@@ -2229,10 +2236,21 @@
       // single placeholder row. nextSelectable() skips placeholders, so it used
       // to silently focus the NEXT group's photos and the jump appeared to do
       // nothing. Land on the group's own row instead.
-      const targetKey = pathKey(path);
-      const folded = isServerCollapsed(
-        rendererIdFor(path, collapsedKeys, snapshotGroupKeys)
-      );
+      // A path whose OWN entry is folded (rendererIdFor) is one case; a path
+      // that is a DESCENDANT of an aggregated ancestor (#142) is another —
+      // cycleSubtreeAggregate purges the descendant's own collapsedPaths
+      // entry and represents it only via the ancestor's one subtree
+      // placeholder, so rendererIdFor alone (which only ever sees an EXACT
+      // key match) reports "grid" for it and this jump would otherwise try
+      // to select photos that were never sent. aggregateAncestorKeyFor gives
+      // back the ancestor's key so the DOM lookup below targets the row that
+      // actually exists.
+      const aggregateAncestorKey = aggregateAncestorKeyFor(path, aggregateKeys);
+      const targetKey = aggregateAncestorKey ?? pathKey(path);
+      const folded =
+        isServerCollapsed(
+          rendererIdFor(path, collapsedKeys, snapshotGroupKeys)
+        ) || aggregateAncestorKey != null;
       if (folded) {
         await tick();
         const el = [
@@ -3085,22 +3103,6 @@
     return { update: mark };
   }
 
-  /** The aggregate cycle's own order (#142) — grid → aggregate-snapshot →
-   *  aggregate-collapsed → grid — the whole-subtree counterpart of
-   *  GROUP_RENDERERS' plain grid → snapshot → collapsed cycle. Kept out of
-   *  GROUP_RENDERERS itself (see groupRenderers.js's own note): that array is
-   *  the per-group toggle's cycle, and mixing the two would let a plain
-   *  single-group click land on an aggregate id, or vice versa. */
-  const AGGREGATE_CYCLE = [
-    DEFAULT_RENDERER_ID,
-    AGGREGATE_SNAPSHOT_RENDERER_ID,
-    AGGREGATE_COLLAPSED_RENDERER_ID,
-  ];
-  function nextAggregateRendererId(id) {
-    const i = AGGREGATE_CYCLE.indexOf(id);
-    return AGGREGATE_CYCLE[((i === -1 ? 0 : i) + 1) % AGGREGATE_CYCLE.length];
-  }
-
   /** Tooltip for the group toggle, from the registry (no parallel string table:
    *  a new renderer must not need a second edit somewhere else). `isParent`
    *  (#142) picks which cycle a plain click on THIS row would advance —
@@ -3191,11 +3193,19 @@
     // aggregate fold of this exact subtree is keyed by that value regardless.
     const descendantKeys = new Set([path, ...(groupPaths ?? [])].map(pathKey));
 
-    const current = !aggregateKeys.has(key)
-      ? DEFAULT_RENDERER_ID
-      : aggregateSnapshotKeys.has(key)
-        ? SNAPSHOT_ID
-        : AGGREGATE_COLLAPSED_RENDERER_ID; // the aggregate cycle's 3rd/"collapsed" slot
+    // currentAggregateRendererId (groupRenderers.js) is the single writer of
+    // this read — it used to be inlined here with SNAPSHOT_ID ("snapshot")
+    // where AGGREGATE_SNAPSHOT_RENDERER_ID ("aggregate-snapshot") belonged: a
+    // DIFFERENT string, so `key`'s membership in `aggregateSnapshotKeys` never
+    // matched the AGGREGATE_CYCLE entry, `current` fell back to `grid`, and
+    // `next` recomputed as `aggregate-snapshot` on every click — a parent's
+    // 2nd plain-click never advanced to the collapsed bar, and never returned
+    // to expanded. Covered by groupRenderers.test.js's aggregate-cycle suite.
+    const current = currentAggregateRendererId(
+      key,
+      aggregateKeys,
+      aggregateSnapshotKeys
+    );
     const next = nextAggregateRendererId(current);
 
     // A subtree fold supersedes every plain fold beneath it — this folder's
