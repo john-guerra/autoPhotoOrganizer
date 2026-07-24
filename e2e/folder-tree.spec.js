@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openApp, trackPageErrors, tree } from "./helpers.js";
+import { openApp, trackPageErrors, tree, group } from "./helpers.js";
 
 /**
  * The folder tree and its labels.
@@ -122,22 +122,26 @@ test("a header keeps the folder's name when the path is too long to fit", async 
   expect(errors).toEqual([]);
 });
 
-test("a virtual ancestor folds every group beneath it", async ({ page }) => {
+test("a virtual ancestor plain-folds its whole subtree as one aggregate (#142)", async ({
+  page,
+}) => {
   const errors = trackPageErrors(page);
   await openApp(page, { groupBy: ["folder"] });
 
+  // Both cameras start as their own headers.
+  await expect(group.folderHeaderExact(page, "Cam 1")).toHaveCount(1);
+  await expect(group.folderHeaderExact(page, "Cam 10")).toHaveCount(1);
+
+  // "Cards" owns no photos of its own, so before #142 its fold icon was a no-op
+  // (it had no group of its own to collapse). Now a plain click from the TREE
+  // aggregates the WHOLE subtree as one unit — the per-camera headers disappear
+  // and Cards stands for both (the feed-header path is covered by
+  // subtree-fold.spec.js; this asserts the tree icon drives the same fold).
   const cardsIcon = tree.node(page, "Cards").locator(".tree-collapse-icon");
   await cardsIcon.click();
 
-  // "Cards" has no photos of its own, so it has no group of its own to collapse —
-  // it has to act on the groups beneath it, or the click is a no-op.
-  for (const name of ["Cam 1", "Cam 10"]) {
-    const header = page.locator(".section-header", { hasText: name }).first();
-    const icon = await header
-      .locator(".section-toggle-icon")
-      .getAttribute("class");
-    expect(icon).toContain("not-grid");
-  }
+  await expect(group.folderHeaderExact(page, "Cam 1")).toHaveCount(0);
+  await expect(group.folderHeaderExact(page, "Cam 10")).toHaveCount(0);
 
   expect(errors).toEqual([]);
 });
