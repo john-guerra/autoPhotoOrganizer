@@ -1,0 +1,22 @@
+# Automated dependency updates — the backstop under the manual "keep everything
+# on latest" workflow (see docs/AI-CODING-READINESS-CHECKLIST.md). Weekly PRs so
+# a known-CVE or a stale transitive dep can't sit unnoticed; dev-tooling updates
+# are grouped into one PR to keep the noise down.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
