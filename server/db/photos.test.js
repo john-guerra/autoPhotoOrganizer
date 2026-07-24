@@ -100,6 +100,22 @@ describe("upsertScan", () => {
     expect(count).toBe(1);
   });
 
+  it("treats a trailing-slash path as the same folder (no duplicate rows/photos)", () => {
+    // A path that arrives with a trailing separator (folder picker, pasted
+    // path, recursive root) must not become a SECOND folders row for the same
+    // physical directory — that row holds the same files and the feed then
+    // renders every photo twice (#138).
+    const db = getDb();
+    upsertScan(db, "/photos/trip", 1, FILES);
+    upsertScan(db, "/photos/trip/", 1, FILES);
+    const folders = db.prepare("SELECT COUNT(*) AS c FROM folders").get().c;
+    expect(folders).toBe(1);
+    const photos = db
+      .prepare("SELECT COUNT(*) AS c FROM photos WHERE stale = 0")
+      .get().c;
+    expect(photos).toBe(FILES.length);
+  });
+
   it("stamps first_seen_at on insert and never changes it on rescan", () => {
     const db = getDb();
     const [first] = upsertScan(db, "/photos/trip", 1, [FILES[0]]);

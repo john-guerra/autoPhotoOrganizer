@@ -1,5 +1,6 @@
 import { join, dirname, basename, sep } from "node:path";
 import { volumeRootForPath, upsertVolume } from "./volumes.js";
+import { normalizeFolderPath } from "../lib/normalizeFolderPath.js";
 
 /**
  * @param {import("better-sqlite3").Database} db
@@ -9,6 +10,9 @@ import { volumeRootForPath, upsertVolume } from "./volumes.js";
  * @returns {Array<{id: number, name: string, size: number, mtimeMs: number, rating: number, preferredCover: number}>}
  */
 export function upsertScan(db, folderAbsPath, volumeId, files) {
+  // Identity is the exact abs_path string (UNIQUE + ON CONFLICT below), so a
+  // trailing separator would fork the same folder into two rows — see #138.
+  folderAbsPath = normalizeFolderPath(folderAbsPath);
   const now = Date.now();
 
   db.prepare(

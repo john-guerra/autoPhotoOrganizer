@@ -37,6 +37,7 @@ import { nextAvailablePath } from "./lib/nextAvailablePath.js";
 import { listDirsRecursive } from "./lib/walkDirs.js";
 import { listSubdirsWithCounts } from "./lib/subdirs.js";
 import { isInsideDir } from "./lib/insideDir.js";
+import { normalizeFolderPath } from "./lib/normalizeFolderPath.js";
 import { getDb } from "./db/connection.js";
 import {
   volumeRootForPath,
@@ -567,6 +568,11 @@ export function registerApi(app) {
     if (!st.isDirectory()) {
       return res.status(400).json({ error: `not a directory: ${dir}` });
     }
+    // Canonicalise before anything keys on it: the recursive walk seeds its
+    // first entry from this exact string, and a trailing slash would fork the
+    // same folder into a duplicate row whose photos then double in the feed
+    // (#138). upsertScan normalises again as the identity backstop.
+    const scanRoot = normalizeFolderPath(dir);
 
     const db = getDb();
     // Every subfolder is under `dir`, hence on the same physical volume — one
@@ -579,7 +585,7 @@ export function registerApi(app) {
       const dirs =
         dirsSubset && dirsSubset.length
           ? dirsSubset
-          : await listDirsRecursive(dir);
+          : await listDirsRecursive(scanRoot);
       const job = registry.create("scan", {
         label: `Scan ${basename(dir)}`,
         total: dirs.length,
@@ -625,7 +631,7 @@ export function registerApi(app) {
           hashPendingPhotos(db).catch(() => {});
           const missing = classifyMissing(db, scanStartedAt);
           registry.finish(job.id, {
-            root: dir,
+            root: scanRoot,
             count,
             folders,
             elapsedMs,
@@ -638,8 +644,8 @@ export function registerApi(app) {
       return;
     }
 
-    const files = await processing.scan(dir);
-    const rows = upsertScan(db, dir, volumeId, files);
+    const files = await processing.scan(scanRoot);
+    const rows = upsertScan(db, scanRoot, volumeId, files);
     const elapsedMs = Math.round(performance.now() - t0);
 
     // Never blocks the response — see server/db/hashing.js.
