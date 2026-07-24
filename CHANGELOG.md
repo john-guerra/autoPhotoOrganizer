@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.9
+
+- **A big shift-click range now asks first (#141).** Click a photo, then
+  shift-click another to select everything in between. If that range is more
+  than 50 photos, an inline "Select all N photos in the shift-click range?"
+  confirmation appears (with Undo), so a stray shift-click across a big grid
+  can't silently grab hundreds.
+
 ## 2.17.8
 
 - **The feed no longer goes blank after materializing albums (#139).** When you

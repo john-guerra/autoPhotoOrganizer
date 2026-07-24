@@ -71,3 +71,16 @@ export function rangeIds(photos, a, b) {
   }
   return ids;
 }
+
+/** A shift-click range longer than this asks before selecting. A range is a
+ * mouse gesture that's easy to overshoot across a big grid, so the floor is far
+ * lower than the whole-group threshold (BIG_GROUP_SELECT, 1000) — 51+ photos in
+ * one shift-click is worth a "did you mean that?" (issue #141). */
+export const RANGE_SELECT_CONFIRM = 50;
+
+/** Should a shift-click range of `count` photos be confirmed before selecting?
+ * Only ever asked of a SELECT — a range never deselects, and the escape hatch
+ * (clear / undo) must never itself ask a question. */
+export function needsRangeConfirm(count) {
+  return count > RANGE_SELECT_CONFIRM;
+}

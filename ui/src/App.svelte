@@ -153,6 +153,7 @@
     withIds,
     withoutIds,
     rangeIds,
+    needsRangeConfirm,
   } from "./lib/selectionOps.js";
   import { combo } from "./lib/platform.js";
   import TimelineFilter from "./lib/TimelineFilter.svelte";
@@ -1810,9 +1811,19 @@
 
   /** Add every real photo between two displayEntries indices (inclusive) to
    * the selection — the shift-click range. Collapsed-stack entries contribute
-   * their cover photo only. */
+   * their cover photo only.
+   *
+   * A big shift-click range is easy to overshoot, so a range past the threshold
+   * asks first (issue #141), the same inline way a whole-group select does —
+   * never a blocking confirm() (#97). It reuses `pendingGroupSelect` so the
+   * SelectionBar prompt and Undo path are the exact ones the group flow uses. */
   function selectRange(a, b) {
-    selectedIds = withIds(selectedIds, rangeIds(resolvedPhotos, a, b));
+    const ids = rangeIds(resolvedPhotos, a, b);
+    if (needsRangeConfirm(ids.length)) {
+      pendingGroupSelect = { ids, label: "the shift-click range" };
+      return;
+    }
+    applyGroupSelect(ids, "the shift-click range");
   }
 
   /** Grid tile click: Cmd/Ctrl toggles selection, Shift selects a range from

@@ -5,6 +5,8 @@ import {
   withIds,
   withoutIds,
   rangeIds,
+  needsRangeConfirm,
+  RANGE_SELECT_CONFIRM,
 } from "./selectionOps.js";
 
 describe("parseStoredSelection", () => {
@@ -116,5 +118,17 @@ describe("rangeIds (shift-click range)", () => {
 
   it("handles a single-slot range", () => {
     expect(rangeIds(photos, 2, 2)).toEqual([30]);
+  });
+});
+
+describe("needsRangeConfirm (shift-click range confirmation)", () => {
+  it("does not ask for a range at or below the threshold", () => {
+    expect(needsRangeConfirm(1)).toBe(false);
+    expect(needsRangeConfirm(RANGE_SELECT_CONFIRM)).toBe(false);
+  });
+
+  it("asks once the range exceeds the threshold", () => {
+    expect(needsRangeConfirm(RANGE_SELECT_CONFIRM + 1)).toBe(true);
+    expect(needsRangeConfirm(500)).toBe(true);
   });
 });
