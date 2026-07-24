@@ -57,17 +57,35 @@ export function isKeyUnder(key, parent) {
  * folder parent. No second "is this a folder" test is needed: only `folder`
  * ever produces a `groupPaths` longer than one.
  *
+ * `aggregatable` gates the AGGREGATE case specifically (post-merge review):
+ * the aggregate fold represents a parent as a single collapsed path whose one
+ * folder segment carries `subtree:true`, and the server's subtree predicates
+ * (`server/db/feed.js` collapse/count, `server/api.js` sample) treat that
+ * segment as a bare `abs_path` prefix — they do NOT constrain any OTHER
+ * grouping dimension. Under `["folder"]` alone that's exactly right. Under
+ * e.g. `["year","folder"]` the collapsed path is multi-segment
+ * (`[{year…}, {folder…, subtree:true}]`), so a plain aggregate fold would
+ * silently exclude that folder's photos across EVERY year, misreport the
+ * count, and (the sample endpoint only enables subtree mode for
+ * `path.length === 1`) render an empty strip. So: `aggregatable` must be
+ * `true` only when the collapsed path WOULD be a single folder segment —
+ * callers pass `path.length === 1 && path[0]?.dimension === "folder"`. When
+ * it's `false`, a parent+plain click falls back to "perLeaf": the per-leaf
+ * fold uses exact full-dimension leaf paths, which the server's EXACT collapse
+ * handles correctly under any grouping.
+ *
  * A LEAF (no descendant groups) ignores Shift entirely — "leaf" either way,
  * per the design's resolved Q3 ("shift on a leaf ≡ plain": nothing to fan out
  * beneath it, so the caller keeps its ordinary single-group cycle regardless
  * of the modifier).
  *
- * @param {{isParent: boolean, shiftKey: boolean}} args
+ * @param {{isParent: boolean, shiftKey: boolean, aggregatable: boolean}} args
  * @returns {"aggregate"|"perLeaf"|"leaf"}
  */
-export function foldTargetFor({ isParent, shiftKey }) {
+export function foldTargetFor({ isParent, shiftKey, aggregatable }) {
   if (!isParent) return "leaf";
-  return shiftKey ? "perLeaf" : "aggregate";
+  if (shiftKey) return "perLeaf";
+  return aggregatable ? "aggregate" : "perLeaf";
 }
 
 /**

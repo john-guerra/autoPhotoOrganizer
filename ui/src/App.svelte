@@ -3465,10 +3465,23 @@
    *   `cycleGroupState` otherwise. This ALSO covers every non-folder
    *   dimension (year, camera, …), which never produces a `groupPaths` longer
    *   than one and so is untouched by #142's aggregate/per-leaf split.
+   *
+   * `aggregatable` (post-merge review): the aggregate fold is only safe when
+   * `path` is a SINGLE folder segment — i.e. groupBy is folder-only. Under
+   * any outer dimension (`["year","folder"]`, `["camera","folder"]`, …) the
+   * server's subtree predicates only constrain the folder segment's prefix
+   * and ignore the outer one(s), so aggregating there would silently drop
+   * that folder's photos under every OTHER year/camera/etc. See
+   * foldTargetFor's doc comment for the full rationale.
    */
   function onGroupToggle(path, event, groupPaths) {
     const isParent = (groupPaths?.length ?? 0) > 1;
-    const target = foldTargetFor({ isParent, shiftKey: !!event?.shiftKey });
+    const aggregatable = path?.length === 1 && path[0]?.dimension === "folder";
+    const target = foldTargetFor({
+      isParent,
+      shiftKey: !!event?.shiftKey,
+      aggregatable,
+    });
     if (target === "aggregate") return cycleSubtreeAggregate(path, groupPaths);
     if (target === "perLeaf") {
       const keys = new Set([path, ...(groupPaths ?? [])].map(pathKey));
@@ -3485,8 +3498,19 @@
    * top-level groups (snapshot also renders each as a strip). Fetches the current
    * top-level group list under displayFilter. Does NOT rebuild the feed — the
    * caller reloads after. Reused by the cycle-all control AND by filter/sort
-   * rebuilds so a global view mode survives those changes (new groups inherit it). */
+   * rebuilds so a global view mode survives those changes (new groups inherit it).
+   *
+   * A whole-view mode change is a clean slate for the #142 aggregate state too
+   * (post-merge review): this is the only window-replace that didn't already
+   * reset `aggregateKeys`/`aggregateSnapshotKeys` (unlike `onGroupByChange`,
+   * `openPhotoById`, `closeLoupe`, `cycleSubtreeAggregate`, `cycleLeafPaths`),
+   * so a prior plain-fold of a parent (which sets those Sets) survived a
+   * "Snapshot all"/"Collapse all" toggle — the parent kept rendering as an
+   * aggregate band suppressing its children even though the server had just
+   * collapsed every leaf exactly. Both branches below clear both Sets. */
   async function applyViewModeToGroups(mode) {
+    aggregateKeys = new Set();
+    aggregateSnapshotKeys = new Set();
     if (!isServerCollapsed(mode)) {
       collapsedPaths = [];
       snapshotGroupKeys = new Set();

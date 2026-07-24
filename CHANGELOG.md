@@ -13,7 +13,10 @@ user-facing — what you can now do, not how it's built.
   subtree as one strip (sampled across every subfolder), then collapses it to one
   bar, then expands — so a card with camera subfolders folds in a single click.
   Shift-click instead fans out to one snapshot strip per subfolder (VS Code–style
-  region fold). Works from both the feed header and the sidebar tree.
+  region fold). Works from both the feed header and the sidebar tree. (The
+  whole-subtree fold only applies when grouped by folder alone — grouping by
+  e.g. year then folder falls back to the per-subfolder fold, since a single
+  folder can span multiple years.)
 
 ## 2.17.10
 

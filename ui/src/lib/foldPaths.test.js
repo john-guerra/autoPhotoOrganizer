@@ -75,22 +75,55 @@ describe("isKeyUnder", () => {
 });
 
 describe("foldTargetFor (#142 parent-fold gesture)", () => {
-  it("a parent, plain click, aggregates the whole subtree", () => {
-    expect(foldTargetFor({ isParent: true, shiftKey: false })).toBe(
-      "aggregate"
-    );
+  it("a parent, plain click, aggregatable, aggregates the whole subtree", () => {
+    expect(
+      foldTargetFor({ isParent: true, shiftKey: false, aggregatable: true })
+    ).toBe("aggregate");
   });
 
   it("a parent, shift-click, fans out to per-leaf snapshots", () => {
-    expect(foldTargetFor({ isParent: true, shiftKey: true })).toBe("perLeaf");
+    expect(
+      foldTargetFor({ isParent: true, shiftKey: true, aggregatable: true })
+    ).toBe("perLeaf");
   });
 
   it("a leaf, plain click, is just a leaf (its ordinary single-group cycle)", () => {
-    expect(foldTargetFor({ isParent: false, shiftKey: false })).toBe("leaf");
+    expect(
+      foldTargetFor({ isParent: false, shiftKey: false, aggregatable: true })
+    ).toBe("leaf");
   });
 
   it("a leaf, shift-click, is STILL a leaf — shift has nothing to fan out", () => {
-    expect(foldTargetFor({ isParent: false, shiftKey: true })).toBe("leaf");
+    expect(
+      foldTargetFor({ isParent: false, shiftKey: true, aggregatable: true })
+    ).toBe("leaf");
+  });
+
+  // Post-merge review (#142): the aggregate fold is only correct when the
+  // collapsed path is a single folder segment (groupBy is folder-only). Under
+  // any outer dimension (year>folder, camera>folder, …) the server's subtree
+  // predicates only constrain the folder segment, so a plain aggregate fold
+  // there would silently drop that folder's photos under every OTHER
+  // year/camera/etc. — the caller must fall back to "perLeaf" instead.
+  it("a parent, plain click, NOT aggregatable (e.g. year>folder grouping), falls back to per-leaf", () => {
+    expect(
+      foldTargetFor({ isParent: true, shiftKey: false, aggregatable: false })
+    ).toBe("perLeaf");
+  });
+
+  it("a parent, shift-click, NOT aggregatable, is still per-leaf (shift already implied it)", () => {
+    expect(
+      foldTargetFor({ isParent: true, shiftKey: true, aggregatable: false })
+    ).toBe("perLeaf");
+  });
+
+  it("a leaf is unaffected by aggregatable either way", () => {
+    expect(
+      foldTargetFor({ isParent: false, shiftKey: false, aggregatable: false })
+    ).toBe("leaf");
+    expect(
+      foldTargetFor({ isParent: false, shiftKey: true, aggregatable: false })
+    ).toBe("leaf");
   });
 });
 
