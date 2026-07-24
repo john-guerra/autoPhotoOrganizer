@@ -41,6 +41,8 @@
  * @property {number=} iso          EXIF ISO, image files only.
  * @property {number=} focalLength  EXIF FocalLength (mm), image files only.
  * @property {string=} lens         EXIF LensModel ("" = none found / attempted).
+ * @property {number|null} [lat]   EXIF GPS latitude, decimal degrees (null = none)
+ * @property {number|null} [lon]   EXIF GPS longitude, decimal degrees (null = none)
  * @property {string=} orientation
  * @property {number=} duration   Video length in seconds (videos only; via ffprobe).
  */

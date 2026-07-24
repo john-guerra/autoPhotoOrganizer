@@ -7,6 +7,7 @@ import ffmpegPathRaw from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { ProcessingService } from "./ProcessingService.js";
 import { createProgressParser } from "../lib/ffmpegProgress.js";
+import { gpsFromExif } from "../lib/exifGps.js";
 
 // In a packaged Electron build the static binaries are pulled out of the asar
 // archive (build.asarUnpack) so they can be spawned, but the resolved path still
@@ -151,12 +152,15 @@ export function formatCamera(make, model) {
  * for files that genuinely have no lens tag. */
 export function exifToMeta(exif) {
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const { lat, lon } = gpsFromExif(exif);
   return {
     aperture: num(exif?.FNumber),
     shutter: num(exif?.ExposureTime),
     iso: num(exif?.ISO),
     focalLength: num(exif?.FocalLength),
     lens: typeof exif?.LensModel === "string" ? exif.LensModel : "",
+    lat,
+    lon,
   };
 }
 
@@ -338,6 +342,14 @@ export class NodeProcessingService extends ProcessingService {
               "ISO",
               "FocalLength",
               "LensModel",
+              // GPS. All four are needed: exifr derives the merged decimal
+              // `latitude`/`longitude` from the rationals PLUS the hemisphere
+              // refs. Adding `gps: true` instead of these does nothing when
+              // `pick` is set — it silently returns {}.
+              "GPSLatitude",
+              "GPSLongitude",
+              "GPSLatitudeRef",
+              "GPSLongitudeRef",
             ],
           });
           const createDate = exif?.DateTimeOriginal || exif?.CreateDate;

@@ -210,6 +210,8 @@ describe("exifToMeta", () => {
       iso: 400,
       focalLength: 50,
       lens: "RF24-70mm F2.8 L IS USM",
+      lat: null,
+      lon: null,
     });
   });
 
@@ -220,6 +222,8 @@ describe("exifToMeta", () => {
       iso: null,
       focalLength: null,
       lens: "",
+      lat: null,
+      lon: null,
     });
   });
 });
