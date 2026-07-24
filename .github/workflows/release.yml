@@ -94,7 +94,7 @@ jobs:
       # Pull every OS's artifacts into one flat directory. Filenames are unique
       # across platforms (…-mac.zip / Setup-….exe / ….AppImage,
       # latest{,-mac,-linux}.yml), so merge-multiple has no collisions.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
