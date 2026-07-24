@@ -82,15 +82,30 @@
     }
   });
 
+  // An aggregate parent (#142): folderSections.js marks the subtree fold by
+  // setting `subtree: true` on the group path's own (last) segment — the same
+  // flag server/api.js's `/api/group/sample` handler reads. Deriving it from
+  // `groupPath` here, rather than taking a separate prop, means the strip
+  // never has two sources of truth for "which group am I" — one path says both
+  // which group and whether it's a whole-subtree stand-in.
+  let isSubtree = $derived(groupPath?.at(-1)?.subtree === true);
+
   // Mode 2: server-fetched sampling for a feed group. Guarded with a
   // request token so a slow earlier response can't clobber a later one.
   $effect(() => {
     if (!ids && groupPath && slots > 0) {
-      loadSample(groupPath, filter, sort, groupBy, slots);
+      loadSample(groupPath, filter, sort, groupBy, slots, isSubtree);
     }
   });
 
-  async function loadSample(path, filterArg, sortArg, groupByArg, slotsArg) {
+  async function loadSample(
+    path,
+    filterArg,
+    sortArg,
+    groupByArg,
+    slotsArg,
+    subtreeArg
+  ) {
     const token = ++requestToken;
     try {
       const resp = await fetchGroupSample({
@@ -99,6 +114,7 @@
         filter: filterArg,
         sort: sortArg,
         slots: slotsArg,
+        subtree: subtreeArg,
       });
       if (token !== requestToken) return; // superseded by a newer request
       shown = resp.samples.map((s) => ({ id: s.id, gapAfter: s.gapAfter }));

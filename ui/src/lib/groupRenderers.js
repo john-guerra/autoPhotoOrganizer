@@ -68,9 +68,50 @@ export const DEFAULT_RENDERER_ID = GRID.id;
  *  callers name it via the registry instead of a bare "snapshot" literal. */
 export const SNAPSHOT_ID = SNAPSHOT.id;
 
+/**
+ * The subtree-fold equivalents of SNAPSHOT/COLLAPSED (#142): folderSections.js
+ * assigns a header one of THESE ids — never a plain "snapshot"/"collapsed" —
+ * when a whole folder subtree is aggregated into one header (see its
+ * AGGREGATE_SNAPSHOT_RENDERER_ID / AGGREGATE_COLLAPSED_RENDERER_ID). They draw
+ * exactly like their leaf counterparts (a SnapshotStrip fed by the subtree
+ * sample, or nothing but the header) but are deliberately NOT part of
+ * GROUP_RENDERERS: that array is the per-group toggle's 3-way cycle, and an
+ * aggregate fold is a separate, whole-subtree action (wired in a later task)
+ * that a single-group click must never cycle into or out of.
+ */
+
+/** @type {GroupRenderer} */
+export const AGGREGATE_SNAPSHOT = {
+  id: "aggregate-snapshot",
+  label: "Aggregate snapshot strip",
+  icon: "strip",
+  needsFeedPhotos: false,
+  bandHeight: ({ snapshotRowHeight }) => snapshotRowHeight,
+  component: SnapshotStrip,
+};
+
+/** @type {GroupRenderer} */
+export const AGGREGATE_COLLAPSED = {
+  id: "aggregate-collapsed",
+  label: "Aggregate collapsed",
+  icon: "bar",
+  needsFeedPhotos: false,
+  // Same as COLLAPSED: the header (with its bar icon and subtree-total count)
+  // IS the representation — no band underneath.
+  bandHeight: () => 0,
+  component: null,
+};
+
+/** Resolvable by `getRenderer` but never cycled through. */
+const AGGREGATE_RENDERERS = [AGGREGATE_SNAPSHOT, AGGREGATE_COLLAPSED];
+
 /** @param {string|undefined} id @returns {GroupRenderer} */
 export function getRenderer(id) {
-  return GROUP_RENDERERS.find((r) => r.id === id) ?? GRID;
+  return (
+    GROUP_RENDERERS.find((r) => r.id === id) ??
+    AGGREGATE_RENDERERS.find((r) => r.id === id) ??
+    GRID
+  );
 }
 
 /** Next renderer in the cycle (wraps). @param {string|undefined} id */

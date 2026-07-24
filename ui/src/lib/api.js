@@ -451,17 +451,19 @@ export async function fetchGroupBoundary({
 }
 
 /**
- * First/middle/last sample of a group, for the fisheye snapshot strip — a
- * scroll-free stand-in for a whole group without fetching every row.
- * @param {{path: Array<{dimension:string,value:string}>, groupBy: string[], filter?: object|null, sort?: object|null, slots?: number}} opts
- * @returns {Promise<{count:number, samples: Array<object & {offset:number, gapAfter:boolean}>}>}
+ * Pure URL-builder for `fetchGroupSample`, split out so the query-string
+ * shape (in particular whether `&subtree=1` shows up) is unit-testable
+ * without stubbing `fetch`.
+ * @param {{path: Array<{dimension:string,value:string}>, groupBy: string[], filter?: object|null, sort?: object|null, slots?: number, subtree?: boolean}} opts
+ * @returns {string}
  */
-export async function fetchGroupSample({
+export function groupSampleUrl({
   path,
   groupBy,
   filter = null,
   sort = null,
   slots = 12,
+  subtree = false,
 }) {
   const params = new URLSearchParams({
     groupBy: groupBy.join(","),
@@ -471,7 +473,32 @@ export async function fetchGroupSample({
   if (sort) params.set("sort", `${sort.by}:${sort.dir}`);
   const fp = filter ? toQueryParam(filter) : null;
   if (fp) params.set("filter", fp);
-  const res = await fetch(`/api/group/sample?${params}`);
+  // Aggregate subtree fold (#142): the exact group at a folder PARENT's path
+  // is usually empty (a "Cards"-style folder holds no photos of its own, only
+  // its camera subfolders do) — `subtree=1` tells the server to sample across
+  // the whole subtree instead of the exact group. See server/api.js's
+  // `/api/group/sample` handler for the other half of this contract.
+  if (subtree) params.set("subtree", "1");
+  return `/api/group/sample?${params}`;
+}
+
+/**
+ * First/middle/last sample of a group, for the fisheye snapshot strip — a
+ * scroll-free stand-in for a whole group without fetching every row.
+ * @param {{path: Array<{dimension:string,value:string}>, groupBy: string[], filter?: object|null, sort?: object|null, slots?: number, subtree?: boolean}} opts
+ * @returns {Promise<{count:number, samples: Array<object & {offset:number, gapAfter:boolean}>}>}
+ */
+export async function fetchGroupSample({
+  path,
+  groupBy,
+  filter = null,
+  sort = null,
+  slots = 12,
+  subtree = false,
+}) {
+  const res = await fetch(
+    groupSampleUrl({ path, groupBy, filter, sort, slots, subtree })
+  );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `group sample failed (${res.status})`);

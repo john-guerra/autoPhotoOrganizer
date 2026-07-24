@@ -7,6 +7,7 @@ import {
   isServerCollapsed,
   cycleAllLabel,
 } from "./groupRenderers.js";
+import SnapshotStrip from "./SnapshotStrip.svelte";
 
 describe("groupRenderers registry", () => {
   it("defaults to the grid, and falls back to it for an unknown id", () => {
@@ -47,6 +48,38 @@ describe("groupRenderers registry", () => {
     // ids are unique — the cycle and the lookup both assume it
     const ids = GROUP_RENDERERS.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("aggregate subtree renderers (#142)", () => {
+  it("aggregate-snapshot resolves to a strip band fed by SnapshotStrip", () => {
+    const r = getRenderer("aggregate-snapshot");
+    expect(r.icon).toBe("strip");
+    expect(r.needsFeedPhotos).toBe(false);
+    expect(r.component).toBe(SnapshotStrip);
+    expect(r.bandHeight({ snapshotRowHeight: 148 })).toBe(148);
+  });
+
+  it("aggregate-collapsed resolves to a bar with no band — the header alone stands for it", () => {
+    const r = getRenderer("aggregate-collapsed");
+    expect(r.icon).toBe("bar");
+    expect(r.needsFeedPhotos).toBe(false);
+    expect(r.component).toBeNull();
+    expect(r.bandHeight({ snapshotRowHeight: 148 })).toBe(0);
+  });
+
+  it("both are server-collapsed, same as their leaf counterparts", () => {
+    expect(isServerCollapsed("aggregate-snapshot")).toBe(true);
+    expect(isServerCollapsed("aggregate-collapsed")).toBe(true);
+  });
+
+  it("neither joins the leaf 3-way toggle cycle — an aggregate fold is a separate action", () => {
+    const ids = GROUP_RENDERERS.map((r) => r.id);
+    expect(ids).not.toContain("aggregate-snapshot");
+    expect(ids).not.toContain("aggregate-collapsed");
+    // nextRendererId only ever cycles grid/snapshot/collapsed, unaffected by
+    // the aggregate ids being resolvable via getRenderer.
+    expect(nextRendererId("collapsed")).toBe("grid");
   });
 });
 
