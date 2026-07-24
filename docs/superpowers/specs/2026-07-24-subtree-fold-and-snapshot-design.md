@@ -1,6 +1,6 @@
 # Group-by-folder: fold and snapshot a parent as one subtree (#142)
 
-**Status:** design, awaiting review
+**Status:** approved — implementing
 **Issue:** #142 — "When group by folder, I cannot show the snapshot of a subfolder."
 
 ## Problem
@@ -119,13 +119,12 @@ feed render:
   per-leaf strips. Assert the item count hidden/shown, not internals. Revert the
   fix and confirm the spec's e2e goes red first.
 
-## Open questions for review
+## Resolved decisions (approved 2026-07-24)
 
 1. **Aggregate snapshot ordering** — sample the subtree in the feed's current
-   sort (date/name), i.e. a representative spread across the whole card, correct?
+   sort (date/name): a representative spread across the whole card. ✅
 2. **Real parent with its OWN photos + children** (e.g. `Trip` has loose photos
-   AND `Trip/Sub`): plain-click aggregates _everything under Trip including its
-   own loose photos_ into the one strip/bar — confirm that's expected (vs. its
-   own photos staying separate).
-3. **Shift on a leaf** — no-op (same as plain), or reserved? Proposed: same as
-   plain (nothing to fan out).
+   AND `Trip/Sub`): plain-click aggregates _everything under `Trip`, including
+   its own loose photos_, into the one strip/bar. ✅
+3. **Shift on a leaf** — no-op (identical to plain); a leaf has nothing to fan
+   out. ✅
