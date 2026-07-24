@@ -25,6 +25,18 @@
 </script>
 
 <footer class="statusbar">
+  <!-- Screen-reader live regions (#a11y). These are ALWAYS in the DOM, empty
+       until there's a message: a polite/assertive region that is inserted at the
+       same moment as its text is often missed by NVDA/VoiceOver, whereas a
+       persistent region reliably announces the change. The visible spans below
+       are aria-hidden so the message isn't announced twice. This is what makes
+       the app's "never fail silently" invariant reach assistive-tech users, not
+       just sighted ones. -->
+  <div class="sr-only">
+    <span role="status" aria-live="polite">{status}</span>
+    <span aria-live="polite">{notice}</span>
+    <span role="alert" aria-live="assertive">{error}</span>
+  </div>
   <div class="sb-left">
     <div
       class="counts"
@@ -52,15 +64,18 @@
       <!-- title: the message can be long (a folder path, an error). It truncates
            with an ellipsis rather than widening the whole app, so the full text
            lives in the tooltip. -->
-      <span class="status" class:err={!!error} title={error || status}
-        >{error || status}</span
+      <span
+        class="status"
+        class:err={!!error}
+        title={error || status}
+        aria-hidden="true">{error || status}</span
       >
     {/if}
     <!-- A calm, informational nudge (e.g. the missing-files review prompt): its
          own neutral/blue style so it reads as a heads-up, not a failure. Same
          truncation treatment as .status so a long message can't widen the app. -->
     {#if notice}
-      <span class="notice" title={notice}>{notice}</span>
+      <span class="notice" title={notice} aria-hidden="true">{notice}</span>
     {/if}
     {#if thumbProgress}
       <span class="thumb-progress" class:err={thumbCounts.error > 0}>
@@ -84,6 +99,20 @@
     background: #1c1c1c;
     border-top: 1px solid #2a2a2a;
     flex-shrink: 0;
+  }
+  /* Visually hidden but present for assistive tech. Not display:none (that would
+     stop screen readers announcing it) — clipped to a 1px box off-flow so it
+     adds no layout and no flex gap. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
   .sb-left {
     display: flex;

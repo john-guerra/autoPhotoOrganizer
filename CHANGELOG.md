@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.6
+
+- **Status messages are now announced to screen readers.** The status bar's
+  transient line — "Path copied", "Select all failed", "Removed N — Undo",
+  "Reading metadata…" — is now a live region, so assistive-tech users hear the
+  same "never fail silently" feedback sighted users always got.
+
 ## 2.17.5
 
 - **Remove any group from the library, not just folders (#135).** The Remove
