@@ -612,11 +612,24 @@ describe("POST /api/reveal-selection", () => {
     expect(execFile).not.toHaveBeenCalled();
   });
 
-  it("413s when more than 500 ids are sent", async () => {
-    const many = Array.from({ length: 501 }, (_, i) => i + 1);
-    const res = await post(many);
-    expect(res.status).toBe(413);
-    expect(execFile).not.toHaveBeenCalled();
+  it("reveals the first 500 and reports the rest omitted when over the cap (#140)", async () => {
+    // A huge selection (the user's 1500) can't be highlighted file-by-file, so
+    // reveal the first 500 and TELL the user the rest were omitted rather than
+    // rejecting the whole action.
+    const body = await scan(srv.base, photosDir);
+    const realIds = body.items.slice(0, 2).map((i) => i.id);
+    // Real ids first so they survive the truncation, then pad past the cap.
+    const fake = Array.from({ length: 520 }, (_, i) => 900000 + i);
+    const ids = [...realIds, ...fake];
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const res = await post(ids);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(json.revealed).toBe(realIds.length); // the real files highlighted
+    expect(json.requested).toBe(ids.length); // what the user asked for
+    expect(json.partial).toMatch(/first 500/i);
+    expect(execFile).toHaveBeenCalled();
   });
 
   it("404s when none of the ids resolve to a file", async () => {

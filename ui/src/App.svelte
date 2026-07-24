@@ -1855,11 +1855,12 @@
       console.warn("[reveal-selection]", res.error);
       return;
     }
-    // Windows' Explorer can only highlight ONE file; the server says so rather
-    // than pretending it revealed them all. Don't leave the user believing a
-    // 30-file selection is sitting highlighted in Explorer.
+    // A partial reveal — Windows' Explorer highlights only ONE file, or the
+    // selection was too big to reveal file-by-file so only the first 500 went
+    // (#140). Either way say exactly how many of how many, never pretend it
+    // revealed them all.
     if (res.partial) {
-      status = `Revealed 1 of ${ids.length} — ${res.partial}`;
+      status = `Revealed ${res.revealed ?? 1} of ${res.requested ?? ids.length} — ${res.partial}`;
     }
   }
 

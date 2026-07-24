@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.17.7
+
+- **Reveal in Finder now works for huge selections (#140).** Selecting more
+  than 500 photos and choosing Reveal used to be rejected outright. It now
+  highlights the first 500 and tells you the rest were omitted (e.g. "Revealed
+  500 of 1500 — narrow the selection to highlight specific files").
+
 ## 2.17.6
 
 - **A folder path with a trailing slash no longer duplicates its photos in the

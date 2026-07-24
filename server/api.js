@@ -1228,9 +1228,11 @@ export function registerApi(app) {
   // folder. Read-only — only shows where the files already live.
   // One Finder/Explorer window opens per distinct parent folder.
   const MAX_REVEAL_FOLDERS = 12;
+  // A giant AppleScript `reveal {…}` list stalls Finder; cap the file count.
+  const MAX_REVEAL_FILES = 500;
 
   app.post("/api/reveal-selection", async (req, res) => {
-    const ids = Array.isArray(req.body?.ids)
+    let ids = Array.isArray(req.body?.ids)
       ? [...new Set(req.body.ids.filter((n) => Number.isInteger(n)))]
       : [];
     if (!ids.length) {
@@ -1240,12 +1242,14 @@ export function registerApi(app) {
       });
     }
     // Revealing thousands of files in a file manager isn't useful and can hang
-    // it — cap and tell the user rather than firing a giant command.
-    if (ids.length > 500) {
-      return res.status(413).json({
-        ok: false,
-        error: `too many files to reveal at once (${ids.length}; max 500) — narrow the selection first`,
-      });
+    // it — a giant AppleScript `reveal {…}` list stalls Finder. Rather than
+    // rejecting the whole action (the user's 1500-photo selection, #140),
+    // highlight the first MAX_REVEAL_FILES and report the rest as omitted.
+    const requested = ids.length;
+    let omittedNote = null;
+    if (ids.length > MAX_REVEAL_FILES) {
+      ids = ids.slice(0, MAX_REVEAL_FILES);
+      omittedNote = `only the first ${MAX_REVEAL_FILES} of ${requested} were revealed — narrow the selection to highlight specific files`;
     }
     const db = getDb();
     const paths = [];
@@ -1291,14 +1295,17 @@ export function registerApi(app) {
       // Explorer's /select, highlights ONE file — saying "revealed: N" here would
       // be a lie the UI then repeats to the user. Report the limitation so the
       // caller can surface it (see revealManyCommand's win32 branch).
-      const partial =
+      const winPartial =
         process.platform === "win32" && paths.length > 1
           ? "Windows Explorer can only highlight one file at a time."
           : null;
+      // Either limitation is worth surfacing; `requested` lets the UI say
+      // "Revealed N of M". win32 wins when both apply (it only shows one file).
+      const partial = winPartial ?? omittedNote;
       res.json({
         ok: true,
-        revealed: partial ? 1 : paths.length,
-        ...(partial ? { partial } : {}),
+        revealed: winPartial ? 1 : paths.length,
+        ...(partial ? { partial, requested } : {}),
       });
     } catch (err) {
       res.status(500).json({ ok: false, error: String(err?.message ?? err) });
