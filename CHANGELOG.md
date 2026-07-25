@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.22
+
+- **Jumping to a group no longer drifts onto a different group** on a large
+  library. Clicking a folder deep in the tree (or the scrubber) used to land on
+  the right group for a moment, then slide onto a _later_ folder as photos'
+  real dimensions loaded in the background. The landing now holds steady until
+  you scroll, and earlier folders load as you scroll up. Fixes the regression in
+  2.18.14, which only held on small libraries (#180).
+
 ## 2.18.21
 
 - **Dev:** pinned the `adm-zip` transitive dependency pulled in by
@@ -65,6 +74,7 @@ user-facing — what you can now do, not how it's built.
   message stays put instead of being overwritten a second later by the generic
   "N photos loaded". If you're grouped by something other than folder (so the
   feed can't scroll to it), it says so rather than appearing to do nothing (#170).
+
 ## 2.18.10
 
 - Unmounting a drive while the library was being hashed no longer excludes those
