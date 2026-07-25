@@ -70,7 +70,7 @@ runSweep(job, {
   nextBatch, // () => rows[]         re-queried from a SQL partial index
   process, // (rows) => Promise<number written>
   markFailed, // (row, err) => void   the caller's OWN sentinel write
-  volumeOf, // (row) => string      folder abs_path, for the reachability probe
+  folderOf, // (row) => string      folder abs_path, for the reachability probe
   onProgress, // ({ done, failed }) => void
 });
 ```
@@ -105,7 +105,7 @@ opposite.
 
 ```
 catch (err) on row R:
-  if (!reachable(volumeOf(R)))
+  if (!reachable(folderOf(R)))
       → ABORT the pass. Nothing is marked.
         job finishes "paused — drive not available"
   else
