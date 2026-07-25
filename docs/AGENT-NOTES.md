@@ -61,6 +61,22 @@ Keep this current: when one of these facts changes, update it in the same commit
   `dist/index.cjs.js`, only needs `lz-ts` and `s2-geometry`). Re-verify this the
   same way if `offline-geocode-city` is ever upgraded — a new version could ship
   a different dependency shape.
+- **`electron-rebuild -w onnxruntime-node` (in `rebuild:electron`) is currently
+  inert — this is expected, not a #67 regression.** `@electron/rebuild` only
+  treats a module as needing a rebuild if it has a `binding.gyp`
+  (`node_modules/@electron/rebuild/lib/rebuild.js:98`); `onnxruntime-node` has
+  none — it ships prebuilt N-API binaries per platform/arch
+  (`bin/napi-v6/{platform}/{arch}/onnxruntime_binding.node`), so the flag is a
+  no-op and `npm run rebuild:electron` only ever rebuilds `better-sqlite3`. The
+  flag is **kept deliberately** so it starts doing real work if a future
+  release of the package ever ships source instead of prebuilt binaries.
+  Verified the addon loads correctly under Electron by requiring it directly
+  under the real Electron binary with `ELECTRON_RUN_AS_NODE=1` (how
+  `OnnxMLService` spawns its child) rather than via a rebuild step — N-API is
+  ABI-stable across Node and Electron by design, so no rebuild is needed.
+  `asarUnpack` is still required regardless: a `.node` file cannot be loaded
+  from inside an asar archive no matter how it was built. Re-verify this note
+  if `onnxruntime-node` is ever upgraded across a major version.
 
 ## Data-layer traps (verify before editing)
 

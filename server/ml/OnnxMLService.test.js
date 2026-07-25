@@ -93,7 +93,11 @@ integration("OnnxMLService (real child)", () => {
     const svc = new OnnxMLService();
     const h = await svc.health();
     expect(h.ok).toBe(true);
-    expect(typeof h.ort).toBe("string");
+    // Version-shaped, not merely a string: "unknown" (the fallback the worker
+    // reports if it reads a property that doesn't exist on the real package)
+    // is a string too, so a bare typeof check passes on a broken introspection
+    // path. Don't hardcode the exact version — it moves with the caret range.
+    expect(h.ort).toMatch(/^\d+\.\d+\.\d+/);
     expect(h.pid).toBeGreaterThan(0);
     svc.stop();
   }, 30_000);
