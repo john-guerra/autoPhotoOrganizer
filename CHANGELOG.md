@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.5
+
+- Unmounting a drive while the library was being hashed no longer excludes those
+  photos from hashing forever. Libraries already affected are repaired
+  automatically on the next launch — no rebuild needed. (#169)
+- Content hashing now appears in the Jobs panel with progress and a cancel
+  button, instead of running invisibly. (#160)
+- Groundwork for on-device photo understanding: the background runtime that
+  future face and similarity features will run on. No models are downloaded and
+  nothing changes in the app yet. (#160)
+
 ## 2.18.4
 
 - **Fix:** removing "Nearest town" (or any non-folder dimension) from Group

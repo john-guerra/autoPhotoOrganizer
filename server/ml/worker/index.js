@@ -48,7 +48,7 @@ function handle(line) {
       return reply({
         id: req.id,
         ok: true,
-        ort: ort.version ?? "unknown",
+        ort: ort.env?.versions?.node ?? "unknown",
         providers: ort.listSupportedBackends?.().map((b) => b.name) ?? ["cpu"],
         pid: process.pid,
       });

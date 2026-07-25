@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.18.4",
+  "version": "2.18.5",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
@@ -19,7 +19,7 @@
     "dev:server": "node --watch --watch-path=server server/index.js",
     "dev:ui": "vite ui",
     "electron:dev": "node scripts/dev.mjs --electron",
-    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3 -w onnxruntime-node",
     "rebuild:node": "npm rebuild better-sqlite3",
     "electron:build": "npm run build && npm run rebuild:electron && electron-builder --mac --win --linux && npm run rebuild:node",
     "electron:build:mac": "npm run build && npm run rebuild:electron && electron-builder --mac && npm run rebuild:node",
@@ -44,6 +44,7 @@
     "ffprobe-static": "^3.1.0",
     "multi-auto-select": "^0.0.13",
     "offline-geocode-city": "^1.0.2",
+    "onnxruntime-node": "^1.27.0",
     "reactive-widget-helper": "^0.0.3",
     "sharp": "^0.35.3",
     "sortablejs": "^1.15.7"
@@ -89,6 +90,7 @@
       "node_modules/sharp/**",
       "node_modules/@img/**",
       "node_modules/better-sqlite3/**",
+      "node_modules/onnxruntime-node/**",
       "node_modules/ffmpeg-static/**",
       "node_modules/ffprobe-static/**"
     ],
