@@ -5,7 +5,9 @@ import { OnnxMLService } from "./OnnxMLService.js";
 /** A fake child process. No real spawn — the default suite must never fork. */
 function fakeChild() {
   const child = new EventEmitter();
-  child.stdin = { write: vi.fn(), end: vi.fn() };
+  child.stdin = new EventEmitter();
+  child.stdin.write = vi.fn();
+  child.stdin.end = vi.fn();
   child.stdout = new EventEmitter();
   // Real child.stdout is a Readable; the implementation calls setEncoding on
   // it so multi-byte UTF-8 sequences aren't split across chunk boundaries.
@@ -67,6 +69,58 @@ describe("OnnxMLService", () => {
     svc.health().catch(() => {});
     svc.stop();
     expect(child.kill).toHaveBeenCalled();
+  });
+
+  it("rejects the in-flight request when the child emits 'error', and respawns on the next request", async () => {
+    // `exit` is asynchronous, so a request arriving in the tick after a crash
+    // can still write into a destroyed pipe — that raises an `error` event
+    // which, unhandled, is an unhandled 'error' event: Node throws it and
+    // takes the whole process down. This proves the listener is attached and
+    // settles in-flight work instead of escaping.
+    const children = [fakeChild(), fakeChild()];
+    let n = 0;
+    const svc = new OnnxMLService({ spawn: () => children[n++] });
+    const first = svc.health();
+    expect(() =>
+      children[0].emit("error", new Error("spawn EACCES"))
+    ).not.toThrow();
+    await expect(first).rejects.toThrow(/EACCES/);
+
+    // Dead child dropped — the next request respawns rather than reusing it.
+    const second = svc.health();
+    const sent = JSON.parse(children[1].stdin.write.mock.calls[0][0]);
+    children[1].reply({ id: sent.id, ok: true, ort: "1.20.0", providers: [] });
+    await expect(second).resolves.toMatchObject({ ok: true });
+    expect(n).toBe(2);
+    svc.stop();
+  });
+
+  it("does not double-settle when the child emits BOTH 'error' and 'exit'", async () => {
+    const child = fakeChild();
+    const svc = new OnnxMLService({ spawn: () => child });
+    const p = svc.health();
+    let rejectionCount = 0;
+    p.catch(() => rejectionCount++);
+    expect(() => {
+      child.emit("error", new Error("EPIPE"));
+      child.emit("exit", null, "SIGSEGV"); // both fire, same child
+    }).not.toThrow();
+    await expect(p).rejects.toThrow();
+    // A promise can only settle once regardless — the real assertion is that
+    // firing both events back-to-back raised no exception and the service
+    // recovers cleanly afterward.
+    expect(() => svc.stop()).not.toThrow();
+  });
+
+  it("rejects the in-flight request when child.stdin emits 'error'", async () => {
+    const child = fakeChild();
+    const svc = new OnnxMLService({ spawn: () => child });
+    const p = svc.health();
+    expect(() =>
+      child.stdin.emit("error", new Error("write EPIPE"))
+    ).not.toThrow();
+    await expect(p).rejects.toThrow(/EPIPE/);
+    expect(() => svc.stop()).not.toThrow();
   });
 
   it("surfaces a malformed line as a rejection, not a crash", async () => {

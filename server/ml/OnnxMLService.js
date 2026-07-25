@@ -47,17 +47,36 @@ export class OnnxMLService extends MLService {
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => this.#onData(chunk));
     child.on("exit", (code, signal) => {
-      this.#child = null;
-      // Fail every in-flight request rather than leaving a caller hanging: a
-      // sweep waiting forever on a dead child is worse than a failed batch.
-      const err = new Error(
-        `ML worker exited (code ${code ?? "null"}, signal ${signal ?? "null"})`
+      this.#killChild(
+        child,
+        new Error(
+          `ML worker exited (code ${code ?? "null"}, signal ${signal ?? "null"})`
+        )
       );
-      for (const { reject } of this.#pending.values()) reject(err);
-      this.#pending.clear();
     });
+    // `exit` is asynchronous — a request arriving in the tick after a crash
+    // can still write into a destroyed pipe. That write raises an `error`
+    // event on the child (and/or child.stdin) which, with no listener
+    // attached, is an UNHANDLED 'error' event: Node throws it and takes the
+    // whole server process down. A child that emits both `error` and `exit`
+    // must not double-settle the pending promises or throw on the second
+    // cleanup — #killChild below is idempotent, keyed on identity so the
+    // second event (whichever arrives second) is a no-op.
+    child.on("error", (err) => this.#killChild(child, err));
+    child.stdin.on("error", (err) => this.#killChild(child, err));
     this.#child = child;
     return child;
+  }
+
+  /** Settle every in-flight request and drop the dead child so the next
+   * request respawns. Safe to call twice for the same child (e.g. it emits
+   * both `error` and `exit`) — the second call is a no-op because `#child`
+   * no longer matches. */
+  #killChild(child, err) {
+    if (this.#child !== child) return; // already handled (error THEN exit, or vice versa)
+    this.#child = null;
+    for (const { reject } of this.#pending.values()) reject(err);
+    this.#pending.clear();
   }
 
   #onData(text) {

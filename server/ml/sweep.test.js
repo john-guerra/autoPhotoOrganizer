@@ -118,6 +118,59 @@ describe("runSweep", () => {
     expect(result.failed).toBe(1);
   });
 
+  it("PAUSES and marks NOTHING on a transient error code even with a REACHABLE folder", async () => {
+    // Same #169 failure shape through a different trigger: an EMFILE storm (or
+    // EIO/EBUSY/etc on a flaky external/network volume) is a property of the
+    // MOMENT, not the file. The folder is present the whole time — only the
+    // error code says "transient" — so this must pause, not markFailed, or
+    // those rows get the same permanent sentinel #169 shipped.
+    const rows = [1, 2, 3].map((id) => ({ id, folder: dir }));
+    const wl = makeWorklist(rows);
+    const failed = [];
+    const result = await runSweep(liveJob(), {
+      nextBatch: wl.nextBatch,
+      process: async () => {
+        const e = new Error("EMFILE, too many open files");
+        e.code = "EMFILE";
+        throw e;
+      },
+      markFailed: (row) => failed.push(row.id),
+      folderOf: (r) => r.folder,
+      idle: noIdle,
+    });
+    expect(failed).toEqual([]); // nothing marked — the whole point
+    expect(result.paused).toBe(true);
+    expect(result.failed).toBe(0);
+    expect(wl.pending.size).toBe(3); // still owed work, for the next pass
+  });
+
+  it("still marks permanently for ENOENT with a reachable folder (no regression)", async () => {
+    // Companion to the transient-code test above: ENOENT with the folder
+    // present means the file itself is really gone, which IS a permanent
+    // property of the photo — the existing, documented behaviour must not
+    // regress when the transient-code classification is introduced.
+    const rows = [{ id: 1, folder: dir }];
+    const wl = makeWorklist(rows);
+    const failed = [];
+    const result = await runSweep(liveJob(), {
+      nextBatch: wl.nextBatch,
+      process: async () => {
+        const e = new Error("ENOENT");
+        e.code = "ENOENT";
+        throw e;
+      },
+      markFailed: (row) => {
+        failed.push(row.id);
+        wl.pending.delete(row.id);
+      },
+      folderOf: (r) => r.folder,
+      idle: noIdle,
+    });
+    expect(failed).toEqual([1]);
+    expect(result.paused).toBe(false);
+    expect(result.failed).toBe(1);
+  });
+
   it("throws AbortError when the job is canceled, without marking", async () => {
     const rows = [1, 2, 3, 4].map((id) => ({ id, folder: dir }));
     const wl = makeWorklist(rows);

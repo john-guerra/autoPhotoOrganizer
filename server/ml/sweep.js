@@ -2,6 +2,34 @@ import { whenIdle } from "../lib/interactive.js";
 import { reachable } from "../lib/reachable.js";
 
 /**
+ * Error codes that are a property of the MOMENT, not the file: out-of-fds
+ * (EMFILE/ENFILE — genuinely plausible here, since full-file SHA-1 read
+ * streams run concurrently with sharp/ffmpeg against a 16-slot libuv
+ * threadpool), and ordinary hiccups on external/network volumes or a drive
+ * that is spinning down rather than fully unmounted (EIO, EBUSY, ESTALE,
+ * ENXIO, ENODEV, EAGAIN, ETIMEDOUT).
+ *
+ * Misclassifying any of these as PERMANENT is the #169 failure shape through
+ * a different trigger — and now unrecoverable, because the one-time repair
+ * migration already consumed `user_version = 1` and will not run again. So
+ * this set deliberately errs toward pausing: everything in it, and only what
+ * is in it, gets a pause instead of a sentinel. ENOENT is deliberately NOT
+ * here — with the folder present, ENOENT means the file really is gone,
+ * which IS permanent and is already the documented behaviour.
+ */
+const TRANSIENT_CODES = new Set([
+  "EMFILE",
+  "ENFILE",
+  "EAGAIN",
+  "EBUSY",
+  "EIO",
+  "ESTALE",
+  "ENXIO",
+  "ENODEV",
+  "ETIMEDOUT",
+]);
+
+/**
  * ONE background drain, reused by every sweep in the app.
  *
  * `/api/enrich` and `hashAllPending` were the same loop written twice by hand.
@@ -129,10 +157,20 @@ export async function runSweep(
             onProgress?.({ done, failed });
             return { done, failed, paused: true };
           }
-          // Folder is there and the file still failed: the file is genuinely
-          // gone or genuinely unreadable. That IS a permanent property of the
-          // photo, so the caller writes its sentinel and the row leaves the
-          // worklist.
+          // The folder is present, but the error itself may still be a
+          // property of the moment (EMFILE storm, a flaky external/network
+          // volume) rather than of the file — see TRANSIENT_CODES above. Same
+          // response as the unreachable-folder case: stand the whole sweep
+          // down and mark nothing, rather than writing a permanent sentinel
+          // for a file that was never really examined.
+          if (TRANSIENT_CODES.has(err?.code)) {
+            onProgress?.({ done, failed });
+            return { done, failed, paused: true };
+          }
+          // Folder is there and the error is not transient: the file is
+          // genuinely gone or genuinely unreadable. That IS a permanent
+          // property of the photo, so the caller writes its sentinel and the
+          // row leaves the worklist.
           markFailed(row, err);
           failedIds.add(idOf(row));
           done += 1;

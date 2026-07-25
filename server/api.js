@@ -801,9 +801,15 @@ export function registerApi(app) {
         // here would tell the user the read completed when a chunk of it never
         // ran. Nothing fails silently (CLAUDE.md, "Usability").
         if (paused) {
+          // Unlike the hash sweep (kickHashSweep, above), nothing re-kicks
+          // enrich automatically — it only ever runs from the UI's
+          // Read-metadata action. "resumes on the next sweep" would promise a
+          // resumption that never happens, which this project's usability
+          // rule (CLAUDE.md, "specific over generic") forbids. Tell the user
+          // what to actually do instead.
           registry.update(job.id, {
             status: "failed",
-            error: "paused — drive not available; resumes on the next sweep",
+            error: "paused — drive not available; reconnect it and run again",
           });
           return;
         }
