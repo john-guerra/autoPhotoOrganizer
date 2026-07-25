@@ -169,6 +169,14 @@
     if (job.type === "transcode") {
       return r.url ? "ready to play" : "done";
     }
+    // Self-clears on success like enrich, so a row reaches here only when the
+    // sweep was CANCELED or paused — which still leaves a result worth reading.
+    if (job.type === "hash") {
+      const hashed = r.hashed ?? 0;
+      return r.failed
+        ? `hashed ${hashed.toLocaleString()} · ${r.failed} unreadable`
+        : `hashed ${hashed.toLocaleString()}`;
+    }
     return "";
   }
 
