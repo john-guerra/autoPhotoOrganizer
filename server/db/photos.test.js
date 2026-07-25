@@ -78,6 +78,24 @@ describe("upsertScan", () => {
     expect(getPhotoById(db, first.id).content_hash).toBeNull();
   });
 
+  it("preserves gps_checked when a file is unchanged, clears it when changed", () => {
+    // Mirrors the content_hash case above: a changed file may have been
+    // re-exported with different (or stripped) GPS, so a rescan must clear the
+    // "we looked" marker and let the sweep look again (see enrich.js
+    // PENDING_CONDITION / gps_checked docs).
+    const db = getDb();
+    const [first] = upsertScan(db, "/photos/trip", 1, [FILES[0]]);
+    db.prepare("UPDATE photos SET gps_checked = 1 WHERE id = ?").run(first.id);
+
+    // Rescan unchanged: gps_checked survives.
+    upsertScan(db, "/photos/trip", 1, [FILES[0]]);
+    expect(getPhotoById(db, first.id).gps_checked).toBe(1);
+
+    // Rescan with a changed size: gps_checked is cleared.
+    upsertScan(db, "/photos/trip", 1, [{ ...FILES[0], size: 999 }]);
+    expect(getPhotoById(db, first.id).gps_checked).toBe(0);
+  });
+
   it("marks a file no longer present as stale instead of deleting it", () => {
     const db = getDb();
     const rows = upsertScan(db, "/photos/trip", 1, FILES);

@@ -7,6 +7,7 @@ import { upsertScan } from "./photos.js";
 import { getFeedPage } from "./feed.js";
 import { getTreeNode } from "./tree.js";
 import { feedIndexes } from "./sort.js";
+import { pendingMetaPhotos, pendingMetaCount } from "./enrich.js";
 
 /**
  * THE FEED MUST NOT FULL-SCAN.
@@ -202,19 +203,37 @@ describe("the feed's query plans", () => {
   });
 
   it("finds the sweep's un-read photos by index, not by scanning the library", () => {
-    // enrich.js asks "which photos have width IS NULL" once per batch — ~2,000
-    // times during a full sweep. Unindexed, that is a full scan every time.
+    // Exercises the REAL PENDING_CONDITION via pendingMetaPhotos/pendingMetaCount
+    // (enrich.js) — not a hand-copied condition. A hand-copied copy is exactly how
+    // this test went stale before: an earlier version hardcoded "width IS NULL"
+    // alone, so when PENDING_CONDITION grew a video_codec disjunct and then a
+    // gps_checked disjunct (#154), the query quietly started full-scanning the
+    // whole table on every one of the ~2,000 batches a full sweep takes, and
+    // nothing here caught it. See schema.js's idx_photos_pending_meta, which is
+    // now built FROM PENDING_CONDITION for the same anti-drift reason.
     const db = getDb();
     seed(db);
-    const plan = db
-      .prepare(
-        `EXPLAIN QUERY PLAN
-         SELECT photos.id FROM photos JOIN folders ON folders.id = photos.folder_id
-          WHERE photos.stale = 0 AND photos.width IS NULL
-          ORDER BY photos.id ASC LIMIT 50`
-      )
-      .all()
-      .map((r) => r.detail);
-    expect(plan.some((l) => isFullScan(l))).toBe(false);
+
+    const statements = capturingSql(db, () => {
+      pendingMetaPhotos(db, { limit: 50 });
+      pendingMetaCount(db);
+    });
+    const photoQueries = statements.filter((s) => /FROM photos/i.test(s.sql));
+    expect(photoQueries.length).toBeGreaterThan(0);
+
+    const scanned = [];
+    for (const q of photoQueries) {
+      for (const line of planFor(db, q)) {
+        if (isFullScan(line)) scanned.push({ ...q, line });
+      }
+    }
+    expect(
+      scanned,
+      `these sweep queries still full-scan:\n${scanned
+        .map(
+          (s) => `  ${s.line}\n    ${s.sql.replace(/\s+/g, " ").slice(0, 120)}`
+        )
+        .join("\n")}`
+    ).toEqual([]);
   });
 });

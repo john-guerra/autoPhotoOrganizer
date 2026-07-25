@@ -36,7 +36,14 @@ import { placeFor } from "../lib/place.js";
  * here. On the real library that left 1,171 of 1,173 videos unprobed — and an
  * unprobed video is one playback has to probe on demand, while the user waits
  * with the loupe open. A column added late needs a way to be filled late. */
-const PENDING_CONDITION = `photos.stale = 0
+// Exported so schema.js can build idx_photos_pending_meta's partial-index WHERE
+// clause from this SAME string (see applySchema there) instead of a
+// hand-copied literal. A hand-copied copy is exactly how the index silently
+// stopped covering this query once before: video_codec was added to this
+// condition without anyone updating the index's WHERE clause to match, and
+// nothing failed loudly — the query just fell back to a full table scan. One
+// shared string can't drift from itself.
+export const PENDING_CONDITION = `photos.stale = 0
     AND (photos.width IS NULL
          OR (photos.kind = 'video' AND photos.video_codec IS NULL)
          OR photos.gps_checked = 0)`;

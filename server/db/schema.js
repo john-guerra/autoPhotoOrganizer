@@ -1,4 +1,5 @@
 import { feedIndexes, FEED_INDEX_PREFIX } from "./sort.js";
+import { PENDING_CONDITION } from "./enrich.js";
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS volumes (
@@ -157,12 +158,28 @@ export function applySchema(db) {
   // "content_hash IS NULL" lookup into an index SEARCH, not a 100k full scan
   // (verified via EXPLAIN QUERY PLAN), and LIMIT caps it regardless.
   ensureColumn(db, "photos", "hash_attempted", "INTEGER NOT NULL DEFAULT 0");
-  // The metadata sweep's to-do list is "width IS NULL" (see db/enrich.js). It
-  // runs once per batch over the whole table, so without this it re-scans 100k+
+  // The metadata sweep's to-do list is PENDING_CONDITION (see db/enrich.js —
+  // width IS NULL, an unprobed video, or gps_checked = 0). It runs once per
+  // batch over the whole table, so without a matching index it re-scans 100k+
   // rows on every one of the ~2,000 batches a full sweep takes.
+  //
+  // The partial index's WHERE clause is built from PENDING_CONDITION itself,
+  // not a hand-copied literal, and dropped + rebuilt on every startup rather
+  // than `CREATE INDEX IF NOT EXISTS`. Both exist for the same reason: SQLite
+  // only uses a partial index as a full replacement scan for a query whose
+  // WHERE clause it can prove is covered by the index's own predicate — once
+  // PENDING_CONDITION gained a disjunct (video_codec, then gps_checked) that
+  // an `IF NOT EXISTS` index kept from a prior app version would NOT match,
+  // and the query fell back to scanning the whole table with no error and no
+  // failing test. (SQLite's multi-index OR optimization was tried and doesn't
+  // apply here — it requires each OR arm to be searchable by a plain,
+  // non-partial index on the compared column, which doesn't fit this file's
+  // "one partial covering index" style. Verified via EXPLAIN QUERY PLAN; see
+  // queryPlan.test.js.)
+  db.exec(`DROP INDEX IF EXISTS idx_photos_pending_meta`);
   db.exec(
-    `CREATE INDEX IF NOT EXISTS idx_photos_pending_meta
-       ON photos (id) WHERE width IS NULL AND stale = 0`
+    `CREATE INDEX idx_photos_pending_meta
+       ON photos (id) WHERE ${PENDING_CONDITION}`
   );
   ensureFeedIndexes(db);
 }
