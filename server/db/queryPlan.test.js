@@ -203,14 +203,15 @@ describe("the feed's query plans", () => {
     expect(plan.some((l) => /idx_folders_sort_path/.test(l))).toBe(true);
   });
 
-  it("a country/city grouped page does not full-scan photos (#154)", () => {
-    // country/city follow the camera/kind precedent: no dedicated index unless
-    // measurement says otherwise. This measures it rather than assuming it.
+  it("a country/region/city grouped page does not full-scan photos (#154/#173)", () => {
+    // country/region/city follow the camera/kind precedent: no dedicated
+    // index unless measurement says otherwise. This measures it rather than
+    // assuming it.
     const db = getDb();
     seed(db);
 
     const statements = capturingSql(db, () =>
-      getFeedPage(db, { groupBy: ["country", "city"], limit: 50 })
+      getFeedPage(db, { groupBy: ["country", "region", "city"], limit: 50 })
     );
     const photoQueries = statements.filter((s) => /FROM photos/i.test(s.sql));
     expect(photoQueries.length).toBeGreaterThan(0);

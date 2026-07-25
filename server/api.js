@@ -866,6 +866,7 @@ export function registerApi(app) {
         lat: p.lat ?? null,
         lon: p.lon ?? null,
         placeCountry: p.place_country ?? "",
+        placeRegion: p.place_region ?? "",
         placeCity: p.place_city ?? "",
       }));
     res.json(out);

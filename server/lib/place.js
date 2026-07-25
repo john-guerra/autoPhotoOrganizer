@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
  * stored lat/lon, so it needs no file access and works with the drive
  * unmounted.
  */
-export const PLACE_VERSION = 2;
+export const PLACE_VERSION = 3;
 
 /**
  * Every 10x of population buys a place this many km of extra distance.
@@ -32,7 +32,7 @@ const KM_PER_POPULATION_DECADE = 2;
 
 const KM_PER_DEG = 111.32;
 
-/** @type {null | {lat: Float32Array, lon: Float32Array, bonus: Float32Array, name: string[], iso: string[], grid: Map<number, Int32Array>, maxBonus: number}} */
+/** @type {null | {lat: Float32Array, lon: Float32Array, bonus: Float32Array, name: string[], iso: string[], admin: string[], grid: Map<number, Int32Array>, maxBonus: number}} */
 let index = null;
 
 /**
@@ -58,10 +58,17 @@ function build() {
   const bonus = new Float32Array(n);
   const name = new Array(n);
   const iso = new Array(n);
+  // "US.CA", "CO.34" — country + adminCode, pre-joined so resolveRegion never
+  // rebuilds this string per lookup. "" (not the raw adminCode) when a place
+  // has none, e.g. Vatican City, so a miss reads as "no region" rather than
+  // stringifying to a bogus "VA.undefined" that admin1Map will just never
+  // match anyway.
+  const admin = new Array(n);
   const cells = new Map();
   // ISO codes come out of the protobuf as 130k separate 2-char strings; there
   // are only ~250 distinct values, so interning them drops 130k allocations.
   const isoPool = new Map();
+  const adminPool = new Map();
   let maxBonus = 0;
 
   for (let i = 0; i < n; i++) {
@@ -77,6 +84,10 @@ function build() {
     let code = isoPool.get(c.country);
     if (code === undefined) isoPool.set(c.country, (code = c.country));
     iso[i] = code;
+    const adminKey = c.adminCode ? `${c.country}.${c.adminCode}` : "";
+    let pooled = adminPool.get(adminKey);
+    if (pooled === undefined) adminPool.set(adminKey, (pooled = adminKey));
+    admin[i] = pooled;
     // wrapLonBucket, not a bare Math.floor: a gazetteer point at exactly
     // lon=180 would otherwise land in a bucket the search side (best()) can
     // never produce, since it always wraps through this same function —
@@ -91,7 +102,7 @@ function build() {
   const grid = new Map();
   for (const [k, arr] of cells) grid.set(k, Int32Array.from(arr));
 
-  index = { lat, lon, bonus, name, iso, grid, maxBonus };
+  index = { lat, lon, bonus, name, iso, admin, grid, maxBonus };
   return index;
 }
 
@@ -184,7 +195,11 @@ function best(lat, lon) {
       );
     }
   }
-  return { city: ix.name[state.i], iso: ix.iso[state.i] };
+  return {
+    city: ix.name[state.i],
+    iso: ix.iso[state.i],
+    admin: ix.admin[state.i],
+  };
 }
 
 /** Test-only: the shipped grid-based search. Exercises the real `build()` /
@@ -210,7 +225,7 @@ export function _bestLinearForTest(lat, lon) {
     }
   }
   if (bestI < 0) return null;
-  return { city: ix.name[bestI], iso: ix.iso[bestI] };
+  return { city: ix.name[bestI], iso: ix.iso[bestI], admin: ix.admin[bestI] };
 }
 
 /** @type {null | ((iso: string) => string)} */
@@ -232,20 +247,45 @@ function resolveCountry(iso) {
   return countryName(iso);
 }
 
+/** @type {null | Map<string, string>} */
+let admin1Names = null;
+
+/** GeoNames admin1 code ("US.CA", "CO.34") -> display name ("California",
+ *  "Bogota D.C."). `cities.json`'s bundled `admin1.json` (~150KB, CC-BY-4.0,
+ *  GeoNames-derived like the rest of this file's data) is a subpath-only
+ *  import — Vite/Node never touch the package's 17MB main cities.json file,
+ *  since the exports map resolves "cities.json/admin1.json" to just that one
+ *  file. Same lazy-load discipline as build(): loaded on first region lookup,
+ *  not at import. */
+function resolveRegion(admin) {
+  if (!admin) return "";
+  if (!admin1Names) {
+    const table = require("cities.json/admin1.json");
+    admin1Names = new Map(table.map((a) => [a.code, a.name]));
+  }
+  return admin1Names.get(admin) ?? "";
+}
+
 /**
  * @param {number|null|undefined} lat
  * @param {number|null|undefined} lon
- * @returns {{country: string, city: string}}
+ * @returns {{country: string, region: string, city: string}}
  *
  * Returns "" (never null) for unknown, because "" is the Unknown sentinel
  * every feed dimension already uses — it sorts before every real value, which
  * is what puts Unknown at the end of a DESC feed without a separate null-flag
  * sort key. See the DIMENSIONS doc comment in server/db/feed.js.
  *
+ * `region` is GeoNames admin1 — "state" in the US, "departamento" in
+ * Colombia, "région" in France, and so on. One field, not a per-country name
+ * for the concept: the display value itself is already localized ("Bogota
+ * D.C.", "California", "Île-de-France"), so a generic label covers every
+ * country the same way `city` already does.
+ *
  * NOTE: the lookup has no concept of coverage, so a mid-ocean coordinate still
  * resolves to the nearest coastal town. That is acceptable — a photo taken at
- * sea genuinely has no better answer — but it means `city` is "the place this
- * was most likely taken in", not a verified containment.
+ * sea genuinely has no better answer — but it means `city`/`region` are "the
+ * place this was most likely taken in", not a verified containment.
  */
 export function placeFor(lat, lon) {
   if (typeof lat !== "number" || typeof lon !== "number") return EMPTY;
@@ -256,6 +296,7 @@ export function placeFor(lat, lon) {
     if (!hit) return EMPTY;
     return {
       country: typeof hit.iso === "string" ? resolveCountry(hit.iso) : "",
+      region: typeof hit.admin === "string" ? resolveRegion(hit.admin) : "",
       city: typeof hit.city === "string" ? hit.city : "",
     };
   } catch {
@@ -265,4 +306,4 @@ export function placeFor(lat, lon) {
   }
 }
 
-const EMPTY = Object.freeze({ country: "", city: "" });
+const EMPTY = Object.freeze({ country: "", region: "", city: "" });

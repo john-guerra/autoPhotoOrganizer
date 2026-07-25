@@ -53,6 +53,7 @@ export const DIMENSIONS = {
   // dimension. COALESCE to '' matches the Unknown sentinel every other
   // dimension uses (a photo with no GPS, or one indexed before places existed).
   country: { expr: "COALESCE(photos.place_country, '')", direction: "ASC" },
+  region: { expr: "COALESCE(photos.place_region, '')", direction: "ASC" },
   city: { expr: "COALESCE(photos.place_city, '')", direction: "ASC" },
 };
 

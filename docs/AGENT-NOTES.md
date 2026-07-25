@@ -68,6 +68,18 @@ Keep this current: when one of these facts changes, update it in the same commit
   confirming the built `dist/` still served correctly. Excluded in
   `build.files` — the same negation pattern, different root cause (not a
   mis-declared dep, just a package whose only consumer is Vite, not Node).
+  Two more landed the same way when the region/departamento level and minimap
+  labels shipped: `cities.json` (only its `admin1.json` subpath is ever
+  imported — the package's exports map keeps the 17MB main `cities.json` file
+  from ever being touched, but the whole package still installs) is the same
+  Vite-only case as world-atlas. `smart-labels` is back to the FIRST kind of
+  waste — it declares `rollup`/`@rollup/*`/`rollup-plugin-ascii`/
+  `rollup-plugin-commonjs`/`rollup-pluginutils`/`terser` (its own bundler
+  toolchain, ~9.6MB) as runtime `dependencies` instead of devDependencies,
+  same mistake as `offline-geocode-city`. Its actual runtime entry
+  (`dist/smartLabels.es.js`) only imports `d3`. Verified the same way as
+  world-atlas/topojson-client — moved everything aside post-build, confirmed
+  `dist/` still served — before excluding.
 - **Place names are versioned, and the version is load-bearing.**
   `photos.gps_checked = 1` is a one-way door meaning "we read this file's EXIF
   GPS", which permanently removes the row from the metadata sweep. That correctly

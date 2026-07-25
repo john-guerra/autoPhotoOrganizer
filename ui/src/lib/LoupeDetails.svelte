@@ -51,7 +51,9 @@
     typeof meta?.lat === "number" && typeof meta?.lon === "number"
   );
   const placeHierarchy = $derived(
-    [meta?.placeCountry, meta?.placeCity].filter(Boolean).join(" › ")
+    [meta?.placeCountry, meta?.placeRegion, meta?.placeCity]
+      .filter(Boolean)
+      .join(" › ")
   );
 
   function fmtDate(iso) {
@@ -121,7 +123,7 @@
         {#if placeHierarchy}
           <div class="v place">{placeHierarchy}</div>
         {/if}
-        <MiniMap lat={meta.lat} lon={meta.lon} />
+        <MiniMap lat={meta.lat} lon={meta.lon} placeName={meta.placeCity} />
       </section>
     {/if}
 
