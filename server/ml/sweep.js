@@ -37,26 +37,34 @@ import { reachable } from "../lib/reachable.js";
  * @param {(row: any) => string} opts.folderOf folder abs_path, for the probe
  * @param {(p: {done: number, failed: number}) => void} [opts.onProgress]
  * @param {() => Promise<void>} [opts.idle]
+ * @param {(row: any) => (number|string)} [opts.idOf] identity for the
+ *   stall guard below. Defaults to `(row) => row.id` — every row in this
+ *   codebase's sweeps has a numeric `id`. Override only if a caller's rows
+ *   key on something else.
  * @returns {Promise<{done: number, failed: number, paused: boolean}>} `done`
  *   counts BOTH successfully-written rows and permanently-failed
  *   (sentinel-marked) rows — it is "rows classified", not "rows written".
  */
 export async function runSweep(
   job,
-  { nextBatch, process, markFailed, folderOf, onProgress, idle = whenIdle }
+  {
+    nextBatch,
+    process,
+    markFailed,
+    folderOf,
+    onProgress,
+    idle = whenIdle,
+    idOf = (row) => row.id,
+  }
 ) {
   let done = 0;
   let failed = 0;
-  // The set of row references `nextBatch` handed us last pass. If the SAME
-  // rows (by reference) come back unchanged — same size, same members — a
-  // full pass just ran and classified nothing that actually left the
-  // caller's worklist. That is the general shape of a caller-contract bug
-  // (most concretely: `markFailed` not removing its row — see below), and
-  // the counters alone can't see it: `done`/`failed` are credited per
-  // classification, so a row that keeps failing and keeps getting
-  // `markFailed`-ed (without ever leaving the worklist) makes the counters
-  // climb forever while the sweep itself never converges.
-  let previousBatch = null;
+  // Every id we have called markFailed on this sweep. Both real callers of
+  // runSweep are SQL-backed (`nextBatch` re-queries), and better-sqlite3
+  // hands back a FRESH row object on every `.all()` — never the same
+  // reference twice, even for the identical row. So the stall guard below
+  // cannot compare by object identity; it has to compare by id.
+  const failedIds = new Set();
 
   const abortIfCanceled = () => {
     if (job?.controller.signal.aborted) {
@@ -76,20 +84,23 @@ export async function runSweep(
     const batch = nextBatch();
     if (!batch.length) break;
 
-    if (
-      previousBatch &&
-      batch.length === previousBatch.size &&
-      batch.every((row) => previousBatch.has(row))
-    ) {
-      // Nothing in this project fails silently (CLAUDE.md, "Usability").
-      // runSweep is the shared foundation every future sweep lands on, so a
-      // caller mistake here must be loud, not a hang with no error anywhere.
-      throw new Error(
-        `runSweep made no progress on a batch of ${batch.length} rows: ` +
-          "markFailed must remove the row from nextBatch's worklist (and " +
-          "process must remove rows it successfully writes), or the sweep " +
-          "cannot terminate"
-      );
+    // THE STALL GUARD. nextBatch() is re-queried every pass with no
+    // visited-set of its own — the loop only terminates because a row that
+    // gets marked failed is expected to leave whatever nextBatch reads. If
+    // it comes back anyway, that removal didn't happen: the caller's
+    // markFailed has a bug, and looping again would just retry it forever
+    // with no error anywhere. Nothing in this project fails silently
+    // (CLAUDE.md, "Usability") — runSweep is the shared foundation every
+    // future sweep lands on, so this has to be loud here, once.
+    for (const row of batch) {
+      const id = idOf(row);
+      if (failedIds.has(id)) {
+        throw new Error(
+          `runSweep: row ${id} was marked failed but nextBatch() returned ` +
+            "it again — markFailed must remove the row from the worklist, " +
+            "or the sweep cannot terminate"
+        );
+      }
     }
 
     try {
@@ -123,13 +134,13 @@ export async function runSweep(
           // photo, so the caller writes its sentinel and the row leaves the
           // worklist.
           markFailed(row, err);
+          failedIds.add(idOf(row));
           done += 1;
           failed += 1;
         }
       }
     }
     onProgress?.({ done, failed });
-    previousBatch = new Set(batch);
   }
   return { done, failed, paused: false };
 }

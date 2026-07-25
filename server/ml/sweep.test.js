@@ -176,21 +176,28 @@ describe("runSweep", () => {
     // row from whatever nextBatch reads. A caller that forgets to do that
     // must get a loud, named error, not an infinite loop with no error
     // anywhere ("nothing fails silently").
-    const rows = [{ id: 1, folder: dir }];
-    const wl = makeWorklist(rows);
+    //
+    // nextBatch here returns a FRESH object with the same id on every call —
+    // this mimics what better-sqlite3's `.all()` actually does (a new row
+    // object per query, never the same reference), and both real callers of
+    // runSweep are SQL-backed. A guard built on object-reference identity
+    // would never fire against this shape: it only protects an in-memory
+    // test worklist, not the real one. Identity has to be by id.
+    const failed = [];
     await expect(
       runSweep(liveJob(), {
-        nextBatch: wl.nextBatch,
+        nextBatch: () => [{ id: 1, folder: dir }], // new object, same id, every call
         process: async () => {
           const e = new Error("ENOENT");
           e.code = "ENOENT";
           throw e;
         },
-        markFailed: () => {}, // caller bug: never removes the row
+        markFailed: (row) => failed.push(row.id), // caller bug: never removes the row
         folderOf: (r) => r.folder,
         idle: noIdle,
       })
-    ).rejects.toThrow(/no progress/i);
+    ).rejects.toThrow(/markFailed must remove the row/i);
+    expect(failed).toEqual([1]);
   }, 2000);
 
   it("reports progress after each batch", async () => {
