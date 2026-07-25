@@ -53,17 +53,25 @@ Electron build, which is precisely how #67 crashed on launch.
 ### Two overrides of the parent design, recorded deliberately
 
 The program design (`2026-07-24-ml-signals-design.md`) lists **GPU/WebGPU
-inference** under "Out of scope", and its resolved decisions say inference runs
-in a Node child process. Both are overridden here at John's explicit direction,
-after the CPU-only finding below was raised and he reaffirmed:
+inference** under "Out of scope", and its resolved decisions name a Node child
+process as _the_ runtime. Both are overridden here at John's explicit direction:
 
 - **WebGPU is in scope for this issue**, not a follow-up.
-- **A second execution host is acceptable**, because prebuilt
-  `onnxruntime-node` has **no CoreML on any platform** — macOS Apple Silicon
-  gets CPU only. DirectML ships on Windows and CUDA on Linux x64, but on the
-  primary development and use machine, "use the GPU" via ORT resolves to
-  nothing. Chromium's WebGPU is the only real path to Apple Silicon's GPU, and
-  the app is already an Electron app.
+- **A second execution host is added.** The Node child is not removed — it
+  remains the fallback, and the only host under `npm run dev`.
+
+**Two different runtimes, and the distinction is load-bearing.** "No GPU on
+macOS" is a fact about **`onnxruntime-node`'s execution providers**: the
+prebuilt native addon ships **no CoreML on any platform**, so Apple Silicon
+gets CPU only (DirectML ships on Windows, CUDA on Linux x64). It says nothing
+about **Chromium's WebGPU**, which is a separate implementation reached through
+the renderer — the same path transformers.js demos use for SAM, already proven
+in practice.
+
+So the two findings agree rather than conflict: ORT's execution providers give
+us nothing on Apple Silicon, which is exactly why the GPU has to be reached
+through a renderer instead. The app is already Electron, so that host is
+available.
 
 This is recorded so it reads as a decision rather than drift.
 
