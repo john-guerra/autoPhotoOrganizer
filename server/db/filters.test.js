@@ -9,7 +9,8 @@ function seeded() {
   db.exec(`
     CREATE TABLE folders (id INTEGER PRIMARY KEY, abs_path TEXT);
     CREATE TABLE photos (
-      id INTEGER PRIMARY KEY, filename TEXT, folder_id INTEGER, stale INTEGER DEFAULT 0
+      id INTEGER PRIMARY KEY, filename TEXT, folder_id INTEGER, stale INTEGER DEFAULT 0,
+      place_country TEXT DEFAULT '', place_city TEXT DEFAULT ''
     );
   `);
   const folder = db.prepare("INSERT INTO folders (id, abs_path) VALUES (?, ?)");
@@ -22,6 +23,9 @@ function seeded() {
   photo.run("b.jpg", 1);
   photo.run("sunset.jpg", 2);
   photo.run("100%_done.jpg", 2); // a literal % — LIKE's wildcard, as a filename
+  db.prepare(
+    "INSERT INTO photos (filename, folder_id, place_country, place_city) VALUES (?, ?, ?, ?)"
+  ).run("gps.jpg", 2, "Colombia", "La Calera");
   return db;
 }
 
@@ -269,7 +273,28 @@ describe("buildFilter — free-text search", () => {
 
   it("is off when the query is empty or only whitespace", () => {
     const db = seeded();
-    expect(namesMatching(db, { text: "   " }).length).toBe(4);
-    expect(namesMatching(db, {}).length).toBe(4);
+    expect(namesMatching(db, { text: "   " }).length).toBe(5);
+    expect(namesMatching(db, {}).length).toBe(5);
+  });
+
+  it("matches a photo by its country or nearest-town (place), not just filename/folder", () => {
+    const db = seeded();
+    expect(namesMatching(db, { text: "Colombia" })).toEqual(["gps.jpg"]);
+    expect(namesMatching(db, { text: "la calera" })).toEqual(["gps.jpg"]);
+  });
+
+  it("free-text search matches the place a photo was taken", () => {
+    const { sql, params } = buildFilter({ text: "Bogota" });
+    expect(sql).toContain("place_country");
+    expect(sql).toContain("place_city");
+    expect(
+      params.filter((p) => p === "%Bogota%").length
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  it("escapes LIKE metacharacters in a place search", () => {
+    const { params } = buildFilter({ text: "100%" });
+    expect(params.every((p) => !String(p).includes("100%%"))).toBe(true);
+    expect(params.some((p) => String(p).includes("100\\%"))).toBe(true);
   });
 });

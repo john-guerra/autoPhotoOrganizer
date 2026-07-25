@@ -1,7 +1,15 @@
-import { mkdirSync, rmSync, existsSync, utimesSync } from "node:fs";
+import {
+  mkdirSync,
+  rmSync,
+  existsSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import sharp from "sharp";
+import { withDateAndGps } from "./gpsJpeg.mjs";
+import { placeFor } from "../server/lib/place.js";
 
 /**
  * A hermetic library for the e2e run: generated JPEGs in a temp folder, indexed
@@ -50,6 +58,38 @@ export const FOLDERS = [
     days: ["2024:03:05", "2024:03:06"],
   },
 ];
+
+/**
+ * GPS for the FIRST TWO photos of the first folder: same country, different
+ * towns. That one structure exercises everything at once — a country group
+ * with a real count, town nesting under it, and (because every other photo has
+ * no GPS) the Unknown bucket. One clever fixture beats five specs.
+ *
+ * These two photos are written by hand rather than through sharp's
+ * `withMetadata`, because sharp cannot write GPS and two Exif segments would
+ * fight. `withDateAndGps` carries the capture date too, so their dates stay
+ * consistent with the rest of the folder.
+ *
+ * The expected `country`/`city` are computed HERE, from the real
+ * `placeFor` (server/lib/place.js) — never hardcoded. The offline geocoder
+ * resolves to the nearest small TOWN, not the nearest major city (e.g.
+ * 4.7110,-74.0721 — a coordinate near Bogota — resolves to "La Calera", not
+ * "Bogota"), so a literal string here would silently drift from what the app
+ * actually shows the moment the geocoder's dataset changes. Deriving it keeps
+ * the fixture and every spec that imports it in permanent agreement with the
+ * real geocoder.
+ */
+const GPS_COORDS = [
+  { index: 0, lat: 4.711, lon: -74.0721 },
+  { index: 1, lat: 6.2442, lon: -75.5812 },
+];
+export const GPS_PHOTOS = GPS_COORDS.map((g) => ({
+  ...g,
+  ...placeFor(g.lat, g.lon),
+}));
+// Both coordinates resolve to the same country by construction (two nearby
+// Colombian towns) — that's the "one country, two towns" structure above.
+export const GPS_COUNTRY = GPS_PHOTOS[0].country;
 
 /** A video the BROWSER CANNOT PLAY: MPEG-4 Part 2 in an AVI, which is what an
  * old camcorder produces and what Chromium has no decoder for. Pointed straight
@@ -125,17 +165,45 @@ export async function buildFixture() {
       // up so capture order is stable and total (no ties to sort around).
       const day = folder.days[i < Math.ceil(folder.count / 2) ? 0 : 1];
       const date = `${day} 09:${String(i).padStart(2, "0")}:00`;
-      await sharp({
-        create: {
-          width: w,
-          height: h,
-          channels: 3,
-          background: { r: 40 + i * 20, g: 90, b: 160 },
-        },
-      })
-        .withMetadata({ exif: { IFD2: { DateTimeOriginal: date } } })
-        .jpeg()
-        .toFile(join(dir, `img_${String(i).padStart(2, "0")}.jpg`));
+      const dest = join(dir, `img_${String(i).padStart(2, "0")}.jpg`);
+      // Only the first folder carries GPS (see GPS_PHOTOS above) — every other
+      // photo in the fixture has none, which is what exercises the Unknown
+      // bucket for the place dimensions.
+      const geo =
+        folder === FOLDERS[0]
+          ? GPS_PHOTOS.find((g) => g.index === i)
+          : undefined;
+
+      if (geo) {
+        // Hand-written EXIF: sharp drops GPS, and a second Exif segment beside
+        // sharp's would be ignored by readers that take the first one.
+        const plain = await sharp({
+          create: {
+            width: w,
+            height: h,
+            channels: 3,
+            background: { r: 40 + i * 20, g: 90, b: 160 },
+          },
+        })
+          .jpeg()
+          .toBuffer();
+        writeFileSync(
+          dest,
+          withDateAndGps(plain, { date, lat: geo.lat, lon: geo.lon })
+        );
+      } else {
+        await sharp({
+          create: {
+            width: w,
+            height: h,
+            channels: 3,
+            background: { r: 40 + i * 20, g: 90, b: 160 },
+          },
+        })
+          .withMetadata({ exif: { IFD2: { DateTimeOriginal: date } } })
+          .jpeg()
+          .toFile(dest);
+      }
     }
   }
 

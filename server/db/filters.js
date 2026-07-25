@@ -92,10 +92,13 @@ export function buildFilter(spec = {}) {
     params.push(spec.folderPath, escaped + "/%");
   }
 
-  // Free-text search: the file's NAME or the folder path it lives in. Those two
-  // are what a photographer actually remembers ("that Tayrona folder", "PXL_2024
-  // -something"), and they are the only text this index holds for every photo —
-  // camera/lens are EXIF, and 97k photos have never had their EXIF read.
+  // Free-text search: the file's NAME, the folder path it lives in, or the
+  // PLACE it was taken (#154). Name and folder path are what a photographer
+  // actually remembers ("that Tayrona folder", "PXL_2024-something"); place is
+  // the same kind of memory ("that was the Bogota trip") now that GPS resolves
+  // to a country/city. Place needs no subquery — unlike the folder path, it is
+  // a plain per-photo column (photos.place_country/place_city), already
+  // denormalized onto the row for exactly this kind of lookup.
   //
   // Case-insensitive by SQLite's default LIKE (ASCII). LIKE metacharacters in
   // the QUERY are escaped, so typing a literal % or _ searches for that
@@ -108,9 +111,12 @@ export function buildFilter(spec = {}) {
   if (text) {
     const like = `%${text.replace(/([\\%_])/g, "\\$1")}%`;
     clauses.push(
-      `(photos.filename LIKE ? ESCAPE '\\' OR photos.folder_id IN (SELECT id FROM folders WHERE abs_path LIKE ? ESCAPE '\\'))`
+      `(photos.filename LIKE ? ESCAPE '\\'
+          OR photos.place_country LIKE ? ESCAPE '\\'
+          OR photos.place_city LIKE ? ESCAPE '\\'
+          OR photos.folder_id IN (SELECT id FROM folders WHERE abs_path LIKE ? ESCAPE '\\'))`
     );
-    params.push(like, like);
+    params.push(like, like, like, like);
   }
 
   // Time-range facet (timeline filter). Filters on the SAME date attribute the

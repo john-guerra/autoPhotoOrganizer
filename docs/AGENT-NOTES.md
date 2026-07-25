@@ -47,6 +47,20 @@ Keep this current: when one of these facts changes, update it in the same commit
   **publish + version-bump** over `npm link`: a global `npm link` re-links ALL
   global links and causes collateral breakage across unrelated projects. The
   version + deps that matter live in the **root** `package.json`.
+- **`offline-geocode-city@1.0.2` (#154) declares its own build toolchain
+  (`@jsheaven/easybuild` → `typescript` ~64MB, plus `dts-bundle-generator`) as a
+  runtime `dependency`, not a `devDependency` — a mistake in that package, not
+  ours. electron-builder ships the whole production `node_modules` tree (the
+  `build.files` allowlist only covers app source, not node_modules pruning), so
+  without an exclusion every installer would carry ~64MB it never runs. Fixed by
+  negation patterns in `package.json`'s `build.files`
+  (`!node_modules/typescript/**`, `!node_modules/@jsheaven/**`,
+  `!node_modules/dts-bundle-generator/**`) — verified safe by physically moving
+  those three directories out of `node_modules` and confirming `getNearestCity()`
+  still works (the package's actual runtime bundle, `dist/index.esm.js` /
+  `dist/index.cjs.js`, only needs `lz-ts` and `s2-geometry`). Re-verify this the
+  same way if `offline-geocode-city` is ever upgraded — a new version could ship
+  a different dependency shape.
 
 ## Data-layer traps (verify before editing)
 

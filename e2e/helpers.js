@@ -79,6 +79,34 @@ export async function resetRatings(page) {
   }
 }
 
+/**
+ * Force the metadata sweep to completion — EXIF, dimensions, and (#154)
+ * GPS/place — and wait for it to finish before looking at anything
+ * metadata-derived.
+ *
+ * Needed because enrichment is otherwise LAZY (see server/db/enrich.js):
+ * the grid only reads metadata for the ids it actually renders, via
+ * `/api/meta`, AFTER the initial `/api/feed` request that decided the
+ * groups. A dimension with a filesystem-timestamp fallback (day/month, via
+ * COALESCE(taken_at, btime, mtime)) happens to look right anyway; place has
+ * no such fallback — `COALESCE(photos.place_country, '')` — so a spec that
+ * groups by country right after `openApp` races that lazy read and sees
+ * every photo under "Unknown" until something re-fetches the feed. Call
+ * this BEFORE `openApp` in any spec that groups/filters by place.
+ */
+export async function enrichAll(page) {
+  await page.request.post("/api/enrich", { data: {} });
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get("/api/enrich/pending");
+        return (await res.json()).pending;
+      },
+      { timeout: 20_000 }
+    )
+    .toBe(0);
+}
+
 /** Reload WITHOUT clearing storage — for "does it persist?" assertions. */
 export async function reload(page) {
   await page.reload();

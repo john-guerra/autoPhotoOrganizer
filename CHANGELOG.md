@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.3
+
+- **Group and search your photos by where they were taken.** AutoGallery now
+  reads the GPS in your photos and resolves it to a country and nearest town —
+  entirely offline, no accounts and no network. Group the feed or the Library
+  tree by Country or Nearest town, and type a place name into search to find
+  everything shot there. Photos without GPS group under "Unknown". Existing
+  libraries fill in automatically in the background after the next scan (#154).
+
 ## 2.18.2
 
 - **Content signatures now index the whole library in the background.** After a
