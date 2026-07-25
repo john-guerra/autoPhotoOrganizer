@@ -1,33 +1,15 @@
-import { createHash } from "node:crypto";
 import { existsSync, statSync, readdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
-import { thumbsDir } from "./cachePaths.js";
-
-// Every thumbnail size the client ever requests (ui/src/App.svelte snaps
-// the displayed size to one of these five, specifically so the disk cache
-// doesn't fragment per pixel) — the complete, exhaustive set to check.
-const THUMB_BUCKETS = [160, 320, 480, 640, 1024];
-
-/**
- * The exact cache-key formula from GET /api/thumb/:id (server/api.js) —
- * kept in sync manually since duplicating a one-line hash call is simpler
- * than adding a shared-module indirection for a single expression.
- * @param {{path:string, mtime:number, size:number}} photo
- * @param {number} bucket
- * @returns {string} sha1 hex key
- */
-function cacheKeyFor(photo, bucket) {
-  return createHash("sha1")
-    .update(`${photo.path}:${photo.mtime}:${photo.size}:${bucket}`)
-    .digest("hex");
-}
+import { basename, join } from "node:path";
+import { thumbsDir, thumbCachePath, THUMB_BUCKETS } from "./cachePaths.js";
 
 /**
  * @param {{path:string, mtime:number, size:number}} photo
- * @returns {string[]} the cache key for every bucket this photo could have
+ * @returns {string[]} the bare cache key for every bucket this photo could have
  */
 function expectedCacheKeys(photo) {
-  return THUMB_BUCKETS.map((bucket) => cacheKeyFor(photo, bucket));
+  return THUMB_BUCKETS.map((bucket) =>
+    basename(thumbCachePath(photo, bucket), ".jpg")
+  );
 }
 
 /** @returns {{totalBytes:number, totalFiles:number}} */

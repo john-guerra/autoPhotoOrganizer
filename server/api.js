@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   existsSync,
   statSync,
@@ -25,7 +24,12 @@ import {
 import { homedir } from "node:os";
 import { revealCommand, revealManyCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
-import { thumbsDir, cacheRoot, videoProxiesDir } from "./lib/cachePaths.js";
+import {
+  thumbCachePath,
+  thumbsDir,
+  cacheRoot,
+  videoProxiesDir,
+} from "./lib/cachePaths.js";
 import {
   getCacheStats,
   getCacheBreakdown,
@@ -903,10 +907,7 @@ export function registerApi(app) {
     if (!it) return res.status(404).end();
     const size = Math.min(1024, Math.max(64, Number(req.query.size) || 320));
 
-    const key = createHash("sha1")
-      .update(`${it.path}:${it.mtime}:${it.size}:${size}`)
-      .digest("hex");
-    const cachePath = join(thumbsDir(), `${key}.jpg`);
+    const cachePath = thumbCachePath(it, size);
 
     res.set("Cache-Control", "public, max-age=31536000, immutable");
     res.type("image/jpeg");
