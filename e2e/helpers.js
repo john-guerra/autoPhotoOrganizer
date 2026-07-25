@@ -604,6 +604,18 @@ export const scrubber = {
   labelTexts: (page) => page.locator(".scrubber .label-text").allInnerTexts(),
 };
 
+// --- the toolbar brushable timeline (TimelineFilter.svelte) -------------------
+
+export const timelineFilter = {
+  root: (page) => page.locator(".time-filter"),
+  /** The two draggable date badges (`.za-value`, from d3-zoomable-axis). Their
+   *  text is the formatted min/max of the domain until the user drags a handle —
+   *  the cheapest DOM-visible proxy for "what date range is this widget plotting
+   *  right now", without reaching into the widget's internal `.value`. */
+  badgeTexts: (page) =>
+    page.locator(".time-filter .za-value").allInnerTexts(),
+};
+
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------
 
 export const menu = {

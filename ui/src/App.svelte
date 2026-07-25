@@ -1658,6 +1658,17 @@
       return; // scope unchanged — the UI still matches what the server holds
     }
     scope = next;
+    // The time-range brush is a pair of ABSOLUTE timestamps, meaningful only
+    // relative to whatever domain the timeline was plotting when it was set.
+    // A scope change re-plots that domain (a different working set), so a
+    // carried-over dateFrom/dateTo has no defined relationship to it — at best
+    // it silently re-narrows the new scope to a range the user never chose for
+    // it, at worst (#194) it strands the timeline strip showing the OLD
+    // scope's dates because the widget's own domain-unchanged fast path skips
+    // reclamping the brush value against the new range.
+    if (filter.dateFrom != null || filter.dateTo != null) {
+      filter = { ...filter, dateFrom: null, dateTo: null };
+    }
     invalidateCounts();
     // displayFilter is a `$:` derived value keyed on `scope`; it hasn't
     // recomputed yet. Flush before rebuilding so the feed loader reads the new

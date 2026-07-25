@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.23
+
+- **The toolbar timeline strip no longer gets stuck showing the wrong dates
+  after "Keep only"**. If you'd narrowed the timeline (dragged a brush handle)
+  before scoping down to a selection or a group, the strip could keep showing
+  the old, now-meaningless date range instead of the new working set's — and
+  in the worst case silently re-applied that stale range as a filter on the
+  new scope. Applying (or leaving) a "Keep only" scope now resets the time
+  brush, the same way it already resets for every other facet. (#194)
+
 ## 2.18.22
 
 - **Jumping to a group no longer drifts onto a different group** on a large
