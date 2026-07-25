@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import {
   trackPageErrors,
   openApp,
+  enrichAll,
   albums,
   grid,
   statusBar,
@@ -22,6 +23,15 @@ import {
  *
  * The lesson the repo keeps relearning: the bugs live in the seam between
  * modules and the DOM, not inside the modules.
+ *
+ * Every test here calls `enrichAll` BEFORE `openApp`. Album detection
+ * gap-clusters on `COALESCE(taken_at, …, mtime)` (see `workingSetTimeline`),
+ * and enrichment is otherwise LAZY — only the photos the grid actually renders
+ * get their EXIF read. So without this, how many albums the fixture produces
+ * depends on how many thumbnails happened to paint first: the un-enriched ones
+ * fall back to their build-time mtimes, which are milliseconds apart, and
+ * collapse into a single album. That is the long-standing flake on the
+ * album-count precondition below (see docs/AGENT-NOTES.md).
  */
 
 test.describe("@p0 album timeline", () => {
@@ -29,6 +39,7 @@ test.describe("@p0 album timeline", () => {
     page,
   }) => {
     const errors = trackPageErrors(page);
+    await enrichAll(page);
     await openApp(page);
     await albums.open(page);
 
@@ -82,6 +93,7 @@ test.describe("@p0 album timeline", () => {
     page,
   }) => {
     const errors = trackPageErrors(page);
+    await enrichAll(page);
     await openApp(page);
     await albums.open(page);
 
@@ -113,6 +125,7 @@ test("@p1 a selection makes Auto Albums organize only those photos", async ({
   page,
 }) => {
   const errors = trackPageErrors(page);
+  await enrichAll(page);
   await openApp(page);
 
   // Pick three photos (the select circle toggles selection without opening the
@@ -142,6 +155,7 @@ test("@p1 a selection makes Auto Albums organize only those photos", async ({
  */
 test("@p1 the album-name input grows to fill the row", async ({ page }) => {
   const errors = trackPageErrors(page);
+  await enrichAll(page);
   await openApp(page);
   await albums.open(page);
 
@@ -170,6 +184,7 @@ test("@p1 materialize sends the edited album names, not the defaults", async ({
   page,
 }) => {
   const errors = trackPageErrors(page);
+  await enrichAll(page);
   await openApp(page);
   await albums.open(page);
 
@@ -198,7 +213,14 @@ test("@p1 materialize sends the edited album names, not the defaults", async ({
     "MyCustomTrip"
   );
 
-  expect(errors).toEqual([]);
+  // The stubbed 400 above is real from the browser's point of view — Chromium
+  // logs ANY non-2xx resource response as its own "Failed to load resource"
+  // console.error, whether or not the app intercepted it on purpose. Whether
+  // that async console event lands before or after this assertion is a race
+  // (CI's slower runners lose it far more often than a local machine does —
+  // see docs/AGENT-NOTES.md's flaky-spec note for this file), so filter out
+  // the one error this test itself caused instead of racing to outrun it.
+  expect(errors.filter((e) => !/materialize|400/i.test(e))).toEqual([]);
 });
 
 /** "#4e79a7" -> "rgb(78, 121, 167)", the form getComputedStyle reports. */

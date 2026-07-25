@@ -15,8 +15,22 @@ Keep this current: when one of these facts changes, update it in the same commit
   `~/.autogallery/`. Playwright already points `AUTOGALLERY_HOME` at `e2e/.tmp/home`
   over generated fixtures (see `playwright.config.js`), which is why `resetRatings`
   in `e2e/helpers.js` is safe by construction.
-- **`e2e/albums.spec.js` is pre-existingly flaky** (~20–40% on the album-count
-  precondition around line 22). Retry before assuming a regression.
+- **`e2e/albums.spec.js` flakes were CI-only, and both causes are now fixed**
+  (2.18.23). Kept here because the two mechanisms recur elsewhere:
+  - _Album-count precondition._ Album detection gap-clusters on
+    `COALESCE(taken_at, …, mtime)`, but enrichment is LAZY — only rendered
+    thumbnails get their EXIF read. Un-enriched photos fall back to build-time
+    mtimes milliseconds apart and collapse into one album, so the count varied
+    with paint timing. Fix: `enrichAll` before `openApp` (same rule as
+    `places.spec.js`).
+  - _`trackPageErrors` vs. a deliberately stubbed error response._ Chromium
+    logs ANY non-2xx as its own `console.error`, even one the test injected on
+    purpose; whether that async event beats the final `expect(errors)` is a
+    race that slow runners lose. Fix: filter out the error the test itself
+    caused, as `culling.spec.js` already did — never assert a bare `[]` in a
+    test that stubs a failure.
+  - Note both were **unreproducible locally** (20+ clean runs each) — a green
+    local run does not clear a CI-only flake in this file.
 - **A test that never failed proves nothing.** Revert the fix, watch the test go
   red, restore. (Also in CLAUDE.md — repeated here because it's the most-skipped
   step.)

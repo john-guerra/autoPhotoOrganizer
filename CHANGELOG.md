@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.32
+
+- **Dev:** fixed the two CI-only flakes in `e2e/albums.spec.js`. Album
+  detection clusters on capture dates, but metadata reads are lazy, so the
+  number of albums the fixture produced varied with paint timing; and the
+  materialize test asserted zero console errors while deliberately stubbing a
+  400, racing Chromium's own log of it. Both now deterministic.
+
 ## 2.18.31
 
 - **Internal:** a test that proves the new photo analysis actually understands
