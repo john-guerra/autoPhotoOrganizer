@@ -6,7 +6,7 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
-## 2.18.5
+## 2.18.10
 
 - Unmounting a drive while the library was being hashed no longer excludes those
   photos from hashing forever. Libraries already affected are repaired
@@ -16,6 +16,49 @@ user-facing — what you can now do, not how it's built.
 - Groundwork for on-device photo understanding: the background runtime that
   future face and similarity features will run on. No models are downloaded and
   nothing changes in the app yet. (#160)
+
+## 2.18.9
+
+- **The "Nearest town" dimension is now labelled "City".** It carried that
+  hedge since it launched because the geocoder used to return a genuinely
+  unrelated small town for a city coordinate; that was fixed in 2.18.5, so
+  the label no longer needed to undersell it.
+
+## 2.18.8
+
+- **A new Region level — state, province, or departamento.** Group and
+  search the feed by "California", "Cundinamarca", "Île-de-France" — one
+  more step in the place hierarchy, between country and nearest town (#173).
+  Existing photos pick it up automatically, no rescan needed.
+- **The loupe's minimap now labels what you're looking at**, using
+  @john-guerra's `smart-labels` — the photo's own town plus nearby countries,
+  only as many as fit without crowding.
+
+## 2.18.7
+
+- **The loupe now shows where a photo was taken.** A Location section appears
+  for any geotagged photo — its country and nearest town, plus a small
+  offline map with a pin. Entirely offline, same as the rest of Places (#154,
+  #175): no network, no accounts, and it works with your photo drive
+  unplugged.
+
+## 2.18.6
+
+- **Fix:** on a large library, updating to the new place-name database (2.18.5)
+  no longer stalls the whole app on launch. It now catches up in the
+  background instead.
+
+## 2.18.5
+
+- **Places now name the right city.** San Francisco photos were being filed
+  under "Half Moon Bay" — a town 33 km away — because the old location
+  database had no entry for San Francisco, Oakland, Berkeley, San Jose or
+  Palo Alto at all. Swapped in a far denser offline database (138,000 places,
+  still no network, no accounts) that also knows the difference between a big
+  city and the small town next door: central Bogotá reads "Bogotá", while
+  nearby La Calera stays "La Calera" (#175).
+- Your existing photos are re-labelled automatically the next time the app
+  starts — no rescan, and it works with the drive unplugged.
 
 ## 2.18.4
 

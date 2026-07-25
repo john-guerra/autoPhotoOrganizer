@@ -370,6 +370,73 @@ describe("GET /api/meta — EXIF fields", () => {
       await close();
     }
   });
+
+  it("returns GPS coordinates and the geocoded place names (#175 loupe follow-up)", async () => {
+    // #154/#175 wrote lat/lon/place_country/place_city into the index and
+    // surfaced them as feed/tree dimensions, but /api/meta never returned
+    // them, so the loupe had no way to show a photo's location at all.
+    const db = getDb();
+    const folderId = db
+      .prepare(`INSERT INTO folders (abs_path, last_scanned_at) VALUES (?, 0)`)
+      .run("/p-place-test").lastInsertRowid;
+    const photoId = db
+      .prepare(
+        `INSERT INTO photos
+           (folder_id, filename, size, mtime, kind, width, height, camera, lens,
+            lat, lon, place_country, place_region, place_city, gps_checked,
+            place_version)
+         VALUES (?, 'a.jpg', 100, 1, 'image', 10, 10, '', '',
+            37.758, -122.426, 'United States', 'California', 'San Francisco',
+            1, 3)`
+      )
+      .run(folderId).lastInsertRowid;
+
+    const { base, close } = await startServer();
+    try {
+      const res = await fetch(`${base}/api/meta?ids=${photoId}`);
+      const [m] = await res.json();
+      expect(m).toMatchObject({
+        id: Number(photoId),
+        lat: 37.758,
+        lon: -122.426,
+        placeCountry: "United States",
+        placeRegion: "California",
+        placeCity: "San Francisco",
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  it("returns the '' Unknown sentinel, not null, for a checked photo with no GPS", async () => {
+    const db = getDb();
+    const folderId = db
+      .prepare(`INSERT INTO folders (abs_path, last_scanned_at) VALUES (?, 0)`)
+      .run("/p-no-gps-test").lastInsertRowid;
+    const photoId = db
+      .prepare(
+        `INSERT INTO photos
+           (folder_id, filename, size, mtime, kind, width, height, camera, lens,
+            gps_checked, place_version)
+         VALUES (?, 'a.jpg', 100, 1, 'image', 10, 10, '', '', 1, 2)`
+      )
+      .run(folderId).lastInsertRowid;
+
+    const { base, close } = await startServer();
+    try {
+      const res = await fetch(`${base}/api/meta?ids=${photoId}`);
+      const [m] = await res.json();
+      expect(m).toMatchObject({
+        lat: null,
+        lon: null,
+        placeCountry: "",
+        placeRegion: "",
+        placeCity: "",
+      });
+    } finally {
+      await close();
+    }
+  });
 });
 
 describe("GET /api/thumb/:id", () => {

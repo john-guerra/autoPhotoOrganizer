@@ -100,7 +100,7 @@ const MONTH_NAMES = [
  * the month-of-year dimension ("01".."12") displays as its month name.
  * Kept in sync manually — there is no shared module between server and
  * client to import this from.
- * Place dimensions (country/city) need no branch — their values are already
+ * Place dimensions (country/region/city) need no branch — their values are already
  * display strings, and '' is handled by the Unknown rule above. */
 function formatTreeLabel(dimension, value) {
   if (value === "") return "Unknown";

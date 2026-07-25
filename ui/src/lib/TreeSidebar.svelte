@@ -247,14 +247,17 @@
     if (!sameHierarchy) {
       expandedKeys = new Set();
       manuallyCollapsedKeys.clear(); // old paths mean nothing under a new hierarchy
-      // A groupBy change is a synchronous re-render (new groupBy) paired with
-      // loadRoot()'s awaited fetch — rootNodes must be cleared HERE, not left
-      // for loadRoot to overwrite once it resolves. Otherwise TreeNode renders
-      // this frame with the NEW groupBy against the OLD rootNodes shape: e.g.
-      // dropping a leading dimension makes `folder` land at depth 0, so
-      // isFolderLevel goes true for a root node that isn't a buildFolderTree
-      // node and has no `.children` — descendantGroups then throws on
-      // `for (const child of node.children)`.
+      // NOT the fix for #172's crash — $effect runs AFTER the render that
+      // pairs the NEW groupBy with the still-stale rootNodes, so by the time
+      // this line executes, TreeNode has already rendered once (or would have
+      // crashed already) against the old data. Verified directly: with only
+      // this reset and no guard in descendantGroups, the crash still
+      // reproduced. The actual backstop is `node.children ?? []` in
+      // folderTree.js's descendantGroups/chainTo. What clearing rootNodes
+      // HERE does is shrink how long that stale pairing can linger across
+      // whatever renders happen before loadRoot() resolves — worthwhile (a
+      // folder-grouped node briefly mislabelled under the old dimension is a
+      // real, if minor, UX gap) but not load-bearing for the crash itself.
       rootNodes = [];
     }
 

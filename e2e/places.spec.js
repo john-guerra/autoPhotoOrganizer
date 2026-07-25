@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { trackPageErrors, openApp, enrichAll } from "./helpers.js";
+import { trackPageErrors, openApp, enrichAll, loupe } from "./helpers.js";
 import { GPS_PHOTOS, GPS_COUNTRY } from "./fixture.mjs";
 
 /**
@@ -44,6 +44,26 @@ test.describe("@p1 places", () => {
       " | "
     );
     for (const { city } of GPS_PHOTOS) expect(joined).toContain(city);
+
+    expect(errors).toEqual([]);
+  });
+
+  /** #173. Region sits between country and city — GeoNames admin1, "state" in
+   *  the US, "departamento" in Colombia. GPS_PHOTOS' two towns are in
+   *  different Colombian departments (Bogotá's own Distrito Capital vs.
+   *  Medellín's Antioquia), so both group labels must appear, not just one. */
+  test("nests region between country and city", async ({ page }) => {
+    const errors = trackPageErrors(page);
+    await enrichAll(page);
+    await openApp(page, { groupBy: ["country", "region", "city"] });
+
+    const joined = (await page.locator(".section-header").allInnerTexts()).join(
+      " | "
+    );
+    for (const { region, city } of GPS_PHOTOS) {
+      expect(joined).toContain(region);
+      expect(joined).toContain(city);
+    }
 
     expect(errors).toEqual([]);
   });
@@ -113,7 +133,7 @@ test.describe("@p1 places", () => {
     const groupTrigger = page.locator(".tg-trigger", { hasText: "Group" });
     if (await groupTrigger.isVisible()) await groupTrigger.click();
 
-    const cityLabel = "Nearest town";
+    const cityLabel = "City";
     const pill = page.locator(".group-by .pill", { hasText: cityLabel });
     await expect(pill).toBeVisible();
     await pill.locator("button.remove").click();
@@ -124,6 +144,63 @@ test.describe("@p1 places", () => {
     ).toHaveCount(0);
     await expect(page.locator(".section-header").first()).toBeVisible();
     await expect(page.locator(".thumb").first()).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
+
+  /**
+   * #175 follow-up: the loupe never showed a photo's location at all — not
+   * missing data, a missing wire. server/lib/place.js resolved country/city
+   * back in #154 and /api/enrich stored lat/lon, but /api/meta (what the
+   * loupe actually fetches) never returned any of it.
+   */
+  test("the loupe shows a GPS photo's place hierarchy and a minimap", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await enrichAll(page);
+    await openApp(page);
+
+    // Narrow to exactly the one GPS photo in that city (see the search test
+    // above) so tile 0 is guaranteed to be it, not whichever photo the
+    // default sort happens to put first.
+    await page.locator(".search-input").fill(GPS_PHOTOS[0].city);
+    await expect(page.locator(".thumb")).toHaveCount(1);
+
+    await loupe.open(page);
+    await expect(loupe.locationText(page)).toHaveText(
+      `${GPS_PHOTOS[0].country} › ${GPS_PHOTOS[0].region} › ${GPS_PHOTOS[0].city}`
+    );
+    await expect(loupe.miniMapSvg(page)).toBeVisible();
+    // Not just present — actually drew something, not an empty frame.
+    await expect(loupe.miniMapSvg(page).locator(".land, .pin")).not.toHaveCount(
+      0
+    );
+    // smart-labels drew at least one text label (a country name, or the
+    // photo's own bolded one) — not just an unlabelled shape map.
+    await expect(
+      loupe.miniMapSvg(page).locator("g.labels text")
+    ).not.toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+
+  test("the loupe shows no Location section for a photo with no GPS", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await enrichAll(page);
+    await openApp(page);
+
+    // Every fixture photo except the two GPS ones has no location — the
+    // search test above already proves those two are a 1-photo match each,
+    // so anything NOT matching a GPS city is safely GPS-less.
+    await page.locator(".search-input").fill("Cards");
+    await expect(page.locator(".thumb").first()).toBeVisible();
+
+    await loupe.open(page);
+    await expect(loupe.locationText(page)).toHaveCount(0);
+    await expect(loupe.miniMapSvg(page)).toHaveCount(0);
 
     expect(errors).toEqual([]);
   });

@@ -453,9 +453,28 @@ guess.
 `exifr` already reads GPS. The extraction call at
 `NodeProcessingService.js:330-342` simply has a nine-tag `pick` allowlist that
 omits it, so the data is never read off disk. Add the GPS fields, store `lat` /
-`lon`, and reverse-geocode offline — `offline-geocode-city` (217 kB, S2-cell,
-~0.035 ms/lookup) or GeoNames-backed `local-reverse-geocoder` for a full
-country → admin1 → city hierarchy.
+`lon`, and reverse-geocode offline.
+
+**Shipped, then corrected (#154 → #175).** The first implementation used
+`offline-geocode-city` (217 kB, S2-cell, ~0.035 ms/lookup). Its dataset is
+UN/LOCODE — a _shipping_ list, not a gazetteer — and it turned out to contain no
+entry at all for San Francisco, Oakland, Berkeley, San Jose or Palo Alto, so
+Bay Area photos resolved to unrelated towns up to 33 km away. Replaced with
+`all-the-cities` (138k GeoNames places, pop ≥ 1000, bundled, MIT). Two lessons
+worth carrying into the remaining place work:
+
+- **A dense gazetteer alone is not enough.** Plain nearest-neighbour over it
+  answers "Mission District" or a 2,000-person barrio rather than the city, so
+  `place.js` scores `distance − 2 km × log10(population)`. Prominence must
+  offset distance without overriding it, or genuinely distinct neighbours
+  (Sausalito, Berkeley, La Calera) get absorbed into their big neighbour.
+- **Derived place names need a version.** `gps_checked` is permanent, so
+  improving the geocoder cannot rely on the sweep revisiting rows — see
+  `PLACE_VERSION` / `backfillPlaces`.
+
+GeoNames `featureCode` also carries the levels this design still wants:
+`PPLX` rows are neighbourhoods (Castro, Union Square — #176) and `adminCode`
+gives admin1 for the state/region level (#173), both from data already loaded.
 
 ⚠️ Verify the exifr option combination during implementation: `pick` restricts
 the parse, and the GPS block may need `gps: true` (or a separate `exifr.gps()`

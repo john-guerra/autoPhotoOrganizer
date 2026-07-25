@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildFolderTree, chainTo } from "./folderTree.js";
+import { buildFolderTree, chainTo, descendantGroups } from "./folderTree.js";
 
 /** The server hands us a flat list of every folder that has photos, as
  * {value: absPath, count}. These tests pin the shape we turn that into. */
@@ -133,5 +133,45 @@ describe("buildFolderTree", () => {
     const roots = buildFolderTree([{ value: "/lib/odd/", count: 2 }]);
     expect(chainTo(roots, "/lib/odd/").at(-1)?.value).toBe("/lib/odd");
     expect(chainTo(roots, "/lib/odd").at(-1)?.value).toBe("/lib/odd");
+  });
+});
+
+/**
+ * #172. TreeNode.svelte re-renders reactively to a `groupBy` change; the tree's
+ * async reload (TreeSidebar.svelte's resetAndLoad) replaces the stale node data
+ * behind it a tick later. In that window a node built for a NON-folder
+ * dimension — no `.children` at all — can be treated as a folder node. This
+ * was caught live (removing a leading dimension crashed the app, e2e coverage
+ * in e2e/places.spec.js), not by a unit test — these pin the pure-logic half
+ * of that fix directly, cheaply, without a browser.
+ */
+describe("stale-node-shape guards (#172)", () => {
+  it("descendantGroups treats a missing .children as childless, not a crash", () => {
+    // Not buildFolderTree output — a node shaped for a different dimension,
+    // exactly what a mid-transition groupBy change can hand TreeNode.
+    const bareLeaf = { isGroup: true, value: "/x" };
+    expect(descendantGroups(bareLeaf)).toEqual(["/x"]);
+
+    const bareNonGroup = { isGroup: false, value: "/x" };
+    expect(descendantGroups(bareNonGroup)).toEqual([]);
+  });
+
+  it("descendantGroups still walks a real subtree normally", () => {
+    const roots = buildFolderTree([
+      { value: "/lib/2005", count: 2 },
+      { value: "/lib/2005/harbour", count: 3 },
+    ]);
+    // /lib/2005 has photos of its own, so it keeps its own row (compacted with
+    // /lib into one label) rather than being swallowed into "harbour".
+    expect(descendantGroups(at(roots, "lib/2005"))).toEqual([
+      "/lib/2005",
+      "/lib/2005/harbour",
+    ]);
+  });
+
+  it("chainTo treats a missing .children as childless, not a crash", () => {
+    const bareNode = { value: "/lib", isGroup: false };
+    expect(() => chainTo([bareNode], "/lib/2005")).not.toThrow();
+    expect(chainTo([bareNode], "/lib/2005")).toEqual([]);
   });
 });

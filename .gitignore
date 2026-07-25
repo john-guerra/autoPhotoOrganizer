@@ -9,9 +9,11 @@ release/
 .worktrees/
 .superpowers/
 
-# Claude Code: share the settings.json baseline, keep everything personal out.
+# Claude Code: share the settings.json baseline and the project skills, keep
+# everything personal (worktrees, local settings, caches) out.
 .claude/*
 !.claude/settings.json
+!.claude/skills/
 docs/TEST_FOLDERS.local.md
 
 # e2e fixture library + temp index (generated)

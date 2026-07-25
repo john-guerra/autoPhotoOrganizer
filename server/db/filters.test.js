@@ -10,7 +10,7 @@ function seeded() {
     CREATE TABLE folders (id INTEGER PRIMARY KEY, abs_path TEXT);
     CREATE TABLE photos (
       id INTEGER PRIMARY KEY, filename TEXT, folder_id INTEGER, stale INTEGER DEFAULT 0,
-      place_country TEXT DEFAULT '', place_city TEXT DEFAULT ''
+      place_country TEXT DEFAULT '', place_region TEXT DEFAULT '', place_city TEXT DEFAULT ''
     );
   `);
   const folder = db.prepare("INSERT INTO folders (id, abs_path) VALUES (?, ?)");
@@ -24,8 +24,8 @@ function seeded() {
   photo.run("sunset.jpg", 2);
   photo.run("100%_done.jpg", 2); // a literal % — LIKE's wildcard, as a filename
   db.prepare(
-    "INSERT INTO photos (filename, folder_id, place_country, place_city) VALUES (?, ?, ?, ?)"
-  ).run("gps.jpg", 2, "Colombia", "La Calera");
+    "INSERT INTO photos (filename, folder_id, place_country, place_region, place_city) VALUES (?, ?, ?, ?, ?)"
+  ).run("gps.jpg", 2, "Colombia", "Cundinamarca", "La Calera");
   return db;
 }
 
@@ -277,15 +277,17 @@ describe("buildFilter — free-text search", () => {
     expect(namesMatching(db, {}).length).toBe(5);
   });
 
-  it("matches a photo by its country or nearest-town (place), not just filename/folder", () => {
+  it("matches a photo by its country, region, or nearest-town (place), not just filename/folder", () => {
     const db = seeded();
     expect(namesMatching(db, { text: "Colombia" })).toEqual(["gps.jpg"]);
+    expect(namesMatching(db, { text: "cundinamarca" })).toEqual(["gps.jpg"]);
     expect(namesMatching(db, { text: "la calera" })).toEqual(["gps.jpg"]);
   });
 
   it("free-text search matches the place a photo was taken", () => {
     const { sql, params } = buildFilter({ text: "Bogota" });
     expect(sql).toContain("place_country");
+    expect(sql).toContain("place_region");
     expect(sql).toContain("place_city");
     expect(
       params.filter((p) => p === "%Bogota%").length

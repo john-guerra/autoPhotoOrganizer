@@ -881,6 +881,16 @@ export function registerApi(app) {
         lens: p.lens ?? null,
         size: p.size ?? null,
         folder: p.folder_abs_path ?? null,
+        // Raw EXIF coordinates (for the minimap) plus the offline-geocoded
+        // names (server/lib/place.js) already shown as feed/tree dimensions
+        // (#154) — the loupe just hadn't surfaced either one yet (#175
+        // follow-up). "" is the Unknown sentinel; the client only renders a
+        // Location section once BOTH lat and lon are present.
+        lat: p.lat ?? null,
+        lon: p.lon ?? null,
+        placeCountry: p.place_country ?? "",
+        placeRegion: p.place_region ?? "",
+        placeCity: p.place_city ?? "",
       }));
     res.json(out);
   });

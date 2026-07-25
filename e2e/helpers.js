@@ -301,6 +301,11 @@ export const loupe = {
   /** The interactive 5-star row in the details panel. */
   star: (page, n) => page.locator(".loupe .star-btn").nth(n - 1),
   filename: (page) => page.locator(".loupe .name"),
+  /** Country/city text and the offline minimap in the details panel's
+   *  Location section (#175 follow-up) — absent entirely for a photo with no
+   *  GPS, not just empty. */
+  locationText: (page) => page.locator(".loupe .place"),
+  miniMapSvg: (page) => page.locator(".loupe .minimap svg"),
   /**
    * Open the loupe on a tile.
    *
