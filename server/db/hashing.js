@@ -92,3 +92,20 @@ export async function hashAllPending(
 export function _resetHashingForTest() {
   hashingInFlight = false;
 }
+
+/**
+ * Compute the progress display counters from raw sweep results.
+ * Converts raw {done, failed} from runSweep (where done includes failed rows)
+ * into the UI display {done: hashed, phase} (where done excludes failed rows).
+ *
+ * @param {{done: number, failed: number}} counters
+ * @returns {{done: number, phase: string}}
+ */
+export function hashProgress({ done, failed }) {
+  const hashed = done - failed;
+  const phase =
+    failed > 0
+      ? `${hashed.toLocaleString()} hashed · ${failed} unreadable`
+      : `${hashed.toLocaleString()} hashed`;
+  return { done: hashed, phase };
+}

@@ -57,7 +57,7 @@ import {
   repointPhotoToFolder,
   renameFolderPath,
 } from "./db/photos.js";
-import { hashAllPending } from "./db/hashing.js";
+import { hashAllPending, hashProgress } from "./db/hashing.js";
 import { interactiveRoute, whenIdle } from "./lib/interactive.js";
 import { whyTranscode, playbackPlan } from "./lib/videoPlayback.js";
 import {
@@ -106,14 +106,8 @@ function kickHashSweep(db) {
   const job = registry.create("hash", { label: "Hashing library contents" });
   hashAllPending(db, {
     job,
-    onProgress: ({ done, failed }) => {
-      const hashed = done - failed;
-      registry.update(job.id, {
-        done: hashed,
-        phase: failed
-          ? `${hashed.toLocaleString()} hashed · ${failed} unreadable`
-          : `${hashed.toLocaleString()} hashed`,
-      });
+    onProgress: (counters) => {
+      registry.update(job.id, hashProgress(counters));
     },
   })
     .then((r) => {

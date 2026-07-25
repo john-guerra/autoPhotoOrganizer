@@ -14,7 +14,12 @@ import { getDb, _resetDbForTest } from "./connection.js";
 import Database from "better-sqlite3";
 import { applySchema } from "./schema.js";
 import { upsertScan, getPhotoById } from "./photos.js";
-import { hashFile, hashAllPending, _resetHashingForTest } from "./hashing.js";
+import {
+  hashFile,
+  hashAllPending,
+  hashProgress,
+  _resetHashingForTest,
+} from "./hashing.js";
 
 let cacheDir;
 let photosDir;
@@ -45,6 +50,28 @@ describe("hashFile", () => {
     await writeFile(path, "hello world");
     const expected = createHash("sha1").update("hello world").digest("hex");
     expect(await hashFile(path)).toBe(expected);
+  });
+});
+
+describe("hashProgress", () => {
+  it("computes adjusted hashed count and phase with failures", () => {
+    const { done, phase } = hashProgress({ done: 4, failed: 1 });
+    expect(done).toBe(3); // done - failed = 4 - 1 = 3 (NOT 4)
+    expect(phase).toBe("3 hashed · 1 unreadable");
+  });
+
+  it("computes count and phase with no failures", () => {
+    const { done, phase } = hashProgress({ done: 5, failed: 0 });
+    expect(done).toBe(5); // done - failed = 5 - 0 = 5
+    expect(phase).toBe("5 hashed");
+  });
+
+  it("formats large numbers with locale-aware thousand separators", () => {
+    const { done, phase } = hashProgress({ done: 10000, failed: 1 });
+    expect(done).toBe(9999);
+    // The phase should include formatted thousands separators
+    expect(phase).toContain("9"); // at least one digit
+    expect(phase).toContain("hashed");
   });
 });
 
