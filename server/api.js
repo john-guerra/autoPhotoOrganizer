@@ -891,6 +891,7 @@ export function registerApi(app) {
         placeCountry: p.place_country ?? "",
         placeRegion: p.place_region ?? "",
         placeCity: p.place_city ?? "",
+        placeNeighborhood: p.place_neighborhood ?? "",
       }));
     res.json(out);
   });

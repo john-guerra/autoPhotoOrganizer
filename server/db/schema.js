@@ -154,6 +154,13 @@ export function applySchema(db) {
   // it, not just newly-scanned ones. See server/lib/place.js.
   ensureColumn(db, "photos", "place_region", "TEXT");
   ensureColumn(db, "photos", "place_city", "TEXT");
+  // Neighbourhood (GeoNames PPLX, #176) — one level BELOW city, the finest
+  // place level. Same story as place_region: added after city already
+  // shipped, so it bumped PLACE_VERSION to 4 to backfill every already-scanned
+  // GPS photo. Often "" (only ~4,800 PPLX exist worldwide, skewed to big US
+  // cities), which is fine for a bottom level: it resolves only when the photo
+  // is genuinely inside a known neighbourhood. See server/lib/place.js.
+  ensureColumn(db, "photos", "place_neighborhood", "TEXT");
   ensureColumn(db, "photos", "gps_checked", "INTEGER NOT NULL DEFAULT 0");
   // Which geocoder generation produced place_country/place_city (#175). NOT the
   // same question as gps_checked: that one says "we read the file's GPS" and is

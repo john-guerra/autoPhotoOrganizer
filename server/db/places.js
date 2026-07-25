@@ -37,13 +37,23 @@ export function backfillPlacesBatch(db, { limit = 200 } = {}) {
   const update = db.prepare(
     `UPDATE photos
         SET place_country = @country, place_region = @region, place_city = @city,
-            place_version = @version
+            place_neighborhood = @neighborhood, place_version = @version
       WHERE id = @id`
   );
   const run = db.transaction((batch) => {
     for (const row of batch) {
-      const { country, region, city } = placeFor(row.lat, row.lon);
-      update.run({ id: row.id, country, region, city, version: PLACE_VERSION });
+      const { country, region, city, neighborhood } = placeFor(
+        row.lat,
+        row.lon
+      );
+      update.run({
+        id: row.id,
+        country,
+        region,
+        city,
+        neighborhood,
+        version: PLACE_VERSION,
+      });
     }
   });
   run(rows);

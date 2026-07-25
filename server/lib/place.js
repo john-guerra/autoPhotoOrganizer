@@ -11,7 +11,24 @@ const require = createRequire(import.meta.url);
  * stored lat/lon, so it needs no file access and works with the drive
  * unmounted.
  */
-export const PLACE_VERSION = 3;
+export const PLACE_VERSION = 4;
+
+/**
+ * How close a photo must be to a neighbourhood (GeoNames PPLX, "section of a
+ * populated place") before it is reported as being IN it. Below city in the
+ * hierarchy (#176), and a DIFFERENT kind of lookup: pure nearest-neighbour
+ * with this hard cap, NOT the population-weighted city score. Prominence is
+ * the wrong idea at this scale — a photo is "in the Mission" because it is
+ * physically there, not because the Mission is large.
+ *
+ * 3 km calibrated against the real `all-the-cities` PPLX rows: photos taken
+ * inside a neighbourhood sit 0–1.3 km from its centroid (Mission District
+ * 0.45, Chinatown 0, Manhattan's Hell's Kitchen 1.26), while the nearest PPLX
+ * to a Palo Alto photo is North Fair Oaks at ~6 km — a place it is NOT in. A
+ * 3 km cap admits the former and rejects the latter, so a photo with no
+ * genuine neighbourhood reports "" instead of a distant wrong guess.
+ */
+const NEIGHBORHOOD_MAX_KM = 3;
 
 /**
  * Every 10x of population buys a place this many km of extra distance.
@@ -35,22 +52,35 @@ const KM_PER_DEG = 111.32;
 /** @type {null | {lat: Float32Array, lon: Float32Array, bonus: Float32Array, name: string[], iso: string[], admin: string[], grid: Map<number, Int32Array>, maxBonus: number}} */
 let index = null;
 
+/** The PPLX-only index for neighbourhood lookups — same grid machinery as the
+ *  city index, but no population bonus/iso/admin (a neighbourhood lookup is a
+ *  pure nearest-neighbour within NEIGHBORHOOD_MAX_KM). Built by `build()` in
+ *  the same single pass over `all-the-cities`, since placeFor now needs both.
+ *  @type {null | {lat: Float32Array, lon: Float32Array, name: string[], grid: Map<number, Int32Array>}} */
+let nIndex = null;
+
 /**
  * `all-the-cities` is 138k GeoNames places (population >= 1000), bundled — no
  * network, ever. Loading and reshaping it costs ~1s and ~80 MB, so it happens
  * on the first lookup rather than at import: a library with no GPS photos
  * never pays for it.
  *
- * PPLX rows ("section of a populated place" — Castro, Mission District,
- * Chinatown) are excluded here on purpose. They are NEIGHBOURHOODS, and
- * mixing them in makes a photo taken downtown resolve to whichever
- * neighbourhood centroid happens to be nearest instead of to the city. They
- * belong to a level BELOW city; see issue #176.
+ * PPLX rows ("section of a populated place" — Mission District, Chinatown,
+ * Hell's Kitchen) are kept OUT of the city index on purpose. They are
+ * NEIGHBOURHOODS, and mixing them in makes a photo taken downtown resolve to
+ * whichever neighbourhood centroid happens to be nearest instead of to the
+ * city. They belong to a level BELOW city (#176), so they are routed into
+ * their own `nIndex` here — one pass over the dataset builds both indexes,
+ * since placeFor now populates city AND neighbourhood together.
  */
 function build() {
   const cities = require("all-the-cities");
   const keep = [];
-  for (const c of cities) if (c.featureCode !== "PPLX") keep.push(c);
+  const hoods = [];
+  for (const c of cities) {
+    if (c.featureCode === "PPLX") hoods.push(c);
+    else keep.push(c);
+  }
 
   const n = keep.length;
   const lat = new Float32Array(n);
@@ -103,7 +133,76 @@ function build() {
   for (const [k, arr] of cells) grid.set(k, Int32Array.from(arr));
 
   index = { lat, lon, bonus, name, iso, admin, grid, maxBonus };
+  nIndex = buildNeighborhoodIndex(hoods);
   return index;
+}
+
+/** The PPLX neighbourhood index: the same 1°-cell grid as the city index, but
+ *  carrying only what a capped nearest-neighbour search needs (lat/lon/name) —
+ *  no population bonus, since neighbourhood matching is distance, not
+ *  prominence. Shares cellKey/wrapLonBucket with the city grid so storage and
+ *  search agree on bucket identity there too. */
+function buildNeighborhoodIndex(rows) {
+  const n = rows.length;
+  const lat = new Float32Array(n);
+  const lon = new Float32Array(n);
+  const name = new Array(n);
+  const cells = new Map();
+  for (let i = 0; i < n; i++) {
+    const c = rows[i];
+    const la = c.loc.coordinates[1];
+    const lo = c.loc.coordinates[0];
+    lat[i] = la;
+    lon[i] = lo;
+    name[i] = c.name;
+    const k = cellKey(Math.floor(la), wrapLonBucket(Math.floor(lo)));
+    let arr = cells.get(k);
+    if (!arr) cells.set(k, (arr = []));
+    arr.push(i);
+  }
+  const grid = new Map();
+  for (const [k, arr] of cells) grid.set(k, Int32Array.from(arr));
+  return { lat, lon, name, grid };
+}
+
+/**
+ * The nearest PPLX neighbourhood to a coordinate, or "" if none lies within
+ * NEIGHBORHOOD_MAX_KM. Pure nearest-neighbour — no population bonus — so the
+ * score IS monotonic in distance, and the search needs no two-phase bound like
+ * `best()`: the cap (3 km) is far smaller than a 1° cell (~111 km), so any
+ * candidate within it lies in the cell containing the point or an immediate
+ * neighbour. `latSpan`/`lonSpan` are derived from the cap the same way best()
+ * derives its phase-2 radius (longitude convergence and antimeridian wrap
+ * handled), which keeps it correct at high latitude where a lon-cell narrows.
+ */
+function nearestNeighborhood(lat, lon) {
+  const ix = nIndex ?? (build(), nIndex);
+  const latBucket = Math.floor(lat);
+  const lonBucket = Math.floor(lon);
+  const latSpan = Math.ceil(NEIGHBORHOOD_MAX_KM / KM_PER_DEG) + 1;
+  const cosLat = Math.max(Math.cos((lat * Math.PI) / 180), 1e-6);
+  const lonSpanRaw = NEIGHBORHOOD_MAX_KM / (KM_PER_DEG * cosLat);
+  const lonSpan = lonSpanRaw >= 180 ? 180 : Math.ceil(lonSpanRaw) + 1;
+  let bestScore = Infinity;
+  let bestI = -1;
+  for (let dLat = -latSpan; dLat <= latSpan; dLat++) {
+    for (let dLon = -lonSpan; dLon <= lonSpan; dLon++) {
+      const arr = ix.grid.get(
+        cellKey(latBucket + dLat, wrapLonBucket(lonBucket + dLon))
+      );
+      if (!arr) continue;
+      for (let j = 0; j < arr.length; j++) {
+        const i = arr[j];
+        const d = distanceKm(lat, lon, i, ix);
+        if (d < bestScore) {
+          bestScore = d;
+          bestI = i;
+        }
+      }
+    }
+  }
+  if (bestI < 0 || bestScore > NEIGHBORHOOD_MAX_KM) return "";
+  return ix.name[bestI];
 }
 
 /** One key per 1°x1° cell. Latitude is bounded to +/-90 and longitude to
@@ -228,6 +327,31 @@ export function _bestLinearForTest(lat, lon) {
   return { city: ix.name[bestI], iso: ix.iso[bestI], admin: ix.admin[bestI] };
 }
 
+/** Test-only: the shipped capped cell-scan neighbourhood search. */
+export function _nearestNeighborhoodForTest(lat, lon) {
+  return nearestNeighborhood(lat, lon);
+}
+
+/** Test-only: an exhaustive linear scan over the SAME PPLX index with the SAME
+ *  cap — same data and same rule, different search strategy. Grid-vs-this is
+ *  what checks the cell-span shortcut (latSpan/lonSpan derived from the cap)
+ *  never misses the true nearest neighbourhood within range, the same way
+ *  _bestLinearForTest guards best(). */
+export function _nearestNeighborhoodLinearForTest(lat, lon) {
+  const ix = nIndex ?? (build(), nIndex);
+  let bestScore = Infinity;
+  let bestI = -1;
+  for (let i = 0; i < ix.lat.length; i++) {
+    const d = distanceKm(lat, lon, i, ix);
+    if (d < bestScore) {
+      bestScore = d;
+      bestI = i;
+    }
+  }
+  if (bestI < 0 || bestScore > NEIGHBORHOOD_MAX_KM) return "";
+  return ix.name[bestI];
+}
+
 /** @type {null | ((iso: string) => string)} */
 let countryName = null;
 
@@ -269,7 +393,7 @@ function resolveRegion(admin) {
 /**
  * @param {number|null|undefined} lat
  * @param {number|null|undefined} lon
- * @returns {{country: string, region: string, city: string}}
+ * @returns {{country: string, region: string, city: string, neighborhood: string}}
  *
  * Returns "" (never null) for unknown, because "" is the Unknown sentinel
  * every feed dimension already uses — it sorts before every real value, which
@@ -298,6 +422,7 @@ export function placeFor(lat, lon) {
       country: typeof hit.iso === "string" ? resolveCountry(hit.iso) : "",
       region: typeof hit.admin === "string" ? resolveRegion(hit.admin) : "",
       city: typeof hit.city === "string" ? hit.city : "",
+      neighborhood: nearestNeighborhood(lat, lon),
     };
   } catch {
     // A geocoder failure must never break metadata extraction for a photo that
@@ -306,4 +431,9 @@ export function placeFor(lat, lon) {
   }
 }
 
-const EMPTY = Object.freeze({ country: "", region: "", city: "" });
+const EMPTY = Object.freeze({
+  country: "",
+  region: "",
+  city: "",
+  neighborhood: "",
+});

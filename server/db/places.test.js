@@ -48,7 +48,7 @@ describe("backfillPlaces", () => {
   const read = (id) =>
     db
       .prepare(
-        `SELECT place_country, place_region, place_city, place_version
+        `SELECT place_country, place_region, place_city, place_neighborhood, place_version
            FROM photos WHERE id = ?`
       )
       .get(id);
@@ -87,6 +87,23 @@ describe("backfillPlaces", () => {
 
     expect((await backfillPlaces(db, { idle: noIdle })).updated).toBe(1);
     expect(read(1).place_region).toBe("California");
+  });
+
+  it("also backfills place_neighborhood — the field PLACE_VERSION 4 added", async () => {
+    // SF Mission coordinates at a pre-neighbourhood version (3), the state a
+    // library caught up only through #173 was in — the finest place level must
+    // backfill too, not be skipped because country/region/city were current.
+    insert({
+      id: 1,
+      lat: 37.76,
+      lon: -122.414,
+      country: "United States",
+      city: "San Francisco",
+      version: 3,
+    });
+
+    expect((await backfillPlaces(db, { idle: noIdle })).updated).toBe(1);
+    expect(read(1).place_neighborhood).toBe("Mission District");
   });
 
   it("leaves rows already at the current version alone", async () => {
