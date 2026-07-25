@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.27
+
+- **Internal:** second step of the jump/landing refactor (#189) — the two
+  separate "hold the landing" flags (a jumped-to tile, and an expanded group's
+  header) are now one `landing` state, so they can never both be armed and fight
+  over the scroll. No change to any normal jump; a rare fold-then-jump corner is
+  tightened. Scrolling also feels a touch smoother (the pin now skips no-op
+  scroll writes).
+
 ## 2.18.26
 
 - **Internal/dev:** the e2e suite's ports are now configurable via

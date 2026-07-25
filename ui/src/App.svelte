@@ -727,21 +727,24 @@
   // (the database has no duplicate photos/folders). A simple re-entry
   // guard, checked and set before the first await, closes this off.
   let jumpingGroup = false; // plain guard: never read in a reactive context
-  // True from a group-jump's landing until its window's metadata finishes
-  // loading — the cue to re-assert the landing once (the above-the-fold rows
-  // resize as their dimensions arrive, drifting the one-shot landing down).
-  // Cleared the instant the user takes over (a keypress or wheel/trackpad
-  // scroll), so the re-assert never fights them. Not a timer.
-  let jumpRevealPending = $state(false);
-  // Expanding a collapsed group must not move its header on screen: the header
-  // holds the exact viewport offset it had at the click while the group's
-  // photos grow downward below it (issue #74). Set to {key, offset} at expand
-  // time and re-asserted on every layout recompute (like jumpRevealPending)
-  // until the user takes over, because the focusId-recenter that re-fetches the
-  // group replaces the whole feed window — so the header's grid Y is rebuilt
-  // and a one-shot scroll can't hold it. Cleared on the user's first keypress/
-  // wheel. Not a timer.
-  let expandPin = $state(null); // { key: string, offset: number } | null
+  // The active feed "landing": an anchor the layout re-asserts on every recompute
+  // — through the window rebuild and the metadata reflow that follows a jump or
+  // an expand — until the user takes over (a keypress or wheel/trackpad scroll
+  // clears it, so the re-assert never fights them). Not a timer. Exactly ONE at a
+  // time: arming either kind replaces the other (these were two independent flags,
+  // `jumpRevealPending` + `expandPin`, that the whole file already read and
+  // cleared as a single "is a landing pinned?" concept — #189). Two kinds:
+  //   { kind: "tile" }                 — hold the SELECTED tile at revealMargin
+  //                                      (a group jump: tree/scrubber/Option+arrow).
+  //                                      The above-the-fold rows resize as their
+  //                                      dimensions arrive, drifting a one-shot
+  //                                      landing down; this re-anchors it.
+  //   { kind: "group", key, offset }   — hold group `key`'s header at the exact
+  //                                      viewport `offset` it had at expand time,
+  //                                      while its photos grow below it (issue #74).
+  //                                      The focusId-recenter rebuilds the whole
+  //                                      window, so a one-shot scroll can't hold it.
+  let landing = $state(null);
   // Per-group photo counts shown on each section header, so the user knows
   // how many photos a group holds before scrolling it (the loaded window is
   // only a slice; a group can hold thousands). Keyed by pathKey(group path).
@@ -2291,7 +2294,7 @@
         focusPending = true;
         // Hold the landing through the metadata reflow, exactly as the keyboard
         // jump (jumpGroupBoundary) does — and hold it the SAME way: until the user
-        // takes over (a keypress or wheel clears jumpRevealPending). The pin
+        // takes over (a keypress or wheel clears the landing). The pin
         // re-anchors the selected tile on every layout recompute (scheduleJumpPin),
         // so no reflow can move the landing.
         //
@@ -2312,7 +2315,7 @@
         // trackpad gesture clears the pin on the gesture itself (see the on:wheel
         // handler), after which the suppressed backfill runs and earlier folders
         // load as the user scrolls up into them.
-        jumpRevealPending = true;
+        landing = { kind: "tile" };
         status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       }
       enrichMeta(page.map((i) => i.id));
@@ -2737,7 +2740,7 @@
     // in place instead (issue #74). Collapsing needs it just as much: you were
     // looking at this group when you clicked it.
     const offset = groupAnchorOffset(key);
-    expandPin = offset == null ? null : { key, offset };
+    landing = offset == null ? null : { kind: "group", key, offset };
 
     collapsedPaths = collapsing
       ? [...collapsedPaths, path]
@@ -2758,7 +2761,7 @@
       ? safeFocusId(anchorIndex >= 0 ? anchorIndex : selected, path)
       : ((await firstPhotoIdOfGroup(path)) ?? safeFocusId(selected));
     await recenterFeedOnId(focusId);
-    if (expandPin) {
+    if (landing?.kind === "group") {
       await tick();
       pinExpandNow();
     }
@@ -3635,7 +3638,7 @@
    * grid is absolutely positioned, so the browser's native scroll-anchoring
    * can't hold it. Driven by the `boxes` reactive (scheduleJumpPin), which
    * fires on every layout recompute — including height-neutral ones a
-   * ResizeObserver would miss — until jumpRevealPending is cleared on the
+   * ResizeObserver would miss — until the tile landing is cleared on the
    * user's first keypress/wheel. loadMore("before") is suppressed while pinned
    * (see updateVisibleRange) so a prepend never fights this. */
   function pinNow() {
@@ -3660,10 +3663,10 @@
 
   /** Re-pin after a layout recompute (the `boxes` reactive). tick() waits for
    * Svelte to patch the DOM so pinNow reads the tile's post-reflow position;
-   * re-check the flag, which may have cleared (user took over) during the tick. */
+   * re-check the landing, which may have cleared (user took over) during the tick. */
   function scheduleJumpPin() {
     tick().then(() => {
-      if (jumpRevealPending) pinNow();
+      if (landing?.kind === "tile") pinNow();
     });
   }
 
@@ -3694,13 +3697,13 @@
    * so a single scroll can't hold the header; the `boxes` reactive re-asserts
    * this until the user takes over. */
   function pinExpandNow() {
-    if (!expandPin) return;
-    const current = groupAnchorOffset(expandPin.key);
+    if (landing?.kind !== "group") return;
+    const current = groupAnchorOffset(landing.key);
     if (current == null) return;
     const next = holdAnchorScrollTop({
       scrollTop: mainColumnEl.scrollTop,
       currentOffset: current,
-      targetOffset: expandPin.offset,
+      targetOffset: landing.offset,
       scrollHeight: mainColumnEl.scrollHeight,
       clientHeight: mainColumnEl.clientHeight,
     });
@@ -3709,7 +3712,7 @@
 
   function scheduleExpandPin() {
     tick().then(() => {
-      if (expandPin) pinExpandNow();
+      if (landing?.kind === "group") pinExpandNow();
     });
   }
 
@@ -3825,8 +3828,10 @@
         // prepend position). Compensating here too would double-scroll and
         // fling the landing off by the prepended height — so let the pin be
         // the sole scroll authority during its window. Normal scrolling (no
-        // pin) still needs this compensation to stay put.
-        if (!jumpRevealPending) {
+        // tile pin) still needs this compensation to stay put. (A group pin
+        // anchors a header, not this prepend's selected tile, so it doesn't
+        // conflict — only the tile landing suppresses the compensation.)
+        if (landing?.kind !== "tile") {
           mainColumnEl.scrollBy(0, gridHeightAfter - gridHeightBefore);
         }
         // scrollBy's own scroll event re-triggers updateVisibleRange,
@@ -4491,12 +4496,12 @@
   // unlike rAF) defers to just after Svelte patches the DOM, so pinNow reads
   // the tile's final position — and works even in a backgrounded tab.
   $effect(() => {
-    if (jumpRevealPending && boxes) scheduleJumpPin();
+    if (landing?.kind === "tile" && boxes) scheduleJumpPin();
   });
-  // Same re-pin story for an expanded group's header (see expandPin): the
+  // Same re-pin story for an expanded group's header (the "group" landing): the
   // refetch + metadata reflow keep moving it until the layout settles.
   $effect(() => {
-    if (expandPin && boxes) scheduleExpandPin();
+    if (landing?.kind === "group" && boxes) scheduleExpandPin();
   });
   // Scroll anchor: keep the user's eye-point fixed across a layout recompute.
   // `boxes` is a fresh array on every recompute (metadata streaming in, resize,
@@ -4515,14 +4520,7 @@
     if (!boxes) return;
     untrack(() => {
       if (!layoutAnchor || !mainColumnEl) return;
-      if (
-        focusPending ||
-        jumpRevealPending ||
-        expandPin ||
-        fetchingBefore ||
-        fetchingAfter
-      )
-        return;
+      if (focusPending || landing || fetchingBefore || fetchingAfter) return;
       const anchor = layoutAnchor;
       const nb = boxes.find((b) => b.id === anchor.domId);
       if (!nb || nb.y === anchor.y) return;
@@ -4609,10 +4607,11 @@
         // in the DOM as a data-id.
         const entry = displayEntries[selected];
         // preventScroll while a group is being expanded: focusing the selected
-        // tile must not yank the viewport off the header the expand pin is holding
-        // (issue #74). Normal scans/jumps (no pin) keep the focus-reveal scroll.
+        // tile must not yank the viewport off the header the group landing is
+        // holding (issue #74). Normal scans/jumps (no group pin) keep the
+        // focus-reveal scroll.
         focusTile(entry ? resolvePhoto(entry).id : null, {
-          preventScroll: !!expandPin,
+          preventScroll: landing?.kind === "group",
         });
       });
     }
@@ -4888,7 +4887,7 @@
       {
         velocity,
         direction,
-        jumpPinned: jumpRevealPending || expandPin,
+        jumpPinned: landing != null,
         fetchingFeed: fetchingAfter || fetchingBefore,
         belowRunwayPx,
         runwayPx,
@@ -5021,8 +5020,7 @@
     }
     if (
       (renderStart <= FETCH_THRESHOLD || above < runway) &&
-      !jumpRevealPending &&
-      !expandPin &&
+      !landing &&
       !jumpingGroup
     ) {
       // Don't prepend previous-group content while a group-jump landing is
@@ -5087,9 +5085,8 @@
    * backfills. A no-op when nothing was pinned.
    */
   function releaseJumpPins() {
-    const wasPinned = jumpRevealPending || expandPin != null;
-    jumpRevealPending = false;
-    expandPin = null;
+    const wasPinned = landing != null;
+    landing = null;
     if (wasPinned) scheduleVisibleRangeUpdate();
   }
 
@@ -5143,8 +5140,7 @@
     // rebuild and land it on the wrong photo. Keyboard navigation resumes any
     // suppressed backfill through its own movement (reveal → updateVisibleRange);
     // only the wheel-at-top case needs the explicit kick (see on:wheel).
-    jumpRevealPending = false;
-    expandPin = null;
+    landing = null;
 
     // Alt+Left/Right jumps groups regardless of what has focus: unlike a
     // bare digit (typing a folder path must not rate photos), Option/Alt
@@ -5542,9 +5538,9 @@
       focusSelectedTile();
       // ...but this first reveal can't stick on its own: the rows above the
       // landing shrink as their metadata arrives, sliding it off the top.
-      // Arming jumpRevealPending drives the pin (the boxes reactive re-anchors
+      // Arming the tile landing drives the pin (the boxes reactive re-anchors
       // it on every reflow — see pinNow) until the user takes over.
-      jumpRevealPending = true;
+      landing = { kind: "tile" };
     });
   }
 </script>
