@@ -21,17 +21,18 @@ export const ALL_DIMENSIONS = [
 ];
 
 /** Human labels for each grouping dimension, shown on the GroupByControl
- *  pills instead of the raw key (`folderName` -> "Folder name"). `city` still
- *  reads "Nearest town" — that label predates #175: the ORIGINAL geocoder
- *  really did return an unrelated small town for a city coordinate (Paris ->
+ *  pills instead of the raw key (`folderName` -> "Folder name"). `city` read
+ *  "Nearest town" from #154 through #175: the ORIGINAL geocoder really did
+ *  return an unrelated small town for a city coordinate (Paris ->
  *  "Gif-sur-Yvette"), so the label said what it actually was. #175 replaced
- *  the geocoder and fixed that — "Nearest town" is now overly hedged, not
- *  wrong — but renaming it is a separate UI-text call the label's owner
- *  hasn't signed off on yet, so it stays as-is here; see #173. `region` is
- *  GeoNames admin1 — "State" in the US, "departamento" in Colombia, and so on
- *  (see server/lib/place.js's placeFor doc comment for why one label covers
- *  all of them). Every ALL_DIMENSIONS key must have an entry here (see
- *  dimensions.test.js). */
+ *  the geocoder and fixed that — when it now picks a smaller neighbour over a
+ *  big city (Half Moon Bay, Sausalito), that's because the photo genuinely
+ *  was closer to it, not a geocoding miss — so the hedge no longer earns its
+ *  keep, and the label reverted to the plain "City" a `city` dimension key
+ *  implies. `region` is GeoNames admin1 — "State" in the US, "departamento"
+ *  in Colombia, and so on (see server/lib/place.js's placeFor doc comment for
+ *  why one label covers all of them). Every ALL_DIMENSIONS key must have an
+ *  entry here (see dimensions.test.js). */
 export const DIMENSION_LABELS = {
   folder: "Folder",
   folderName: "Folder name",
@@ -42,7 +43,7 @@ export const DIMENSION_LABELS = {
   kind: "Kind",
   country: "Country",
   region: "Region",
-  city: "Nearest town",
+  city: "City",
 };
 
 /** Feed-sort attributes, in dropdown order. */

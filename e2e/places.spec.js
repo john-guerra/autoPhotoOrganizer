@@ -133,7 +133,7 @@ test.describe("@p1 places", () => {
     const groupTrigger = page.locator(".tg-trigger", { hasText: "Group" });
     if (await groupTrigger.isVisible()) await groupTrigger.click();
 
-    const cityLabel = "Nearest town";
+    const cityLabel = "City";
     const pill = page.locator(".group-by .pill", { hasText: cityLabel });
     await expect(pill).toBeVisible();
     await pill.locator("button.remove").click();

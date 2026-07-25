@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.9
+
+- **The "Nearest town" dimension is now labelled "City".** It carried that
+  hedge since it launched because the geocoder used to return a genuinely
+  unrelated small town for a city coordinate; that was fixed in 2.18.5, so
+  the label no longer needed to undersell it.
+
 ## 2.18.8
 
 - **A new Region level — state, province, or departamento.** Group and
