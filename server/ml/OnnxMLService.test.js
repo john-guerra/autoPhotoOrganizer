@@ -7,6 +7,9 @@ function fakeChild() {
   const child = new EventEmitter();
   child.stdin = { write: vi.fn(), end: vi.fn() };
   child.stdout = new EventEmitter();
+  // Real child.stdout is a Readable; the implementation calls setEncoding on
+  // it so multi-byte UTF-8 sequences aren't split across chunk boundaries.
+  child.stdout.setEncoding = vi.fn();
   child.stderr = new EventEmitter();
   child.kill = vi.fn(() => child.emit("exit", null, "SIGTERM"));
   child.pid = 4242;
@@ -30,14 +33,16 @@ describe("OnnxMLService", () => {
 
   it("rejects the in-flight request when the child dies, and stays usable", async () => {
     const child = fakeChild();
-    const spawn = vi.fn(() => fakeChild());
-    const svc = new OnnxMLService({ spawn: () => child });
+    const spawn = vi.fn(() => child);
+    const svc = new OnnxMLService({ spawn });
     const p = svc.health();
     child.emit("exit", 1, null); // segfault
     await expect(p).rejects.toThrow(/exited/i);
     // The service is not poisoned — the app stays usable without ML.
     expect(() => svc.stop()).not.toThrow();
-    expect(spawn).not.toHaveBeenCalled();
+    // No eager respawn inside the exit handler itself — only the ONE spawn
+    // from the original health() call above.
+    expect(spawn).toHaveBeenCalledTimes(1);
   });
 
   it("respawns on the next request after a crash", async () => {

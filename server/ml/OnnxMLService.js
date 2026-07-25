@@ -44,7 +44,8 @@ export class OnnxMLService extends MLService {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
     });
-    child.stdout.on("data", (chunk) => this.#onData(String(chunk)));
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => this.#onData(chunk));
     child.on("exit", (code, signal) => {
       this.#child = null;
       // Fail every in-flight request rather than leaving a caller hanging: a
