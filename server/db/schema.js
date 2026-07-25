@@ -189,6 +189,67 @@ export function applySchema(db) {
   // (verified via EXPLAIN QUERY PLAN), and LIMIT caps it regardless.
   ensureColumn(db, "photos", "hash_attempted", "INTEGER NOT NULL DEFAULT 0");
 
+  // --- ML artifacts (#161) --------------------------------------------------
+  // Their OWN tables, never columns on `photos`. The feed's hot path is
+  // `SELECT photos.*` over a keyset seek; a ~800-byte blob per row would be
+  // dragged through every page fetch, every tree count and every group sample
+  // for no benefit whatsoever.
+  //
+  // The primary key is (photo_id, model), NOT photo_id. The entire point of the
+  // `model` column is that upgrading the model is NEW ROWS rather than a
+  // migration — so two models' vectors must be able to coexist, and a photo_id
+  // PK would forbid exactly that. Switching models then costs a backfill;
+  // switching BACK costs nothing, because the old rows are still here.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS photo_embeddings (
+      photo_id   INTEGER NOT NULL REFERENCES photos(id),
+      model      TEXT    NOT NULL,
+      dim        INTEGER NOT NULL,
+      scale      REAL    NOT NULL,
+      vec        BLOB    NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (photo_id, model)
+    )
+  `);
+  // "How many are embedded under model X", and the whole-library vector load,
+  // both scan by model. Without this they are full table scans of the widest
+  // table in the schema.
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_photo_embeddings_model
+       ON photo_embeddings(model)`
+  );
+
+  // The failure sentinel. An explicit table rather than an overloaded data
+  // column, because a failed embedding has no natural zero value — enrich can
+  // use width=0 and hashing can use hash_attempted=1, but a vector cannot.
+  //
+  // It carries `attempts` and `error` so a sentinel can distinguish "this photo
+  // cannot be processed" (permanent) from "the drive was not there" (a property
+  // of the MOMENT, and the common case on a removable-drive library). Conflating
+  // those two is #169, which excluded a whole unmounted drive from hashing
+  // forever. runSweep already classifies; this is where the answer is recorded.
+  //
+  // Keyed by model as well as stage: a photo that fails under one model is not
+  // thereby failed under another.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ml_status (
+      photo_id   INTEGER NOT NULL REFERENCES photos(id),
+      stage      TEXT    NOT NULL,
+      model      TEXT    NOT NULL,
+      state      TEXT    NOT NULL,
+      attempts   INTEGER NOT NULL DEFAULT 1,
+      error      TEXT,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (photo_id, stage, model)
+    )
+  `);
+  // The embed worklist anti-joins this table by (stage, model); without an
+  // index on that pair SQLite scans every sentinel row per batch.
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_ml_status_lookup
+       ON ml_status(stage, model, photo_id)`
+  );
+
   // --- One-shot data repairs -----------------------------------------------
   // Everything else in applySchema is idempotent BY CONSTRUCTION (CREATE TABLE
   // IF NOT EXISTS, ensureColumn) and re-runs harmlessly on every startup. A
