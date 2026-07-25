@@ -48,6 +48,26 @@ test.describe("@p1 places", () => {
     expect(errors).toEqual([]);
   });
 
+  /** #173. Region sits between country and city — GeoNames admin1, "state" in
+   *  the US, "departamento" in Colombia. GPS_PHOTOS' two towns are in
+   *  different Colombian departments (Bogotá's own Distrito Capital vs.
+   *  Medellín's Antioquia), so both group labels must appear, not just one. */
+  test("nests region between country and city", async ({ page }) => {
+    const errors = trackPageErrors(page);
+    await enrichAll(page);
+    await openApp(page, { groupBy: ["country", "region", "city"] });
+
+    const joined = (await page.locator(".section-header").allInnerTexts()).join(
+      " | "
+    );
+    for (const { region, city } of GPS_PHOTOS) {
+      expect(joined).toContain(region);
+      expect(joined).toContain(city);
+    }
+
+    expect(errors).toEqual([]);
+  });
+
   test("the tree's country count matches the feed's", async ({ page }) => {
     const errors = trackPageErrors(page);
     await enrichAll(page);
@@ -149,13 +169,18 @@ test.describe("@p1 places", () => {
 
     await loupe.open(page);
     await expect(loupe.locationText(page)).toHaveText(
-      `${GPS_PHOTOS[0].country} › ${GPS_PHOTOS[0].city}`
+      `${GPS_PHOTOS[0].country} › ${GPS_PHOTOS[0].region} › ${GPS_PHOTOS[0].city}`
     );
     await expect(loupe.miniMapSvg(page)).toBeVisible();
     // Not just present — actually drew something, not an empty frame.
     await expect(loupe.miniMapSvg(page).locator(".land, .pin")).not.toHaveCount(
       0
     );
+    // smart-labels drew at least one text label (a country name, or the
+    // photo's own bolded one) — not just an unlabelled shape map.
+    await expect(
+      loupe.miniMapSvg(page).locator("g.labels text")
+    ).not.toHaveCount(0);
 
     expect(errors).toEqual([]);
   });

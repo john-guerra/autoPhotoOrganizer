@@ -48,7 +48,8 @@ describe("backfillPlaces", () => {
   const read = (id) =>
     db
       .prepare(
-        `SELECT place_country, place_city, place_version FROM photos WHERE id = ?`
+        `SELECT place_country, place_region, place_city, place_version
+           FROM photos WHERE id = ?`
       )
       .get(id);
 
@@ -69,6 +70,23 @@ describe("backfillPlaces", () => {
     const row = read(1);
     expect(row.place_city).toBe("San Francisco");
     expect(row.place_version).toBe(PLACE_VERSION);
+  });
+
+  it("also backfills place_region — the field PLACE_VERSION 3 added", async () => {
+    // A row already migrated to a PRE-region version (2), the exact state
+    // every #175-era library was in before this change — region must not be
+    // silently skipped just because country/city were already current once.
+    insert({
+      id: 1,
+      lat: 37.758,
+      lon: -122.426,
+      country: "United States",
+      city: "San Francisco",
+      version: 2,
+    });
+
+    expect((await backfillPlaces(db, { idle: noIdle })).updated).toBe(1);
+    expect(read(1).place_region).toBe("California");
   });
 
   it("leaves rows already at the current version alone", async () => {

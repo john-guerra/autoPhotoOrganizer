@@ -383,9 +383,11 @@ describe("GET /api/meta — EXIF fields", () => {
       .prepare(
         `INSERT INTO photos
            (folder_id, filename, size, mtime, kind, width, height, camera, lens,
-            lat, lon, place_country, place_city, gps_checked, place_version)
+            lat, lon, place_country, place_region, place_city, gps_checked,
+            place_version)
          VALUES (?, 'a.jpg', 100, 1, 'image', 10, 10, '', '',
-            37.758, -122.426, 'United States', 'San Francisco', 1, 2)`
+            37.758, -122.426, 'United States', 'California', 'San Francisco',
+            1, 3)`
       )
       .run(folderId).lastInsertRowid;
 
@@ -398,6 +400,7 @@ describe("GET /api/meta — EXIF fields", () => {
         lat: 37.758,
         lon: -122.426,
         placeCountry: "United States",
+        placeRegion: "California",
         placeCity: "San Francisco",
       });
     } finally {
@@ -427,6 +430,7 @@ describe("GET /api/meta — EXIF fields", () => {
         lat: null,
         lon: null,
         placeCountry: "",
+        placeRegion: "",
         placeCity: "",
       });
     } finally {

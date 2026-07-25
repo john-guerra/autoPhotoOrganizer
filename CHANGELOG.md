@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.8
+
+- **A new Region level — state, province, or departamento.** Group and
+  search the feed by "California", "Cundinamarca", "Île-de-France" — one
+  more step in the place hierarchy, between country and nearest town (#173).
+  Existing photos pick it up automatically, no rescan needed.
+- **The loupe's minimap now labels what you're looking at**, using
+  @john-guerra's `smart-labels` — the photo's own town plus nearby countries,
+  only as many as fit without crowding.
+
 ## 2.18.7
 
 - **The loupe now shows where a photo was taken.** A Location section appears

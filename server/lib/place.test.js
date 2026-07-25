@@ -15,17 +15,19 @@ function mulberry32(seed) {
 }
 
 describe("placeFor", () => {
+  const SENTINEL = { country: "", region: "", city: "" };
+
   it("returns the '' Unknown sentinel — never null — for missing coordinates", () => {
-    expect(placeFor(null, null)).toEqual({ country: "", city: "" });
-    expect(placeFor(undefined, undefined)).toEqual({ country: "", city: "" });
-    expect(placeFor(4.711, null)).toEqual({ country: "", city: "" });
+    expect(placeFor(null, null)).toEqual(SENTINEL);
+    expect(placeFor(undefined, undefined)).toEqual(SENTINEL);
+    expect(placeFor(4.711, null)).toEqual(SENTINEL);
   });
 
   it("never throws on absurd input", () => {
     expect(() => placeFor(NaN, NaN)).not.toThrow();
-    expect(placeFor(NaN, NaN)).toEqual({ country: "", city: "" });
-    expect(placeFor(999, 999)).toEqual({ country: "", city: "" });
-    expect(placeFor(Infinity, -Infinity)).toEqual({ country: "", city: "" });
+    expect(placeFor(NaN, NaN)).toEqual(SENTINEL);
+    expect(placeFor(999, 999)).toEqual(SENTINEL);
+    expect(placeFor(Infinity, -Infinity)).toEqual(SENTINEL);
   });
 
   it("still answers for a mid-ocean coordinate rather than throwing", () => {
@@ -102,6 +104,46 @@ describe("placeFor", () => {
         expect(p.country).toBe(country);
       });
     }
+  });
+
+  /**
+   * Region: GeoNames admin1 — "state" in the US, "departamento" in Colombia,
+   * a prefecture in Japan, a constituent country in the UK. One field for all
+   * of them (see placeFor's doc comment) — these pin the display name is
+   * actually correct per country, not just present.
+   */
+  describe("region (state/departamento/prefecture — GeoNames admin1)", () => {
+    const cases = [
+      ["San Francisco", 37.758, -122.426, "California", "United States"],
+      // La Calera is a municipality IN Cundinamarca, administratively
+      // distinct from Bogotá D.C. itself — the region must follow the town,
+      // not the nearby capital.
+      ["La Calera, Colombia", 4.7211, -73.9689, "Cundinamarca", "Colombia"],
+      // Bogotá is its own top-level "Distrito Capital", NOT Cundinamarca,
+      // even though Cundinamarca surrounds it — a real administrative
+      // distinction, not a dataset quirk.
+      ["Bogotá centre", 4.711, -74.0721, "Bogota D.C.", "Colombia"],
+      ["Medellín", 6.2442, -75.5812, "Antioquia", "Colombia"],
+      ["Paris centre", 48.8566, 2.3522, "Île-de-France", "France"],
+      ["Tokyo centre (Shibuya)", 35.6595, 139.7005, "Tokyo", "Japan"],
+      ["London centre (Soho)", 51.5136, -0.1365, "England", "UK"],
+    ];
+    for (const [label, lat, lon, region, country] of cases) {
+      it(label, () => {
+        const p = placeFor(lat, lon);
+        expect(p.region).toBe(region);
+        expect(p.country).toBe(country);
+      });
+    }
+
+    it("returns '' — not undefined, not the raw code — for a place with no admin1", () => {
+      // McMurdo Station, Antarctica: a real GeoNames entry with no adminCode
+      // at all, isolated enough that nothing else's population bonus can
+      // steal the match — confirmed against the real geocoder, not assumed.
+      const p = placeFor(-77.846, 166.676);
+      expect(p.city).toBe("McMurdo Station");
+      expect(p.region).toBe("");
+    });
   });
 
   /**

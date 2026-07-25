@@ -147,6 +147,12 @@ export function applySchema(db) {
   ensureColumn(db, "photos", "lat", "REAL");
   ensureColumn(db, "photos", "lon", "REAL");
   ensureColumn(db, "photos", "place_country", "TEXT");
+  // State/province/departamento/prefecture (GeoNames admin1, #173) — one
+  // level between country and city. Added after country/city already
+  // shipped, which is why place_version exists at all: adding this column
+  // bumped PLACE_VERSION to 3 so every already-scanned GPS photo backfills
+  // it, not just newly-scanned ones. See server/lib/place.js.
+  ensureColumn(db, "photos", "place_region", "TEXT");
   ensureColumn(db, "photos", "place_city", "TEXT");
   ensureColumn(db, "photos", "gps_checked", "INTEGER NOT NULL DEFAULT 0");
   // Which geocoder generation produced place_country/place_city (#175). NOT the

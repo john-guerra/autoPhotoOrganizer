@@ -15,11 +15,16 @@
    * becomes its own Vite chunk fetched only when a geotagged photo is actually
    * viewed — a library with no GPS photos never pays for it, the same
    * lazy-load discipline server/lib/place.js uses for its own dataset.
+   *
+   * Labels are `smart-labels` (github.com/john-guerra/smart-labels) — a
+   * Voronoi-occlusion labeller so only the countries with enough room get a
+   * name drawn, rather than 241 overlapping strings.
    */
   import * as d3 from "d3";
   import { feature } from "topojson-client";
+  import smartLabels from "smart-labels";
 
-  let { lat, lon, width = 220, height = 140 } = $props();
+  let { lat, lon, placeName = "", width = 220, height = 140 } = $props();
 
   /** @type {Array<object> | null} */
   let countries = $state(null);
@@ -58,6 +63,71 @@
   // not hardcoded to width/2,height/2, so it stays correct if SCALE/center
   // logic ever changes to something off-centre.
   let dot = $derived(projection([lon, lat]));
+
+  // Only countries whose projected centroid falls within a margin of the
+  // visible box: world-atlas has 241 of them, and Mercator legitimately
+  // diverges to +/-Infinity for anything near a pole (Antarctica's own
+  // centroid sits close enough to qualify) — feeding that straight into
+  // d3-delaunay throws. Culling first is both the fix and, incidentally, the
+  // right call for a labeller: a country hundreds of screen-widths away never
+  // needed a label here anyway.
+  const VIEWPORT_MARGIN = 4;
+  let labelData = $derived.by(() => {
+    if (!countries) return [];
+    const data = [];
+    const xMin = -width * VIEWPORT_MARGIN;
+    const xMax = width * (1 + VIEWPORT_MARGIN);
+    const yMin = -height * VIEWPORT_MARGIN;
+    const yMax = height * (1 + VIEWPORT_MARGIN);
+    for (const country of countries) {
+      const c = path.centroid(country);
+      if (!Number.isFinite(c[0]) || !Number.isFinite(c[1])) continue;
+      if (c[0] < xMin || c[0] > xMax || c[1] < yMin || c[1] > yMax) continue;
+      data.push({ x: c[0], y: c[1], name: country.properties?.name ?? "" });
+    }
+    // The photo's own point, always labelled — it is the whole point of the
+    // map, not just another country to compete with for space.
+    if (dot && placeName) {
+      data.push({ x: dot[0], y: dot[1], name: placeName, isPhoto: true });
+    }
+    return data;
+  });
+
+  /** Svelte action: draws into a `<g>` that ONLY smart-labels ever touches —
+   *  it manipulates the DOM directly (d3-style), and letting it share
+   *  ownership of an element Svelte also renders into is exactly the
+   *  GroupByControl.svelte/multi-auto-select trap this app already learned to
+   *  avoid. Re-invoked on every reactive `update`, which is safe: smart-labels
+   *  itself joins on a stable `[0]`-keyed root and an index-keyed data array
+   *  (see node_modules/smart-labels/dist/smartLabels.es.js), so re-running it
+   *  on the SAME node updates existing text elements instead of duplicating
+   *  them, as long as `labelData`'s length/order stays stable — which it does,
+   *  since `countries` never changes after its one load. */
+  function drawLabels(node, data) {
+    render(data);
+    return { update: render };
+    function render(d) {
+      if (!d.length) return;
+      smartLabels(d, {
+        target: node,
+        width,
+        height,
+        x: (p) => p.x,
+        y: (p) => p.y,
+        label: (p) => p.name,
+        hover: false,
+        alwaysShow: (p) => p.isPhoto,
+        // fill is a single attr on the whole <g class="labels"> (see
+        // node_modules/smart-labels/dist/smartLabels.es.js ~line 252) — every
+        // label shares one colour, no per-datum override. font DOES vary
+        // per-datum (it's applied per <text> element), so the photo's own
+        // label is set apart by weight/size instead.
+        fill: "#cfe8d8",
+        font: (p) => (p.isPhoto ? "bold 11px sans-serif" : "9px sans-serif"),
+        threshold: 800,
+      });
+    }
+  }
 </script>
 
 <div class="minimap" style={`width:${width}px;height:${height}px;`}>
@@ -80,6 +150,12 @@
         <circle cx={dot[0]} cy={dot[1]} r="4" class="pin-halo" />
         <circle cx={dot[0]} cy={dot[1]} r="3" class="pin" />
       {/if}
+      <!-- No class here: smart-labels creates its OWN "g.labels" as a child
+           of this node (see drawLabels below) — naming this wrapper the same
+           would nest g.labels inside g.labels, confusing to read even though
+           it isn't functionally broken (CSS/locators still match the inner
+           one via descendant matching). -->
+      <g use:drawLabels={labelData}></g>
     </svg>
   {/if}
 </div>
@@ -115,5 +191,11 @@
     fill: #ffd24c;
     stroke: #1a1400;
     stroke-width: 0.75;
+  }
+  .minimap :global(g.labels text) {
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: #0a1622;
+    stroke-width: 2px;
   }
 </style>

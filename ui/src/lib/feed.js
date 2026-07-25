@@ -23,7 +23,7 @@ const MONTH_NAMES = [
 
 /**
  * @param {string} dimension @param {string|undefined|null} value @returns {string}
- * Place dimensions (country/city) need no branch — their values are already
+ * Place dimensions (country/region/city) need no branch — their values are already
  * display strings, and '' is handled by the Unknown rule below.
  */
 export function formatGroupValue(dimension, value) {

@@ -16,17 +16,22 @@ export const ALL_DIMENSIONS = [
   "camera",
   "kind",
   "country",
+  "region",
   "city",
 ];
 
 /** Human labels for each grouping dimension, shown on the GroupByControl
- *  pills instead of the raw key (`folderName` -> "Folder name"). `city` reads
- *  "Nearest town": the offline reverse-geocoder returns the nearest small
- *  town, not the city a user would expect (a Paris coordinate resolves to
- *  "Gif-sur-Yvette") — country is accurate, only this second level
- *  overpromises, so the label says what it actually is (#154). This does NOT
- *  rename the `city` dimension key or the `place_city` column — display only.
- *  Every ALL_DIMENSIONS key must have an entry here (see dimensions.test.js). */
+ *  pills instead of the raw key (`folderName` -> "Folder name"). `city` still
+ *  reads "Nearest town" — that label predates #175: the ORIGINAL geocoder
+ *  really did return an unrelated small town for a city coordinate (Paris ->
+ *  "Gif-sur-Yvette"), so the label said what it actually was. #175 replaced
+ *  the geocoder and fixed that — "Nearest town" is now overly hedged, not
+ *  wrong — but renaming it is a separate UI-text call the label's owner
+ *  hasn't signed off on yet, so it stays as-is here; see #173. `region` is
+ *  GeoNames admin1 — "State" in the US, "departamento" in Colombia, and so on
+ *  (see server/lib/place.js's placeFor doc comment for why one label covers
+ *  all of them). Every ALL_DIMENSIONS key must have an entry here (see
+ *  dimensions.test.js). */
 export const DIMENSION_LABELS = {
   folder: "Folder",
   folderName: "Folder name",
@@ -36,6 +41,7 @@ export const DIMENSION_LABELS = {
   camera: "Camera",
   kind: "Kind",
   country: "Country",
+  region: "Region",
   city: "Nearest town",
 };
 
