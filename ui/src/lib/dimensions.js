@@ -18,6 +18,7 @@ export const ALL_DIMENSIONS = [
   "country",
   "region",
   "city",
+  "neighborhood",
 ];
 
 /** Human labels for each grouping dimension, shown on the GroupByControl
@@ -31,8 +32,11 @@ export const ALL_DIMENSIONS = [
  *  keep, and the label reverted to the plain "City" a `city` dimension key
  *  implies. `region` is GeoNames admin1 — "State" in the US, "departamento"
  *  in Colombia, and so on (see server/lib/place.js's placeFor doc comment for
- *  why one label covers all of them). Every ALL_DIMENSIONS key must have an
- *  entry here (see dimensions.test.js). */
+ *  why one label covers all of them). `neighborhood` is GeoNames PPLX
+ *  ("section of a populated place" — Mission District, Chinatown), the level
+ *  BELOW city (#176); it is "" for most photos, since only ~4,800 exist
+ *  worldwide. Every ALL_DIMENSIONS key must have an entry here (see
+ *  dimensions.test.js). */
 export const DIMENSION_LABELS = {
   folder: "Folder",
   folderName: "Folder name",
@@ -44,6 +48,7 @@ export const DIMENSION_LABELS = {
   country: "Country",
   region: "Region",
   city: "City",
+  neighborhood: "Neighborhood",
 };
 
 /** Feed-sort attributes, in dropdown order. */

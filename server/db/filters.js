@@ -97,7 +97,8 @@ export function buildFilter(spec = {}) {
   // actually remembers ("that Tayrona folder", "PXL_2024-something"); place is
   // the same kind of memory ("that was the Bogota trip") now that GPS resolves
   // to a country/city. Place needs no subquery — unlike the folder path, it is
-  // a plain per-photo column (photos.place_country/place_region/place_city),
+  // a plain per-photo column (photos.place_country/place_region/place_city/
+  // place_neighborhood),
   // already denormalized onto the row for exactly this kind of lookup.
   //
   // Case-insensitive by SQLite's default LIKE (ASCII). LIKE metacharacters in
@@ -115,9 +116,10 @@ export function buildFilter(spec = {}) {
           OR photos.place_country LIKE ? ESCAPE '\\'
           OR photos.place_region LIKE ? ESCAPE '\\'
           OR photos.place_city LIKE ? ESCAPE '\\'
+          OR photos.place_neighborhood LIKE ? ESCAPE '\\'
           OR photos.folder_id IN (SELECT id FROM folders WHERE abs_path LIKE ? ESCAPE '\\'))`
     );
-    params.push(like, like, like, like, like);
+    params.push(like, like, like, like, like, like);
   }
 
   // Time-range facet (timeline filter). Filters on the SAME date attribute the

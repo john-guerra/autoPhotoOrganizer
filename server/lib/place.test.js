@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { placeFor, _bestForTest, _bestLinearForTest } from "./place.js";
+import {
+  placeFor,
+  _bestForTest,
+  _bestLinearForTest,
+  _nearestNeighborhoodForTest,
+  _nearestNeighborhoodLinearForTest,
+} from "./place.js";
 
 /** Deterministic PRNG (mulberry32) — fixed seed, so a failure is reproducible
  *  and CI doesn't flake on whichever point Math.random() happened to pick. */
@@ -15,7 +21,7 @@ function mulberry32(seed) {
 }
 
 describe("placeFor", () => {
-  const SENTINEL = { country: "", region: "", city: "" };
+  const SENTINEL = { country: "", region: "", city: "", neighborhood: "" };
 
   it("returns the '' Unknown sentinel — never null — for missing coordinates", () => {
     expect(placeFor(null, null)).toEqual(SENTINEL);
@@ -147,6 +153,47 @@ describe("placeFor", () => {
   });
 
   /**
+   * Neighbourhood: GeoNames PPLX ("section of a populated place"), the level
+   * BELOW city (#176). A SEPARATE lookup from city — pure nearest-neighbour
+   * with a hard distance cap, NOT the population-weighted city score, because
+   * prominence is the wrong idea at this scale (a photo is "in" the Mission
+   * because it is physically there, not because the Mission is big). Values
+   * below are the real nearest PPLX in `all-the-cities`, verified against the
+   * dataset, not assumed.
+   */
+  describe("neighborhood (PPLX section-of-a-city, below city; #176)", () => {
+    it("resolves a photo taken inside a neighbourhood to it", () => {
+      // Each ≤ ~1.3 km from its neighbourhood centroid — genuinely inside it.
+      expect(placeFor(37.76, -122.414).neighborhood).toBe("Mission District");
+      expect(placeFor(37.7966, -122.4086).neighborhood).toBe("Chinatown");
+      expect(placeFor(37.7502, -122.4337).neighborhood).toBe("Noe Valley");
+      expect(placeFor(40.7549, -73.984).neighborhood).toBe("Hell's Kitchen");
+    });
+
+    it("keeps city and neighbourhood as independent levels", () => {
+      // The Mission is IN San Francisco: the finer level must not replace the
+      // coarser one — both are populated on the same photo.
+      const p = placeFor(37.76, -122.414);
+      expect(p.city).toBe("San Francisco");
+      expect(p.neighborhood).toBe("Mission District");
+    });
+
+    it("returns '' beyond the cap rather than inventing a distant neighbourhood", () => {
+      // The Palo Alto photo from the loupe: its nearest PPLX (North Fair Oaks)
+      // is ~6 km away — NOT a neighbourhood it is in. City stays Palo Alto; the
+      // neighbourhood level correctly declines to guess.
+      const p = placeFor(37.4419, -122.143);
+      expect(p.city).toBe("Palo Alto");
+      expect(p.neighborhood).toBe("");
+    });
+
+    it("returns '' where there is no neighbourhood for hundreds of km", () => {
+      expect(placeFor(41.5, -99.5).neighborhood).toBe(""); // rural Nebraska
+      expect(placeFor(0, -160).neighborhood).toBe(""); // mid-ocean
+    });
+  });
+
+  /**
    * `KM_PER_POPULATION_DECADE` was tuned against the cases above — all of
    * which are Bay Area, Bogotá, or Paris. That is a real overfitting risk: the
    * only evidence for the constant was the same set it was validated against.
@@ -226,5 +273,41 @@ describe("the grid index agrees with brute force", () => {
     for (const [lat, lon] of points) {
       expect(_bestForTest(lat, lon)).toEqual(_bestLinearForTest(lat, lon));
     }
+  });
+});
+
+/**
+ * The neighbourhood search (nearestNeighborhood in place.js) is a second custom
+ * spatial index: a capped cell-scan whose latSpan/lonSpan are derived from the
+ * cap so it can skip ring expansion. That shortcut could miss a candidate that
+ * a full scan would find, especially at a cell boundary or high latitude. Grid
+ * vs. an exhaustive linear scan over the identical PPLX index — same data, same
+ * cap — is the check that it doesn't, mirroring the city-index guard above.
+ */
+describe("the neighbourhood cell-scan agrees with brute force", () => {
+  it("on points sampled across dense metros (where PPLX actually exist)", () => {
+    // Random worldwide points are almost all "" for both (no PPLX for hundreds
+    // of km), which exercises nothing. Sampling inside metro bounding boxes
+    // puts points right around the cap boundary, where the cell-span shortcut
+    // is actually load-bearing.
+    const boxes = [
+      [37.7, 37.82, -122.52, -122.35], // San Francisco
+      [40.5, 40.9, -74.1, -73.7], // New York City
+      [51.4, 51.6, -0.3, 0.05], // London
+      [35.55, 35.75, 139.6, 139.85], // Tokyo
+      [4.55, 4.8, -74.15, -74.0], // Bogotá
+    ];
+    const rand = mulberry32(20260725);
+    const mismatches = [];
+    for (const [latMin, latMax, lonMin, lonMax] of boxes) {
+      for (let i = 0; i < 200; i++) {
+        const lat = latMin + rand() * (latMax - latMin);
+        const lon = lonMin + rand() * (lonMax - lonMin);
+        const grid = _nearestNeighborhoodForTest(lat, lon);
+        const linear = _nearestNeighborhoodLinearForTest(lat, lon);
+        if (grid !== linear) mismatches.push({ lat, lon, grid, linear });
+      }
+    }
+    expect(mismatches).toEqual([]);
   });
 });

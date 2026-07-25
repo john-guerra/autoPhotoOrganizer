@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.15
+
+- **New "Neighborhood" place level, below City.** Group, filter, and search by
+  the neighborhood a photo was taken in — Mission District, Chinatown, Hell's
+  Kitchen — as the finest level under Country › Region › City, and see it in
+  the loupe's Location breadcrumb. Only resolves when the photo is genuinely
+  inside a known neighborhood (otherwise it stays Unknown), so it never guesses
+  a distant one. (#176)
+
 ## 2.18.14
 
 - **Jumping to a group no longer drifts off screen.** When you jump to a folder
@@ -30,7 +39,6 @@ user-facing — what you can now do, not how it's built.
   message stays put instead of being overwritten a second later by the generic
   "N photos loaded". If you're grouped by something other than folder (so the
   feed can't scroll to it), it says so rather than appearing to do nothing (#170).
-
 ## 2.18.10
 
 - Unmounting a drive while the library was being hashed no longer excludes those

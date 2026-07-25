@@ -51,7 +51,12 @@
     typeof meta?.lat === "number" && typeof meta?.lon === "number"
   );
   const placeHierarchy = $derived(
-    [meta?.placeCountry, meta?.placeRegion, meta?.placeCity]
+    [
+      meta?.placeCountry,
+      meta?.placeRegion,
+      meta?.placeCity,
+      meta?.placeNeighborhood,
+    ]
       .filter(Boolean)
       .join(" › ")
   );

@@ -55,6 +55,10 @@ export const DIMENSIONS = {
   country: { expr: "COALESCE(photos.place_country, '')", direction: "ASC" },
   region: { expr: "COALESCE(photos.place_region, '')", direction: "ASC" },
   city: { expr: "COALESCE(photos.place_city, '')", direction: "ASC" },
+  neighborhood: {
+    expr: "COALESCE(photos.place_neighborhood, '')",
+    direction: "ASC",
+  },
 };
 
 /**
