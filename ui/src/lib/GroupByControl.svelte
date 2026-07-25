@@ -28,8 +28,8 @@
       // `attr` (default identity) keeps the raw dimension key as the pill's
       // underlying value/datalist option — groupBy still persists and sends
       // "city"/"folderName". `format` only changes what's PRINTED on the pill,
-      // so it reads "Nearest town" instead of "city" (#154) without touching
-      // the value the rest of the app sees.
+      // so it reads "Region"/"City" instead of the raw "region"/"city" key
+      // without touching the value the rest of the app sees.
       format: (d) => DIMENSION_LABELS[d] ?? d,
     });
     widget.addEventListener("input", () => ongroupbychange?.(widget.value));
