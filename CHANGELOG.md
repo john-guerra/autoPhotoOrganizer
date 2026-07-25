@@ -6,6 +6,11 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.4
+
+- **Fix:** removing "Nearest town" (or any non-folder dimension) from Group
+  By no longer crashes the Library tree (#172).
+
 ## 2.18.3
 
 - **Group and search your photos by where they were taken.** AutoGallery now

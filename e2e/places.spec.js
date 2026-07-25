@@ -90,4 +90,41 @@ test.describe("@p1 places", () => {
 
     expect(errors).toEqual([]);
   });
+
+  /**
+   * Dropping a leading non-folder dimension used to crash the tree:
+   * TreeSidebar's resetAndLoad() re-renders TreeNode with the NEW groupBy
+   * before its awaited loadRoot() replaces the OLD rootNodes. With `city`
+   * removed, `folder` lands at depth 0 one render early, so `isFolderLevel`
+   * goes true for a root node that is still shaped for the city dimension —
+   * no `.children` — and descendantGroups threw `node.children is not
+   * iterable` (folderTree.js:104). Found via live testing, not a synthetic
+   * case.
+   */
+  test("removing a leading dimension (city) from groupBy does not crash the tree", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await enrichAll(page);
+    await openApp(page, { groupBy: ["city", "folder"] });
+
+    // The "Group" toolbar section folds into a popover trigger when the row
+    // is too narrow — open it (harmless no-op if it's already unfolded).
+    const groupTrigger = page.locator(".tg-trigger", { hasText: "Group" });
+    if (await groupTrigger.isVisible()) await groupTrigger.click();
+
+    const cityLabel = "Nearest town";
+    const pill = page.locator(".group-by .pill", { hasText: cityLabel });
+    await expect(pill).toBeVisible();
+    await pill.locator("button.remove").click();
+
+    // Tree/feed reload under the new (folder-only) groupBy without crashing.
+    await expect(
+      page.locator(".group-by .pill", { hasText: cityLabel })
+    ).toHaveCount(0);
+    await expect(page.locator(".section-header").first()).toBeVisible();
+    await expect(page.locator(".thumb").first()).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
 });

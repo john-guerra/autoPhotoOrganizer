@@ -247,6 +247,15 @@
     if (!sameHierarchy) {
       expandedKeys = new Set();
       manuallyCollapsedKeys.clear(); // old paths mean nothing under a new hierarchy
+      // A groupBy change is a synchronous re-render (new groupBy) paired with
+      // loadRoot()'s awaited fetch — rootNodes must be cleared HERE, not left
+      // for loadRoot to overwrite once it resolves. Otherwise TreeNode renders
+      // this frame with the NEW groupBy against the OLD rootNodes shape: e.g.
+      // dropping a leading dimension makes `folder` land at depth 0, so
+      // isFolderLevel goes true for a root node that isn't a buildFolderTree
+      // node and has no `.children` — descendantGroups then throws on
+      // `for (const child of node.children)`.
+      rootNodes = [];
     }
 
     await loadRoot();

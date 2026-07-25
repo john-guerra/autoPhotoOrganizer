@@ -98,10 +98,18 @@ function finalize(node) {
 
 /** Every real folder group at or below `node`, in tree order. Used to resolve a
  * click on a virtual ancestor ("jump to the first group under here") and to fold
- * every group beneath one. */
+ * every group beneath one.
+ *
+ * `node.children ?? []`, matching TreeNode.svelte's own `subfolders` derived:
+ * a groupBy change is a reactive prop update, and TreeNode's `isFolderLevel`
+ * (position-based) can go true for one render before TreeSidebar's async
+ * reload replaces `rootNodes`/`childrenByKey` with nodes actually shaped by
+ * buildFolderTree — e.g. dropping a leading dimension moves `folder` to depth
+ * 0 while the depth-0 nodes are still last render's non-folder leaves, which
+ * have no `.children` at all. */
 export function descendantGroups(node) {
   const out = node.isGroup ? [node.value] : [];
-  for (const child of node.children) out.push(...descendantGroups(child));
+  for (const child of node.children ?? []) out.push(...descendantGroups(child));
   return out;
 }
 
