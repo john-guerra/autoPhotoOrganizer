@@ -1,15 +1,13 @@
 import { existsSync, statSync, readdirSync, unlinkSync } from "node:fs";
-import { basename, join } from "node:path";
-import { thumbsDir, thumbCachePath, THUMB_BUCKETS } from "./cachePaths.js";
+import { join } from "node:path";
+import { thumbsDir, thumbCacheKey, THUMB_BUCKETS } from "./cachePaths.js";
 
 /**
  * @param {{path:string, mtime:number, size:number}} photo
  * @returns {string[]} the bare cache key for every bucket this photo could have
  */
 function expectedCacheKeys(photo) {
-  return THUMB_BUCKETS.map((bucket) =>
-    basename(thumbCachePath(photo, bucket), ".jpg")
-  );
+  return THUMB_BUCKETS.map((bucket) => thumbCacheKey(photo, bucket));
 }
 
 /** @returns {{totalBytes:number, totalFiles:number}} */

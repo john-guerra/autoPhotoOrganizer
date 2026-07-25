@@ -65,7 +65,27 @@ export function indexDbFile() {
 export const THUMB_BUCKETS = [160, 320, 480, 640, 1024];
 
 /**
- * THE thumbnail cache key. One definition, because it was two — GET
+ * Pure computation of the thumbnail cache key (bare SHA1 hex, no path or extension).
+ *
+ * thumbsDir() calls mkdirSync, which is a blocking syscall. Callers that only
+ * need to compare keys against directory listings (cacheStats, pruneOrphanedCache)
+ * must use this instead of thumbCachePath to avoid a syscall per photo per bucket
+ * in loops spanning 100k+ photos. The invariant "thumbCachePath(photo, size)
+ * equals join(thumbsDir(), thumbCacheKey(photo, size) + '.jpg')" is tested and
+ * must not drift.
+ *
+ * @param {{path: string, mtime: number, size: number}} photo
+ * @param {number} size one of THUMB_BUCKETS
+ * @returns {string} bare 40-char SHA1 hex digest
+ */
+export function thumbCacheKey(photo, size) {
+  return createHash("sha1")
+    .update(`${photo.path}:${photo.mtime}:${photo.size}:${size}`)
+    .digest("hex");
+}
+
+/**
+ * THE thumbnail cache path. One definition, because it was two — GET
  * /api/thumb/:id and cacheStats.js each carried a copy, the second admitting in
  * a comment that it was "kept in sync manually". A key formula that drifts
  * doesn't throw; it silently orphans every cached thumbnail, and
@@ -80,8 +100,5 @@ export const THUMB_BUCKETS = [160, 320, 480, 640, 1024];
  * @returns {string} absolute path to the cached JPEG (which may not exist yet)
  */
 export function thumbCachePath(photo, size) {
-  const key = createHash("sha1")
-    .update(`${photo.path}:${photo.mtime}:${photo.size}:${size}`)
-    .digest("hex");
-  return join(thumbsDir(), `${key}.jpg`);
+  return join(thumbsDir(), `${thumbCacheKey(photo, size)}.jpg`);
 }

@@ -2,8 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { thumbCachePath, THUMB_BUCKETS, thumbsDir } from "./cachePaths.js";
+import { basename, join } from "node:path";
+import {
+  thumbCachePath,
+  thumbCacheKey,
+  THUMB_BUCKETS,
+  thumbsDir,
+} from "./cachePaths.js";
 
 let cacheDir;
 
@@ -46,5 +51,37 @@ describe("thumbCachePath", () => {
 
   it("exports every bucket the client can request", () => {
     expect(THUMB_BUCKETS).toEqual([160, 320, 480, 640, 1024]);
+  });
+
+  it("is the join of thumbsDir(), the key, and .jpg (the invariant)", () => {
+    expect(thumbCachePath(photo, 320)).toBe(
+      join(thumbsDir(), `${thumbCacheKey(photo, 320)}.jpg`)
+    );
+  });
+});
+
+describe("thumbCacheKey", () => {
+  const photo = {
+    path: "/vol/Trip/IMG_1.jpg",
+    mtime: 1700000000000,
+    size: 4242,
+  };
+
+  it("returns a bare 40-char hex SHA1 string", () => {
+    const key = thumbCacheKey(photo, 320);
+    expect(key).toMatch(/^[a-f0-9]{40}$/);
+  });
+
+  it("contains no path separators or file extensions", () => {
+    const key = thumbCacheKey(photo, 320);
+    expect(key).not.toContain("/");
+    expect(key).not.toContain("\\");
+    expect(key).not.toContain(".");
+  });
+
+  it("is identical to the filename extracted from thumbCachePath", () => {
+    const path = thumbCachePath(photo, 320);
+    const filename = basename(path, ".jpg");
+    expect(thumbCacheKey(photo, 320)).toBe(filename);
   });
 });
