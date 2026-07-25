@@ -106,13 +106,15 @@ function kickHashSweep(db) {
   const job = registry.create("hash", { label: "Hashing library contents" });
   hashAllPending(db, {
     job,
-    onProgress: ({ done, failed }) =>
+    onProgress: ({ done, failed }) => {
+      const hashed = done - failed;
       registry.update(job.id, {
-        done,
+        done: hashed,
         phase: failed
-          ? `${done.toLocaleString()} hashed · ${failed} unreadable`
-          : `${done.toLocaleString()} hashed`,
-      }),
+          ? `${hashed.toLocaleString()} hashed · ${failed} unreadable`
+          : `${hashed.toLocaleString()} hashed`,
+      });
+    },
   })
     .then((r) => {
       // registry.dismiss() no-ops on a "running" job (by design — you cannot

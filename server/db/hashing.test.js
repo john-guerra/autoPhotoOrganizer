@@ -138,6 +138,50 @@ describe("hashAllPending", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("reports progress excluding permanently-unreadable files", async () => {
+    _resetHashingForTest();
+    const db = new Database(":memory:");
+    applySchema(db);
+    const dir = mkdtempSync(join(tmpdir(), "hash-progress-fail-"));
+    const entries = [];
+    // Create 3 real files
+    for (let i = 0; i < 3; i++) {
+      const name = `P_${i}.JPG`;
+      writeFileSync(join(dir, name), `bytes ${i}`);
+      const st = statSync(join(dir, name));
+      entries.push({
+        name,
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+        btimeMs: st.birthtimeMs,
+        kind: "image",
+      });
+    }
+    // Add one entry for a file that doesn't exist (permanent failure)
+    entries.push({
+      name: "GONE.JPG",
+      size: 10,
+      mtimeMs: Date.now(),
+      btimeMs: Date.now(),
+      kind: "image",
+    });
+    upsertScan(db, dir, null, entries);
+    const progressUpdates = [];
+    await hashAllPending(db, {
+      limit: 2,
+      idle: () => Promise.resolve(),
+      onProgress: (p) =>
+        progressUpdates.push({ done: p.done, failed: p.failed }),
+    });
+    // done counts both hashed AND failed rows, but we only want hashed count
+    // With 3 hashed + 1 failed: done=4, failed=1, so hashed=done-failed=3
+    expect(progressUpdates).toEqual([
+      { done: 2, failed: 0 },
+      { done: 4, failed: 1 },
+    ]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("PAUSES without marking when the drive goes away mid-sweep (#169)", async () => {
     // The #169 regression test. NOTE the trap recorded in the issue: do NOT
     // re-stat() the restored file and feed those values to upsertScan.
