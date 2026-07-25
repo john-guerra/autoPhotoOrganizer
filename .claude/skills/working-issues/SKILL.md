@@ -137,7 +137,7 @@ gh issue comment $N --body "🤖 CLAIMED by \`$WHO\`
 - branch: \`issue-$N-<slug>\`
 - started: $(date -u +%FT%TZ)
 
-Will post progress here. Release me if this branch has no new commit in 4h."
+Will post progress here. Release me if this branch has no new commit in 12h."
 ```
 
 ## 3. Claim a version — never hand-pick one
@@ -229,8 +229,9 @@ git branch -d issue-$N-<slug>
 
 ## Already claimed / stale claims
 
-<!-- John: this policy block is the one judgment call here — how you want your
-     fleet to behave on contention. Rewrite it to taste. -->
+A claim goes stale after **12 hours without a commit on its branch** — long
+enough that a slow test run, a long debugging session, or a session paused
+overnight is never robbed mid-work.
 
 - **Held and alive** (claim comment or branch commit within 12h): do not start.
   Report to John which agent holds it and pick a different unclaimed issue.
