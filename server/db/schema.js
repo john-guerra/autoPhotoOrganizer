@@ -149,6 +149,13 @@ export function applySchema(db) {
   ensureColumn(db, "photos", "place_country", "TEXT");
   ensureColumn(db, "photos", "place_city", "TEXT");
   ensureColumn(db, "photos", "gps_checked", "INTEGER NOT NULL DEFAULT 0");
+  // Which geocoder generation produced place_country/place_city (#175). NOT the
+  // same question as gps_checked: that one says "we read the file's GPS" and is
+  // permanent, while this says "we derived these NAMES with algorithm version
+  // N" and must expire when the algorithm improves. Without it, replacing the
+  // geocoder left every already-scanned photo showing its old wrong answer for
+  // good, because gps_checked = 1 keeps the sweep away. See db/places.js.
+  ensureColumn(db, "photos", "place_version", "INTEGER NOT NULL DEFAULT 0");
   // Content-hash sweep bookkeeping (#12/#86). `hash_attempted` mirrors the
   // metadata sweep's "mark attempted" trick: an unreadable file keeps
   // content_hash NULL but sets hash_attempted=1 so the background hasher

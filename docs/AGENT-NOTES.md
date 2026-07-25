@@ -47,20 +47,27 @@ Keep this current: when one of these facts changes, update it in the same commit
   **publish + version-bump** over `npm link`: a global `npm link` re-links ALL
   global links and causes collateral breakage across unrelated projects. The
   version + deps that matter live in the **root** `package.json`.
-- **`offline-geocode-city@1.0.2` (#154) declares its own build toolchain
-  (`@jsheaven/easybuild` → `typescript` ~64MB, plus `dts-bundle-generator`) as a
-  runtime `dependency`, not a `devDependency` — a mistake in that package, not
-  ours. electron-builder ships the whole production `node_modules` tree (the
-  `build.files` allowlist only covers app source, not node_modules pruning), so
-  without an exclusion every installer would carry ~64MB it never runs. Fixed by
-  negation patterns in `package.json`'s `build.files`
-  (`!node_modules/typescript/**`, `!node_modules/@jsheaven/**`,
-  `!node_modules/dts-bundle-generator/**`) — verified safe by physically moving
-  those three directories out of `node_modules` and confirming `getNearestCity()`
-  still works (the package's actual runtime bundle, `dist/index.esm.js` /
-  `dist/index.cjs.js`, only needs `lz-ts` and `s2-geometry`). Re-verify this the
-  same way if `offline-geocode-city` is ever upgraded — a new version could ship
-  a different dependency shape.
+- **electron-builder ships the whole production `node_modules` tree** — the
+  `build.files` allowlist only scopes APP source, it does not prune node_modules.
+  So a dependency that mis-declares its own build toolchain as a runtime
+  `dependency` lands in every installer. This bit us once: `offline-geocode-city`
+  (since removed, #175) dragged in `typescript` (~64MB), `@jsheaven/*`,
+  `dts-bundle-generator`, `chokidar` and `csv-parse`, all needing
+  `!node_modules/<pkg>/**` negation patterns. **Check `npm ls --omit=dev` when
+  adding any dependency**, and if you find build-only packages in the production
+  tree, exclude them the same way — then verify by physically moving those
+  directories out of `node_modules` and confirming the feature still runs.
+  (The current geocoding deps are clean: `all-the-cities` → only `pbf`,
+  `i18n-iso-countries` → only `diacritics`, so no exclusions are needed today.)
+- **Place names are versioned, and the version is load-bearing.**
+  `photos.gps_checked = 1` is a one-way door meaning "we read this file's EXIF
+  GPS", which permanently removes the row from the metadata sweep. That correctly
+  avoids re-reading an unchangeable file, but it also freezes the _derived_ city
+  and country names. So improving `server/lib/place.js` requires bumping its
+  `PLACE_VERSION`; `server/db/places.js`'s `backfillPlaces` then re-derives every
+  stale row from the stored lat/lon at DB open (no filesystem access, works with
+  the drive unmounted). Skip the bump and existing libraries keep the old wrong
+  answer forever with nothing failing — which is exactly how #175 shipped.
 
 ## Data-layer traps (verify before editing)
 

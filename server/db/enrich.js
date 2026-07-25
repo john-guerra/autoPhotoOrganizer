@@ -26,7 +26,7 @@
  * date-less one, which is the whole basis of TAKEN_AT_EXPR's guard.
  */
 
-import { placeFor } from "../lib/place.js";
+import { placeFor, PLACE_VERSION } from "../lib/place.js";
 
 /** The rows the sweep still owes work to.
  *
@@ -156,6 +156,10 @@ export function writeMeta(db, id, m) {
     place_country: country,
     place_city: city,
     gps_checked: 1,
+    // Stamp which geocoder generation produced the two names above, so a later
+    // improvement can find and re-derive them (db/places.js). A row written
+    // here is current by definition.
+    place_version: PLACE_VERSION,
   };
   db.prepare(
     `UPDATE photos SET taken_at = @taken_at, width = @width, height = @height,
@@ -163,7 +167,8 @@ export function writeMeta(db, id, m) {
        shutter = @shutter, iso = @iso, focal_length = @focal_length,
        lens = @lens, video_codec = @video_codec, pix_fmt = @pix_fmt,
        lat = @lat, lon = @lon, place_country = @place_country,
-       place_city = @place_city, gps_checked = @gps_checked
+       place_city = @place_city, gps_checked = @gps_checked,
+       place_version = @place_version
      WHERE id = @id`
   ).run({ ...fields, id });
   return fields;

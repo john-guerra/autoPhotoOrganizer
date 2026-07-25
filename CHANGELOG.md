@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.5
+
+- **Places now name the right city.** San Francisco photos were being filed
+  under "Half Moon Bay" — a town 33 km away — because the old location
+  database had no entry for San Francisco, Oakland, Berkeley, San Jose or
+  Palo Alto at all. Swapped in a far denser offline database (138,000 places,
+  still no network, no accounts) that also knows the difference between a big
+  city and the small town next door: central Bogotá reads "Bogotá", while
+  nearby La Calera stays "La Calera" (#175).
+- Your existing photos are re-labelled automatically the next time the app
+  starts — no rescan, and it works with the drive unplugged.
+
 ## 2.18.4
 
 - **Fix:** removing "Nearest town" (or any non-folder dimension) from Group
