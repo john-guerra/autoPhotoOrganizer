@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.16
+
+- **Loupe minimap now labels the photo's place on the map.** The city name sits
+  on the pin instead of drifting off behind a stray leader line, and only places
+  actually in view are labelled — no more lines pointing to nothing. (#179)
+
 ## 2.18.15
 
 - **New "Neighborhood" place level, below City.** Group, filter, and search by

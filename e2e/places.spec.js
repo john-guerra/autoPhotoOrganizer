@@ -185,6 +185,55 @@ test.describe("@p1 places", () => {
     expect(errors).toEqual([]);
   });
 
+  /**
+   * #179: the minimap drew an orange leader line from the pin to a label that
+   * was never visible. Two causes, both in MiniMap.svelte's smart-labels use:
+   * `labelsInCentroids` (default true) offset every label into its Voronoi cell
+   * and drew an anchor back to the point; and a 4-viewport data margin fed the
+   * labeller points far outside the 220px canvas it was told about, so their
+   * labels landed off-screen. The old test above only checked a <text> EXISTED
+   * — it did, just anchored off into space — so the bug sailed through. This
+   * asserts the two things the user actually needs: no leader lines, and the
+   * city label rendered INSIDE the map.
+   */
+  test("labels the photo's place on the map, with no leader line to nowhere (#179)", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await enrichAll(page);
+    await openApp(page);
+
+    await page.locator(".search-input").fill(GPS_PHOTOS[0].city);
+    await expect(page.locator(".thumb")).toHaveCount(1);
+    await loupe.open(page);
+    await expect(loupe.miniMapSvg(page)).toBeVisible();
+
+    // No anchor/leader lines at all.
+    await expect(loupe.miniMapAnchors(page)).toHaveCount(0);
+
+    // The photo's own city label is rendered, and its box sits INSIDE the svg —
+    // asserted on getBoundingClientRect, not the x/y attrs, since smart-labels
+    // positions via a group transform the raw attrs don't reflect.
+    const cityLabel = loupe.miniMapLabel(page, GPS_PHOTOS[0].city);
+    await expect(cityLabel).toBeVisible();
+    const insideMap = await cityLabel.first().evaluate((el) => {
+      const svg = el.ownerSVGElement;
+      const t = el.getBoundingClientRect();
+      const s = svg.getBoundingClientRect();
+      return (
+        t.width > 0 &&
+        t.height > 0 &&
+        t.left >= s.left - 1 &&
+        t.right <= s.right + 1 &&
+        t.top >= s.top - 1 &&
+        t.bottom <= s.bottom + 1
+      );
+    });
+    expect(insideMap).toBe(true);
+
+    expect(errors).toEqual([]);
+  });
+
   test("the loupe shows no Location section for a photo with no GPS", async ({
     page,
   }) => {
