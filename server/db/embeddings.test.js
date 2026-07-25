@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, _resetDbForTest } from "./connection.js";
-import { upsertScan } from "./photos.js";
+import { upsertScan, resetLibrary, deletePhotosByIds } from "./photos.js";
 import { quantize } from "../ml/quantize.js";
 import {
   putEmbedding,
@@ -346,5 +346,60 @@ describe("clearEmbeddingsFor", () => {
     });
     clearEmbeddingsFor(db, []);
     expect(getEmbedding(db, id, SIGLIP)).not.toBeNull();
+  });
+});
+
+// better-sqlite3 enables PRAGMA foreign_keys by default, and both
+// photo_embeddings and ml_status carry `photo_id INTEGER REFERENCES
+// photos(id)`. Every existing `DELETE FROM photos` path (resetLibrary,
+// deleteFolder(Subtree), deletePhotosByIds, missing.js relocateMissing) would
+// throw the moment a photo had a vector or a sentinel, unless the child row
+// is declared ON DELETE CASCADE (see schema.js). These tests are the tier
+// that would have caught that gap; each was verified red-then-green against
+// the CASCADE fix (see task-5-report.md, "Fix round 1").
+describe("ON DELETE CASCADE from photos (#161 fix round 1)", () => {
+  it("lets a photo with an embedding be deleted, taking the vector with it", () => {
+    const db = getDb();
+    const [id] = seed(db, 1);
+    putEmbedding(db, {
+      photoId: id,
+      model: SIGLIP,
+      dim: 8,
+      ...quantize(vec(1)),
+    });
+
+    expect(() => deletePhotosByIds(db, [id])).not.toThrow();
+    expect(
+      db.prepare(`SELECT * FROM photo_embeddings WHERE photo_id = ?`).get(id)
+    ).toBeUndefined();
+  });
+
+  it("lets a photo with an ml_status sentinel be deleted, taking the sentinel with it", () => {
+    const db = getDb();
+    const [id] = seed(db, 1);
+    markEmbedFailed(db, id, SIGLIP, new Error("corrupt jpeg"));
+
+    expect(() => deletePhotosByIds(db, [id])).not.toThrow();
+    expect(
+      db.prepare(`SELECT * FROM ml_status WHERE photo_id = ?`).get(id)
+    ).toBeUndefined();
+  });
+
+  it("resetLibrary succeeds with embeddings and sentinels present, and empties both tables", () => {
+    const db = getDb();
+    const ids = seed(db, 2);
+    putEmbedding(db, {
+      photoId: ids[0],
+      model: SIGLIP,
+      dim: 8,
+      ...quantize(vec(1)),
+    });
+    markEmbedFailed(db, ids[1], SIGLIP, new Error("nope"));
+
+    expect(() => resetLibrary(db)).not.toThrow();
+    expect(
+      db.prepare(`SELECT COUNT(*) AS n FROM photo_embeddings`).get().n
+    ).toBe(0);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM ml_status`).get().n).toBe(0);
   });
 });

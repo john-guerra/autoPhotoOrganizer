@@ -200,9 +200,17 @@ export function applySchema(db) {
   // migration — so two models' vectors must be able to coexist, and a photo_id
   // PK would forbid exactly that. Switching models then costs a backfill;
   // switching BACK costs nothing, because the old rows are still here.
+  // ON DELETE CASCADE: better-sqlite3 enables PRAGMA foreign_keys by default
+  // (confirmed empirically — it is NOT the raw-SQLite off-by-default), so every
+  // `DELETE FROM photos` path (resetLibrary, deleteFolder(Subtree),
+  // deletePhotosByIds, missing.js relocateMissing) throws once a photo has a
+  // vector, unless the child row disappears with its parent automatically.
+  // Deriving that from a CASCADE here — rather than adding a clearEmbeddingsFor
+  // call at each of today's five delete sites — means a SIXTH delete site added
+  // later can't silently reintroduce the same throw.
   db.exec(`
     CREATE TABLE IF NOT EXISTS photo_embeddings (
-      photo_id   INTEGER NOT NULL REFERENCES photos(id),
+      photo_id   INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
       model      TEXT    NOT NULL,
       dim        INTEGER NOT NULL,
       scale      REAL    NOT NULL,
@@ -231,9 +239,12 @@ export function applySchema(db) {
   //
   // Keyed by model as well as stage: a photo that fails under one model is not
   // thereby failed under another.
+  // Same ON DELETE CASCADE reasoning as photo_embeddings above: a failure
+  // sentinel must not outlive the photo it describes, or deleting that photo
+  // throws instead of just dropping its sentinel too.
   db.exec(`
     CREATE TABLE IF NOT EXISTS ml_status (
-      photo_id   INTEGER NOT NULL REFERENCES photos(id),
+      photo_id   INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
       stage      TEXT    NOT NULL,
       model      TEXT    NOT NULL,
       state      TEXT    NOT NULL,

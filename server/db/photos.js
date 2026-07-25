@@ -338,8 +338,12 @@ export function deletePhotosByIds(db, ids) {
  * volume — in one transaction. This is the "start over" nuclear option (see
  * POST /api/library/reset); real files on disk are never touched, only the
  * SQLite rows that mirror them. Deletion order (children before parents)
- * doesn't matter today since foreign_keys enforcement isn't turned on, but
- * is kept anyway so this stays correct if that ever changes.
+ * DOES matter: better-sqlite3 enables `PRAGMA foreign_keys` by default (unlike
+ * raw SQLite, which is off unless a caller turns it on), so a parent row with
+ * a surviving child throws rather than silently orphaning it. photo_embeddings
+ * and ml_status (#161) are declared ON DELETE CASCADE for exactly this reason
+ * — see server/db/schema.js — but any table without a CASCADE FK must still be
+ * emptied before its parent.
  * @param {import("better-sqlite3").Database} db
  * @returns {{folders: number, photos: number}} row counts as of just before
  *   the delete.
