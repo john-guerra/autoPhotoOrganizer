@@ -84,6 +84,16 @@ export function thumbCacheKey(photo, size) {
     .digest("hex");
 }
 
+/** Downloaded ML model weights. Deliberately NOT under cache/thumbs/ —
+ *  pruneOrphanedCache deletes anything there outside its expected key set,
+ *  regardless of extension.
+ *  @returns {string} Absolute path to the model cache dir (created if missing). */
+export function modelsDir() {
+  const dir = join(cacheRoot(), "models");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 /**
  * THE thumbnail cache path. One definition, because it was two — GET
  * /api/thumb/:id and cacheStats.js each carried a copy, the second admitting in

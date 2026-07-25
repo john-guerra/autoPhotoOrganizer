@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { MLService } from "./MLService.js";
+import { modelsDir } from "../lib/cachePaths.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -15,8 +16,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * the whole app down. The child IS the resilience requirement: hard resource
  * boundary, kill switch, crash isolation.
  *
- * This slice ships supervision and one op (`health`). Model loading and real
- * inference arrive with #161, which has a cost to measure them against.
+ * Supervision plus three ops: `health`, `configure` (select a model, cap
+ * threads), and `embed` (real inference — see server/ml/models.js for the
+ * registry and server/ml/worker/index.js for the loader).
  *
  * `spawn` is injectable so the default test suite never forks a real process.
  */
@@ -27,6 +29,7 @@ export class OnnxMLService extends MLService {
   #pending = new Map();
   #seq = 0;
   #buf = "";
+  #modelId = null;
 
   constructor({ spawn = nodeSpawn, workerPath } = {}) {
     super();
@@ -42,7 +45,12 @@ export class OnnxMLService extends MLService {
     // launch, and electron-builder's own rebuild was a silent no-op.
     const child = this.#spawn(process.execPath, [this.#workerPath], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+        AUTOGALLERY_MODELS_DIR:
+          process.env.AUTOGALLERY_MODELS_DIR ?? modelsDir(),
+      },
     });
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => this.#onData(chunk));
@@ -115,6 +123,29 @@ export class OnnxMLService extends MLService {
    * @returns {Promise<{ok: boolean, ort: string, providers: string[], pid: number}>} */
   health() {
     return this.#request({ op: "health" });
+  }
+
+  /** Select which model embedImages() uses and cap the worker's thread pool.
+   * A thread-count change only takes effect on a fresh session, so the worker
+   * drops any loaded model when this is called.
+   * @param {{modelId: string, threads: number}} opts */
+  async configure({ modelId, threads }) {
+    this.#modelId = modelId;
+    return this.#request({ op: "configure", modelId, threads });
+  }
+
+  /**
+   * @param {Buffer[]} buffers JPEG bytes, one per image
+   * @returns {Promise<Float32Array[]>} raw (un-normalized) model vectors
+   */
+  async embedImages(buffers) {
+    if (!this.#modelId) throw new Error("OnnxMLService: configure() first");
+    const { vectors } = await this.#request({
+      op: "embed",
+      modelId: this.#modelId,
+      images: buffers.map((b) => b.toString("base64")),
+    });
+    return vectors.map((v) => Float32Array.from(v));
   }
 
   /** Kill the child. Any later request respawns it. */

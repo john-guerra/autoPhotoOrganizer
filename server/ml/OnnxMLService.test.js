@@ -136,6 +136,48 @@ describe("OnnxMLService", () => {
   });
 });
 
+describe("embedImages", () => {
+  it("refuses to embed before configure, rather than guessing a model", async () => {
+    const child = fakeChild();
+    const svc = new OnnxMLService({ spawn: () => child });
+    await expect(svc.embedImages([Buffer.from("x")])).rejects.toThrow(
+      /configure/
+    );
+  });
+
+  it("sends base64 images and returns Float32Arrays", async () => {
+    const child = fakeChild();
+    const svc = new OnnxMLService({ spawn: () => child });
+
+    const p = svc.configure({
+      modelId: "Xenova/clip-vit-base-patch32",
+      threads: 2,
+    });
+    let sent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+    expect(sent.op).toBe("configure");
+    child.reply({ id: sent.id, ok: true });
+    await p;
+
+    const embed = svc.embedImages([Buffer.from("abc"), Buffer.from("def")]);
+    sent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+    expect(sent.op).toBe("embed");
+    expect(sent.images).toEqual(["YWJj", "ZGVm"]);
+
+    child.reply({
+      id: sent.id,
+      vectors: [
+        [1, 2],
+        [3, 4],
+      ],
+      dim: 2,
+    });
+    const out = await embed;
+    expect(out[0]).toBeInstanceOf(Float32Array);
+    expect(Array.from(out[1])).toEqual([3, 4]);
+    svc.stop();
+  });
+});
+
 // The ONLY test that spawns a real child. Off by default so the suite stays
 // fast and hermetic — but without it, "does the worker start at all" would be
 // discovered by a user rather than by CI.
