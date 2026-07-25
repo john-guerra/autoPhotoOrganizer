@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.24
+
+- **Internal:** first step of the jump/landing refactor (#189) — extracted the
+  scroll-hold math that keeps a jumped-to photo in view into a pure,
+  unit-tested module. No behavior change; groundwork toward ending the recurring
+  "jump lands on the wrong group" bug class for good.
+
 ## 2.18.23
 
 - **The toolbar timeline strip no longer gets stuck showing the wrong dates
