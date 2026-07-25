@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { getDb, _resetDbForTest } from "./connection.js";
+import { applySchema } from "./schema.js";
 import { upsertScan } from "./photos.js";
 import {
   pendingMetaPhotos,
@@ -244,6 +246,59 @@ describe("the video-codec backfill", () => {
     const db = getDb();
     const [a] = seed(db, ["a.jpg"]);
     writeMeta(db, a.id, { width: 100, height: 50 });
+    expect(pendingMetaCount(db)).toBe(0);
+  });
+});
+
+describe("GPS + place persistence", () => {
+  let db, photoId;
+  beforeEach(() => {
+    db = new Database(":memory:");
+    applySchema(db);
+    db.prepare("INSERT INTO folders (abs_path) VALUES ('/lib')").run();
+    photoId = db
+      .prepare(
+        `INSERT INTO photos (folder_id, filename, size, mtime, kind)
+         VALUES (1, 'a.jpg', 10, 100, 'image')`
+      )
+      .run().lastInsertRowid;
+  });
+
+  it("stores coordinates and the resolved place", () => {
+    writeMeta(db, photoId, { width: 4, height: 3, lat: 4.711, lon: -74.0721 });
+    const row = db
+      .prepare(
+        "SELECT lat, lon, place_country, place_city, gps_checked FROM photos"
+      )
+      .get();
+    expect(row.lat).toBeCloseTo(4.711, 4);
+    expect(row.place_country).toBe("Colombia");
+    expect(row.gps_checked).toBe(1);
+  });
+
+  it("marks gps_checked even when the photo has NO GPS, so it is not retried forever", () => {
+    writeMeta(db, photoId, { width: 4, height: 3 });
+    const row = db
+      .prepare("SELECT lat, place_country, gps_checked FROM photos")
+      .get();
+    expect(row.lat).toBeNull();
+    expect(row.place_country).toBe(""); // the Unknown sentinel, not null
+    expect(row.gps_checked).toBe(1);
+  });
+
+  it("an already-enriched photo with gps_checked = 0 is still pending (backfill)", () => {
+    // Simulates a row enriched BEFORE this feature existed: it has a width, so
+    // the old PENDING_CONDITION considered it done.
+    db.prepare(
+      "UPDATE photos SET width = 100, height = 50, gps_checked = 0"
+    ).run();
+    expect(pendingMetaCount(db)).toBe(1);
+  });
+
+  it("stops being pending once it has been checked", () => {
+    db.prepare(
+      "UPDATE photos SET width = 100, height = 50, gps_checked = 1"
+    ).run();
     expect(pendingMetaCount(db)).toBe(0);
   });
 });

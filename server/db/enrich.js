@@ -18,9 +18,15 @@
  *  - `video_codec` NULL = never probed. "" = probed, no video stream. Same shape
  *    as `width`, and for the same reason: without the "" a video ffprobe can't
  *    read would come back pending on every sweep, forever.
+ *  - `gps_checked` 0 = EXIF GPS has never been looked for. 1 = looked, whatever
+ *    the answer. Photos indexed before places existed have a width and would
+ *    otherwise never return here; this is the same "a column added late needs a
+ *    way to be filled late" problem video_codec had.
  * Together they are why an un-read photo is distinguishable from a genuinely
  * date-less one, which is the whole basis of TAKEN_AT_EXPR's guard.
  */
+
+import { placeFor } from "../lib/place.js";
 
 /** The rows the sweep still owes work to.
  *
@@ -32,7 +38,8 @@
  * with the loupe open. A column added late needs a way to be filled late. */
 const PENDING_CONDITION = `photos.stale = 0
     AND (photos.width IS NULL
-         OR (photos.kind = 'video' AND photos.video_codec IS NULL))`;
+         OR (photos.kind = 'video' AND photos.video_codec IS NULL)
+         OR photos.gps_checked = 0)`;
 
 /** Photos that have never had their metadata read, oldest id first.
  * @param {import("better-sqlite3").Database} db
@@ -116,6 +123,7 @@ export function pendingMetaCount(db, folderId = null) {
  */
 export function writeMeta(db, id, m) {
   const takenAtMs = m.createDate ? new Date(m.createDate).getTime() : null;
+  const { country, city } = placeFor(m.lat ?? null, m.lon ?? null);
   const fields = {
     taken_at: takenAtMs,
     width: m.width ?? 0, // 0 = attempted, dimensionless (see sentinels above)
@@ -135,12 +143,20 @@ export function writeMeta(db, id, m) {
     // come out of the pending set once we've looked (see PENDING_CONDITION).
     video_codec: m.videoCodec ?? "",
     pix_fmt: m.pixFmt ?? null,
+    lat: m.lat ?? null,
+    lon: m.lon ?? null,
+    // "" (not NULL) is the Unknown sentinel every dimension uses.
+    place_country: country,
+    place_city: city,
+    gps_checked: 1,
   };
   db.prepare(
     `UPDATE photos SET taken_at = @taken_at, width = @width, height = @height,
        camera = @camera, duration = @duration, aperture = @aperture,
        shutter = @shutter, iso = @iso, focal_length = @focal_length,
-       lens = @lens, video_codec = @video_codec, pix_fmt = @pix_fmt
+       lens = @lens, video_codec = @video_codec, pix_fmt = @pix_fmt,
+       lat = @lat, lon = @lon, place_country = @place_country,
+       place_city = @place_city, gps_checked = @gps_checked
      WHERE id = @id`
   ).run({ ...fields, id });
   return fields;

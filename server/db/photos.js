@@ -49,6 +49,14 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
         THEN photos.hash_attempted
         ELSE 0
       END
+      ,
+      -- A changed file may have been re-exported with different (or stripped)
+      -- GPS, so clear the "we looked" marker and let the sweep look again.
+      gps_checked = CASE
+        WHEN photos.size = excluded.size AND photos.mtime = excluded.mtime
+        THEN photos.gps_checked
+        ELSE 0
+      END
   `);
   const markAllStale = db.prepare(
     `UPDATE photos SET stale = 1 WHERE folder_id = ?`

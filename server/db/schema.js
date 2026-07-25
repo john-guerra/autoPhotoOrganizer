@@ -131,6 +131,23 @@ export function applySchema(db) {
   // indexed before this column existed; playback probes those on demand.
   ensureColumn(db, "photos", "video_codec", "TEXT");
   ensureColumn(db, "photos", "pix_fmt", "TEXT");
+  // Places (#154). lat/lon are the raw EXIF coordinates; place_country and
+  // place_city are the offline-reverse-geocoded, DENORMALIZED single values
+  // that make place a legal feed group dimension (the keyset seek assumes one
+  // value per photo per dimension — see server/db/feed.js:53-77).
+  //
+  // gps_checked is the "we have looked" marker, and it is load-bearing: the
+  // sweep's to-do list keys on `width IS NULL`, so every photo enriched before
+  // this feature existed already has a width and would NEVER come back to have
+  // its GPS read. That is exactly what happened to video_codec (1,171 of 1,173
+  // videos left unprobed — see db/enrich.js). Keying on `lat IS NULL` instead
+  // is not an option: most photos genuinely have no GPS and would be retried on
+  // every sweep, forever.
+  ensureColumn(db, "photos", "lat", "REAL");
+  ensureColumn(db, "photos", "lon", "REAL");
+  ensureColumn(db, "photos", "place_country", "TEXT");
+  ensureColumn(db, "photos", "place_city", "TEXT");
+  ensureColumn(db, "photos", "gps_checked", "INTEGER NOT NULL DEFAULT 0");
   // Content-hash sweep bookkeeping (#12/#86). `hash_attempted` mirrors the
   // metadata sweep's "mark attempted" trick: an unreadable file keeps
   // content_hash NULL but sets hash_attempted=1 so the background hasher
