@@ -778,7 +778,7 @@ export function registerApi(app) {
         // drained from SQL as it goes. runSweep does not care which — nextBatch
         // is a callback precisely so both modes share one loop.
         let taken = 0;
-        const { done, failed } = await runSweep(job, {
+        const { done, failed, paused } = await runSweep(job, {
           nextBatch: () => {
             if (!forced) return pendingMetaPhotos(db, { limit: BATCH });
             const slice = forced.slice(taken, taken + BATCH);
@@ -796,6 +796,17 @@ export function registerApi(app) {
               phase: `${d.toLocaleString()} of ${total.toLocaleString()} read`,
             }),
         });
+        // Mirrors kickHashSweep's paused handling below: the drive went away
+        // mid-sweep, runSweep stopped and marked nothing, so a normal finish()
+        // here would tell the user the read completed when a chunk of it never
+        // ran. Nothing fails silently (CLAUDE.md, "Usability").
+        if (paused) {
+          registry.update(job.id, {
+            status: "failed",
+            error: "paused — drive not available; resumes on the next sweep",
+          });
+          return;
+        }
         registry.finish(job.id, {
           read: done - failed,
           failed,
