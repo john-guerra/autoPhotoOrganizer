@@ -429,3 +429,95 @@ describe("ON DELETE CASCADE from photos (#161 fix round 1)", () => {
     expect(db.prepare(`SELECT COUNT(*) AS n FROM ml_status`).get().n).toBe(0);
   });
 });
+
+describe("rescan invalidation", () => {
+  const file = (over = {}) => ({
+    name: "IMG_0.jpg",
+    size: 1000,
+    mtimeMs: 1700000000000,
+    kind: "image",
+    ...over,
+  });
+
+  it("drops the vector when the file's mtime changed", () => {
+    const db = getDb();
+    const [id] = upsertScan(db, "/vol/Trip", 1, [file()]).map((r) => r.id);
+    putEmbedding(db, {
+      photoId: id,
+      model: SIGLIP,
+      dim: 8,
+      ...quantize(vec(1)),
+    });
+
+    upsertScan(db, "/vol/Trip", 1, [file({ mtimeMs: 1800000000000 })]);
+
+    expect(getEmbedding(db, id, SIGLIP)).toBeNull();
+  });
+
+  it("drops the vector when the file's size changed", () => {
+    const db = getDb();
+    const [id] = upsertScan(db, "/vol/Trip", 1, [file()]).map((r) => r.id);
+    putEmbedding(db, {
+      photoId: id,
+      model: SIGLIP,
+      dim: 8,
+      ...quantize(vec(1)),
+    });
+
+    upsertScan(db, "/vol/Trip", 1, [file({ size: 2000 })]);
+
+    expect(getEmbedding(db, id, SIGLIP)).toBeNull();
+  });
+
+  it("drops a stale failure sentinel too, so a fixed file is retried", () => {
+    const db = getDb();
+    const [id] = upsertScan(db, "/vol/Trip", 1, [file()]).map((r) => r.id);
+    markEmbedFailed(db, id, SIGLIP, new Error("corrupt"));
+
+    upsertScan(db, "/vol/Trip", 1, [file({ mtimeMs: 1800000000000 })]);
+
+    // #169's shape: a sentinel nothing ever clears excludes the photo forever.
+    expect(pendingEmbedRows(db, SIGLIP, 10).map((r) => r.id)).toContain(id);
+  });
+
+  it("KEEPS the vector when nothing about the file changed", () => {
+    const db = getDb();
+    const [id] = upsertScan(db, "/vol/Trip", 1, [file()]).map((r) => r.id);
+    putEmbedding(db, {
+      photoId: id,
+      model: SIGLIP,
+      dim: 8,
+      ...quantize(vec(1)),
+    });
+
+    // An ordinary rescan of an unchanged library must not throw away hours of
+    // embedding work.
+    upsertScan(db, "/vol/Trip", 1, [file()]);
+
+    expect(getEmbedding(db, id, SIGLIP)).not.toBeNull();
+  });
+
+  it("keeps other photos' vectors when one file changed", () => {
+    const db = getDb();
+    const rows = upsertScan(db, "/vol/Trip", 1, [
+      file(),
+      file({ name: "IMG_1.jpg", size: 1001 }),
+    ]);
+    for (const r of rows) {
+      putEmbedding(db, {
+        photoId: r.id,
+        model: SIGLIP,
+        dim: 8,
+        ...quantize(vec(r.id)),
+      });
+    }
+
+    upsertScan(db, "/vol/Trip", 1, [
+      file({ mtimeMs: 1800000000000 }),
+      file({ name: "IMG_1.jpg", size: 1001 }),
+    ]);
+
+    expect(getEmbedding(db, rows[0].id, SIGLIP)).toBeNull();
+    expect(getEmbedding(db, rows[1].id, SIGLIP)).not.toBeNull();
+  });
+});

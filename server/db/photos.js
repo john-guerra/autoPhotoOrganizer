@@ -1,6 +1,7 @@
 import { join, dirname, basename, sep } from "node:path";
 import { volumeRootForPath, upsertVolume } from "./volumes.js";
 import { normalizeFolderPath } from "../lib/normalizeFolderPath.js";
+import { clearEmbeddingsFor } from "./embeddings.js";
 
 /**
  * @param {import("better-sqlite3").Database} db
@@ -62,9 +63,27 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
     `UPDATE photos SET stale = 1 WHERE folder_id = ?`
   );
 
+  // Which photos' BYTES changed this scan. The ON CONFLICT clause above can
+  // express "keep or null a column", but embeddings live in their own table, so
+  // dropping them needs the id list — and it has to be captured BEFORE the
+  // upsert overwrites the old size/mtime we compare against.
+  const priorByName = new Map(
+    db
+      .prepare(
+        `SELECT id, filename, size, mtime FROM photos WHERE folder_id = ?`
+      )
+      .all(folderId)
+      .map((r) => [r.filename, r])
+  );
+
   const tx = db.transaction((files) => {
     markAllStale.run(folderId);
+    const changedIds = [];
     for (const f of files) {
+      const prior = priorByName.get(f.name);
+      if (prior && (prior.size !== f.size || prior.mtime !== f.mtimeMs)) {
+        changedIds.push(prior.id);
+      }
       upsertPhoto.run({
         folderId,
         filename: f.name,
@@ -75,6 +94,11 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
         now,
       });
     }
+    // An edited photo that keeps its old vector is wrong FOREVER — the worklist
+    // only asks whether a vector exists, never whether it still describes the
+    // current bytes. Same reasoning as content_hash above; different table, so
+    // it cannot ride the ON CONFLICT CASE.
+    clearEmbeddingsFor(db, changedIds);
   });
   tx(files);
 
