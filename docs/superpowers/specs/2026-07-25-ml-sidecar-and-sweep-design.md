@@ -166,8 +166,31 @@ UPDATE photos SET hash_attempted = 0
 
 Safe by construction: a genuinely unreadable file is re-attempted once and
 re-marked. The cost is one wasted pass over a handful of corrupt files; the
-benefit is that anyone who unmounted mid-sweep gets their library back. It runs
-once, guarded like every other `schema.js` migration step.
+benefit is that anyone who unmounted mid-sweep gets their library back.
+
+**It must run exactly once, and `applySchema` has no mechanism for that.** Every
+other step there is idempotent by construction — `CREATE TABLE IF NOT EXISTS`,
+`ensureColumn` — and `applySchema` runs on every startup. A data `UPDATE` is not
+idempotent in that sense: re-running it each launch would also clear the marks
+the _fixed_ code sets on genuinely corrupt files, so those would be re-attempted
+on every startup forever. That is precisely the spin the sentinel exists to
+prevent, reintroduced by the repair for it.
+
+So the repair is gated on `PRAGMA user_version` — SQLite's built-in one-shot
+migration counter, zero schema cost, and the first use of it in this codebase:
+
+```js
+// server/db/schema.js, inside applySchema
+const v = db.pragma("user_version", { simple: true });
+if (v < 1) {
+  db.exec(`UPDATE photos SET hash_attempted = 0
+            WHERE hash_attempted = 1 AND content_hash IS NULL AND stale = 0`);
+  db.pragma("user_version = 1");
+}
+```
+
+This establishes the pattern for every future one-shot data repair; the counter
+is the app's, not SQLite's, and only ever moves forward.
 
 ### `server/ml/` — the sidecar substrate
 
@@ -249,6 +272,7 @@ A fixed bug gets a test at the tier that would have caught it.
 | vitest, pure | volume unreachable → pass aborts and **marks nothing**; a later pass with the volume back drains (the #169 regression)                           |
 | vitest, pure | `runSweep` honours `job.controller.signal` mid-batch                                                                                             |
 | vitest, db   | the `hash_attempted` recovery migration clears poisoned rows and leaves hashed/stale rows alone                                                  |
+| vitest, db   | the repair runs **exactly once**: a second `applySchema` on the same db does not re-clear a mark set after the repair (`user_version` gate)      |
 | vitest       | `OnnxMLService` supervision against an **injected fake spawn**: crash → respawn with backoff; kill → in-flight batch fails cleanly, app survives |
 | vitest, db   | enrich still writes the same sentinel for an unreadable file after the migration                                                                 |
 | e2e          | existing enrich specs green and **unmodified**                                                                                                   |
@@ -282,7 +306,7 @@ only test that touches `onnxruntime-node`.
 - [ ] Killing the child mid-sweep leaves the app usable and the job reported as
       failed, not hung.
 - [ ] A packaged build launches with `onnxruntime-node` present and `{ op:
-    "health" }` answering.
+  "health" }` answering.
 - [ ] `CHANGELOG.md` + `package.json` bumped to 2.18.5 in the same commit.
 
 ## Out of scope
