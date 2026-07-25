@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-/** @typedef {"scan"|"export"|"materialize"|"undo-move"|"enrich"|"transcode"} JobType */
+/** @typedef {"scan"|"export"|"materialize"|"undo-move"|"enrich"|"transcode"|"hash"} JobType */
 
 /**
  * Job types that clear their own row when they SUCCEED.
@@ -13,7 +13,7 @@ import { EventEmitter } from "node:events";
  * Only success self-clears. A FAILURE is news, and a job carrying an Undo is an
  * offer — both wait for a human.
  */
-const SELF_CLEARING = new Set(["transcode", "enrich"]);
+const SELF_CLEARING = new Set(["transcode", "enrich", "hash"]);
 
 /** How many self-cleared jobs stay answerable by id. See `#recent`. */
 const RECENT_MAX = 50;

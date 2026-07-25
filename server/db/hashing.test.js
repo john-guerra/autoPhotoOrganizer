@@ -1,16 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  statSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { getDb, _resetDbForTest } from "./connection.js";
+import Database from "better-sqlite3";
+import { applySchema } from "./schema.js";
 import { upsertScan, getPhotoById } from "./photos.js";
-import {
-  hashFile,
-  hashPendingPhotos,
-  hashAllPending,
-  _resetHashingForTest,
-} from "./hashing.js";
+import { hashFile, hashAllPending, _resetHashingForTest } from "./hashing.js";
 
 let cacheDir;
 let photosDir;
@@ -44,96 +48,110 @@ describe("hashFile", () => {
   });
 });
 
-describe("hashPendingPhotos", () => {
-  it("hashes every photo with a NULL content_hash", async () => {
-    const db = getDb();
-    await writeFile(join(photosDir, "a.jpg"), "content-a");
-    await writeFile(join(photosDir, "b.jpg"), "content-b");
-    const rows = upsertScan(db, photosDir, 1, [
-      { name: "a.jpg", size: 9, mtimeMs: 1, kind: "image" },
-      { name: "b.jpg", size: 9, mtimeMs: 1, kind: "image" },
-    ]);
-
-    const result = await hashPendingPhotos(db);
-    expect(result.hashed).toBe(2);
-    expect(result.remaining).toBe(false);
-
-    const expectedA = createHash("sha1").update("content-a").digest("hex");
-    expect(getPhotoById(db, rows[0].id).content_hash).toBe(expectedA);
-  });
-
-  it("respects the limit and reports remaining work", async () => {
-    const db = getDb();
-    await writeFile(join(photosDir, "a.jpg"), "content-a");
-    await writeFile(join(photosDir, "b.jpg"), "content-b");
-    upsertScan(db, photosDir, 1, [
-      { name: "a.jpg", size: 9, mtimeMs: 1, kind: "image" },
-      { name: "b.jpg", size: 9, mtimeMs: 1, kind: "image" },
-    ]);
-
-    const result = await hashPendingPhotos(db, { limit: 1 });
-    expect(result.hashed).toBe(1);
-    expect(result.remaining).toBe(true);
-  });
-
-  it("marks an unreadable file attempted (hash NULL) instead of throwing", async () => {
-    const db = getDb();
-    const rows = upsertScan(db, photosDir, 1, [
-      { name: "missing.jpg", size: 9, mtimeMs: 1, kind: "image" },
-    ]);
-    const result = await hashPendingPhotos(db);
-    expect(result.hashed).toBe(0);
-    expect(result.failed).toBe(1);
-    expect(getPhotoById(db, rows[0].id).content_hash).toBeNull();
-    // Marked attempted so the background sweep can't re-select it forever.
-    const attempted = db
-      .prepare(`SELECT hash_attempted FROM photos WHERE id = ?`)
-      .get(rows[0].id).hash_attempted;
-    expect(attempted).toBe(1);
-    // ...and it is no longer pending.
-    const again = await hashPendingPhotos(db);
-    expect(again.hashed).toBe(0);
-    expect(again.remaining).toBe(false);
-  });
-});
-
 describe("hashAllPending", () => {
   it("hashes the WHOLE library across batches and TERMINATES past an unreadable file", async () => {
-    const db = getDb();
-    await writeFile(join(photosDir, "a.jpg"), "content-a");
-    // b.jpg is never written to disk → unreadable. Without the hash_attempted
-    // marker, LIMIT 1 would re-select it every batch and this loop would hang.
-    const rows = upsertScan(db, photosDir, 1, [
-      { name: "a.jpg", size: 9, mtimeMs: 1, kind: "image" },
-      { name: "b.jpg", size: 9, mtimeMs: 1, kind: "image" },
-    ]);
+    _resetHashingForTest();
+    const db = new Database(":memory:");
+    applySchema(db);
+    const dir = mkdtempSync(join(tmpdir(), "hash-all-"));
+    const entries = [];
+    for (let i = 0; i < 5; i++) {
+      const name = `IMG_${i}.JPG`;
+      writeFileSync(join(dir, name), `bytes ${i}`);
+      const st = statSync(join(dir, name));
+      entries.push({
+        name,
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+        btimeMs: st.birthtimeMs,
+        kind: "image",
+      });
+    }
+    // A row for a file that does not exist, in a folder that DOES: permanently
+    // unreadable, so it must leave the pending set via the sentinel.
+    entries.push({
+      name: "GONE.JPG",
+      size: 10,
+      mtimeMs: Date.now(),
+      btimeMs: Date.now(),
+      kind: "image",
+    });
+    upsertScan(db, dir, null, entries);
 
-    const result = await hashAllPending(db, { limit: 1 });
-    expect(result.hashed).toBe(1);
-    expect(result.failed).toBe(1);
-    expect(getPhotoById(db, rows[0].id).content_hash).not.toBeNull();
+    const r = await hashAllPending(db, {
+      limit: 2,
+      idle: () => Promise.resolve(),
+    });
+    expect(r.hashed).toBe(5);
+    expect(r.failed).toBe(1);
+    expect(r.paused).toBe(false);
 
     const pending = db
       .prepare(
         `SELECT COUNT(*) AS n FROM photos
-         WHERE content_hash IS NULL AND hash_attempted = 0 AND stale = 0`
+          WHERE content_hash IS NULL AND hash_attempted = 0 AND stale = 0`
       )
       .get().n;
     expect(pending).toBe(0);
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("is single-flight: a concurrent call is a no-op", async () => {
-    const db = getDb();
-    await writeFile(join(photosDir, "a.jpg"), "content-a");
-    upsertScan(db, photosDir, 1, [
-      { name: "a.jpg", size: 9, mtimeMs: 1, kind: "image" },
-    ]);
-
-    const first = hashAllPending(db, { limit: 1 });
-    const second = await hashAllPending(db, { limit: 1 });
+    _resetHashingForTest();
+    const db = new Database(":memory:");
+    applySchema(db);
+    let release;
+    const gate = new Promise((r) => (release = r));
+    const first = hashAllPending(db, { idle: () => gate });
+    const second = await hashAllPending(db, { idle: () => Promise.resolve() });
     expect(second.alreadyRunning).toBe(true);
-    expect(second.hashed).toBe(0);
+    release();
     await first;
+  });
+
+  it("PAUSES without marking when the drive goes away mid-sweep (#169)", async () => {
+    // The #169 regression test. NOTE the trap recorded in the issue: do NOT
+    // re-stat() the restored file and feed those values to upsertScan.
+    // writeFileSync + utimesSync round-trips mtimeMs at sub-millisecond
+    // precision, so the rescan would see a CHANGED file, hash_attempted would
+    // reset, and the test would pass for the wrong reason. A real unmount does
+    // not touch mtime — passing the ORIGINAL entry is the faithful model.
+    _resetHashingForTest();
+    const db = new Database(":memory:");
+    applySchema(db);
+    const dir = mkdtempSync(join(tmpdir(), "unmount-"));
+    const file = join(dir, "IMG_0001.JPG");
+    writeFileSync(file, "the original bytes");
+    const st = statSync(file);
+    const entry = {
+      name: "IMG_0001.JPG",
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+      btimeMs: st.birthtimeMs,
+      kind: "image",
+    };
+    upsertScan(db, dir, null, [entry]); // indexed while mounted
+
+    rmSync(dir, { recursive: true, force: true }); // the DRIVE goes away
+
+    const first = await hashAllPending(db, { idle: () => Promise.resolve() });
+    expect(first.paused).toBe(true);
+    expect(
+      db.prepare(`SELECT hash_attempted FROM photos`).get().hash_attempted
+    ).toBe(0); // NOTHING marked
+
+    // Drive returns. File never modified -> the rescan reports the IDENTICAL stat.
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, "the original bytes");
+    _resetHashingForTest();
+    upsertScan(db, dir, null, [entry]); // same size, same mtimeMs
+
+    const second = await hashAllPending(db, { idle: () => Promise.resolve() });
+    expect(second.hashed).toBe(1);
+    expect(
+      db.prepare(`SELECT content_hash FROM photos`).get().content_hash
+    ).not.toBeNull();
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

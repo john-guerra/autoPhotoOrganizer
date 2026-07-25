@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { whenIdle } from "../lib/interactive.js";
+import { runSweep } from "../ml/sweep.js";
 
 /** @param {string} path @returns {Promise<string>} */
 export function hashFile(path) {
@@ -14,95 +15,76 @@ export function hashFile(path) {
   });
 }
 
-/**
- * Hash one batch of photos whose content_hash is still NULL. Never blocks a
- * scan's grid paint — callers invoke this after already responding.
- *
- * An unreadable file is marked `hash_attempted = 1` (its content_hash stays NULL
- * — it simply has no signature) so the background driver below can't re-select
- * the same failing rows forever. This mirrors the metadata sweep's width-0
- * "attempted" marker. A shared sentinel in content_hash is NOT usable here:
- * backupCoverage.js and missing.js match files by EQUAL content_hash, so every
- * unreadable file would falsely match every other.
- *
- * @param {import("better-sqlite3").Database} db
- * @param {{limit?: number}} [opts]
- * @returns {Promise<{hashed: number, failed: number, remaining: boolean}>}
- */
-export async function hashPendingPhotos(db, { limit = 50 } = {}) {
-  const rows = db
+let hashingInFlight = false;
+
+/** Photos whose content_hash is still NULL and that have not been written off.
+ * Re-queried every batch, so it is the worklist AND the resume point.
+ * `idx_photos_content_hash` makes the NULL range an index search, not a scan. */
+function pendingHashRows(db, limit) {
+  return db
     .prepare(
       `SELECT photos.id, folders.abs_path AS folder_abs_path, photos.filename
-       FROM photos JOIN folders ON folders.id = photos.folder_id
-       WHERE photos.content_hash IS NULL AND photos.hash_attempted = 0
-         AND photos.stale = 0
-       LIMIT ?`
+         FROM photos JOIN folders ON folders.id = photos.folder_id
+        WHERE photos.content_hash IS NULL AND photos.hash_attempted = 0
+          AND photos.stale = 0
+        LIMIT ?`
     )
     .all(limit);
+}
+
+/**
+ * Hash the WHOLE library's pending photos in the background, to completion.
+ *
+ * The drain, idle gating, cancellation, poison-file isolation and — critically —
+ * the permanent/transient CLASSIFICATION all live in runSweep now. This file
+ * used to hand-roll all of it, and that hand-rolled copy shipped #169: an
+ * unmount mid-sweep marked every unreachable file hash_attempted=1, and because
+ * upsertScan only clears that when size/mtime CHANGE (which an unmount does
+ * not), those photos were excluded from hashing forever.
+ *
+ * What stays here is the part that is genuinely hashing's own: the worklist
+ * query, and the sentinel WRITE. `hash_attempted` keeps exactly its old meaning.
+ * A shared sentinel in content_hash is NOT usable — backupCoverage.js and
+ * missing.js match files by EQUAL content_hash, so every unreadable file would
+ * falsely match every other.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {{limit?: number, idle?: () => Promise<void>, job?: object|null}} [opts]
+ * @returns {Promise<{hashed: number, failed: number, paused: boolean, alreadyRunning?: boolean}>}
+ */
+export async function hashAllPending(
+  db,
+  { limit = 50, idle = whenIdle, job = null } = {}
+) {
+  if (hashingInFlight)
+    return { hashed: 0, failed: 0, paused: false, alreadyRunning: true };
+  hashingInFlight = true;
 
   const setHash = db.prepare(`UPDATE photos SET content_hash = ? WHERE id = ?`);
   const markAttempted = db.prepare(
     `UPDATE photos SET hash_attempted = 1 WHERE id = ?`
   );
-  let hashed = 0;
-  let failed = 0;
-  for (const row of rows) {
-    const path = join(row.folder_abs_path, row.filename);
-    try {
-      const hash = await hashFile(path);
-      setHash.run(hash, row.id);
-      hashed++;
-    } catch {
-      // Unreadable file: mark attempted so the sweep makes progress. Hashing
-      // failure must never block culling on an otherwise-usable photo.
-      markAttempted.run(row.id);
-      failed++;
-    }
-  }
-  return { hashed, failed, remaining: rows.length === limit };
-}
 
-let hashingInFlight = false;
-
-/**
- * Hash the WHOLE library's pending photos in the background, to completion.
- *
- * - **Idle-gated**: between batches it `await idle()` (see lib/interactive.js) so
- *   it never competes with the user's scroll — the sweep uses what's left after
- *   the interactive thumbnail requests are served.
- * - **Single-flight**: a second call while one is running is a no-op. The running
- *   loop re-queries the NULL set each batch, so it naturally picks up rows a
- *   concurrent scan just added — no need to start a second driver.
- * - **Guaranteed to terminate**: every row is either hashed or marked
- *   hash_attempted, so the pending set strictly shrinks each batch.
- *
- * Fire-and-forget from callers (`.catch(() => {})`): it never blocks a response.
- * Completing the whole library (not the ~50 rows the old single-batch call left
- * hashed) is what makes backup-coverage/dedup (#12/#86) real. Because the pending
- * query spans the whole `photos` table, the next scan of ANY folder finishes the
- * entire backlog.
- *
- * @param {import("better-sqlite3").Database} db
- * @param {{limit?: number, idle?: () => Promise<void>}} [opts]
- * @returns {Promise<{hashed: number, failed: number, alreadyRunning?: boolean}>}
- */
-export async function hashAllPending(db, { limit = 50, idle = whenIdle } = {}) {
-  if (hashingInFlight) return { hashed: 0, failed: 0, alreadyRunning: true };
-  hashingInFlight = true;
-  let hashed = 0;
-  let failed = 0;
   try {
-    for (;;) {
-      await idle();
-      const batch = await hashPendingPhotos(db, { limit });
-      hashed += batch.hashed;
-      failed += batch.failed;
-      if (!batch.remaining) break;
-    }
+    const { done, failed, paused } = await runSweep(job, {
+      nextBatch: () => pendingHashRows(db, limit),
+      process: async (rows) => {
+        let written = 0;
+        for (const row of rows) {
+          const hash = await hashFile(join(row.folder_abs_path, row.filename));
+          setHash.run(hash, row.id);
+          written++;
+        }
+        return written;
+      },
+      markFailed: (row) => markAttempted.run(row.id),
+      folderOf: (row) => row.folder_abs_path,
+      idle,
+    });
+    return { hashed: done - failed, failed, paused };
   } finally {
     hashingInFlight = false;
   }
-  return { hashed, failed };
 }
 
 /** Test-only: clear the single-flight latch between cases. */

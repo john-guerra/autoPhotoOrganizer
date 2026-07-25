@@ -99,6 +99,32 @@ import {
   carryMetadata,
 } from "./db/missing.js";
 
+/** Kick the background hasher with a JobsPanel entry, so hours of full-file
+ * SHA-1 on a 114k library are visible and cancelable rather than invisible.
+ * Fire-and-forget: it must never block a scan's response. */
+function kickHashSweep(db) {
+  const job = registry.create("hash", { label: "Hashing library contents" });
+  hashAllPending(db, { job })
+    .then((r) => {
+      // registry.dismiss() no-ops on a "running" job (by design — you cannot
+      // dismiss what hasn't finished), and this job's status is still
+      // "running" at this point since nothing has updated it yet. finish()
+      // is what actually clears it: "hash" is SELF_CLEARING, so it vanishes
+      // from list() immediately instead of leaking as a permanently
+      // "running" ghost entry in the JobsPanel.
+      if (r.alreadyRunning)
+        return registry.finish(job.id, { alreadyRunning: true });
+      if (r.paused) {
+        return registry.update(job.id, {
+          status: "failed",
+          error: "paused — drive not available; resumes on the next scan",
+        });
+      }
+      registry.finish(job.id, { hashed: r.hashed, failed: r.failed });
+    })
+    .catch((e) => registry.fail(job.id, e));
+}
+
 /**
  * True if `target` is `root` itself or nested anywhere inside it. Same
  * resolve+startsWith(root+sep) primitive as safeResolve.js, but for testing
@@ -628,7 +654,7 @@ export function registerApi(app) {
             });
           }
           const elapsedMs = Math.round(performance.now() - t0);
-          hashAllPending(db).catch(() => {});
+          kickHashSweep(db);
           const missing = classifyMissing(db, scanStartedAt);
           registry.finish(job.id, {
             root: scanRoot,
@@ -649,7 +675,7 @@ export function registerApi(app) {
     const elapsedMs = Math.round(performance.now() - t0);
 
     // Never blocks the response — see server/db/hashing.js.
-    hashAllPending(db).catch(() => {});
+    kickHashSweep(db);
 
     const items = rows.map((r) => ({
       id: r.id,
