@@ -58,7 +58,8 @@ import {
   renameFolderPath,
 } from "./db/photos.js";
 import { hashAllPending, hashProgress } from "./db/hashing.js";
-import { interactiveRoute, whenIdle } from "./lib/interactive.js";
+import { runSweep } from "./ml/sweep.js";
+import { interactiveRoute } from "./lib/interactive.js";
 import { whyTranscode, playbackPlan } from "./lib/videoPlayback.js";
 import {
   pendingMetaPhotos,
@@ -772,55 +773,29 @@ export function registerApi(app) {
 
     (async () => {
       const t0 = performance.now();
-      let done = 0;
-      let failed = 0;
-      // Batched, not all-at-once: a 100k-photo array of paths handed to
-      // exiftool/sharp in one go would balloon memory and make cancel useless.
-      // Each batch awaits, so the event loop keeps serving the UI while the
-      // sweep runs (heavy IO stays off the main thread — see the usability rules).
-      const nextBatch = () =>
-        forced
-          ? forced.slice(done, done + BATCH)
-          : pendingMetaPhotos(db, { limit: BATCH });
       try {
-        for (;;) {
-          if (job.controller.signal.aborted) {
-            const e = new Error("canceled");
-            e.name = "AbortError";
-            throw e;
-          }
-          // Let the user go first. The sweep and the grid share one
-          // ProcessingService, and a full-library sweep will happily starve the
-          // thumbnails the user is actually waiting on (measured: 15ms → 90ms,
-          // with tiles abandoned mid-scroll). Between batches we stand aside
-          // until nothing interactive is in flight — so scrolling stays fast and
-          // the sweep uses what's left.
-          await whenIdle();
-          const batch = nextBatch();
-          if (!batch.length) break;
-          try {
-            done += await enrichBatch(db, processing, batch);
-          } catch {
-            // One unreadable file must not kill a 100k sweep. Retry the batch
-            // one at a time so the bad file is isolated and the rest still land.
-            for (const p of batch) {
-              if (job.controller.signal.aborted) break;
-              try {
-                done += await enrichBatch(db, processing, [p]);
-              } catch {
-                // Mark it attempted (width 0) so the sweep can't loop on it
-                // forever — this file simply has no readable metadata.
-                writeMeta(db, p.id, {});
-                done += 1;
-                failed += 1;
-              }
-            }
-          }
-          registry.update(job.id, {
-            done,
-            phase: `${done.toLocaleString()} of ${total.toLocaleString()} read`,
-          });
-        }
+        // `forced` (re-read mode) is a FIXED in-memory list; the sweep's list is
+        // drained from SQL as it goes. runSweep does not care which — nextBatch
+        // is a callback precisely so both modes share one loop.
+        let taken = 0;
+        const { done, failed } = await runSweep(job, {
+          nextBatch: () => {
+            if (!forced) return pendingMetaPhotos(db, { limit: BATCH });
+            const slice = forced.slice(taken, taken + BATCH);
+            taken += slice.length;
+            return slice;
+          },
+          process: (batch) => enrichBatch(db, processing, batch),
+          // width=0 is the metadata sweep's "attempted, nothing there" sentinel
+          // — see db/enrich.js. This file simply has no readable metadata.
+          markFailed: (p) => writeMeta(db, p.id, {}),
+          folderOf: (p) => dirname(p.path),
+          onProgress: ({ done: d }) =>
+            registry.update(job.id, {
+              done: d,
+              phase: `${d.toLocaleString()} of ${total.toLocaleString()} read`,
+            }),
+        });
         registry.finish(job.id, {
           read: done - failed,
           failed,
