@@ -77,7 +77,12 @@ function build() {
     let code = isoPool.get(c.country);
     if (code === undefined) isoPool.set(c.country, (code = c.country));
     iso[i] = code;
-    const k = cellKey(Math.floor(la), Math.floor(lo));
+    // wrapLonBucket, not a bare Math.floor: a gazetteer point at exactly
+    // lon=180 would otherwise land in a bucket the search side (best()) can
+    // never produce, since it always wraps through this same function —
+    // making that point permanently unreachable. Storage and search must
+    // agree on bucket identity.
+    const k = cellKey(Math.floor(la), wrapLonBucket(Math.floor(lo)));
     let arr = cells.get(k);
     if (!arr) cells.set(k, (arr = []));
     arr.push(i);
@@ -180,6 +185,32 @@ function best(lat, lon) {
     }
   }
   return { city: ix.name[state.i], iso: ix.iso[state.i] };
+}
+
+/** Test-only: the shipped grid-based search. Exercises the real `build()` /
+ *  `best()` path, not a re-implementation of it. */
+export function _bestForTest(lat, lon) {
+  return best(lat, lon);
+}
+
+/** Test-only: an exhaustive linear scan over the SAME built index — same
+ *  data, same score, different search strategy. Grid vs. this is what an
+ *  index-correctness test actually needs to check: not "is the dataset
+ *  right" (place.test.js's named-city cases own that) but "does the grid's
+ *  ring/radius shortcut ever disagree with checking every point." */
+export function _bestLinearForTest(lat, lon) {
+  const ix = index ?? build();
+  let bestScore = Infinity;
+  let bestI = -1;
+  for (let i = 0; i < ix.lat.length; i++) {
+    const score = distanceKm(lat, lon, i, ix) - ix.bonus[i];
+    if (score < bestScore) {
+      bestScore = score;
+      bestI = i;
+    }
+  }
+  if (bestI < 0) return null;
+  return { city: ix.name[bestI], iso: ix.iso[bestI] };
 }
 
 /** @type {null | ((iso: string) => string)} */

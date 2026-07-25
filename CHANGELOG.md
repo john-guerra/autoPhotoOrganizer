@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.6
+
+- **Fix:** on a large library, updating to the new place-name database (2.18.5)
+  no longer stalls the whole app on launch. It now catches up in the
+  background instead.
+
 ## 2.18.5
 
 - **Places now name the right city.** San Francisco photos were being filed

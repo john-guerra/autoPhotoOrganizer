@@ -8,6 +8,7 @@ import { getFeedPage } from "./feed.js";
 import { getTreeNode } from "./tree.js";
 import { feedIndexes } from "./sort.js";
 import { pendingMetaPhotos, pendingMetaCount } from "./enrich.js";
+import { backfillPlacesBatch, stampPlacelessPhotos } from "./places.js";
 
 /**
  * THE FEED MUST NOT FULL-SCAN.
@@ -258,6 +259,39 @@ describe("the feed's query plans", () => {
     expect(
       scanned,
       `these sweep queries still full-scan:\n${scanned
+        .map(
+          (s) => `  ${s.line}\n    ${s.sql.replace(/\s+/g, " ").slice(0, 120)}`
+        )
+        .join("\n")}`
+    ).toEqual([]);
+  });
+
+  it("finds the place-version backfill's pending rows by index, not by scanning (#175)", () => {
+    // idx_photos_place_version (schema.js). Runs at every getDb() via
+    // db/places.js's backfillPlaces/stampPlacelessPhotos, so an unindexed
+    // `place_version < ?` would full-scan on every single app startup, forever
+    // — not just the one-time event a version bump actually causes. Exercises
+    // the real functions, not a hand-copied condition, for the same
+    // anti-drift reason as the sweep test above.
+    const db = getDb();
+    seed(db);
+
+    const statements = capturingSql(db, () => {
+      backfillPlacesBatch(db, { limit: 50 });
+      stampPlacelessPhotos(db);
+    });
+    const photoQueries = statements.filter((s) => /FROM photos/i.test(s.sql));
+    expect(photoQueries.length).toBeGreaterThan(0);
+
+    const scanned = [];
+    for (const q of photoQueries) {
+      for (const line of planFor(db, q)) {
+        if (isFullScan(line)) scanned.push({ ...q, line });
+      }
+    }
+    expect(
+      scanned,
+      `these place-backfill queries still full-scan:\n${scanned
         .map(
           (s) => `  ${s.line}\n    ${s.sql.replace(/\s+/g, " ").slice(0, 120)}`
         )

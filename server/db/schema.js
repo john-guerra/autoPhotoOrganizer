@@ -156,6 +156,16 @@ export function applySchema(db) {
   // geocoder left every already-scanned photo showing its old wrong answer for
   // good, because gps_checked = 1 keeps the sweep away. See db/places.js.
   ensureColumn(db, "photos", "place_version", "INTEGER NOT NULL DEFAULT 0");
+  // db/places.js's backfill gate (`place_version < ?`) and its GPS-less stamp
+  // (`place_version < ? AND lat IS NULL`) both run on every startup, and
+  // without this the gate's own COUNT was a full table scan — verified via
+  // EXPLAIN QUERY PLAN, the same trap idx_photos_pending_meta's comment above
+  // describes. A plain (non-partial) index, unlike that one: PLACE_VERSION
+  // only ever goes up, so once a library is caught up almost nothing matches
+  // `place_version < ?` and the range scan is cheap regardless of `lat`.
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_photos_place_version ON photos(place_version)`
+  );
   // Content-hash sweep bookkeeping (#12/#86). `hash_attempted` mirrors the
   // metadata sweep's "mark attempted" trick: an unreadable file keeps
   // content_hash NULL but sets hash_attempted=1 so the background hasher

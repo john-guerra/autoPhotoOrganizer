@@ -1,5 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { placeFor } from "./place.js";
+import { placeFor, _bestForTest, _bestLinearForTest } from "./place.js";
+
+/** Deterministic PRNG (mulberry32) — fixed seed, so a failure is reproducible
+ *  and CI doesn't flake on whichever point Math.random() happened to pick. */
+function mulberry32(seed) {
+  let a = seed;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 describe("placeFor", () => {
   it("returns the '' Unknown sentinel — never null — for missing coordinates", () => {
@@ -88,6 +101,88 @@ describe("placeFor", () => {
         expect(p.city).toBe(city);
         expect(p.country).toBe(country);
       });
+    }
+  });
+
+  /**
+   * `KM_PER_POPULATION_DECADE` was tuned against the cases above — all of
+   * which are Bay Area, Bogotá, or Paris. That is a real overfitting risk: the
+   * only evidence for the constant was the same set it was validated against.
+   * These regions were never looked at while choosing it, checked here purely
+   * as held-out evidence that "2" generalises rather than just fitting the
+   * cases that happened to be tried.
+   */
+  describe("holds up on regions not used to tune the constant", () => {
+    const cases = [
+      ["Tokyo centre (Shibuya)", 35.6595, 139.7005, "Tokyo", "Japan"],
+      ["Yokohama, near Tokyo", 35.4437, 139.638, "Yokohama", "Japan"],
+      ["Mumbai centre", 18.975, 72.8258, "Mumbai", "India"],
+      ["Pune, near Mumbai", 18.5204, 73.8567, "Pune", "India"],
+      ["London centre (Soho)", 51.5136, -0.1365, "London", "UK"],
+      ["Croydon, near London", 51.3762, -0.0982, "Croydon", "UK"],
+      ["Berlin centre", 52.52, 13.405, "Berlin", "Germany"],
+      ["Potsdam, near Berlin", 52.3906, 13.0645, "Potsdam", "Germany"],
+    ];
+    for (const [label, lat, lon, city, country] of cases) {
+      it(label, () => {
+        const p = placeFor(lat, lon);
+        expect(p.city).toBe(city);
+        expect(p.country).toBe(country);
+      });
+    }
+  });
+});
+
+/**
+ * The two-phase ring/radius-bound grid search (best() in place.js) is a
+ * genuinely non-trivial custom index — antimeridian wraparound, pole capping,
+ * a non-monotonic score. Its ONLY prior validation ("0 mismatches on 3000
+ * random points") lived in a throwaway script that was never committed,
+ * which — per this project's own testing rule — proves nothing about the
+ * shipped code. This is that check, for real, in the suite: grid vs. an
+ * exhaustive linear scan over the identical built index, so a divergence can
+ * only come from the grid's search strategy, never from a data difference.
+ */
+describe("the grid index agrees with brute force", () => {
+  it("on 500 deterministic worldwide points", () => {
+    const rand = mulberry32(20260725);
+    const mismatches = [];
+    for (let i = 0; i < 500; i++) {
+      const lat = rand() * 178 - 89;
+      const lon = rand() * 360 - 180;
+      const grid = _bestForTest(lat, lon);
+      const linear = _bestLinearForTest(lat, lon);
+      if (grid?.city !== linear?.city || grid?.iso !== linear?.iso) {
+        mismatches.push({ lat, lon, grid, linear });
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it("across the antimeridian (lon near +/-180)", () => {
+    const points = [
+      [51.0, 179.95],
+      [51.0, -179.95],
+      [-16.5, 179.99],
+      [63.0, -179.5],
+      [0, 180],
+      [0, -180],
+    ];
+    for (const [lat, lon] of points) {
+      expect(_bestForTest(lat, lon)).toEqual(_bestLinearForTest(lat, lon));
+    }
+  });
+
+  it("near the poles", () => {
+    const points = [
+      [89.9, 0],
+      [89.9, 90],
+      [89.9, -170],
+      [-89.9, 30],
+      [-89.9, -60],
+    ];
+    for (const [lat, lon] of points) {
+      expect(_bestForTest(lat, lon)).toEqual(_bestLinearForTest(lat, lon));
     }
   });
 });

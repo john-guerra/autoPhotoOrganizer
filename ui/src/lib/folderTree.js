@@ -138,7 +138,11 @@ export function chainTo(roots, value) {
   for (const node of roots) {
     if (node.value === value) return [node];
     if (value.startsWith(`${node.value}/`)) {
-      const rest = chainTo(node.children, value);
+      // `?? []`: same stale-node-shape race #172 hit in descendantGroups — a
+      // node reached here can transiently be shaped for the OLD groupBy
+      // (no .children at all) while revealPath's caller has already moved to
+      // the new one. See folderTree.js's descendantGroups doc comment.
+      const rest = chainTo(node.children ?? [], value);
       if (rest.length) return [node, ...rest];
     }
   }
