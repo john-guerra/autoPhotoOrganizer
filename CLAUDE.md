@@ -14,6 +14,10 @@ Lightroom too slow.
   "Where the project was" log is prototype history, not current status).
 - **Operational notes** (release process, test isolation, dependency landmines,
   data-layer traps) → `docs/AGENT-NOTES.md`. Cross-agent summary → `AGENTS.md`.
+- **About to work a GitHub issue?** → the `working-github-issues` skill
+  (`.claude/skills/`). Several agents work this repo at once: check the issue is
+  unclaimed before starting, and take your version number with
+  `claim-version.sh` rather than hand-picking the next patch.
 
 ## Two invariants (do not violate)
 
