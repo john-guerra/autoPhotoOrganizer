@@ -89,8 +89,17 @@ itself, and it is what `hashAllPending` got wrong. It moves into `runSweep` and
 there is one answer.
 
 `runSweep` also owns: drain-until-empty, `await whenIdle()` between batches,
-`job.controller.signal`, single-flight per stage, poison-file isolation
-(batch failure → retry one at a time), and progress reporting.
+`job.controller.signal`, poison-file isolation (batch failure → retry one at a
+time), and progress reporting.
+
+**Single-flight stays with the caller**, not `runSweep`. It is per _stage_, and
+the two callers genuinely want different things: hashing keeps its module-level
+latch (a second post-scan kick while one sweep runs must be a no-op, since both
+would drain the same worklist), while enrich deliberately has none — each `POST
+/api/enrich` is a user asking for a job, and two concurrent re-reads of
+different id sets are legitimate. Hoisting the latch into `runSweep` would
+require a stage key and would impose hashing's answer on a caller that wants the
+opposite.
 
 ### The failure contract
 
@@ -306,7 +315,7 @@ only test that touches `onnxruntime-node`.
 - [ ] Killing the child mid-sweep leaves the app usable and the job reported as
       failed, not hung.
 - [ ] A packaged build launches with `onnxruntime-node` present and `{ op:
-  "health" }` answering.
+"health" }` answering.
 - [ ] `CHANGELOG.md` + `package.json` bumped to 2.18.5 in the same commit.
 
 ## Out of scope
