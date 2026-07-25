@@ -79,8 +79,11 @@ test.describe("@p1 the toolbar folds instead of overflowing", () => {
     // selection.)
     expect(await toolbar.groupReachable(page, "Group")).toBe(true);
     const panel = toolbar.group(page, "Group");
-    await expect(panel).toContainText("folder");
-    await expect(panel).toContainText("year");
+    // Title Case: the chips render the dimension LABELS ("Folder"/"Year" from
+    // ui/src/lib/dimensions.js), not the raw keys. This asserted lowercase and
+    // so had been red since the labels were Title-Cased (#178).
+    await expect(panel).toContainText("Folder");
+    await expect(panel).toContainText("Year");
 
     // The panel is on screen, not half past the edge — that is what Floating UI's
     // shift() is there for.

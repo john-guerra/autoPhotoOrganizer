@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.19
+
+- **Dev:** fixed the toolbar-fold e2e test, which had asserted lowercase
+  dimension names and so been red since the chips were Title-Cased — restoring
+  regression protection for the folded group-by dropdown. (#178)
+
 ## 2.18.18
 
 - **Dev:** the e2e suite warms the Vite dev server before running, so a cold
