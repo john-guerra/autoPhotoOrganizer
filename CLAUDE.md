@@ -14,10 +14,11 @@ Lightroom too slow.
   "Where the project was" log is prototype history, not current status).
 - **Operational notes** (release process, test isolation, dependency landmines,
   data-layer traps) → `docs/AGENT-NOTES.md`. Cross-agent summary → `AGENTS.md`.
-- **About to work a GitHub issue?** → the `working-github-issues` skill
-  (`.claude/skills/`). Several agents work this repo at once: check the issue is
-  unclaimed before starting, and take your version number with
-  `claim-version.sh` rather than hand-picking the next patch.
+- **Filing or working a GitHub issue?** → the `working-issues` skill
+  (`.claude/skills/`). Every report John makes becomes an issue with a priority;
+  and since several agents work this repo at once, check an issue is unclaimed
+  before starting and take your version number with `claim-version.sh` rather
+  than hand-picking the next patch.
 
 ## Two invariants (do not violate)
 
@@ -179,6 +180,21 @@ is **not** user feedback.
   failure).
 - When you add or touch an action, ask: _if this fails, does the user find out,
   and do they know what to do?_ If not, it isn't done.
+
+## Every report becomes an issue
+
+**When John reports a bug, asks for a feature, or describes an annoyance, file a
+GitHub issue for it** — even when he didn't ask you to, and even when you fix it
+in the same breath. The conversation is gone tomorrow; the tracker is the backlog.
+
+Search for a duplicate first (`gh issue list --search "<keywords>" --state all`),
+then propose a priority and confirm it in one question rather than filing
+unprioritized — `priority: critical | high | medium | low` (MoSCoW: must-now /
+must-this-cycle / should / could), `medium` being the default. Don't set a
+milestone; they're vestigial here.
+
+Full ladder, filing template, and the parallel-agent claim protocol → the
+**`working-issues` skill** in `.claude/skills/`.
 
 ## Committing
 

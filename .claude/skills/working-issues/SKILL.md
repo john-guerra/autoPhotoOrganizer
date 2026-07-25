@@ -1,6 +1,6 @@
 ---
 name: working-issues
-description: Use when picking up, working on, or finishing a GitHub issue in this repo — before claiming an issue, before setting a version in package.json, before opening a PR, or any time another agent may be working this repo in parallel.
+description: Use when John reports a bug, enhancement, or annoyance that should be filed, and when picking up, working on, or finishing a GitHub issue in this repo — before claiming an issue, before setting a version in package.json, before opening a PR, or any time another agent may be working this repo in parallel.
 ---
 
 # Working GitHub issues in parallel
@@ -44,12 +44,52 @@ and a duplicate splits the discussion. If genuinely nothing matches, small work
 needs no issue; just say out loud that you are working unclaimed, so a second
 agent starting the same thing is John's decision rather than a surprise.
 
+## Filing: every report becomes an issue
+
+**When John reports a bug, asks for a feature, or describes an annoyance, file
+it** — including when he did not ask you to, and including when you fix it in
+the same breath. The conversation is gone tomorrow; GitHub Issues is the backlog.
+
+1. **Search first.** `gh issue list --search "<keywords>" --state all`. There are
+   50+ open issues and he files a lot — a duplicate splits the discussion. If it
+   already exists, add the new detail as a comment there instead.
+2. **Propose a priority and confirm it** — one `AskUserQuestion`, your
+   recommendation first with a one-line reason. Do not interrogate him, and do
+   not file unprioritized: an unlabelled issue is what most of the current
+   backlog is made of, which is why it cannot be ordered.
+3. **File it, then tell him the number.**
+
+| Label                | MoSCoW           | Means                                                                                           | Example                             |
+| -------------------- | ---------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `priority: critical` | Must, now        | Data loss, a crash on a common path, or his workflow is blocked today. Interrupts current work. | Ratings lost on rescan              |
+| `priority: high`     | Must, this cycle | User-visible breakage that has a workaround, or the next planned slice                          | Group jump lands on the wrong photo |
+| `priority: medium`   | Should           | A real improvement, but nothing is broken. **The default.**                                     | Neighborhood level below city       |
+| `priority: low`      | Could            | Polish, speculative, nice-to-have                                                               | Tooltip wording                     |
+
+"Won't" is not a label — close it as `wontfix` with the reason.
+
+```bash
+gh issue create --title "<what the user cannot do today>" \
+  --label bug --label "priority: high" \
+  --body "**Repro** …  **Expected** …  **Actual** …  **Acceptance** …"
+```
+
+- **Title states the user-visible problem, not the suspected cause** — "Tree
+  doesn't reflect a newly-scanned folder", not "invalidate tree cache on scan".
+  The cause is a theory; the symptom is the fact, and theories are usually wrong
+  before the lowest layer has been checked.
+- **Do not set a milestone.** `v0.2` and `Phase 3` are closed out and most open
+  issues have none — populating a dead taxonomy makes the backlog harder to
+  read, not easier. Priority is the ordering signal.
+- Filing is not claiming. A new issue is unclaimed until someone runs the
+  pre-flight check and claims it, even if you filed it seconds ago.
+
 ## Who you are
 
 Claim comments and version tags carry `<label>#<key>` from `agent-id.sh`:
 
 ```bash
-WHO=$(.claude/skills/working-github-issues/agent-id.sh)   # skill-agent-collaboration#e70a532e
+WHO=$(.claude/skills/working-issues/agent-id.sh)   # skill-agent-collaboration#e70a532e
 ```
 
 - **`key`** (8 hex chars of the session id) is what every check matches on. It
@@ -90,7 +130,7 @@ another agent holds it.** Do not start. See _Already claimed_ below.
 ## 2. Claim the issue
 
 ```bash
-WHO=$(.claude/skills/working-github-issues/agent-id.sh)
+WHO=$(.claude/skills/working-issues/agent-id.sh)
 
 gh issue edit $N --add-label wip
 gh issue comment $N --body "🤖 CLAIMED by \`$WHO\`
@@ -109,7 +149,7 @@ compare-and-swap. Verified under 3-way concurrency: three agents starting from
 `2.18.7` got `2.18.8`, `2.18.9`, `2.18.10`.
 
 ```bash
-VERSION=$(.claude/skills/working-github-issues/claim-version.sh $N)   # add --minor only when cutting a packaged build
+VERSION=$(.claude/skills/working-issues/claim-version.sh $N)   # add --minor only when cutting a packaged build
 ```
 
 - **Never `git push --force` a `claim/*` tag.** Force _succeeds_ — it silently
@@ -201,6 +241,26 @@ git branch -d issue-$N-<slug>
   its worktree. Stealing a live claim destroys uncommitted work.
 
 Check liveness with: `git log -1 --format=%cr origin/issue-$N-<slug>`
+
+## If you need something from another agent
+
+There is no automated agent-to-agent messaging, deliberately. **John routes
+between agents.** When your issue is blocked on another agent's in-flight work:
+
+1. Comment on **your** issue naming the blocker (`blocked on #158's Thumb
+contract — need to know if the `y` prop survives`), and say it in your reply
+   to John. He is the one who can reach the other agent.
+2. Keep going on whatever does not depend on it. If nothing is left, release
+   your claim rather than sitting on it.
+
+Do not comment on the other agent's issue expecting an answer — nothing is
+watching it, and you will block forever waiting.
+
+If this ever gets frequent enough to automate, two findings save the rediscovery:
+`Monitor` polling `gh api ".../comments?since=…"` is the mechanism (a 304 on a
+conditional request is free), but **every agent posts as `john-guerra`**, so
+messages must be routed by a marker in the comment _body_ — author is useless —
+and need a hop cap, or two agents reply to each other indefinitely.
 
 ## Red flags — stop
 
