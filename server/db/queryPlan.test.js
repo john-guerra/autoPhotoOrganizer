@@ -9,6 +9,7 @@ import { getTreeNode } from "./tree.js";
 import { feedIndexes } from "./sort.js";
 import { pendingMetaPhotos, pendingMetaCount } from "./enrich.js";
 import { backfillPlacesBatch, stampPlacelessPhotos } from "./places.js";
+import { pendingEmbedRows, markEmbedFailed } from "./embeddings.js";
 
 /**
  * THE FEED MUST NOT FULL-SCAN.
@@ -298,5 +299,71 @@ describe("the feed's query plans", () => {
         )
         .join("\n")}`
     ).toEqual([]);
+  });
+});
+
+/**
+ * THE EMBED WORKLIST MUST NOT FULL-SCAN EITHER.
+ *
+ * pendingEmbedRows (embeddings.js, #161) runs once per batch of a 114k-photo
+ * embedding backfill and anti-joins two tables: photo_embeddings (has this
+ * photo already been vectorised under this model?) and ml_status (did it
+ * already fail permanently under this model?). Same silent-rot risk as the
+ * feed's date-group indexes above — if either anti-join degrades to a SCAN,
+ * every one of the ~2,000+ batches a full backfill takes re-reads a whole
+ * table, nothing errors, and the app just quietly gets slow again.
+ *
+ * What actually serves these anti-joins, verified empirically below, is each
+ * table's own composite PRIMARY KEY (photo_id, model) / (photo_id, stage,
+ * model) — photo_id is the correlated value AND the leading PK column, so
+ * SQLite plans off the PK's automatic UNIQUE index. idx_photo_embeddings_model
+ * and idx_ml_status_lookup (schema.js) are NOT what protects this query — they
+ * exist for embedCounts' and modelStorage's (stage, model)-only filters, which
+ * have no photo_id to correlate on. An earlier draft of this test assumed
+ * those two named indexes were the guard and asserted red/green by toggling
+ * idx_ml_status_lookup; that stayed green with the index removed (decoration),
+ * which is what surfaced the mix-up. The red/green proof that survived is: an
+ * ml_status/photo_embeddings schema with NEITHER a PK NOR a secondary index
+ * scans (verified by hand against a throwaway schema); the real schema, with
+ * its PK, does not.
+ */
+describe("the embed worklist's query plans", () => {
+  it("the embed worklist's anti-joins use an index, not a scan (#161)", () => {
+    // Exercises the REAL pendingEmbedRows function rather than a hand-copied
+    // copy of its SQL, for the same anti-drift reason as the sweep and
+    // place-backfill tests above: a hand-typed WHERE clause silently stops
+    // matching the real query and the plan test keeps passing on a query
+    // nobody runs.
+    const db = getDb();
+    seed(db);
+
+    const statements = capturingSql(db, () => pendingEmbedRows(db, "m", 10));
+    expect(statements.length).toBeGreaterThan(0);
+
+    const plan = statements.flatMap((s) => planFor(db, s));
+    const detail = plan.join("\n");
+
+    // SQLite's plan detail names the query's own aliases (`e` for
+    // photo_embeddings, `s` for ml_status — see pendingEmbedRows), not the
+    // table names, so that's what these match against.
+    expect(detail).toMatch(/SEARCH e USING (COVERING )?INDEX/);
+    expect(detail).toMatch(/SEARCH s USING (COVERING )?INDEX/);
+    expect(detail).not.toMatch(/SCAN e\b/);
+    expect(detail).not.toMatch(/SCAN s\b/);
+  });
+
+  it("the embed worklist still returns the right rows, so the plan test above is not asserting a typo", () => {
+    // A plan assertion alone can't tell an index that serves the WRONG rows
+    // (e.g. keyed on the wrong stage) from one that serves the right ones —
+    // both would plan identically. This proves the anti-join actually excludes
+    // a photo once it has a failure sentinel for this model.
+    const db = getDb();
+    const rows = seed(db);
+    const failedId = rows[0].id;
+    markEmbedFailed(db, failedId, "m", new Error("boom"));
+
+    const pending = pendingEmbedRows(db, "m", 100).map((r) => r.id);
+    expect(pending).not.toContain(failedId);
+    expect(pending.length).toBe(rows.length - 1);
   });
 });

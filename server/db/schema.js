@@ -310,8 +310,15 @@ export function applySchema(db) {
       PRIMARY KEY (photo_id, stage, model)
     )
   `);
-  // The embed worklist anti-joins this table by (stage, model); without an
-  // index on that pair SQLite scans every sentinel row per batch.
+  // embedCounts' failed-count query filters this table by (stage, model) with
+  // no photo_id bound at all; without an index on that pair it is a full
+  // table scan. (It is NOT what serves pendingEmbedRows' worklist anti-join —
+  // that query correlates on photo_id, which is already the leading column of
+  // this table's own PRIMARY KEY, so SQLite plans it off that PK's automatic
+  // index regardless of this one. Verified via EXPLAIN QUERY PLAN; see
+  // queryPlan.test.js's "embed worklist" describe block. An earlier version of
+  // this comment claimed this index was what protected the worklist query —
+  // it never was.)
   db.exec(
     `CREATE INDEX IF NOT EXISTS idx_ml_status_lookup
        ON ml_status(stage, model, photo_id)`
