@@ -140,6 +140,59 @@ describe("runSweep", () => {
     expect(wl.pending.size).toBeGreaterThan(0);
   });
 
+  it("does not mark a sentinel when cancel arrives mid-flight during the per-row retry", async () => {
+    // Regression for the race the original cancel test didn't cover: that test
+    // aborts inside a SUCCEEDING process() call, so it never exercises the
+    // path where the call that was in flight when cancel fired goes on to
+    // REJECT with an ordinary (non-Abort) error. Without a re-check right
+    // after that rejection, the code fell through to markFailed and wrote a
+    // sentinel after the user had already asked to stop.
+    const rows = [1, 2].map((id) => ({ id, folder: dir }));
+    const wl = makeWorklist(rows, 2);
+    const job = liveJob();
+    const failed = [];
+    await expect(
+      runSweep(job, {
+        nextBatch: wl.nextBatch,
+        process: async (batch) => {
+          if (batch.length > 1) throw new Error("poison batch"); // force per-row retry
+          // Per-row retry: cancel arrives WHILE this call is in flight, and
+          // the call itself then rejects with an ordinary error — not an
+          // AbortError.
+          job.controller.abort();
+          throw new Error("boom");
+        },
+        markFailed: (row) => failed.push(row.id),
+        folderOf: (r) => r.folder,
+        idle: noIdle,
+      })
+    ).rejects.toThrow(/canceled/i);
+    expect(failed).toEqual([]);
+  });
+
+  it("throws rather than hanging when markFailed does not remove the row from the worklist", async () => {
+    // Regression: nextBatch() is re-queried every pass with no visited-set —
+    // the loop only terminates because markFailed is expected to remove its
+    // row from whatever nextBatch reads. A caller that forgets to do that
+    // must get a loud, named error, not an infinite loop with no error
+    // anywhere ("nothing fails silently").
+    const rows = [{ id: 1, folder: dir }];
+    const wl = makeWorklist(rows);
+    await expect(
+      runSweep(liveJob(), {
+        nextBatch: wl.nextBatch,
+        process: async () => {
+          const e = new Error("ENOENT");
+          e.code = "ENOENT";
+          throw e;
+        },
+        markFailed: () => {}, // caller bug: never removes the row
+        folderOf: (r) => r.folder,
+        idle: noIdle,
+      })
+    ).rejects.toThrow(/no progress/i);
+  }, 2000);
+
   it("reports progress after each batch", async () => {
     const rows = [1, 2, 3, 4].map((id) => ({ id, folder: dir }));
     const wl = makeWorklist(rows);
