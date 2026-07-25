@@ -167,4 +167,25 @@ describe("resolveSelectedIndex", () => {
     ];
     expect(resolveSelectedIndex(allPlaceholders, null)).toBe(0);
   });
+
+  // Issue #189 step 5: the group-jump paths (jumpToPath, jumpGroupBoundaryInner)
+  // now resolve their landing index through THIS helper instead of hand-rolling
+  // their own. The one behaviour that made them wary of merging was a jump
+  // targetId that is a server-resolved photo id landing on a NON-COVER member
+  // of a collapsed burst stack — a naive resolvePhoto(e).id === targetId search
+  // would miss it (the stack renders its cover) and fall through to index 0,
+  // landing on an unrelated photo. resolveSelectedIndex uses findEntryIndexForId,
+  // which matches the member, so the jump lands on the right stack.
+  it("lands on the stack when the jump targetId is a hidden burst member (not the cover)", () => {
+    const entries = [
+      { kind: "photo", item: { id: 1 } },
+      {
+        kind: "stack",
+        stack: { id: "s1", memberIds: [2, 3, 4] },
+        coverItem: { id: 3 },
+      },
+      { kind: "photo", item: { id: 5 } },
+    ];
+    expect(resolveSelectedIndex(entries, 4)).toBe(1);
+  });
 });

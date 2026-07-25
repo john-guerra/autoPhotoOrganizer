@@ -116,11 +116,21 @@ export function findEntryIndexForId(entries, id) {
   );
 }
 
-/** Resolves the `selected` index for a feed re-center: lands on `targetId`
- * when it's present in `entries`, otherwise falls back to the first
- * non-placeholder entry in `fallbackDir` from the start (or 0 if every
- * entry is a placeholder). Shared by the canonical
- * recenterFeedOnId helper and any other re-center path (issue #42).
+/** Resolves the `selected` index for ANY feed-window replacement — a re-center
+ * (recenterFeedOnId) AND a group jump (jumpToPath / jumpGroupBoundaryInner,
+ * issue #189 step 5). Lands on `targetId` when it's present in `entries`,
+ * otherwise falls back to the first non-placeholder entry in `fallbackDir`
+ * from the start (or 0 if every entry is a placeholder). Shared by the
+ * canonical recenterFeedOnId helper and any other re-center path (issue #42).
+ *
+ * The jump paths used to hand-roll a variant that skip-forwarded off the found
+ * index (`nextSelectable(idx, 1)`) to avoid landing on a folded placeholder
+ * row. That skip is provably a no-op here: findEntryIndexForId only ever
+ * matches a photo or stack entry (a placeholder's synthetic `collapsed:` id
+ * never equals a server photo id), so the index it returns is never a
+ * placeholder and nextSelectable(idx, 1) === idx. The fallback branch already
+ * skips a leading placeholder. So all three callers collapse onto this one
+ * tested resolver with no behavior change — the single-owner win #189 is about.
  * @param {Array<object>} entries
  * @param {number|string|null} targetId
  * @param {1|-1} [fallbackDir]
