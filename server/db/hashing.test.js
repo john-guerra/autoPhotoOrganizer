@@ -109,6 +109,35 @@ describe("hashAllPending", () => {
     await first;
   });
 
+  it("reports progress as it goes", async () => {
+    _resetHashingForTest();
+    const db = new Database(":memory:");
+    applySchema(db);
+    const dir = mkdtempSync(join(tmpdir(), "hash-progress-"));
+    const entries = [];
+    for (let i = 0; i < 4; i++) {
+      const name = `P_${i}.JPG`;
+      writeFileSync(join(dir, name), `bytes ${i}`);
+      const st = statSync(join(dir, name));
+      entries.push({
+        name,
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+        btimeMs: st.birthtimeMs,
+        kind: "image",
+      });
+    }
+    upsertScan(db, dir, null, entries);
+    const seen = [];
+    await hashAllPending(db, {
+      limit: 2,
+      idle: () => Promise.resolve(),
+      onProgress: (p) => seen.push(p.done),
+    });
+    expect(seen).toEqual([2, 4]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("PAUSES without marking when the drive goes away mid-sweep (#169)", async () => {
     // The #169 regression test. NOTE the trap recorded in the issue: do NOT
     // re-stat() the restored file and feed those values to upsertScan.

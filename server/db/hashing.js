@@ -49,12 +49,12 @@ function pendingHashRows(db, limit) {
  * falsely match every other.
  *
  * @param {import("better-sqlite3").Database} db
- * @param {{limit?: number, idle?: () => Promise<void>, job?: object|null}} [opts]
+ * @param {{limit?: number, idle?: () => Promise<void>, job?: object|null, onProgress?: ({done, failed}) => void|null}} [opts]
  * @returns {Promise<{hashed: number, failed: number, paused: boolean, alreadyRunning?: boolean}>}
  */
 export async function hashAllPending(
   db,
-  { limit = 50, idle = whenIdle, job = null } = {}
+  { limit = 50, idle = whenIdle, job = null, onProgress = null } = {}
 ) {
   if (hashingInFlight)
     return { hashed: 0, failed: 0, paused: false, alreadyRunning: true };
@@ -79,6 +79,7 @@ export async function hashAllPending(
       },
       markFailed: (row) => markAttempted.run(row.id),
       folderOf: (row) => row.folder_abs_path,
+      onProgress: onProgress ?? undefined,
       idle,
     });
     return { hashed: done - failed, failed, paused };

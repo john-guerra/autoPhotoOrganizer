@@ -104,7 +104,16 @@ import {
  * Fire-and-forget: it must never block a scan's response. */
 function kickHashSweep(db) {
   const job = registry.create("hash", { label: "Hashing library contents" });
-  hashAllPending(db, { job })
+  hashAllPending(db, {
+    job,
+    onProgress: ({ done, failed }) =>
+      registry.update(job.id, {
+        done,
+        phase: failed
+          ? `${done.toLocaleString()} hashed · ${failed} unreadable`
+          : `${done.toLocaleString()} hashed`,
+      }),
+  })
     .then((r) => {
       // registry.dismiss() no-ops on a "running" job (by design — you cannot
       // dismiss what hasn't finished), and this job's status is still
