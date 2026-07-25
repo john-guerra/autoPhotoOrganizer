@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.14
+
+- **Jumping to a group no longer drifts off screen.** When you jump to a folder
+  via the tree (or the scrubber), the landing now holds steady while the photos'
+  real dimensions load in the background, instead of sliding out of view a moment
+  after it looked right. Most visible on a large library, where that metadata is
+  slow to arrive.
+
 ## 2.18.13
 
 - **Guarded group jumping.** Every way of jumping to a group (Option+→, the tree,

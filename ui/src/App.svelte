@@ -2277,19 +2277,39 @@
       } else {
         selected = nextSelectable(displayEntries, 0, 1) ?? 0;
         focusPending = true;
-        // NB: do NOT arm jumpRevealPending here. It blocks loadMore("before"),
-        // and this jump lands the target at the TOP (scrollTop 0, no before-page):
-        // with the pin on, scrolling up can't reach earlier folders (there's
-        // nothing above to scroll into, so no scroll event fires the backfill, and
-        // the pin only clears on that scroll) — you get stuck unable to see the
-        // previous folders. The bounce the pin was added for ("jump to X, slide
-        // onto the album before it") came from a STALE deep scrollTop, which the
-        // `mainColumnEl.scrollTop = 0` reset above already fixes; with that, the
-        // auto-loadMore("before") backfills earlier folders cleanly (its own
-        // scroll-compensation holds the landing) instead of flinging.
+        // Hold the landing through the metadata reflow, exactly as the keyboard
+        // jump (jumpGroupBoundary) does. Without this pin, the target's own tiles
+        // resize from DEFAULT_RATIO to their real aspect as /api/meta arrives —
+        // and on a large library, where that metadata is genuinely slow, the
+        // above-the-fold rows grow and the landing drifts off screen a beat after
+        // it looked right. The pin re-anchors the tile on every layout recompute
+        // (see scheduleJumpPin) so the reflow can't move it.
+        //
+        // The reason this was historically left OFF for jumpToPath is that the
+        // pin also suppresses loadMore("before"), and this jump lands at the top
+        // (scrollTop 0, no before-page): if the pin only ever cleared on a user
+        // scroll, a user who never scrolled could be stuck with earlier folders
+        // unreachable. So we AUTO-RELEASE it below the moment the landing's own
+        // reflow is done — event-driven off enrichMeta, not a timer — which lets
+        // the suppressed backfill resume on its own even if the user does nothing.
+        jumpRevealPending = true;
         status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       }
-      enrichMeta(page.map((i) => i.id));
+      // enrichMeta resolves only once every tile in this page has its real
+      // dimensions — i.e. once the landing's reflow has finished. Release the
+      // pin then (unless the user already took over, which cleared it and may
+      // have started a newer jump: guard the epoch before touching it).
+      enrichMeta(page.map((i) => i.id)).then(() => {
+        if (epoch !== feedEpoch) return;
+        jumpRevealPending = false;
+        // Releasing the pin isn't enough on its own: nothing else recomputes the
+        // visible range at this instant, so the loadMore("before") that the pin
+        // was suppressing would never fire until the user happened to scroll —
+        // and with the target at the top there's nothing above to scroll into,
+        // so earlier folders would be unreachable (the exact "stuck" the pin was
+        // withheld to avoid). Kick the check so the suppressed backfill runs now.
+        scheduleVisibleRangeUpdate();
+      });
     });
   }
 
