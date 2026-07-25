@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.18
+
+- **Dev:** the e2e suite warms the Vite dev server before running, so a cold
+  optimizer cache no longer flakes the accessibility spec with a spurious
+  dependency-reoptimization 404. (#190)
+
 ## 2.18.16
 
 - **Loupe minimap now labels the photo's place on the map.** The city name sits
