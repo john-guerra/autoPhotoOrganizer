@@ -109,6 +109,13 @@ README.md` claimed there was; it was removed as inaccurate.)
   `createEventDispatcher`); a component is all-runes or all-legacy, never half.
 - Every file-serving endpoint MUST route user paths through
   `server/lib/safeResolve.js` (path-traversal guard — the legacy app was flagged).
+- **Prefer the latest stable version** of a library or framework when adding a
+  new dependency or bumping an existing one — don't pin behind older majors
+  out of caution. Stale deps are how `npm audit` findings and unpatched CVEs
+  accumulate silently. If a transitive dependency carries a known
+  vulnerability and no direct dependency has shipped a fix yet, add a scoped
+  `overrides` entry in `package.json` (see the `adm-zip`/`onnxruntime-node`
+  entry) rather than leaving the finding open or downgrading.
 
 ### Three traps that each cost an afternoon
 

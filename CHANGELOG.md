@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.21
+
+- **Dev:** pinned the `adm-zip` transitive dependency pulled in by
+  `onnxruntime-node` to `^0.6.0` via an `overrides` entry, closing a high
+  severity `npm audit` finding (crafted-ZIP memory exhaustion, GHSA-xcpc-8h2w-3j85).
+  No released `onnxruntime-node` version (including dev prereleases) requires
+  the fixed `adm-zip`, so the override is required until upstream moves.
+
 ## 2.18.19
 
 - **Dev:** fixed the toolbar-fold e2e test, which had asserted lowercase

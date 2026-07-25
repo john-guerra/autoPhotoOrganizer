@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.18.19",
+  "version": "2.18.21",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
@@ -69,6 +69,11 @@
     "vite": "^8.1.4",
     "vitest": "^4.1.10",
     "wait-on": "^9.0.10"
+  },
+  "overrides": {
+    "onnxruntime-node": {
+      "adm-zip": "^0.6.0"
+    }
   },
   "build": {
     "appId": "com.johnguerra.autogallery",
