@@ -18,7 +18,7 @@ set -euo pipefail
 
 ISSUE="${1:?usage: claim-version.sh <issue-number> [--minor]}"
 MODE="${2:---patch}"
-WHO="${CLAUDE_SESSION_ID:-$(hostname -s)-$$}"
+WHO="$("$(dirname "${BASH_SOURCE[0]}")/agent-id.sh")"
 BRANCH="$(git branch --show-current 2>/dev/null || echo detached)"
 
 git fetch -q origin main

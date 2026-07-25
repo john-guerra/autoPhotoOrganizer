@@ -1,5 +1,5 @@
 ---
-name: working-github-issues
+name: working-issues
 description: Use when picking up, working on, or finishing a GitHub issue in this repo — before claiming an issue, before setting a version in package.json, before opening a PR, or any time another agent may be working this repo in parallel.
 ---
 
@@ -20,6 +20,48 @@ Everything else (worktree, branch, PR) is naturally private to one agent.
 **Core principle: never start work you have not claimed, and never claim work
 without checking it is free first.** A duplicate claim wastes a whole session;
 the check costs one command.
+
+## When this fires
+
+**Load this before touching an issue — including when John hands you the issue
+number himself.** He cannot see which agents are live; you can. "He told me to
+do #176" is not evidence that #176 is free.
+
+Fires when you are about to:
+
+- pick up, triage, or start any issue
+- create a branch or worktree for issue work
+- **set the version in `package.json`** — the claim protocol is not optional
+- open a PR that references an issue, or comment results on one
+
+Does not fire for: questions that change no files, reading an issue to answer
+something, a doc edit John asks for inline in the main checkout, or a fix he is
+driving interactively at his own keyboard.
+
+**Asked to do something substantive with no issue number?** Search first —
+`gh issue list --search "<keywords>" --state open` — because John files a lot
+and a duplicate splits the discussion. If genuinely nothing matches, small work
+needs no issue; just say out loud that you are working unclaimed, so a second
+agent starting the same thing is John's decision rather than a surprise.
+
+## Who you are
+
+Claim comments and version tags carry `<label>#<key>` from `agent-id.sh`:
+
+```bash
+WHO=$(.claude/skills/working-github-issues/agent-id.sh)   # skill-agent-collaboration#e70a532e
+```
+
+- **`key`** (8 hex chars of the session id) is what every check matches on. It
+  never changes.
+- **`label`** is the conversation's custom title if John renamed it, else Claude
+  Code's codename for the session (`clever-nibbling-sunbeam`). It is for reading,
+  never for matching — John can rename a conversation mid-flight, and a claim
+  keyed on a mutable label would strand itself.
+
+Never hand-write an identifier, and never use `$CLAUDE_SESSION_ID` — that
+variable does not exist (it is `CLAUDE_CODE_SESSION_ID`), and reading it
+silently yields an empty string rather than failing.
 
 ## The loop
 
@@ -48,9 +90,10 @@ another agent holds it.** Do not start. See _Already claimed_ below.
 ## 2. Claim the issue
 
 ```bash
+WHO=$(.claude/skills/working-github-issues/agent-id.sh)
+
 gh issue edit $N --add-label wip
-gh issue comment $N --body "🤖 CLAIMED by claude-code
-- session: \`${CLAUDE_SESSION_ID:-unknown}\`
+gh issue comment $N --body "🤖 CLAIMED by \`$WHO\`
 - branch: \`issue-$N-<slug>\`
 - started: $(date -u +%FT%TZ)
 
@@ -149,9 +192,9 @@ git branch -d issue-$N-<slug>
 <!-- John: this policy block is the one judgment call here — how you want your
      fleet to behave on contention. Rewrite it to taste. -->
 
-- **Held and alive** (claim comment or branch commit within 4h): do not start.
+- **Held and alive** (claim comment or branch commit within 12h): do not start.
   Report to John which agent holds it and pick a different unclaimed issue.
-- **Held but stale** (no commit on its branch for 4h+): you may take it. Comment
+- **Held but stale** (no commit on its branch for 12h+): you may take it. Comment
   the takeover on the issue, naming the stale session and its last commit, so
   the record shows why. Never silently re-claim.
 - **Never** delete another agent's claim tag, force-push its branch, or push to
