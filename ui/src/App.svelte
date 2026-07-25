@@ -790,6 +790,15 @@
   // A calm, informational nudge ("N files went missing …") — its own channel so
   // it renders in a neutral style, NOT the red error style. See reportScanMissing.
   let missingNotice = $state("");
+  /** What the last scan did, kept on screen after it finishes (#170).
+   *
+   * NOT `status`: that line is transient by design and every feed load writes to
+   * it — including the automatic loadMore("before") backfill that a jump
+   * triggers a beat later, which overwrote the confirmation ~1s after the scan
+   * and left the user with the same generic "N photos loaded" they'd get from
+   * doing nothing at all. A confirmation has to outlive the next background
+   * fetch, so it lives in the persistent `notice` channel instead. */
+  let scanNotice = $state("");
   // Scope to the folder once it's in? (The old "Open a folder…" entry, now an
   // option on the one Add panel rather than a second door to the same room.)
   let focusAfterAdd = $state(false);
@@ -4006,14 +4015,22 @@
       });
   }
 
-  /** @returns {Promise<boolean>} true when the folder is indexed and the feed
-   * has caught up — the caller (submitAddFolder) needs to know whether it may
-   * scope to the folder afterwards. Renders its own error on every failure. */
+  /** @returns {Promise<{root: string, count: number, folders: number}|null>} the
+   * scan's own result when the folder is indexed and the feed has caught up —
+   * the caller (submitAddFolder) needs it both to decide whether it may scope to
+   * the folder afterwards and to SAY what the scan did. null on every failure
+   * (which renders its own error).
+   *
+   * It deliberately does NOT set the success status itself: everything this
+   * function awaits afterwards (loadInitialFeed, then the caller's jump/scope)
+   * ends by writing "N photos loaded" over it. The confirmation belongs at the
+   * end of the whole action — see submitAddFolder (#170). */
   async function doScan() {
     scanRefreshAt = 0;
-    if (!dir.trim()) return false;
+    if (!dir.trim()) return null;
     error = "";
     missingNotice = ""; // a new scan supersedes any previous missing-file nudge
+    scanNotice = ""; // ...and any previous scan's confirmation
     scanning = true;
     status = "scanning…";
     let scanJob = null;
@@ -4035,12 +4052,12 @@
         const job = await waitForJob(jobId, onScanProgress);
         if (job.status === "canceled") {
           status = "Scan canceled";
-          return false;
+          return null;
         }
         if (job.status !== "done") {
           error = job.error || "Scan failed";
           status = "";
-          return false;
+          return null;
         }
         scanJob = job;
       } else {
@@ -4057,11 +4074,11 @@
       refreshCounts();
       libraryVersion++;
       if (scanJob) await reportScanMissing(scanJob);
-      return true;
+      return scanJob?.result ?? { root: dir.trim(), count: 0, folders: 0 };
     } catch (e) {
       error = e.message;
       status = "";
-      return false;
+      return null;
     } finally {
       scanning = false;
     }
@@ -4078,25 +4095,75 @@
    *   already indexed, no focus→ incremental rescan, to catch up with disk.
    *   new folder               → scan it in, then scope to it if asked.
    */
+  /**
+   * What to tell the user a finished scan actually did (#170).
+   *
+   * A successful scan and a silently-failed one used to look identical: the
+   * status line just said "N photos loaded", the same string every ordinary feed
+   * load prints. Worse, when the grouping isn't folder-based there is no jump
+   * either, so nothing on screen moved at all.
+   *
+   * @param {{root: string, count: number, folders: number}} scan
+   * @param {{jumped: boolean, rescan: boolean}} opts `jumped` = the feed
+   *   scrolled to the folder; `rescan` = the folder was ALREADY in the library,
+   *   so this was a catch-up rescan rather than a first import.
+   */
+  function scanSummary(scan, { jumped, rescan }) {
+    const name = scan.root.split("/").filter(Boolean).at(-1) || scan.root;
+    const count = scan.count ?? 0;
+    // An empty folder is a legitimate outcome, not an error — but it MUST be
+    // said out loud, or "nothing appeared" reads as a broken scan.
+    if (count === 0) return `Scanned ${name} — no photos found here.`;
+    const folders = scan.folders ?? 1;
+    const noun =
+      `${count.toLocaleString()} photo${count === 1 ? "" : "s"}` +
+      ` in ${folders.toLocaleString()} folder${folders === 1 ? "" : "s"}`;
+    // `count` is the folder's CURRENT total, not how many photos this scan added
+    // — the server re-lists every file each scan and dedups at the DB layer, so
+    // there is no delta to report. "Added N" is only truthful on a first import;
+    // on a rescan of a folder already in the library it would overstate what
+    // happened (a 1,000-photo folder that gained 3 files would claim "Added
+    // 1,003"). "Rescanned … — now N" is true either way.
+    const summary = rescan
+      ? `Rescanned ${name} — now ${noun}`
+      : `Added ${name} — ${noun}`;
+    // The feed can only scroll to a folder when it HAS folder groups. Say where
+    // the photos went instead of leaving the user staring at an unchanged feed.
+    return jumped ? summary : `${summary}. Group by folder to see it in place.`;
+  }
+
   async function submitAddFolder() {
     const p = dir.trim();
     if (!p) return;
     addFolderOpen = false;
     error = "";
-    if (alreadyIndexed && focusAfterAdd) {
+    // Capture BEFORE doScan → refreshLibrary flips it: a brand-new folder becomes
+    // `alreadyIndexed` the moment it's scanned in, so reading it afterwards would
+    // always say "rescan".
+    const wasIndexed = alreadyIndexed;
+    const name = p.split("/").filter(Boolean).at(-1) || p;
+    if (wasIndexed && focusAfterAdd) {
       await applyScope(folderScope(p));
+      // This path skips doScan (which is the only other place scanNotice is
+      // cleared), so without setting it here a stale "Added …" from an earlier
+      // add would linger next to a feed now scoped to a different folder.
+      scanNotice = `Focused on ${name}`;
       return;
     }
-    const ok = await doScan(); // renders its own error when it fails
-    if (!ok) return;
+    const scan = await doScan(); // renders its own error when it fails
+    if (!scan) return;
     if (focusAfterAdd) {
+      // Scoping to the folder IS the confirmation — the feed now shows nothing
+      // else — but still name what landed.
       await applyScope(folderScope(p));
+      scanNotice = scanSummary(scan, { jumped: true, rescan: wasIndexed });
       return;
     }
     // Not keeping-only: jump the feed to the folder we just added so its photos
     // are on screen. This is a SCROLL, not a filter — the whole library stays
     // loaded (unlike focusAfterAdd's keep-only scope above).
-    await jumpToFolder(p);
+    const jumped = await jumpToFolder(p);
+    scanNotice = scanSummary(scan, { jumped, rescan: wasIndexed });
   }
 
   /** Scroll the feed to a folder by its absolute path, without filtering. The
@@ -4104,10 +4171,18 @@
    * (see folderSections.js), and jumpToPath seeks the feed there. Only lands
    * when the current grouping is folder-based (the default "folder" grouping) —
    * a date/camera grouping has no folder group to scroll to, so we skip it
-   * rather than jump somewhere arbitrary. */
+   * rather than jump somewhere arbitrary.
+   *
+   * @returns {Promise<boolean>} whether the feed actually moved. false is not a
+   * failure — it means the current grouping has no folder group to scroll to —
+   * but the caller MUST say so rather than leave the user with a feed that
+   * didn't visibly change (#170). */
   async function jumpToFolder(absPath) {
-    if (!groupBy.includes("folder") && !groupBy.includes("folderName")) return;
+    if (!groupBy.includes("folder") && !groupBy.includes("folderName")) {
+      return false;
+    }
     await jumpToPath([{ dimension: "folder", value: absPath }]);
+    return true;
   }
 
   /** The native picker fills the path in and leaves the panel open — it does NOT
@@ -5921,7 +5996,7 @@
     {selectedCount}
     {status}
     {error}
-    notice={missingNotice}
+    notice={[scanNotice, missingNotice].filter(Boolean).join(" · ")}
     {thumbProgress}
     {thumbCounts}
   >
