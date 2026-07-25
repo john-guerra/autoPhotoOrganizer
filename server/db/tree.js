@@ -99,7 +99,9 @@ const MONTH_NAMES = [
  * sentinel (see feed.js's DIMENSIONS doc comment) displays as "Unknown", and
  * the month-of-year dimension ("01".."12") displays as its month name.
  * Kept in sync manually — there is no shared module between server and
- * client to import this from. */
+ * client to import this from.
+ * Place dimensions (country/city) need no branch — their values are already
+ * display strings, and '' is handled by the Unknown rule above. */
 function formatTreeLabel(dimension, value) {
   if (value === "") return "Unknown";
   if (dimension === "month") return MONTH_NAMES[Number(value) - 1] ?? value;

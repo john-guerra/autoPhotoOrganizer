@@ -48,6 +48,12 @@ export const DIMENSIONS = {
   },
   camera: { expr: "COALESCE(photos.camera, '')", direction: "ASC" },
   kind: { expr: "photos.kind", direction: "ASC" },
+  // Places (#154). Denormalized single-valued columns, which is precisely what
+  // makes them legal here — the keyset seek assumes one value per photo per
+  // dimension. COALESCE to '' matches the Unknown sentinel every other
+  // dimension uses (a photo with no GPS, or one indexed before places existed).
+  country: { expr: "COALESCE(photos.place_country, '')", direction: "ASC" },
+  city: { expr: "COALESCE(photos.place_city, '')", direction: "ASC" },
 };
 
 /**

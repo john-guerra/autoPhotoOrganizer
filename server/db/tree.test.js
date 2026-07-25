@@ -346,6 +346,84 @@ describe("getTreeNode/getFlatTree — filter", () => {
   });
 });
 
+describe("place dimensions (#154)", () => {
+  /** Sets the place columns the sweep (Task 3) would have written. gps_checked
+   *  is set to 1 for every row here — this suite is about grouping/labeling
+   *  the already-computed value, not about the sweep's own pending state. */
+  function setPlace(db, id, country, city) {
+    db.prepare(
+      `UPDATE photos SET place_country = ?, place_city = ?, gps_checked = 1 WHERE id = ?`
+    ).run(country, city, id);
+  }
+
+  it("groups by country with correct counts", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const rows = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setPlace(db, rows.find((r) => r.name === "a.jpg").id, "Colombia", "Bogota");
+    setPlace(
+      db,
+      rows.find((r) => r.name === "b.jpg").id,
+      "Colombia",
+      "Medellin"
+    );
+    setPlace(db, rows.find((r) => r.name === "c.jpg").id, "Spain", "Madrid");
+
+    const { nodes } = getTreeNode(db, { groupBy: ["country"] });
+    const byLabel = Object.fromEntries(nodes.map((n) => [n.label, n.count]));
+    expect(byLabel["Colombia"]).toBe(2);
+    expect(byLabel["Spain"]).toBe(1);
+  });
+
+  it("labels the empty-string sentinel as Unknown, not as a blank row", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const rows = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "nogps.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setPlace(db, rows.find((r) => r.name === "a.jpg").id, "Colombia", "Bogota");
+    // nogps.jpg: never got a fix — place_country/place_city stay '' (the
+    // schema default), gps_checked flips to 1 once the sweep looked.
+    db.prepare(`UPDATE photos SET gps_checked = 1 WHERE id = ?`).run(
+      rows.find((r) => r.name === "nogps.jpg").id
+    );
+
+    const { nodes } = getTreeNode(db, { groupBy: ["country"] });
+    expect(nodes.some((n) => n.label === "Unknown" && n.count === 1)).toBe(
+      true
+    );
+  });
+
+  it("nests city under country", () => {
+    const db = getDb();
+    seedVolume(db, 1);
+    const rows = upsertScan(db, "/photos/trip", 1, [
+      { name: "a.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "b.jpg", size: 1, mtimeMs: 1, kind: "image" },
+      { name: "c.jpg", size: 1, mtimeMs: 1, kind: "image" },
+    ]);
+    setPlace(db, rows.find((r) => r.name === "a.jpg").id, "Colombia", "Bogota");
+    setPlace(
+      db,
+      rows.find((r) => r.name === "b.jpg").id,
+      "Colombia",
+      "Medellin"
+    );
+    setPlace(db, rows.find((r) => r.name === "c.jpg").id, "Spain", "Madrid");
+
+    const { nodes } = getTreeNode(db, {
+      groupBy: ["country", "city"],
+      path: [{ dimension: "country", value: "Colombia" }],
+    });
+    expect(nodes.map((n) => n.label).sort()).toEqual(["Bogota", "Medellin"]);
+  });
+});
+
 describe("getFlatTree — date-source coupling", () => {
   it("orders month groups by the sort direction (date_taken asc → ascending)", () => {
     const db = getDb();

@@ -15,7 +15,29 @@ export const ALL_DIMENSIONS = [
   "day",
   "camera",
   "kind",
+  "country",
+  "city",
 ];
+
+/** Human labels for each grouping dimension, shown on the GroupByControl
+ *  pills instead of the raw key (`folderName` -> "Folder name"). `city` reads
+ *  "Nearest town": the offline reverse-geocoder returns the nearest small
+ *  town, not the city a user would expect (a Paris coordinate resolves to
+ *  "Gif-sur-Yvette") — country is accurate, only this second level
+ *  overpromises, so the label says what it actually is (#154). This does NOT
+ *  rename the `city` dimension key or the `place_city` column — display only.
+ *  Every ALL_DIMENSIONS key must have an entry here (see dimensions.test.js). */
+export const DIMENSION_LABELS = {
+  folder: "Folder",
+  folderName: "Folder name",
+  year: "Year",
+  month: "Month",
+  day: "Day",
+  camera: "Camera",
+  kind: "Kind",
+  country: "Country",
+  city: "Nearest town",
+};
 
 /** Feed-sort attributes, in dropdown order. */
 export const SORT_ATTRS = [

@@ -21,7 +21,11 @@ const MONTH_NAMES = [
   "December",
 ];
 
-/** @param {string} dimension @param {string|undefined|null} value @returns {string} */
+/**
+ * @param {string} dimension @param {string|undefined|null} value @returns {string}
+ * Place dimensions (country/city) need no branch — their values are already
+ * display strings, and '' is handled by the Unknown rule below.
+ */
 export function formatGroupValue(dimension, value) {
   // null/undefined, not just "": a collapsed-group placeholder only carries the
   // grouping levels down to where it was collapsed, so a deeper level is absent

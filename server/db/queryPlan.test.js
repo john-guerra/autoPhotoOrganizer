@@ -202,6 +202,34 @@ describe("the feed's query plans", () => {
     expect(plan.some((l) => /idx_folders_sort_path/.test(l))).toBe(true);
   });
 
+  it("a country/city grouped page does not full-scan photos (#154)", () => {
+    // country/city follow the camera/kind precedent: no dedicated index unless
+    // measurement says otherwise. This measures it rather than assuming it.
+    const db = getDb();
+    seed(db);
+
+    const statements = capturingSql(db, () =>
+      getFeedPage(db, { groupBy: ["country", "city"], limit: 50 })
+    );
+    const photoQueries = statements.filter((s) => /FROM photos/i.test(s.sql));
+    expect(photoQueries.length).toBeGreaterThan(0);
+
+    const scanned = [];
+    for (const q of photoQueries) {
+      for (const line of planFor(db, q)) {
+        if (isFullScan(line)) scanned.push({ ...q, line });
+      }
+    }
+    expect(
+      scanned,
+      `these place-grouped queries full-scan:\n${scanned
+        .map(
+          (s) => `  ${s.line}\n    ${s.sql.replace(/\s+/g, " ").slice(0, 120)}`
+        )
+        .join("\n")}`
+    ).toEqual([]);
+  });
+
   it("finds the sweep's un-read photos by index, not by scanning the library", () => {
     // Exercises the REAL PENDING_CONDITION via pendingMetaPhotos/pendingMetaCount
     // (enrich.js) — not a hand-copied condition. A hand-copied copy is exactly how
