@@ -64,14 +64,19 @@
   // logic ever changes to something off-centre.
   let dot = $derived(projection([lon, lat]));
 
-  // Only countries whose projected centroid falls within a margin of the
-  // visible box: world-atlas has 241 of them, and Mercator legitimately
-  // diverges to +/-Infinity for anything near a pole (Antarctica's own
-  // centroid sits close enough to qualify) — feeding that straight into
-  // d3-delaunay throws. Culling first is both the fix and, incidentally, the
-  // right call for a labeller: a country hundreds of screen-widths away never
-  // needed a label here anyway.
-  const VIEWPORT_MARGIN = 4;
+  // Only countries whose projected centroid falls within (a small margin of)
+  // the VISIBLE box. Two reasons, one of them a bug we hit (#179):
+  //   1. world-atlas has 241 countries, and Mercator legitimately diverges to
+  //      +/-Infinity near a pole (Antarctica qualifies) — feeding that to
+  //      d3-delaunay throws. The Number.isFinite guard below handles that.
+  //   2. smart-labels is TOLD the canvas is width×height, so every point we
+  //      pass it must actually live on that canvas. A wide margin (this was
+  //      once 4 → x from -880 to +1100 on a 220px map) hands it points far
+  //      off-screen; it then places their labels off-screen too and draws
+  //      anchor lines back across the view — the "leader line to nowhere" of
+  //      #179. Keeping the data extent == the canvas is the fix. A hair of
+  //      margin lets a label whose centroid sits just past the edge still show.
+  const VIEWPORT_MARGIN = 0.1;
   let labelData = $derived.by(() => {
     if (!countries) return [];
     const data = [];
@@ -117,6 +122,16 @@
         label: (p) => p.name,
         hover: false,
         alwaysShow: (p) => p.isPhoto,
+        // Place each label AT its point, not in its Voronoi cell's open space.
+        // `labelsInCentroids` (default true) offsets labels into free space and
+        // draws an anchor line back to the point — right for a big chart, wrong
+        // for a 220px "you are here" map, where that anchor is the stray
+        // "leader line to nowhere" of #179 and the city label drifts off the
+        // pin. false pins "Amagasaki" on the dot. Anchors are gated by
+        // `showAnchors || labelsInCentroids`, so BOTH must be off to suppress
+        // them (showAnchors already defaults false).
+        labelsInCentroids: false,
+        showAnchors: false,
         // fill is a single attr on the whole <g class="labels"> (see
         // node_modules/smart-labels/dist/smartLabels.es.js ~line 252) — every
         // label shares one colour, no per-datum override. font DOES vary

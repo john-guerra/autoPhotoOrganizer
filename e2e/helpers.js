@@ -306,6 +306,12 @@ export const loupe = {
    *  GPS, not just empty. */
   locationText: (page) => page.locator(".loupe .place"),
   miniMapSvg: (page) => page.locator(".loupe .minimap svg"),
+  /** smart-labels' anchor (leader) lines in the minimap. #179: these must not
+   *  exist — an anchor on a 220px map is a "leader line to nowhere". */
+  miniMapAnchors: (page) => page.locator(".loupe .minimap #anchors path.anchor"),
+  /** A minimap label by its text (e.g. the photo's own city). */
+  miniMapLabel: (page, name) =>
+    page.locator(".loupe .minimap g.labels text", { hasText: name }),
   /**
    * Open the loupe on a tile.
    *

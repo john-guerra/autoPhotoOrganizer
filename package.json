@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.18.15",
+  "version": "2.18.16",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
@@ -49,7 +49,7 @@
     "onnxruntime-node": "^1.27.0",
     "reactive-widget-helper": "^0.0.3",
     "sharp": "^0.35.3",
-    "smart-labels": "^0.0.12",
+    "smart-labels": "^0.0.14",
     "sortablejs": "^1.15.7",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2"
