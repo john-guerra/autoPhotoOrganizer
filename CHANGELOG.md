@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.26
+
+- **Internal/dev:** the e2e suite's ports are now configurable via
+  `E2E_API_PORT` / `E2E_UI_PORT` (default 4399 / 5399), so multiple agents can
+  run Playwright concurrently without colliding on the hardcoded ports (#192).
+
 ## 2.18.24
 
 - **Internal:** first step of the jump/landing refactor (#189) — extracted the
