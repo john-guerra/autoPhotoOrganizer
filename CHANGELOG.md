@@ -6,6 +6,31 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.14
+
+- **Jumping to a group no longer drifts off screen.** When you jump to a folder
+  via the tree (or the scrubber), the landing now holds steady while the photos'
+  real dimensions load in the background, instead of sliding out of view a moment
+  after it looked right. Most visible on a large library, where that metadata is
+  slow to arrive.
+
+## 2.18.13
+
+- **Guarded group jumping.** Every way of jumping to a group (Option+→, the tree,
+  the scrubber, a group header's › button) is now covered by a test that checks
+  the jump lands on that group's FIRST photo, with the photo on screen — and that
+  the landing still holds after the feed's background backfill settles, rather
+  than only for the first frame. Also covers a library larger than one feed page,
+  which the old fixture was too small to exercise at all.
+
+## 2.18.12
+
+- **Adding a folder now tells you it worked.** After a scan the status bar names
+  what landed — "Added 2024_05May_01 NewCard — 4 photos in 1 folder" — and the
+  message stays put instead of being overwritten a second later by the generic
+  "N photos loaded". If you're grouped by something other than folder (so the
+  feed can't scroll to it), it says so rather than appearing to do nothing (#170).
+
 ## 2.18.10
 
 - Unmounting a drive while the library was being hashed no longer excludes those
