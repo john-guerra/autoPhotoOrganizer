@@ -420,6 +420,76 @@ export const group = {
     return m ? Number(m[1].replace(/,/g, "")) : NaN;
   },
 
+  /**
+   * The id of a group's FIRST photo, straight from the server.
+   *
+   * This is the ground truth a jump has to land on, and it deliberately does not
+   * come from the DOM: the grid is virtualized, so "the first tile I can see"
+   * is a statement about the render window, not about the group.
+   */
+  firstPhotoId: async (page, path) => {
+    const q = new URLSearchParams({
+      path: JSON.stringify(path),
+      edge: "first",
+    });
+    const res = await page.request.get(`/api/photos/ids?${q}`);
+    const { ids = [] } = await res.json();
+    if (!ids.length)
+      throw new Error(`group has no photos: ${JSON.stringify(path)}`);
+    return ids[0];
+  },
+
+  /**
+   * Assert a jump actually LANDED on `path` — the one promise every jump method
+   * makes, however it was triggered (Option+→, the scrubber, the tree, a group
+   * header's › button).
+   *
+   * "Landed" is two separate claims, and the bugs in this app's history broke
+   * them independently (#35/#36/#39): the group's first photo must be the
+   * FOCUSED tile (landing on the wrong photo), and it must be ON SCREEN (landing
+   * on the right photo but scrolled somewhere else). Asserting only the first
+   * would pass while the user stares at an unrelated part of the feed.
+   *
+   * `what` names the jump method, so a failure says which one broke.
+   */
+  landedOnFirstPhoto: async (page, path, what, { settleMs = 400 } = {}) => {
+    const id = await group.firstPhotoId(page, path);
+    const tile = page.locator(`.thumb[data-id="${id}"]`);
+    await expect(
+      tile,
+      `${what}: the group's first photo never rendered`
+    ).toHaveCount(1);
+    await expect(
+      tile,
+      `${what}: focus landed on a different photo than the group's first`
+    ).toHaveClass(/\bselected\b/);
+    await expect(
+      tile,
+      `${what}: the group's first photo is focused but scrolled off screen`
+    ).toBeInViewport();
+
+    // A jump is not finished when it first LOOKS right, and that is the whole
+    // bug: landing arms an automatic loadMore("before") that prepends earlier
+    // groups, and its scroll compensation lands a beat later — the same late
+    // pass that was found overwriting the scan confirmation in #170. Playwright's
+    // matchers auto-retry until they pass, so every assertion above is satisfied
+    // by the first good frame and would never notice the feed sliding away
+    // afterwards.
+    //
+    // So re-assert once the backfill has had time to run. This deliberately
+    // waits rather than polls: polling would again stop at the first frame that
+    // passes, and what is being asserted here is that the landing STAYS put.
+    await page.waitForTimeout(settleMs);
+    await expect(
+      tile,
+      `${what}: the landing did not HOLD — focus moved off the group's first photo after the jump settled`
+    ).toHaveClass(/\bselected\b/);
+    await expect(
+      tile,
+      `${what}: the landing did not HOLD — the group's first photo scrolled out of view after the jump settled`
+    ).toBeInViewport();
+  },
+
   /** The group's tri-state select checkbox. */
   selectBox: (header) => header.locator(".gla-select"),
   /** "none" | "some" | "all" | "loading" — read off the checkbox's own class,

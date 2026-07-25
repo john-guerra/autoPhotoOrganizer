@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.13
+
+- **Guarded group jumping.** Every way of jumping to a group (Option+→, the tree,
+  the scrubber, a group header's › button) is now covered by a test that checks
+  the jump lands on that group's FIRST photo, with the photo on screen — and that
+  the landing still holds after the feed's background backfill settles, rather
+  than only for the first frame. Also covers a library larger than one feed page,
+  which the old fixture was too small to exercise at all.
+
 ## 2.18.12
 
 - **Adding a folder now tells you it worked.** After a scan the status bar names
