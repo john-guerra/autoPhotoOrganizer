@@ -31,6 +31,7 @@
     findEntryIndexForId,
     resolveSelectedIndex,
   } from "./lib/navigation.js";
+  import { holdAnchorScrollTop } from "./lib/landing.js";
   import {
     buildDisplayEntries,
     entryDomId,
@@ -3647,14 +3648,14 @@
     const c = mainColumnEl.getBoundingClientRect();
     // getBoundingClientRect forces a synchronous layout, so this reads the
     // tile's REAL current position even mid-reflow (where box.y can lag).
-    const delta = t.top - c.top - revealMargin;
-    if (Math.abs(delta) > 0.5) {
-      const max = mainColumnEl.scrollHeight - mainColumnEl.clientHeight;
-      mainColumnEl.scrollTop = Math.max(
-        0,
-        Math.min(max, mainColumnEl.scrollTop + delta)
-      );
-    }
+    const next = holdAnchorScrollTop({
+      scrollTop: mainColumnEl.scrollTop,
+      currentOffset: t.top - c.top,
+      targetOffset: revealMargin,
+      scrollHeight: mainColumnEl.scrollHeight,
+      clientHeight: mainColumnEl.clientHeight,
+    });
+    if (next !== mainColumnEl.scrollTop) mainColumnEl.scrollTop = next;
   }
 
   /** Re-pin after a layout recompute (the `boxes` reactive). tick() waits for
@@ -3696,14 +3697,14 @@
     if (!expandPin) return;
     const current = groupAnchorOffset(expandPin.key);
     if (current == null) return;
-    const delta = current - expandPin.offset;
-    if (Math.abs(delta) > 0.5) {
-      const max = mainColumnEl.scrollHeight - mainColumnEl.clientHeight;
-      mainColumnEl.scrollTop = Math.max(
-        0,
-        Math.min(max, mainColumnEl.scrollTop + delta)
-      );
-    }
+    const next = holdAnchorScrollTop({
+      scrollTop: mainColumnEl.scrollTop,
+      currentOffset: current,
+      targetOffset: expandPin.offset,
+      scrollHeight: mainColumnEl.scrollHeight,
+      clientHeight: mainColumnEl.clientHeight,
+    });
+    if (next !== mainColumnEl.scrollTop) mainColumnEl.scrollTop = next;
   }
 
   function scheduleExpandPin() {
