@@ -1,5 +1,6 @@
 <script>
   import Stars from "./Stars.svelte";
+  import MiniMap from "./MiniMap.svelte";
   import {
     formatAperture,
     formatShutter,
@@ -41,6 +42,17 @@
   );
   const folder = $derived(meta?.folder ?? null);
   const isVideo = $derived(item?.kind === "video");
+
+  // Only meta (not item) carries GPS — the feed row never has it (#175
+  // follow-up). Both lat AND lon: place.js's Unknown sentinel is "", which is
+  // truthy-empty but not a valid coordinate, so gate on the numbers, not on
+  // the derived name strings.
+  const hasLocation = $derived(
+    typeof meta?.lat === "number" && typeof meta?.lon === "number"
+  );
+  const placeHierarchy = $derived(
+    [meta?.placeCountry, meta?.placeCity].filter(Boolean).join(" › ")
+  );
 
   function fmtDate(iso) {
     if (!iso) return DASH;
@@ -103,6 +115,16 @@
       </section>
     {/if}
 
+    {#if hasLocation}
+      <section>
+        <h4>Location</h4>
+        {#if placeHierarchy}
+          <div class="v place">{placeHierarchy}</div>
+        {/if}
+        <MiniMap lat={meta.lat} lon={meta.lon} />
+      </section>
+    {/if}
+
     <section class="rating-row">
       <h4>Rating</h4>
       <Stars rating={item.rating ?? 0} full interactive {onrate} />
@@ -149,6 +171,10 @@
     font-size: 0.75rem;
     word-break: break-all;
     margin-top: 2px;
+  }
+  .place {
+    color: #eee;
+    margin-bottom: 0.4rem;
   }
   dl {
     display: grid;

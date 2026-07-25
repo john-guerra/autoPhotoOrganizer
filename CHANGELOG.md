@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.7
+
+- **The loupe now shows where a photo was taken.** A Location section appears
+  for any geotagged photo — its country and nearest town, plus a small
+  offline map with a pin. Entirely offline, same as the rest of Places (#154,
+  #175): no network, no accounts, and it works with your photo drive
+  unplugged.
+
 ## 2.18.6
 
 - **Fix:** on a large library, updating to the new place-name database (2.18.5)

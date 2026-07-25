@@ -59,6 +59,15 @@ Keep this current: when one of these facts changes, update it in the same commit
   directories out of `node_modules` and confirming the feature still runs.
   (The current geocoding deps are clean: `all-the-cities` → only `pbf`,
   `i18n-iso-countries` → only `diacritics`, so no exclusions are needed today.)
+  A different flavor of the same waste: `world-atlas`/`topojson-client`
+  (MiniMap.svelte's loupe minimap, #175 follow-up) are genuinely UI-only —
+  Vite bundles the one topojson file they use into its own `dist/assets/`
+  chunk at build time, so the packaged app's Node process never touches
+  `node_modules/world-atlas` or `node_modules/topojson-client` at runtime.
+  Verified by moving both out of `node_modules` after `npm run build` and
+  confirming the built `dist/` still served correctly. Excluded in
+  `build.files` — the same negation pattern, different root cause (not a
+  mis-declared dep, just a package whose only consumer is Vite, not Node).
 - **Place names are versioned, and the version is load-bearing.**
   `photos.gps_checked = 1` is a one-way door meaning "we read this file's EXIF
   GPS", which permanently removes the row from the metadata sweep. That correctly
