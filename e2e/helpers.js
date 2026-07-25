@@ -308,7 +308,8 @@ export const loupe = {
   miniMapSvg: (page) => page.locator(".loupe .minimap svg"),
   /** smart-labels' anchor (leader) lines in the minimap. #179: these must not
    *  exist — an anchor on a 220px map is a "leader line to nowhere". */
-  miniMapAnchors: (page) => page.locator(".loupe .minimap #anchors path.anchor"),
+  miniMapAnchors: (page) =>
+    page.locator(".loupe .minimap #anchors path.anchor"),
   /** A minimap label by its text (e.g. the photo's own city). */
   miniMapLabel: (page, name) =>
     page.locator(".loupe .minimap g.labels text", { hasText: name }),
@@ -612,8 +613,7 @@ export const timelineFilter = {
    *  text is the formatted min/max of the domain until the user drags a handle —
    *  the cheapest DOM-visible proxy for "what date range is this widget plotting
    *  right now", without reaching into the widget's internal `.value`. */
-  badgeTexts: (page) =>
-    page.locator(".time-filter .za-value").allInnerTexts(),
+  badgeTexts: (page) => page.locator(".time-filter .za-value").allInnerTexts(),
 };
 
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------
