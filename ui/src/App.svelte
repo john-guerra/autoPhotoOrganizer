@@ -2278,38 +2278,32 @@
         selected = nextSelectable(displayEntries, 0, 1) ?? 0;
         focusPending = true;
         // Hold the landing through the metadata reflow, exactly as the keyboard
-        // jump (jumpGroupBoundary) does. Without this pin, the target's own tiles
-        // resize from DEFAULT_RATIO to their real aspect as /api/meta arrives —
-        // and on a large library, where that metadata is genuinely slow, the
-        // above-the-fold rows grow and the landing drifts off screen a beat after
-        // it looked right. The pin re-anchors the tile on every layout recompute
-        // (see scheduleJumpPin) so the reflow can't move it.
+        // jump (jumpGroupBoundary) does — and hold it the SAME way: until the user
+        // takes over (a keypress or wheel clears jumpRevealPending). The pin
+        // re-anchors the selected tile on every layout recompute (scheduleJumpPin),
+        // so no reflow can move the landing.
         //
-        // The reason this was historically left OFF for jumpToPath is that the
-        // pin also suppresses loadMore("before"), and this jump lands at the top
-        // (scrollTop 0, no before-page): if the pin only ever cleared on a user
-        // scroll, a user who never scrolled could be stuck with earlier folders
-        // unreachable. So we AUTO-RELEASE it below the moment the landing's own
-        // reflow is done — event-driven off enrichMeta, not a timer — which lets
-        // the suppressed backfill resume on its own even if the user does nothing.
+        // Two reflows can move it, and the pin must outlast BOTH:
+        //   1. the target's own tiles resizing from DEFAULT_RATIO to their real
+        //      (often much taller) aspect as /api/meta streams in, and
+        //   2. every loadMore("before") prepend the landing arms, whose tiles ALSO
+        //      start at DEFAULT_RATIO and grow — each prepend's one-shot scroll
+        //      compensation is measured BEFORE that growth, so on a large library
+        //      (slow metadata, tall photos) the landing drifts down page by page,
+        //      onto a LATER group entirely.
+        //
+        // An earlier version auto-released the pin once the *jumped* page's meta
+        // settled and then kicked the backfill — which re-introduced exactly (2):
+        // the prepended pages reflowed with no pin to hold the landing. Holding
+        // the pin (which also suppresses loadMore("before")) until the user scrolls
+        // is what the keyboard path already does, and it is not "stuck": a wheel or
+        // trackpad gesture clears the pin on the gesture itself (see the on:wheel
+        // handler), after which the suppressed backfill runs and earlier folders
+        // load as the user scrolls up into them.
         jumpRevealPending = true;
         status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       }
-      // enrichMeta resolves only once every tile in this page has its real
-      // dimensions — i.e. once the landing's reflow has finished. Release the
-      // pin then (unless the user already took over, which cleared it and may
-      // have started a newer jump: guard the epoch before touching it).
-      enrichMeta(page.map((i) => i.id)).then(() => {
-        if (epoch !== feedEpoch) return;
-        jumpRevealPending = false;
-        // Releasing the pin isn't enough on its own: nothing else recomputes the
-        // visible range at this instant, so the loadMore("before") that the pin
-        // was suppressing would never fire until the user happened to scroll —
-        // and with the target at the top there's nothing above to scroll into,
-        // so earlier folders would be unreachable (the exact "stuck" the pin was
-        // withheld to avoid). Kick the check so the suppressed backfill runs now.
-        scheduleVisibleRangeUpdate();
-      });
+      enrichMeta(page.map((i) => i.id));
     });
   }
 
@@ -3848,8 +3842,20 @@
     } catch (e) {
       error = e.message;
     } finally {
-      if (direction === "after") fetchingAfter = false;
-      else fetchingBefore = false;
+      // Only the STILL-CURRENT caller may release the guard. A loadMore started
+      // against the old window, which correctly bailed above on `epoch !==
+      // feedEpoch`, must NOT reset this flag: withFeedTransaction holds it for a
+      // jump's whole duration precisely so a stale scroll-triggered loadMore
+      // can't splice into the just-rebuilt window — and clearing it here
+      // unconditionally re-opened that door mid-transaction, letting a second,
+      // same-epoch loadMore("before") clobber `items` right after a jump set
+      // them (findEntryIndexForId then misses the target and the jump lands on
+      // an unrelated far photo). The current owner clears its own flag; a
+      // superseded call leaves it be.
+      if (epoch === feedEpoch) {
+        if (direction === "after") fetchingAfter = false;
+        else fetchingBefore = false;
+      }
     }
   }
 
@@ -5004,7 +5010,8 @@
     if (
       (renderStart <= FETCH_THRESHOLD || above < runway) &&
       !jumpRevealPending &&
-      !expandPin
+      !expandPin &&
+      !jumpingGroup
     ) {
       // Don't prepend previous-group content while a group-jump landing is
       // still being pinned: the prepend shifts everything below it, and the
@@ -5014,6 +5021,15 @@
       // lands under the threshold right after the jump). The user doesn't
       // need earlier content the instant they land; it loads the moment they
       // scroll up, which releases the pin (see onKeydown / on:wheel).
+      //
+      // `!jumpingGroup` closes the un-transactioned gap in jumpGroupBoundary:
+      // its fetchGroupBoundary lookup runs BEFORE withFeedTransaction, and the
+      // Alt+arrow keypress that starts it also clears the PREVIOUS jump's pin
+      // (onKeydown) — which would otherwise unblock a loadMore("before") that
+      // fires during that gap and rebuilds `items` out from under the jump
+      // (findEntryIndexForId then misses the target, landing on a far photo).
+      // jumpGroupBoundary re-runs updateVisibleRange in its finally, so any
+      // genuinely-needed backfill still fires once the jump owns the window.
       loadMore("before");
     }
   }
@@ -5044,6 +5060,25 @@
       else indices.splice(insertAt, 0, selected);
     }
     return indices.map((i) => ({ i, entry: entries[i] }));
+  }
+
+  /**
+   * The user took over — drop the group-jump landing pin and the post-expand
+   * header pin, and kick the visible-range check so the loadMore("before") those
+   * pins were suppressing runs NOW.
+   *
+   * The kick is load-bearing for a jump that landed at the very top (scrollTop 0,
+   * no before-page): there is nothing above to scroll into, so the user's wheel
+   * gesture fires no scroll event, and clearing the pin alone recomputes nothing
+   * — earlier folders would stay unreachable (the classic stuck-at-top). The kick
+   * re-runs updateVisibleRange, which sees renderStart at the threshold and
+   * backfills. A no-op when nothing was pinned.
+   */
+  function releaseJumpPins() {
+    const wasPinned = jumpRevealPending || expandPin != null;
+    jumpRevealPending = false;
+    expandPin = null;
+    if (wasPinned) scheduleVisibleRangeUpdate();
   }
 
   async function onKeydown(e) {
@@ -5090,7 +5125,12 @@
     }
     // The user is driving now — cancel any pending post-jump pin (a jump
     // re-arms it at the end of jumpGroupBoundary, after this returns) and any
-    // post-expand header pin (issue #74).
+    // post-expand header pin (issue #74). Plain clear, NOT releaseJumpPins: this
+    // runs before every key handler below, including Alt+arrow which starts a new
+    // group jump — kicking a backfill here would race that jump's own window
+    // rebuild and land it on the wrong photo. Keyboard navigation resumes any
+    // suppressed backfill through its own movement (reveal → updateVisibleRange);
+    // only the wheel-at-top case needs the explicit kick (see on:wheel).
     jumpRevealPending = false;
     expandPin = null;
 
@@ -5668,7 +5708,7 @@
       class="main-column"
       bind:this={mainColumnEl}
       onscroll={scheduleVisibleRangeUpdate}
-      onwheel={() => ((jumpRevealPending = false), (expandPin = null))}
+      onwheel={releaseJumpPins}
       style="--reveal-margin:{revealMargin}px"
     >
       {#if albumMode}
