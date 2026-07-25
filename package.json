@@ -81,7 +81,9 @@
       "package.json",
       "!node_modules/typescript/**",
       "!node_modules/@jsheaven/**",
-      "!node_modules/dts-bundle-generator/**"
+      "!node_modules/dts-bundle-generator/**",
+      "!node_modules/chokidar/**",
+      "!node_modules/csv-parse/**"
     ],
     "asarUnpack": [
       "node_modules/sharp/**",
