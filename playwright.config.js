@@ -13,9 +13,16 @@ import { join } from "node:path";
  * Hermetic: a temp AUTOGALLERY_HOME and generated fixture photos. The real
  * library and ~/.autogallery are never touched (CLAUDE.md's read-only rule
  * applies to tests too). High ports so a running dev server doesn't collide.
+ *
+ * Ports come from E2E_API_PORT / E2E_UI_PORT, defaulting to 4399 / 5399 (#192).
+ * Several agents work this repo at once; with the ports hardcoded, a second
+ * agent's `npx playwright test` collided on them and couldn't run until the
+ * first finished (observed 3× in one session). An agent can now run on a
+ * private pair, e.g. `E2E_API_PORT=4601 E2E_UI_PORT=5601 npx playwright test`.
+ * global-setup.mjs already reads E2E_API_PORT for its API probe.
  */
-const API_PORT = 4399;
-const UI_PORT = 5399;
+const API_PORT = Number(process.env.E2E_API_PORT) || 4399;
+const UI_PORT = Number(process.env.E2E_UI_PORT) || 5399;
 
 export default defineConfig({
   testDir: "./e2e",

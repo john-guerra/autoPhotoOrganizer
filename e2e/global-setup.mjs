@@ -50,7 +50,7 @@ export default async function globalSetup(config) {
   // still fails loudly in the specs themselves.
   const baseURL =
     config?.projects?.[0]?.use?.baseURL ??
-    `http://localhost:${process.env.VITE_PORT ?? 5399}`;
+    `http://localhost:${process.env.E2E_UI_PORT ?? process.env.VITE_PORT ?? 5399}`;
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
