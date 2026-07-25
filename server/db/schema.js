@@ -189,6 +189,62 @@ export function applySchema(db) {
   // (verified via EXPLAIN QUERY PLAN), and LIMIT caps it regardless.
   ensureColumn(db, "photos", "hash_attempted", "INTEGER NOT NULL DEFAULT 0");
 
+  // --- One-shot data repairs -----------------------------------------------
+  // Everything else in applySchema is idempotent BY CONSTRUCTION (CREATE TABLE
+  // IF NOT EXISTS, ensureColumn) and re-runs harmlessly on every startup. A
+  // data UPDATE is not, so it needs a gate — PRAGMA user_version, SQLite's
+  // built-in one-shot counter. It is the app's counter, not SQLite's, and only
+  // ever moves forward.
+  //
+  // This section sits HERE — before the ML artifacts tables below — and not
+  // where a "repairs run last" instinct would put it, because the dataVersion
+  // < 2 step drops and recreates photo_embeddings/ml_status, and that DROP
+  // must execute before the `CREATE TABLE IF NOT EXISTS` further down. If it
+  // ran after, `IF NOT EXISTS` would see tables that already exist (with the
+  // wrong constraint) and skip creating them — the drop would have nothing
+  // left to fix.
+  const dataVersion = db.pragma("user_version", { simple: true });
+  if (dataVersion < 1) {
+    // #169: 2.17.14-2.18.4 marked every file unreachable during a hash sweep
+    // hash_attempted=1, including a whole drive that was merely unmounted. Only
+    // a size/mtime CHANGE clears that marker, and an unmount changes neither —
+    // so those photos were excluded from hashing permanently, and
+    // backup-coverage/dedup silently under-reported.
+    //
+    // Un-marking is safe: a genuinely unreadable file is re-attempted once and
+    // re-marked by the (now correct) sweep. Rows that already HAVE a hash, and
+    // stale rows, are untouched.
+    //
+    // Must run once, not per startup: re-running would also clear the marks the
+    // FIXED code sets on genuinely corrupt files, re-attempting them forever.
+    db.exec(`UPDATE photos SET hash_attempted = 0
+                WHERE hash_attempted = 1 AND content_hash IS NULL AND stale = 0`);
+    db.pragma("user_version = 1");
+  }
+  if (dataVersion < 2) {
+    // #161 fix round 2 (I1): photo_embeddings/ml_status first shipped (commit
+    // c465228) with a plain `REFERENCES photos(id)` — no ON DELETE CASCADE.
+    // better-sqlite3 enables PRAGMA foreign_keys by default, so every existing
+    // `DELETE FROM photos` path threw once a photo had a vector or a sentinel;
+    // the CASCADE clause (commit e126785) fixes that — but only for a table
+    // CREATEd fresh. `CREATE TABLE IF NOT EXISTS` is a no-op against a table
+    // that already exists, so any database that started the app in the window
+    // between those two commits has both tables WITHOUT the cascade, forever,
+    // unless something drops and recreates them — SQLite cannot ALTER a
+    // foreign-key clause in place.
+    //
+    // This DROP is safe TODAY, and ONLY today: #161 has not shipped in any
+    // released build, so no real inference result has ever been written to
+    // either table — dropping them destroys nothing. DO NOT copy this pattern
+    // forward once embeddings ship: the same DROP TABLE run against a live
+    // library would destroy hours of real inference work. A future schema
+    // change to these tables needs an actual data-preserving migration, not
+    // this one reused.
+    db.exec(`DROP TABLE IF EXISTS photo_embeddings`);
+    db.exec(`DROP TABLE IF EXISTS ml_status`);
+    db.pragma("user_version = 2");
+  }
+
   // --- ML artifacts (#161) --------------------------------------------------
   // Their OWN tables, never columns on `photos`. The feed's hot path is
   // `SELECT photos.*` over a keyset seek; a ~800-byte blob per row would be
@@ -260,31 +316,6 @@ export function applySchema(db) {
     `CREATE INDEX IF NOT EXISTS idx_ml_status_lookup
        ON ml_status(stage, model, photo_id)`
   );
-
-  // --- One-shot data repairs -----------------------------------------------
-  // Everything else in applySchema is idempotent BY CONSTRUCTION (CREATE TABLE
-  // IF NOT EXISTS, ensureColumn) and re-runs harmlessly on every startup. A
-  // data UPDATE is not, so it needs a gate — PRAGMA user_version, SQLite's
-  // built-in one-shot counter. It is the app's counter, not SQLite's, and only
-  // ever moves forward.
-  const dataVersion = db.pragma("user_version", { simple: true });
-  if (dataVersion < 1) {
-    // #169: 2.17.14-2.18.4 marked every file unreachable during a hash sweep
-    // hash_attempted=1, including a whole drive that was merely unmounted. Only
-    // a size/mtime CHANGE clears that marker, and an unmount changes neither —
-    // so those photos were excluded from hashing permanently, and
-    // backup-coverage/dedup silently under-reported.
-    //
-    // Un-marking is safe: a genuinely unreadable file is re-attempted once and
-    // re-marked by the (now correct) sweep. Rows that already HAVE a hash, and
-    // stale rows, are untouched.
-    //
-    // Must run once, not per startup: re-running would also clear the marks the
-    // FIXED code sets on genuinely corrupt files, re-attempting them forever.
-    db.exec(`UPDATE photos SET hash_attempted = 0
-                WHERE hash_attempted = 1 AND content_hash IS NULL AND stale = 0`);
-    db.pragma("user_version = 1");
-  }
 
   // The metadata sweep's to-do list is PENDING_CONDITION (see db/enrich.js —
   // width IS NULL, an unprobed video, or gps_checked = 0). It runs once per

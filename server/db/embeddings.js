@@ -11,33 +11,31 @@
 export const EMBED_STAGE = "embed";
 
 /**
+ * Write one vector AND clear any failure sentinel for the same photo+model, in
+ * one transaction. A successful vector makes a "cannot be processed" sentinel
+ * a lie — without this, a future retry-failed-embeds action would call this,
+ * the sentinel would survive, and embedCounts would double-count the photo as
+ * both embedded AND failed (#161 fix round 2, I2). That's the same
+ * "unexplained shortfall" shape pre-2.17.14 backupCoverage shipped: a UI
+ * computing pending as total - embedded - failed would go negative.
  * @param {import("better-sqlite3").Database} db
  * @param {{photoId: number, model: string, dim: number, scale: number, bytes: Int8Array}} row
  */
 export function putEmbedding(db, row) {
-  stmtPut(db).run({
-    photoId: row.photoId,
-    model: row.model,
-    dim: row.dim,
-    scale: row.scale,
-    // Int8Array -> Buffer WITHOUT copying the underlying bytes. Note the
-    // byteOffset/byteLength arguments: a typed array can be a VIEW into a
-    // larger buffer (transformers.js hands back exactly that, one big tensor
-    // sliced per image), and Buffer.from(view.buffer) alone would store the
-    // WHOLE tensor for every photo.
-    vec: Buffer.from(
-      row.bytes.buffer,
-      row.bytes.byteOffset,
-      row.bytes.byteLength
-    ),
-    createdAt: Date.now(),
-  });
+  txPutEmbedding(db)(row);
 }
 
 /**
  * One transaction for a whole batch. better-sqlite3 transactions are
  * synchronous by contract, which is exactly what makes them crash-safe: a
  * half-written batch is impossible.
+ *
+ * Calls putEmbedding per row, which is ITSELF a `db.transaction()` (see
+ * txPutEmbedding below) — better-sqlite3 supports this nesting via SAVEPOINTs
+ * (verified empirically: an inner transaction function invoked from inside an
+ * outer one participates in the outer's commit/rollback rather than starting
+ * an independent one), so a failure partway through the batch still rolls
+ * back everything written so far, including the sentinel clears.
  * @param {import("better-sqlite3").Database} db
  * @param {Array<{photoId: number, model: string, dim: number, scale: number, bytes: Int8Array}>} rows
  */
@@ -244,4 +242,63 @@ function stmtPut(db) {
     putCache.set(db, s);
   }
   return s;
+}
+
+/** Prepared once per database handle. The other half of putEmbedding's
+ * transaction: drop the failure sentinel for this exact photo+model, since a
+ * fresh vector just proved it is no longer "cannot be processed". */
+let clearSentinelCache = new WeakMap();
+function stmtClearSentinel(db) {
+  let s = clearSentinelCache.get(db);
+  if (!s) {
+    s = db.prepare(
+      `DELETE FROM ml_status WHERE photo_id = @photoId AND stage = @stage AND model = @model`
+    );
+    clearSentinelCache.set(db, s);
+  }
+  return s;
+}
+
+/** Prepared once per database handle: the transaction function itself, not
+ * just a statement — db.transaction() wraps a JS function in BEGIN/COMMIT (or
+ * a SAVEPOINT when nested inside another transaction, as putEmbeddings does),
+ * so caching it avoids re-wrapping on every call while keeping the write and
+ * the sentinel-clear atomic. */
+let txPutCache = new WeakMap();
+function txPutEmbedding(db) {
+  let tx = txPutCache.get(db);
+  if (!tx) {
+    tx = db.transaction((row) => {
+      stmtPut(db).run({
+        photoId: row.photoId,
+        model: row.model,
+        dim: row.dim,
+        scale: row.scale,
+        // Int8Array -> Buffer WITHOUT copying the underlying bytes. The three-
+        // argument form (byteOffset/byteLength) is required for correctness IF
+        // a caller ever hands in a typed-array VIEW into a larger buffer —
+        // Buffer.from(view.buffer) alone would then store the WHOLE backing
+        // buffer instead of just this row's slice. Today's only caller is
+        // quantize() (server/ml/quantize.js), which always allocates a fresh,
+        // exactly-sized Int8Array per call, so byteOffset is always 0 and
+        // byteLength always equals the buffer's own length — there is no view
+        // to worry about yet. Kept anyway: it costs nothing here and stays
+        // correct the day a caller (e.g. a batched tensor sliced per image)
+        // changes that.
+        vec: Buffer.from(
+          row.bytes.buffer,
+          row.bytes.byteOffset,
+          row.bytes.byteLength
+        ),
+        createdAt: Date.now(),
+      });
+      stmtClearSentinel(db).run({
+        photoId: row.photoId,
+        stage: EMBED_STAGE,
+        model: row.model,
+      });
+    });
+    txPutCache.set(db, tx);
+  }
+  return tx;
 }

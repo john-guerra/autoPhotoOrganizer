@@ -227,6 +227,32 @@ describe("counts and storage reporting", () => {
     expect(row.error).toBe("second");
   });
 
+  it("clears a prior failure sentinel once the retry succeeds (#161 fix round 2, I2)", () => {
+    const db = getDb();
+    const [id] = seed(db, 1);
+    markEmbedFailed(db, id, SIGLIP, new Error("first try"));
+    putEmbedding(db, {
+      photoId: id,
+      model: SIGLIP,
+      dim: 8,
+      ...quantize(vec(1)),
+    });
+
+    // A successful vector makes the old "cannot be processed" sentinel a lie.
+    // Without putEmbedding clearing it, this photo would count as BOTH
+    // embedded and failed, and total - embedded - failed (the UI's "pending")
+    // would go negative — the same unexplained-shortfall shape pre-2.17.14
+    // backupCoverage shipped.
+    const counts = embedCounts(db, SIGLIP);
+    expect(counts).toEqual({ total: 1, embedded: 1, failed: 0 });
+    expect(
+      counts.total - counts.embedded - counts.failed
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      db.prepare(`SELECT * FROM ml_status WHERE photo_id = ?`).get(id)
+    ).toBeUndefined();
+  });
+
   it("reports per-model storage so the settings panel can offer a purge", () => {
     const db = getDb();
     const ids = seed(db, 2);
