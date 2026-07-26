@@ -27,7 +27,14 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 4321;
 // never be reachable from the network.
 const HOST = "127.0.0.1";
 
-export function createApp() {
+/**
+ * @param {{ml?: import("./ml/MLService.js").MLService}} [opts] `ml` is
+ *   injectable so tests never spawn the real ONNX child process (registerApi
+ *   otherwise constructs one LAZILY on first use — see api.js) and so a
+ *   future WebGPU host (electron/main.js) can supply its own without server/
+ *   ever importing electron.
+ */
+export function createApp({ ml } = {}) {
   const app = express();
   // 50mb: materialize/undo POST an album's full photo-id list and the move
   // manifest ({id,from,to} per file); a big album blows the default 100kb limit
@@ -48,7 +55,7 @@ export function createApp() {
   });
 
   // v0.1 culling API: scan, thumbnails, full images, ratings.
-  registerApi(app);
+  registerApi(app, { ml });
 
   // In production, serve the built UI. In dev, the Vite server owns the UI
   // and proxies /api here (see ui/vite.config.js).

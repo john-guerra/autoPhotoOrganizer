@@ -13,6 +13,7 @@ import { existsSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, basename, dirname } from "node:path";
+import { EventEmitter } from "node:events";
 
 // Reveal-in-Finder shells out to a file manager; stub the async launcher so
 // tests never actually pop Finder/Explorer, while preserving execFileSync
@@ -34,10 +35,65 @@ import { getPhotoById } from "./db/photos.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { registry } from "./jobs/registry.js";
 import { sampleOffsets } from "./db/sampleGroup.js";
+import { modelById } from "./ml/models.js";
+import { _resetEmbedSweepForTest } from "./ml/embedSweep.js";
+
+/**
+ * Every scan in this file kicks a real background embed sweep
+ * (kickEmbedSweep in api.js) as a fire-and-forget side effect — exactly like
+ * the pre-existing hash sweep. createApp()'s default lazily-constructed
+ * OnnxMLService would spawn a REAL child process (and attempt to download a
+ * model) the moment that sweep called ml.configure(), which this suite must
+ * never do — so every server built here gets SOME injected `ml`.
+ *
+ * This one is deliberately inert: `configure()` rejects immediately, so
+ * embedAllPending's per-photo loop (thumbBytes -> processing.thumbnail)
+ * never runs at all. That matters because it writes into the SAME on-disk
+ * thumbnail cache the "cache management routes" tests assert exact file
+ * counts against — a successful embed sweep racing one of those tests would
+ * inflate its count non-deterministically. Rejecting fast also settles the
+ * job (to "failed", auto-dismissed by the afterEach below) well before the
+ * "jobs: []" assertion's own HTTP round trip, instead of leaving it
+ * "running". The dedicated "/api/ml" describe block below proves the happy
+ * path against its own isolated server + working stub instead.
+ */
+function inertMl() {
+  return {
+    configure: vi.fn().mockRejectedValue(new Error("no ml host in tests")),
+    embedImages: vi.fn(),
+  };
+}
+
+/**
+ * A working fake ML host for tests that want the sweep to actually
+ * succeed. `embedImages` returns a fixed nonzero vector sized to whichever
+ * model was last configured, so quantize() (which rejects an all-zero
+ * vector) never throws. Implements the same on/off progress-event API as
+ * OnnxMLService (server/ml/OnnxMLService.js) via a plain EventEmitter, so
+ * kickEmbedSweep's download-progress relay (api.js) has something to attach
+ * to; `configure` accepts an optional callback to fire mid-call, for tests
+ * that need to observe the relay before the sweep runs to completion.
+ */
+function workingMl({ duringConfigure } = {}) {
+  let dim = 768;
+  const events = new EventEmitter();
+  return {
+    configure: vi.fn(async ({ modelId }) => {
+      dim = modelById(modelId).dim;
+      await duringConfigure?.(events, modelId);
+      return { ok: true };
+    }),
+    embedImages: vi.fn(async (buffers) =>
+      buffers.map(() => Float32Array.from({ length: dim }, () => 1))
+    ),
+    on: (event, listener) => events.on(event, listener),
+    off: (event, listener) => events.off(event, listener),
+  };
+}
 
 /** Start the app on an ephemeral port; return { base, close }. */
-async function startServer() {
-  const app = createApp();
+async function startServer({ ml = inertMl() } = {}) {
+  const app = createApp({ ml });
   const server = await new Promise((resolve) => {
     const s = app.listen(0, "127.0.0.1", () => resolve(s));
   });
@@ -70,11 +126,35 @@ async function waitJob(id, { timeoutMs = 5000 } = {}) {
   }
 }
 
+/**
+ * Poll the in-process registry (the same singleton the server's routes use,
+ * since the app runs in this process) until no job of `type` is "running".
+ * Used for the fire-and-forget embed kick, whose response carries no jobId
+ * to hand to `waitJob`.
+ */
+async function waitNoRunningJobOfType(type, { timeoutMs = 5000 } = {}) {
+  const start = Date.now();
+  for (;;) {
+    const stillRunning = registry
+      .list()
+      .some((j) => j.type === type && j.status === "running");
+    if (!stillRunning) return;
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`a "${type}" job was still running after ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 let photosDir;
 let cacheDir;
 let srv;
 
 beforeAll(async () => {
+  // The embed sweep's single-flight latch (embedSweep.js) is a module
+  // global, not per-server — clear it in case another suite in this worker
+  // left it set.
+  _resetEmbedSweepForTest();
   photosDir = await mkdtemp(join(tmpdir(), "ag-photos-"));
   cacheDir = await mkdtemp(join(tmpdir(), "ag-cache-"));
   process.env.AUTOGALLERY_HOME = cacheDir;
@@ -240,6 +320,163 @@ describe("POST /api/scan", () => {
       expect(staleAfter[0].stale).toBe(1);
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("/api/ml", () => {
+  // A SEPARATE server (own port, own injected `ml`), not the shared `srv`
+  // above. The happy-path embed test below needs a WORKING ml host so the
+  // sweep actually finishes and self-clears; `srv` deliberately runs an
+  // inert one (see inertMl's comment) so the hundreds of unrelated scans
+  // elsewhere in this file never race real thumbnail writes into the
+  // "cache management routes" tests' counted cache dir. This server still
+  // shares the one process-wide `getDb()`/AUTOGALLERY_HOME, so it sees
+  // whatever photosDir's scan already indexed — fine, since these tests
+  // only assert on shape and on the job settling, not on exact counts.
+  let mlSrv;
+
+  beforeAll(async () => {
+    mlSrv = await startServer({ ml: workingMl() });
+  });
+
+  afterAll(async () => {
+    await mlSrv?.close();
+  });
+
+  it("reports the default model and the available models", async () => {
+    const res = await fetch(`${mlSrv.base}/api/ml/settings`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.modelId).toBe("Xenova/siglip-base-patch16-224");
+    expect(body.models.map((m) => m.id)).toContain(
+      "Xenova/clip-vit-base-patch32"
+    );
+  });
+
+  it("persists a settings change and round-trips it", async () => {
+    const put = await fetch(`${mlSrv.base}/api/ml/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ threads: 2 }),
+    });
+    expect(put.status).toBe(200);
+    expect((await put.json()).threads).toBe(2);
+
+    const get = await fetch(`${mlSrv.base}/api/ml/settings`);
+    expect((await get.json()).threads).toBe(2);
+  });
+
+  it("rejects an unknown model with a specific message, not a generic 500", async () => {
+    const res = await fetch(`${mlSrv.base}/api/ml/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ modelId: "evil/model" }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/unknown model/i);
+    // The rejected write must not have persisted.
+    const settled = await (await fetch(`${mlSrv.base}/api/ml/settings`)).json();
+    expect(settled.modelId).toBe("Xenova/siglip-base-patch16-224");
+  });
+
+  it("reports embedded, failed and total separately", async () => {
+    const res = await fetch(`${mlSrv.base}/api/ml/stats`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.counts).toHaveProperty("total");
+    expect(body.counts).toHaveProperty("embedded");
+    expect(body.counts).toHaveProperty("failed");
+    expect(Array.isArray(body.storage)).toBe(true);
+  });
+
+  it("requires a model to purge", async () => {
+    const res = await fetch(`${mlSrv.base}/api/ml/purge`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("purges a model's stored vectors and sentinels", async () => {
+    const res = await fetch(`${mlSrv.base}/api/ml/purge`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "Xenova/siglip-base-patch16-224" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toHaveProperty("rows");
+  });
+
+  it("POST /api/ml/embed kicks a background sweep that finishes and self-clears", async () => {
+    const res = await fetch(`${mlSrv.base}/api/ml/embed`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).started).toBe(true);
+
+    // Fire-and-forget: the response confirms the kick, not completion.
+    // Poll the in-process registry (deterministic — no arbitrary sleep)
+    // until the sweep it started leaves "running".
+    await waitNoRunningJobOfType("embed");
+
+    // "embed" is SELF_CLEARING (server/jobs/registry.js): a job that
+    // finished SUCCESSFULLY removes its own row rather than leaving a
+    // "done" entry behind, so none should remain — unlike a failure, which
+    // is news and stays until dismissed.
+    expect(registry.list().some((j) => j.type === "embed")).toBe(false);
+  });
+
+  it("relays the model host's download-progress frames into the job's phase", async () => {
+    // A first embed against a freshly-selected model can mean a real
+    // download before any photo is touched (models.js's approxDownloadMB) —
+    // embedAllPending's own onProgress has nothing to report during that
+    // window, so kickEmbedSweep (api.js) separately relays OnnxMLService's
+    // unsolicited "progress" frames into job.phase. Prove it deterministically
+    // by parking the sweep INSIDE configure() (before it emits one frame)
+    // rather than racing a real download.
+    let releaseConfigure;
+    const gate = new Promise((r) => (releaseConfigure = r));
+    const ml = workingMl({
+      duringConfigure: async (events, modelId) => {
+        events.emit("progress", {
+          modelId,
+          status: "progress",
+          file: "onnx/model.onnx",
+          progress: 37,
+        });
+        await gate;
+      },
+    });
+    const gatedSrv = await startServer({ ml });
+    try {
+      const res = await fetch(`${gatedSrv.base}/api/ml/embed`, {
+        method: "POST",
+      });
+      expect(res.status).toBe(200);
+
+      // Poll the in-process registry until the relay lands. Deterministic,
+      // not a settle-window sleep: the sweep cannot get past `gate`, so
+      // this only waits as long as the event loop needs to deliver the
+      // synchronous emit() above through kickEmbedSweep's listener.
+      const start = Date.now();
+      let job;
+      for (;;) {
+        job = registry
+          .list()
+          .find((j) => j.type === "embed" && j.status === "running");
+        if (job?.phase?.startsWith("downloading")) break;
+        if (Date.now() - start > 2000) {
+          throw new Error("download-progress relay never landed on the job");
+        }
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(job.phase).toBe("downloading onnx/model.onnx 37%");
+
+      releaseConfigure();
+      await waitNoRunningJobOfType("embed");
+    } finally {
+      await gatedSrv.close();
     }
   });
 });
