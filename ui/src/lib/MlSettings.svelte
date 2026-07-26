@@ -319,9 +319,27 @@
     await save({ threads: Number(threadsDraft) });
   }
 
+  /**
+   * NOT disabled while a sweep runs, unlike Purge and Retry.
+   *
+   * Those two delete rows the sweep is walking through and genuinely must
+   * wait. Changing the device does nothing to a running sweep — the worker
+   * resolved its provider at `configure` time — so blocking it only stops the
+   * user setting up the NEXT run, which is exactly what someone comparing
+   * CPU against GPU is trying to do. It is the first thing they reach for
+   * while watching a slow sweep, and the control was dead in their hands.
+   */
   async function changeDevice() {
     const next = deviceDraft;
     if (!(await save({ device: next }))) return;
+    if (runningJob) {
+      // Say why nothing appears to change: the read-out still names the
+      // provider the RUNNING sweep resolved, not the one just picked.
+      say(
+        `Saved. A sweep is already running on ${stats?.provider ?? "its own provider"}, so this takes effect on the next one — stop it below to compare now.`
+      );
+      return;
+    }
     say(
       next === "auto"
         ? "Back to picking automatically. The provider below updates on the next embed."
@@ -664,7 +682,7 @@
       <select
         data-testid="ml-device"
         bind:value={deviceDraft}
-        disabled={busy || !!runningJob}
+        disabled={busy}
         onchange={changeDevice}
       >
         {#each settings.devices ?? ["auto"] as d (d)}
