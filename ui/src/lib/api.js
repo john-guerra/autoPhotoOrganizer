@@ -1028,6 +1028,23 @@ export async function startEmbed() {
   return res.json();
 }
 
+/**
+ * Recompute the near-duplicate grouping (#162) from vectors already stored —
+ * seconds of arithmetic, not the ~72 minutes a full re-embed of 114k photos
+ * costs. Separate from startEmbed for exactly that reason: tuning the
+ * threshold must not imply re-reading every photo.
+ */
+export async function startNearDupes() {
+  const res = await fetch("/api/ml/near-dupes", { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      body.error || `couldn't start near-duplicate detection (${res.status})`
+    );
+  }
+  return res.json();
+}
+
 /** Carry a vanished copy's rating/albums/tags/stack onto an unrated survivor. */
 export async function carryMissing(fromId, toId) {
   const res = await fetch("/api/missing/carry", {

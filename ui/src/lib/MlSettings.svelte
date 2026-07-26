@@ -25,6 +25,7 @@
     purgeMlModel,
     retryMlFailed,
     startEmbed,
+    startNearDupes,
     cancelJob,
   } from "./api.js";
   import { jobs } from "./jobs.js";
@@ -51,6 +52,19 @@
   let enabledDraft = $state(false);
   let modelDraft = $state("");
   let threadsDraft = $state(1);
+  /**
+   * The near-duplicate controls (#162), mirrored for the same reason as the
+   * three above.
+   *
+   * `thresholdDraft` always holds a NUMBER, never null, because a range input
+   * has no representation for "unset" — it would silently render 0.5 (its min)
+   * and the user would be looking at a value the server is not using. The
+   * stored setting keeps null meaning "use the active model's own value", so
+   * the draft is seeded from the model's default and a Reset control puts the
+   * null back. Whether the user is currently on the default is `usingModelDefault`.
+   */
+  let thresholdDraft = $state(0.9);
+  let windowSecDraft = $state(60);
   /** @type {{model:string, provider:string, counts:{total:number,embedded:number,failed:number}, storage:Array<object>}|null} */
   let stats = $state(null);
   let loadFailed = $state(false);
@@ -69,12 +83,21 @@
   // below, and making it reactive would make the effect depend on its own
   // write.
   let lastJobId = null;
+  /** Same bookkeeping, for the grouping pass — its counts live in the same
+   *  /api/ml/stats payload, so a finished pass leaves them stale too. */
+  let lastDupeJobId = null;
   /** Set by Stop; cleared automatically once that job actually stops. */
   let stoppingId = $state(null);
   const stopping = $derived(
     stoppingId !== null && runningJob?.id === stoppingId
   );
 
+  const dupeJob = $derived(
+    $jobs.find((j) => j.type === "near-dupes" && j.status === "running") ?? null
+  );
+  /** Whether the stored setting is still `null` — i.e. following the active
+   *  model's own value rather than an override the user typed. */
+  const usingModelDefault = $derived(settings?.nearDupeThreshold == null);
   const activeModel = $derived(
     settings?.models?.find((m) => m.id === settings.modelId) ?? null
   );
@@ -119,6 +142,15 @@
     enabledDraft = settings.enabled;
     modelDraft = settings.modelId;
     threadsDraft = settings.threads;
+    // null (the default) resolves to the ACTIVE model's own threshold, so the
+    // slider shows the number actually in force rather than an invented one.
+    thresholdDraft = settings.nearDupeThreshold ?? modelThreshold(settings);
+    windowSecDraft = Math.round(settings.nearDupeWindowMs / 1000);
+  }
+
+  /** The active model's own measured threshold — what `null` means. */
+  function modelThreshold(s) {
+    return s?.models?.find((m) => m.id === s.modelId)?.nearDupeThreshold ?? 0.9;
   }
 
   /**
@@ -197,6 +229,22 @@
     }
   });
 
+  // The grouping pass, same shape. Kept as its own effect rather than folded
+  // into the one above because the two jobs end independently — a single
+  // effect reading both ids would re-run (and re-fetch) whenever EITHER
+  // changed, including while the other is still mid-sweep.
+  $effect(() => {
+    const id = dupeJob?.id ?? null;
+    const ended = lastDupeJobId !== null && id === null;
+    lastDupeJobId = id;
+    if (ended) {
+      refreshStats().then((err) => {
+        if (err)
+          say(`Couldn't refresh the near-duplicate counts: ${err}`, "err");
+      });
+    }
+  });
+
   /** @param {{enabled?:boolean, modelId?:string, threads?:number}} patch */
   async function save(patch) {
     busy = true;
@@ -258,6 +306,54 @@
 
   async function changeThreads() {
     await save({ threads: Number(threadsDraft) });
+  }
+
+  /**
+   * Changing either near-duplicate input makes the STORED grouping describe a
+   * rule that is no longer in force, so the server clears it and starts a
+   * fresh pass. Say that plainly: a user who tightens the threshold and sees
+   * their stacks vanish for a few seconds should know it is regrouping, not
+   * broken.
+   */
+  async function changeThreshold() {
+    if (!(await save({ nearDupeThreshold: Number(thresholdDraft) }))) return;
+    say(regroupingNote());
+  }
+
+  async function changeWindow() {
+    if (!(await save({ nearDupeWindowMs: Number(windowSecDraft) * 1000 })))
+      return;
+    say(regroupingNote());
+  }
+
+  /** Back to the active model's own measured value — the `null` the setting
+   *  stores, not a number copied out of the model, so a later model switch
+   *  follows the new model instead of carrying this one's value across. */
+  async function resetThreshold() {
+    if (!(await save({ nearDupeThreshold: null }))) return;
+    say(
+      `Back to ${labelFor(settings.modelId)}'s own value (${modelThreshold(settings).toFixed(2)}). ${regroupingNote()}`
+    );
+  }
+
+  function regroupingNote() {
+    return "Regrouping now — stacks update when the job finishes. No photo is moved or deleted.";
+  }
+
+  async function findNearDupesNow() {
+    busy = true;
+    try {
+      const r = await startNearDupes();
+      if (r.started) say("Looking for near-duplicates — watch the jobs panel.");
+      else if (r.alreadyRunning)
+        say("Already looking for near-duplicates.", "warn");
+    } catch (e) {
+      // Includes the server's 409 when the feature is off, in its own words
+      // ("Turn it on in Manage library to compute embeddings first").
+      say(`Couldn't start near-duplicate detection: ${e.message}`, "err");
+    } finally {
+      busy = false;
+    }
   }
 
   async function embedNow() {
@@ -576,6 +672,89 @@
       </p>
     {/if}
 
+    <h4>Near-duplicates</h4>
+    <p class="hint">
+      Photos of the same shot are stacked together, even when the pause between
+      them is too long for burst detection to catch on timing alone. Only photos
+      taken within the time window below are ever compared — the same scene
+      re-shot on another day is left alone.
+    </p>
+
+    <label class="field">
+      <span class="field-label">Similarity</span>
+      <!-- Floor 0.5, matching the server's clamp. Below the band where two
+           unrelated photos that merely share a genre already score (0.61-0.68),
+           a lower value does not group "more aggressively" — it collapses whole
+           minutes of a shoot into one stack. -->
+      <input
+        type="range"
+        data-testid="ml-dupe-threshold"
+        min="0.5"
+        max="0.99"
+        step="0.01"
+        bind:value={thresholdDraft}
+        disabled={busy}
+        onchange={changeThreshold}
+      />
+      <span class="field-value">{Number(thresholdDraft).toFixed(2)}</span>
+    </label>
+    <p class="hint">
+      Higher means only near-identical frames stack — safer, and the reason the
+      default is deliberately strict: a missed duplicate is invisible, but a
+      wrong one hides a photo behind a stack cover.
+      {#if usingModelDefault}
+        Using {labelFor(settings.modelId)}'s own value.
+      {:else}
+        <button class="linkish" disabled={busy} onclick={resetThreshold}>
+          Reset to {labelFor(settings.modelId)}'s value ({modelThreshold(
+            settings
+          ).toFixed(2)})
+        </button>
+      {/if}
+    </p>
+
+    <label class="field">
+      <span class="field-label">Time window</span>
+      <input
+        type="range"
+        data-testid="ml-dupe-window"
+        min="3"
+        max="600"
+        step="1"
+        bind:value={windowSecDraft}
+        disabled={busy}
+        onchange={changeWindow}
+      />
+      <span class="field-value">{windowSecDraft}s</span>
+    </label>
+
+    <ul class="counts" data-testid="ml-dupe-counts">
+      <li>
+        <strong>{(stats.nearDupes?.groups ?? 0).toLocaleString()}</strong>
+        groups found
+        <span class="of"
+          >— covering {(stats.nearDupes?.photos ?? 0).toLocaleString()} photos</span
+        >
+      </li>
+    </ul>
+
+    <div class="ml-actions">
+      <button
+        data-testid="ml-find-dupes"
+        disabled={busy || !!dupeJob}
+        onclick={findNearDupesNow}
+      >
+        {dupeJob ? "Looking…" : "Find near-duplicates now"}
+      </button>
+    </div>
+    <p class="hint">
+      Uses the vectors already stored, so this takes seconds — it never re-reads
+      your photos.
+    </p>
+    {#if dupeJob}
+      <p class="hint">{dupeJob.phase || "Comparing photos"}</p>
+    {/if}
+
     <h4>Stored vectors</h4>
     {#if stats.storage.length === 0}
       <p class="empty">Nothing stored yet.</p>
@@ -781,5 +960,20 @@
   .storage-size {
     font-size: 0.8rem;
     color: #aaa;
+  }
+  /* An inline action inside a hint paragraph — the reset belongs beside the
+     sentence explaining what it resets to, not in the button row below. */
+  .linkish {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #6aa9ff;
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .linkish:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>

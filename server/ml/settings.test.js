@@ -52,6 +52,8 @@ import {
   writeMlSettings,
   defaultThreads,
   MlSettingsPersistError,
+  effectiveThreshold,
+  DEFAULT_NEAR_DUPE_WINDOW_MS,
 } from "./settings.js";
 import { DEFAULT_MODEL_ID } from "./models.js";
 
@@ -168,5 +170,67 @@ describe("ML settings", () => {
     }
     expect(thrown).toBeInstanceOf(MlSettingsPersistError);
     expect(thrown.message).toMatch(/EACCES|could not save/i);
+  });
+});
+
+/**
+ * The near-duplicate settings (#162). The one that matters is the null:
+ * `nearDupeThreshold` stores "follow the active model" rather than a resolved
+ * number, because SigLIP and CLIP disagree by ~0.05 on the case that decides
+ * most groupings — so a number saved under one model and carried to the other
+ * silently misses every re-framed duplicate.
+ */
+describe("near-duplicate settings", () => {
+  it("defaults to the model's own threshold, not a stored number", () => {
+    const s = readMlSettings();
+    expect(s.nearDupeThreshold).toBeNull();
+    expect(s.nearDupeWindowMs).toBe(DEFAULT_NEAR_DUPE_WINDOW_MS);
+    // SigLIP is the default model, and 0.93 is its measured value.
+    expect(effectiveThreshold(s)).toBe(0.93);
+  });
+
+  it("follows the new model when the model changes and no override is set", () => {
+    // The whole reason null is stored instead of a number: this must become
+    // CLIP's 0.88, not stay at SigLIP's 0.93.
+    const s = writeMlSettings({ modelId: "Xenova/clip-vit-base-patch32" });
+    expect(s.nearDupeThreshold).toBeNull();
+    expect(effectiveThreshold(s)).toBe(0.88);
+  });
+
+  it("keeps an explicit override across a model switch", () => {
+    writeMlSettings({ nearDupeThreshold: 0.8 });
+    const s = writeMlSettings({ modelId: "Xenova/clip-vit-base-patch32" });
+    expect(effectiveThreshold(s)).toBe(0.8);
+  });
+
+  it("takes null back as a reset to the model default", () => {
+    writeMlSettings({ nearDupeThreshold: 0.8 });
+    const s = writeMlSettings({ nearDupeThreshold: null });
+    expect(s.nearDupeThreshold).toBeNull();
+    expect(effectiveThreshold(s)).toBe(0.93);
+  });
+
+  it("clamps a threshold below the shared-genre band up to the floor", () => {
+    // Two unrelated photos that merely share a genre already score 0.61-0.68,
+    // so a threshold of 0 does not group "more aggressively" — every photo in
+    // a window matches every other and whole minutes collapse into one stack.
+    expect(writeMlSettings({ nearDupeThreshold: 0 }).nearDupeThreshold).toBe(
+      0.5
+    );
+    expect(writeMlSettings({ nearDupeThreshold: 5 }).nearDupeThreshold).toBe(
+      0.999
+    );
+  });
+
+  it("clamps the window and survives a garbage value", () => {
+    expect(writeMlSettings({ nearDupeWindowMs: 1 }).nearDupeWindowMs).toBe(
+      3000
+    );
+    expect(
+      writeMlSettings({ nearDupeWindowMs: 99_999_999 }).nearDupeWindowMs
+    ).toBe(3_600_000);
+    expect(writeMlSettings({ nearDupeWindowMs: "nope" }).nearDupeWindowMs).toBe(
+      DEFAULT_NEAR_DUPE_WINDOW_MS
+    );
   });
 });
