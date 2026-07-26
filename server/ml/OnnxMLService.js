@@ -42,6 +42,11 @@ const EMBED_COLD_TIMEOUT_MS = 10 * 60_000; // cold cache: download + load
  * (`{status, name, file, progress, loaded, total}` typically), plus
  * `modelId` and `type: "progress"`.
  *
+ * Also emits `"unloaded"` for `{type: "unloaded", modelId}` — the worker's
+ * own idle timer (UNLOAD_AFTER_MS in worker/index.js) dropped its resident
+ * model. Handled internally to reset `#modelWarm` (see embedImages below);
+ * also emitted for any interested subscriber.
+ *
  * `spawn` is injectable so the default test suite never forks a real process.
  */
 export class OnnxMLService extends MLService {
@@ -164,6 +169,17 @@ export class OnnxMLService extends MLService {
         this.#events.emit("progress", msg);
         continue;
       }
+      if (msg.type === "unloaded") {
+        // The worker's OWN idle timer (independent of this class's request
+        // timeouts) dropped the model. Without this, #modelWarm would stay
+        // true forever and the next embedImages() would get the 30s warm
+        // budget while the worker actually has to reload from disk — a
+        // >2-minute gap between embed batches is the NORMAL case here
+        // (sweeps are whenIdle-gated), not a rare one.
+        this.#modelWarm = false;
+        this.#events.emit("unloaded", msg);
+        continue;
+      }
       const waiter = this.#pending.get(msg.id);
       if (!waiter) continue;
       this.#pending.delete(msg.id);
@@ -172,7 +188,7 @@ export class OnnxMLService extends MLService {
     }
   }
 
-  /** Subscribe to worker events. Currently only `"progress"` is emitted.
+  /** Subscribe to worker events: `"progress"` and `"unloaded"`.
    * @param {string} event @param {(msg: object) => void} listener */
   on(event, listener) {
     this.#events.on(event, listener);

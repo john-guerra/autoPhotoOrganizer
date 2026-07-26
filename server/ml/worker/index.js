@@ -133,7 +133,18 @@ async function ensureModel(modelId) {
 function touchUnloadTimer() {
   clearTimeout(unloadTimer);
   unloadTimer = setTimeout(() => {
+    const modelId = loaded?.id;
     loaded = null;
+    // Tell the parent — this reuses the unsolicited-frame transport
+    // `progress` already established (no `id`, so #onData routes it past
+    // the pending-request map). Without this the parent's `#modelWarm` has
+    // no way to learn the model went away: this app's sweeps are
+    // `whenIdle`-gated by design (runSweep awaits idle() between batches
+    // specifically to stand aside while the user browses), so a >2-minute
+    // gap between embed batches is the NORMAL case, not an edge case, and
+    // the next embed would otherwise be timed as "warm" (30s) while the
+    // worker actually has to reload the model from disk.
+    if (modelId) reply({ type: "unloaded", modelId });
   }, UNLOAD_AFTER_MS);
   unloadTimer.unref?.();
 }

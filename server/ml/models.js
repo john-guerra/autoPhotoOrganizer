@@ -20,7 +20,12 @@ export const MODELS = [
     outputKey: "pooler_output",
     dim: 768,
     dtype: "int8",
-    approxDownloadMB: 100,
+    // Measured, not guessed: a real from_pretrained() download of the int8
+    // ONNX export (vision_model_int8.onnx + config + preprocessor config)
+    // came to 94,099,141 bytes (89.7 MB) on 2026-07-25. Rendered in a later
+    // task's settings panel before the user starts the download — a wrong
+    // number there is a metered-connection surprise, not a cosmetic bug.
+    approxDownloadMB: 90,
     note: "~4x the CPU cost of CLIP per photo, clearly better zero-shot accuracy",
   },
   {
@@ -30,7 +35,12 @@ export const MODELS = [
     outputKey: "image_embeds",
     dim: 512,
     dtype: "int8",
-    approxDownloadMB: 45,
+    // Measured the same way as SigLIP above: 88,653,921 bytes (84.5 MB) for
+    // the int8 vision_model_int8.onnx + config + preprocessor config,
+    // 2026-07-25. The old 45 MB estimate undersold this by roughly half —
+    // "faster to run" (fewer patches) is not the same as "smaller to
+    // download"; CLIP and SigLIP's downloads are actually close in size.
+    approxDownloadMB: 85,
     note: "49 patches instead of 196 — much cheaper, lower accuracy",
   },
 ];

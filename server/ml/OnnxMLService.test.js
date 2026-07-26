@@ -358,6 +358,64 @@ describe("request timeout", () => {
       vi.useRealTimers();
     }
   });
+
+  it("treats the model as cold again after the worker reports its idle-timer unload", async () => {
+    // This app's sweeps are whenIdle-gated by design (runSweep awaits idle()
+    // between batches specifically to stand aside while the user browses a
+    // grid of thumbnails) — a multi-minute gap between embed batches is the
+    // NORMAL operating mode, not a rare edge case. The worker's own idle
+    // timer (UNLOAD_AFTER_MS, worker/index.js) drops the model after 120s of
+    // no embed traffic; without this, the parent would still think the
+    // model is warm and give the next embed only 30s, while the worker
+    // actually has to reload it from disk — competing for CPU with exactly
+    // the libvips thumbnailing that made the user active in the first
+    // place.
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild();
+      const svc = new OnnxMLService({ spawn: () => child });
+      const cfg = svc.configure({
+        modelId: "Xenova/clip-vit-base-patch32",
+        threads: 1,
+      });
+      const configureSent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+      child.reply({ id: configureSent.id, ok: true });
+      await cfg;
+
+      const first = svc.embedImages([Buffer.from("x")]);
+      const firstSent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+      child.reply({ id: firstSent.id, vectors: [[1]], dim: 1 });
+      await first; // warm now
+
+      // The worker's OWN idle timer fired and unloaded the model —
+      // unsolicited, no matching request id, exactly like a progress frame.
+      child.reply({
+        type: "unloaded",
+        modelId: "Xenova/clip-vit-base-patch32",
+      });
+
+      const second = svc.embedImages([Buffer.from("y")]);
+      let settled = false;
+      second.then(
+        () => (settled = true),
+        () => (settled = true)
+      );
+
+      // The warm (30s) budget must NOT apply — prove it by advancing past
+      // it and observing the promise is still pending.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(settled).toBe(false);
+
+      // It does eventually time out on the cold (10 min) budget, proving
+      // THAT budget — not the warm one — is what actually applied.
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(settled).toBe(true);
+      await expect(second).rejects.toThrow(/embed.*timed out/i);
+      svc.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("progress events", () => {
@@ -394,6 +452,24 @@ describe("progress events", () => {
     svc.off("progress", cb);
     child.stdout.emit("data", JSON.stringify({ type: "progress" }) + "\n");
     expect(cb).not.toHaveBeenCalled();
+    svc.stop();
+  });
+
+  it("emits 'unloaded' for the worker's idle-timer frame", () => {
+    const child = fakeChild();
+    const svc = new OnnxMLService({ spawn: () => child });
+    svc.health().catch(() => {});
+    const seen = [];
+    svc.on("unloaded", (msg) => seen.push(msg));
+    child.stdout.emit(
+      "data",
+      JSON.stringify({
+        type: "unloaded",
+        modelId: "Xenova/clip-vit-base-patch32",
+      }) + "\n"
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0].modelId).toBe("Xenova/clip-vit-base-patch32");
     svc.stop();
   });
 });
