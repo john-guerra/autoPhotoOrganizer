@@ -8,6 +8,7 @@
     resetLibrary,
   } from "./api.js";
   import Modal from "./Modal.svelte";
+  import MlSettings from "./MlSettings.svelte";
 
   let {
     library = [],
@@ -199,6 +200,12 @@
       <p class="empty">Every photo's metadata has been read.</p>
     {/if}
   </section>
+
+  <!-- Image embeddings (#161). Its own component, but it lives here because
+       this is where the library's other background/cache work already is —
+       the metadata sweep above is its nearest neighbour in both cost and
+       shape. -->
+  <MlSettings />
 
   <section class="danger">
     <h3>Danger zone</h3>

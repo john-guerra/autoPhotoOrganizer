@@ -616,6 +616,41 @@ export const timelineFilter = {
   badgeTexts: (page) => page.locator(".time-filter .za-value").allInnerTexts(),
 };
 
+// --- Manage library, and the ML settings section inside it (#161) ------------
+
+/** Open the ＋ menu's "Manage library" dialog and wait for it. */
+export async function openManageLibrary(page) {
+  await toolbar.plus(page).click();
+  await toolbar.menuItem(page, "Manage library").click();
+  await expect(
+    page.locator('dialog.modal[aria-label="Manage library"]')
+  ).toBeVisible();
+}
+
+export const mlSettings = {
+  root: (page) => page.getByTestId("ml-settings"),
+  /** "N of M embedded · F failed · P not computed yet" — pending and failed
+   *  are DIFFERENT answers and are rendered as separate cells on purpose. */
+  counts: (page) => page.getByTestId("ml-counts"),
+  /** The execution provider that actually won validation, verbatim. */
+  provider: (page) => page.getByTestId("ml-provider"),
+  model: (page) => page.getByTestId("ml-model"),
+  enable: (page) => page.getByTestId("ml-enable"),
+  /** The consent line above the toggle: what gets downloaded, how big, and
+   *  under which licence — the sentence the user reads BEFORE opting in. */
+  consent: (page) => page.getByTestId("ml-consent"),
+  /** The inline status/error line — the panel's only feedback channel. */
+  message: (page) => page.getByTestId("ml-message"),
+  embedNow: (page) => page.getByTestId("ml-embed-now"),
+  storageRows: (page) => page.getByTestId("ml-storage-row"),
+  /** The way back from a failure record — only rendered when there ARE
+   *  failures, because it is the only control in the app that can clear one
+   *  when no vector exists to hang a Purge button off. */
+  retryFailed: (page) => page.getByTestId("ml-retry-failed"),
+  /** The line stating that RAW is skipped rather than failed. */
+  rawNote: (page) => page.getByTestId("ml-raw-note"),
+};
+
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------
 
 export const menu = {

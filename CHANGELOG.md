@@ -6,6 +6,28 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.30
+
+- **AutoGallery can now analyze your photos by what they look like, so future
+  features can find them without you having tagged anything — off by default.**
+  Turn it on from Manage library, which shows you the model, its download
+  size, and its licence before anything downloads. (#161)
+- **New ML settings in Manage library**: pick the model, cap how many cores it
+  can use (half your machine by default, so browsing stays smooth), see how
+  many photos are done and how many failed, and reclaim the disk space a
+  model's data uses. (#161)
+- Analyzing your library in the background leaves thumbnails cached for every
+  photo it passes over, so the grid loads instantly everywhere afterwards,
+  not just where you've already scrolled. (#161)
+- **A problem with the model or the download no longer writes off your
+  photos.** If the analyzer itself can't run — no connection on the plane, a
+  blocked proxy, a full disk — it now stops and says why, instead of marking
+  every photo "could not be read". And when photos are genuinely marked
+  failed, a **Retry failed** button in Manage library puts them back in line.
+  (#161)
+- RAW files are skipped rather than counted as failures, and the panel says
+  so — there's no preview AutoGallery can read for one yet. (#161)
+
 ## 2.18.29
 
 - **Internal:** step 5 of the jump/landing refactor (#189) — every feed-window

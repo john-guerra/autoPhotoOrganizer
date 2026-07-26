@@ -195,6 +195,14 @@ export function applySchema(db) {
   // data UPDATE is not, so it needs a gate — PRAGMA user_version, SQLite's
   // built-in one-shot counter. It is the app's counter, not SQLite's, and only
   // ever moves forward.
+  //
+  // This section sits HERE — before the ML artifacts tables below — and not
+  // where a "repairs run last" instinct would put it, because the dataVersion
+  // < 2 step drops and recreates photo_embeddings/ml_status, and that DROP
+  // must execute before the `CREATE TABLE IF NOT EXISTS` further down. If it
+  // ran after, `IF NOT EXISTS` would see tables that already exist (with the
+  // wrong constraint) and skip creating them — the drop would have nothing
+  // left to fix.
   const dataVersion = db.pragma("user_version", { simple: true });
   if (dataVersion < 1) {
     // #169: 2.17.14-2.18.4 marked every file unreachable during a hash sweep
@@ -213,6 +221,108 @@ export function applySchema(db) {
                 WHERE hash_attempted = 1 AND content_hash IS NULL AND stale = 0`);
     db.pragma("user_version = 1");
   }
+  if (dataVersion < 2) {
+    // #161 fix round 2 (I1): photo_embeddings/ml_status first shipped (commit
+    // c465228) with a plain `REFERENCES photos(id)` — no ON DELETE CASCADE.
+    // better-sqlite3 enables PRAGMA foreign_keys by default, so every existing
+    // `DELETE FROM photos` path threw once a photo had a vector or a sentinel;
+    // the CASCADE clause (commit e126785) fixes that — but only for a table
+    // CREATEd fresh. `CREATE TABLE IF NOT EXISTS` is a no-op against a table
+    // that already exists, so any database that started the app in the window
+    // between those two commits has both tables WITHOUT the cascade, forever,
+    // unless something drops and recreates them — SQLite cannot ALTER a
+    // foreign-key clause in place.
+    //
+    // This DROP is safe TODAY, and ONLY today: #161 has not shipped in any
+    // released build, so no real inference result has ever been written to
+    // either table — dropping them destroys nothing. DO NOT copy this pattern
+    // forward once embeddings ship: the same DROP TABLE run against a live
+    // library would destroy hours of real inference work. A future schema
+    // change to these tables needs an actual data-preserving migration, not
+    // this one reused.
+    db.exec(`DROP TABLE IF EXISTS photo_embeddings`);
+    db.exec(`DROP TABLE IF EXISTS ml_status`);
+    db.pragma("user_version = 2");
+  }
+
+  // --- ML artifacts (#161) --------------------------------------------------
+  // Their OWN tables, never columns on `photos`. The feed's hot path is
+  // `SELECT photos.*` over a keyset seek; a ~800-byte blob per row would be
+  // dragged through every page fetch, every tree count and every group sample
+  // for no benefit whatsoever.
+  //
+  // The primary key is (photo_id, model), NOT photo_id. The entire point of the
+  // `model` column is that upgrading the model is NEW ROWS rather than a
+  // migration — so two models' vectors must be able to coexist, and a photo_id
+  // PK would forbid exactly that. Switching models then costs a backfill;
+  // switching BACK costs nothing, because the old rows are still here.
+  // ON DELETE CASCADE: better-sqlite3 enables PRAGMA foreign_keys by default
+  // (confirmed empirically — it is NOT the raw-SQLite off-by-default), so every
+  // `DELETE FROM photos` path (resetLibrary, deleteFolder(Subtree),
+  // deletePhotosByIds, missing.js relocateMissing) throws once a photo has a
+  // vector, unless the child row disappears with its parent automatically.
+  // Deriving that from a CASCADE here — rather than adding a clearEmbeddingsFor
+  // call at each of today's five delete sites — means a SIXTH delete site added
+  // later can't silently reintroduce the same throw.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS photo_embeddings (
+      photo_id   INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+      model      TEXT    NOT NULL,
+      dim        INTEGER NOT NULL,
+      scale      REAL    NOT NULL,
+      vec        BLOB    NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (photo_id, model)
+    )
+  `);
+  // "How many are embedded under model X", and the whole-library vector load,
+  // both scan by model. Without this they are full table scans of the widest
+  // table in the schema.
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_photo_embeddings_model
+       ON photo_embeddings(model)`
+  );
+
+  // The failure sentinel. An explicit table rather than an overloaded data
+  // column, because a failed embedding has no natural zero value — enrich can
+  // use width=0 and hashing can use hash_attempted=1, but a vector cannot.
+  //
+  // It carries `attempts` and `error` so a sentinel can distinguish "this photo
+  // cannot be processed" (permanent) from "the drive was not there" (a property
+  // of the MOMENT, and the common case on a removable-drive library). Conflating
+  // those two is #169, which excluded a whole unmounted drive from hashing
+  // forever. runSweep already classifies; this is where the answer is recorded.
+  //
+  // Keyed by model as well as stage: a photo that fails under one model is not
+  // thereby failed under another.
+  // Same ON DELETE CASCADE reasoning as photo_embeddings above: a failure
+  // sentinel must not outlive the photo it describes, or deleting that photo
+  // throws instead of just dropping its sentinel too.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ml_status (
+      photo_id   INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+      stage      TEXT    NOT NULL,
+      model      TEXT    NOT NULL,
+      state      TEXT    NOT NULL,
+      attempts   INTEGER NOT NULL DEFAULT 1,
+      error      TEXT,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (photo_id, stage, model)
+    )
+  `);
+  // embedCounts' failed-count query filters this table by (stage, model) with
+  // no photo_id bound at all; without an index on that pair it is a full
+  // table scan. (It is NOT what serves pendingEmbedRows' worklist anti-join —
+  // that query correlates on photo_id, which is already the leading column of
+  // this table's own PRIMARY KEY, so SQLite plans it off that PK's automatic
+  // index regardless of this one. Verified via EXPLAIN QUERY PLAN; see
+  // queryPlan.test.js's "embed worklist" describe block. An earlier version of
+  // this comment claimed this index was what protected the worklist query —
+  // it never was.)
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_ml_status_lookup
+       ON ml_status(stage, model, photo_id)`
+  );
 
   // The metadata sweep's to-do list is PENDING_CONDITION (see db/enrich.js —
   // width IS NULL, an unprobed video, or gps_checked = 0). It runs once per

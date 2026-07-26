@@ -171,6 +171,51 @@ describe("runSweep", () => {
     expect(result.failed).toBe(1);
   });
 
+  it("honours a caller's own isTransient for an error with NO errno at all", async () => {
+    // The embedder's case: its work crosses a process boundary, so the error
+    // it sees was rebuilt from a string and has no `code` for the default
+    // classifier to read. Without this hook every host-level failure (a
+    // model that would not download, a dead worker) reads as "this photo
+    // cannot be read" and gets a permanent sentinel — for every row of every
+    // batch, i.e. the whole library.
+    const rows = [1, 2, 3].map((id) => ({ id, folder: dir }));
+    const wl = makeWorklist(rows);
+    const failed = [];
+    const result = await runSweep(liveJob(), {
+      nextBatch: wl.nextBatch,
+      process: async () => {
+        throw new Error("Could not locate file: onnx/model.onnx");
+      },
+      markFailed: (row) => failed.push(row.id),
+      folderOf: (r) => r.folder,
+      isTransient: (err) => /could not locate file/i.test(err.message),
+      idle: noIdle,
+    });
+    expect(failed).toEqual([]);
+    expect(result.paused).toBe(true);
+    expect(result.pauseReason).toMatch(/onnx\/model\.onnx/);
+    expect(wl.pending.size).toBe(3);
+  });
+
+  it("says WHY it paused, and the two reasons are different", async () => {
+    // "drive not available" for a failed model download would be a false
+    // statement with a useless fix attached ("plug the drive back in").
+    const gone = join(dir, "unmounted");
+    const wl = makeWorklist([{ id: 1, folder: gone }]);
+    const result = await runSweep(liveJob(), {
+      nextBatch: wl.nextBatch,
+      process: async () => {
+        const e = new Error("ENOENT");
+        e.code = "ENOENT";
+        throw e;
+      },
+      markFailed: () => {},
+      folderOf: (r) => r.folder,
+      idle: noIdle,
+    });
+    expect(result.pauseReason).toBe("drive not available");
+  });
+
   it("throws AbortError when the job is canceled, without marking", async () => {
     const rows = [1, 2, 3, 4].map((id) => ({ id, folder: dir }));
     const wl = makeWorklist(rows);
@@ -249,7 +294,7 @@ describe("runSweep", () => {
         folderOf: (r) => r.folder,
         idle: noIdle,
       })
-    ).rejects.toThrow(/markFailed must remove the row/i);
+    ).rejects.toThrow(/markFailed is not removing the row/i);
     expect(failed).toEqual([1]);
   }, 2000);
 

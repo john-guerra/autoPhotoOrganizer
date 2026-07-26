@@ -30,6 +30,24 @@ const TRANSIENT_CODES = new Set([
 ]);
 
 /**
+ * The DEFAULT classifier: errno-based, and the only thing `enrich` and
+ * `hashing` ever needed — every failure they can see comes from a filesystem
+ * call, so the file's own errno is the whole story.
+ *
+ * A caller whose work goes through something OTHER than the filesystem (the
+ * embedder, whose encoder lives in another process) must override
+ * `opts.isTransient`, because that boundary loses the errno: an error crossing
+ * a stdio protocol is reconstructed from a STRING and has no `code` at all, so
+ * this returns false for it and the row would be sentinel-marked for a failure
+ * that says nothing about the photo. See embedSweep.js's own isTransient.
+ * @param {any} err
+ * @returns {boolean}
+ */
+export function isTransientCode(err) {
+  return TRANSIENT_CODES.has(err?.code);
+}
+
+/**
  * ONE background drain, reused by every sweep in the app.
  *
  * `/api/enrich` and `hashAllPending` were the same loop written twice by hand.
@@ -64,14 +82,29 @@ const TRANSIENT_CODES = new Set([
  *   rather than hanging, but the fix is always in the caller's `markFailed`.
  * @param {(row: any) => string} opts.folderOf folder abs_path, for the probe
  * @param {(p: {done: number, failed: number}) => void} [opts.onProgress]
+ * @param {(err: any) => boolean} [opts.isTransient] "is this failure a
+ *   property of the MOMENT rather than of this photo?" Defaults to
+ *   `isTransientCode` (errno only), which is what `enrich` and `hashing`
+ *   have always used. A caller whose work can fail for reasons that are
+ *   neither the file's nor the moment's — a broken ENCODER, a model that
+ *   won't download — overrides this, because the honest answer for a
+ *   HOST-level failure is also "pause": it teaches us nothing about the
+ *   photo, and a sentinel written from it is a false statement about the
+ *   user's library (#161 final review, Critical 1).
  * @param {() => Promise<void>} [opts.idle]
  * @param {(row: any) => (number|string)} [opts.idOf] identity for the
  *   stall guard below. Defaults to `(row) => row.id` — every row in this
  *   codebase's sweeps has a numeric `id`. Override only if a caller's rows
  *   key on something else.
- * @returns {Promise<{done: number, failed: number, paused: boolean}>} `done`
- *   counts BOTH successfully-written rows and permanently-failed
- *   (sentinel-marked) rows — it is "rows classified", not "rows written".
+ * @returns {Promise<{done: number, failed: number, paused: boolean,
+ *   pauseReason?: string}>} `done` counts BOTH successfully-written rows and
+ *   permanently-failed (sentinel-marked) rows — it is "rows classified", not
+ *   "rows written". `pauseReason` is present only when `paused` is true, and
+ *   exists so the caller can tell the user WHY it stood down: "drive not
+ *   available" and "the model could not be downloaded" are different
+ *   problems with different fixes, and reporting the first for the second is
+ *   the same class of false statement this whole classification exists to
+ *   avoid.
  */
 export async function runSweep(
   job,
@@ -81,6 +114,7 @@ export async function runSweep(
     markFailed,
     folderOf,
     onProgress,
+    isTransient = isTransientCode,
     idle = whenIdle,
     idOf = (row) => row.id,
   }
@@ -92,6 +126,23 @@ export async function runSweep(
   // hands back a FRESH row object on every `.all()` — never the same
   // reference twice, even for the identical row. So the stall guard below
   // cannot compare by object identity; it has to compare by id.
+  //
+  // NOT AN ABSOLUTE INVARIANT, and the guard's error must not be read as
+  // "the caller has a bug" without checking this first. A sentinel written
+  // by THIS sweep can legitimately be deleted underneath it by something
+  // else in the same process, which puts the row straight back in
+  // `nextBatch`'s result:
+  //   - purgeModel() (POST /api/ml/purge) — deletes every ml_status row for
+  //     the model; the route and the settings panel's Purge button both
+  //     refuse while a sweep is in flight for exactly this reason, and the
+  //     new POST /api/ml/retry-failed refuses for the same one.
+  //   - clearEmbeddingsFor() from upsertScan (server/db/photos.js) — a
+  //     CONCURRENT SCAN of a folder whose files changed clears their
+  //     sentinels. Nothing gates that, and nothing should: the scan is
+  //     right, the vector really is stale.
+  // Both are rare, both are user-triggered, and the cost is one aborted
+  // sweep that the next scan restarts — hence a loud error rather than
+  // silent looping. See the throw below for the wording the user gets.
   const failedIds = new Set();
 
   const abortIfCanceled = () => {
@@ -125,8 +176,11 @@ export async function runSweep(
       if (failedIds.has(id)) {
         throw new Error(
           `runSweep: row ${id} was marked failed but nextBatch() returned ` +
-            "it again — markFailed must remove the row from the worklist, " +
-            "or the sweep cannot terminate"
+            "it again, so the sweep cannot terminate. Either something " +
+            "cleared that record while the sweep was running (a purge, a " +
+            "retry-failed, or a rescan of the same folder) — in which case " +
+            "just start it again — or markFailed is not removing the row " +
+            "from the worklist, which is a bug in the caller"
         );
       }
     }
@@ -155,17 +209,29 @@ export async function runSweep(
           // costs the data.
           if (!reachable(folderOf(row))) {
             onProgress?.({ done, failed });
-            return { done, failed, paused: true };
+            return {
+              done,
+              failed,
+              paused: true,
+              pauseReason: "drive not available",
+            };
           }
           // The folder is present, but the error itself may still be a
           // property of the moment (EMFILE storm, a flaky external/network
-          // volume) rather than of the file — see TRANSIENT_CODES above. Same
+          // volume) rather than of the file — see TRANSIENT_CODES above — or
+          // of the TOOL doing the work rather than of the photo it was
+          // pointed at, which is what embedSweep's own isTransient adds. Same
           // response as the unreachable-folder case: stand the whole sweep
           // down and mark nothing, rather than writing a permanent sentinel
           // for a file that was never really examined.
-          if (TRANSIENT_CODES.has(err?.code)) {
+          if (isTransient(err)) {
             onProgress?.({ done, failed });
-            return { done, failed, paused: true };
+            return {
+              done,
+              failed,
+              paused: true,
+              pauseReason: String(err?.message ?? err),
+            };
           }
           // Folder is there and the error is not transient: the file is
           // genuinely gone or genuinely unreadable. That IS a permanent

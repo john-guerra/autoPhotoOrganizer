@@ -1,4 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeImage,
+  shell,
+} from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp, listenOnOpenPort } from "../server/index.js";
@@ -27,6 +34,27 @@ async function startEmbeddedServer() {
   return port;
 }
 
+/**
+ * Hand an http(s) URL to the OS browser, and TELL THE USER when that fails.
+ *
+ * `openExternal` rejects on a real failure (no handler registered for the
+ * scheme, a locked-down profile). Swallowing that rejection would leave the
+ * user clicking a link that does nothing — the dead control this whole path
+ * exists to prevent — so the failure gets a dialog with the URL in it, which
+ * they can at least copy. Non-http(s) is dropped silently and deliberately:
+ * `javascript:`, `file:`, `data:` and custom schemes must never reach the OS.
+ * @param {string} url Chromium's normalised absolute URL
+ */
+function openExternally(url) {
+  if (!/^https?:\/\//i.test(url)) return;
+  shell.openExternal(url).catch((err) => {
+    dialog.showErrorBox(
+      "Couldn't open that link",
+      `AutoGallery couldn't hand this link to your browser:\n\n${url}\n\n${err?.message ?? err}`
+    );
+  });
+}
+
 async function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
@@ -41,6 +69,26 @@ async function createWindow() {
       sandbox: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
+  });
+
+  // An external link (the ML settings panel's model card, #161) must open in
+  // the user's own browser. Electron denies window.open by default, so without
+  // this the anchor is a DEAD CONTROL in the packaged app while working fine
+  // under `npm run dev` — the exact class of bug no unit test sees. Only
+  // http(s) is handed to the OS.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternally(url);
+    return { action: "deny" };
+  });
+
+  // The handler above only covers window.open / target="_blank". An ordinary
+  // same-tab link (or an anchor that ever loses its target) would instead
+  // NAVIGATE this window to huggingface.co — no address bar, no back button,
+  // no way home. Anything that isn't our own origin leaves for the OS browser.
+  win.webContents.on("will-navigate", (event, url) => {
+    if (url.startsWith(DEV_URL) || url.startsWith(`http://${HOST}:`)) return;
+    event.preventDefault();
+    openExternally(url);
   });
 
   if (isDev) {
