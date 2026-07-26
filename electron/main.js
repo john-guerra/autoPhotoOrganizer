@@ -1,4 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeImage,
+  shell,
+} from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp, listenOnOpenPort } from "../server/index.js";
@@ -41,6 +48,17 @@ async function createWindow() {
       sandbox: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
+  });
+
+  // An external link (the ML settings panel's model card, #161) must open in
+  // the user's own browser. Electron denies window.open by default, so without
+  // this the anchor is a DEAD CONTROL in the packaged app while working fine
+  // under `npm run dev` — the exact class of bug no unit test sees. Only
+  // http(s) is handed to the OS, and the app window itself never navigates
+  // away from its own origin.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: "deny" };
   });
 
   if (isDev) {

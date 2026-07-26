@@ -636,6 +636,9 @@ export const mlSettings = {
   provider: (page) => page.getByTestId("ml-provider"),
   model: (page) => page.getByTestId("ml-model"),
   enable: (page) => page.getByTestId("ml-enable"),
+  /** The consent line above the toggle: what gets downloaded, how big, and
+   *  under which licence — the sentence the user reads BEFORE opting in. */
+  consent: (page) => page.getByTestId("ml-consent"),
   /** The inline status/error line — the panel's only feedback channel. */
   message: (page) => page.getByTestId("ml-message"),
   embedNow: (page) => page.getByTestId("ml-embed-now"),

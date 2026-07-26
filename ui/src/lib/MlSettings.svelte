@@ -274,12 +274,24 @@
       />
       <span>Embed photos in the background</span>
     </label>
-    <p class="hint consent">
+    <p class="hint consent" data-testid="ml-consent">
       Off until you turn it on, because turning it on downloads
       <strong>{activeModel?.label ?? settings.modelId}</strong>
       — about
       <strong>{activeModel?.approxDownloadMB ?? "?"} MB</strong>, once, from
-      Hugging Face. Licence: {activeModel?.licence ?? "see the model's page"}.
+      Hugging Face. Licence: {activeModel?.licence ??
+        "not known — check the model card"}.
+      {#if activeModel?.modelCardUrl}
+        <!-- The licence line only ever repeats what the card DECLARES, and for
+             some models that is nothing at all — so the card itself is always
+             one click away rather than being something the user has to take
+             our word for. -->
+        <a
+          href={activeModel.modelCardUrl}
+          target="_blank"
+          rel="noreferrer noopener">Model card</a
+        >
+      {/if}
     </p>
 
     <label class="field">
@@ -435,6 +447,10 @@
   }
   .consent {
     color: #a9a9a9;
+  }
+  .consent a {
+    color: #6aa9ff;
+    white-space: nowrap;
   }
   .warn-note {
     color: #c9b48a;

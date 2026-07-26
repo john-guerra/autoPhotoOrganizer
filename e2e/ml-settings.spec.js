@@ -60,8 +60,43 @@ test.describe("ML settings", () => {
     await openManageLibrary(page);
 
     await expect(mlSettings.enable(page)).not.toBeChecked();
-    await expect(mlSettings.root(page)).toContainText(/MB/);
-    await expect(mlSettings.root(page)).toContainText(/Apache-2\.0|MIT/);
+
+    const consent = mlSettings.consent(page);
+    await expect(consent).toContainText(/MB/);
+    await expect(consent).toContainText(/Licence:/);
+    // The card is always one click away, because a licence line the user has
+    // to take our word for is not much of a consent notice — and for some
+    // models the honest answer is "the card declares nothing".
+    await expect(
+      consent.getByRole("link", { name: /model card/i })
+    ).toHaveAttribute("href", /^https:\/\/huggingface\.co\//);
+
+    expect(errors).toEqual([]);
+  });
+
+  test("never claims a licence the model's card does not declare", async ({
+    page,
+  }) => {
+    // openai/clip-vit-base-patch32 declares NO licence: no `license` key in
+    // its card metadata, none in the README body. (MIT belongs to the CLIP
+    // *code* repo, which is a different artifact.) The panel says so, in the
+    // one place where a confident guess would be worst — the moment the user
+    // decides whether to download it.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await openManageLibrary(page);
+
+    await mlSettings.model(page).selectOption("Xenova/clip-vit-base-patch32");
+
+    const consent = mlSettings.consent(page);
+    await expect(consent).toContainText(/not stated/i);
+    await expect(consent).not.toContainText(/MIT/);
+    await expect(
+      consent.getByRole("link", { name: /model card/i })
+    ).toHaveAttribute(
+      "href",
+      "https://huggingface.co/openai/clip-vit-base-patch32"
+    );
 
     expect(errors).toEqual([]);
   });

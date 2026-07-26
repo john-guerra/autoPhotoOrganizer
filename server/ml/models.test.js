@@ -21,7 +21,15 @@ describe("the model registry", () => {
       // The settings panel promises the licence is visible BEFORE the user
       // consents to the download — a blank one there would be an empty
       // promise, so it is a registry invariant, not a UI detail.
+      //
+      // PRESENT and non-empty is the whole bar, deliberately: "the card
+      // declares nothing" is a legal, correct answer (openai/clip-vit-base-
+      // patch32 is exactly that), and a test demanding a recognised SPDX id
+      // would push the next person into inventing one. Missing is the only
+      // failure. The card link is required alongside it, so an unknown is
+      // always something the user can go and check.
       expect(m.licence).toMatch(/\S/);
+      expect(m.modelCardUrl).toMatch(/^https:\/\/huggingface\.co\//);
     }
   });
 
