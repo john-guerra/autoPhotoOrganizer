@@ -1019,8 +1019,18 @@ export async function retryMlFailed() {
  * the button is dead.
  * @returns {Promise<{started:boolean, alreadyRunning?:boolean}>}
  */
-export async function startEmbed() {
-  const res = await fetch("/api/ml/embed", { method: "POST" });
+/**
+ * Kick the background embedder. With `ids`, embeds ONLY those photos (#206) —
+ * the selection, the current view, or one right-clicked folder — so a user can
+ * point it at the shoot they are culling instead of waiting out the library.
+ * @param {number[]|null} [ids]
+ */
+export async function startEmbed(ids = null) {
+  const res = await fetch("/api/ml/embed", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(ids ? { ids } : {}),
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `couldn't start embedding (${res.status})`);

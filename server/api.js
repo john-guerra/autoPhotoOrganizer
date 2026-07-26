@@ -74,10 +74,12 @@ import {
   writeMlSettings,
   MlSettingsPersistError,
   effectiveThreshold,
+  DEVICES,
 } from "./ml/settings.js";
 import { MODELS } from "./ml/models.js";
 import {
   embedCounts,
+  pendingEmbedRows,
   modelStorage,
   purgeModel,
   clearEmbedFailures,
@@ -195,13 +197,32 @@ function kickHashSweep(db) {
  *   NOT the single-flight latch (see isEmbedInFlight, checked by the
  *   /api/ml/embed route itself before calling this).
  */
-function kickEmbedSweep(db, getMl, { force = false } = {}) {
+function kickEmbedSweep(
+  db,
+  getMl,
+  { force = false, scopeIds = null, scopeLabel = null } = {}
+) {
   let job;
   try {
-    const { modelId, threads, enabled } = readMlSettings();
+    const { modelId, threads, enabled, device } = readMlSettings();
     if (!enabled && !force) return; // opt-in; silent when off — see doc above
 
-    job = registry.create("embed", { label: "Embedding photos" });
+    // How many photos this sweep will actually touch, counted ONCE, up front.
+    // Without it the job's `total` stays 0 and the JobsPanel renders an
+    // indeterminate bar for the whole run (#208) — on a 34,807-photo library
+    // that is ~20 minutes of a control that looks frozen. Scoped sweeps count
+    // their own scope, so "3 of 12" means what it says.
+    const pending = scopeIds
+      ? pendingEmbedRows(db, modelId, Number.MAX_SAFE_INTEGER, scopeIds).length
+      : (() => {
+          const c = embedCounts(db, modelId);
+          return Math.max(0, c.total - c.embedded - c.failed);
+        })();
+
+    job = registry.create("embed", {
+      label: scopeLabel ? `Embedding ${scopeLabel}` : "Embedding photos",
+      total: pending,
+    });
     const ml = getMl();
 
     // A first embed against a freshly-selected model means the worker has to
@@ -247,8 +268,10 @@ function kickEmbedSweep(db, getMl, { force = false } = {}) {
       model: modelId,
       threads,
       job,
+      scopeIds,
+      device,
       onProgress: (counters) =>
-        registry.update(job.id, embedProgress(counters)),
+        registry.update(job.id, embedProgress(counters, pending)),
     })
       .then((r) => {
         // Mirrors kickHashSweep above: "embed" is SELF_CLEARING, so finish()
@@ -322,11 +345,11 @@ function kickNearDupeSweep(db) {
   let job;
   try {
     const settings = readMlSettings();
-    if (!settings.enabled) return; // opt-in, same gate as embedding
+    if (!settings.enabled) return null; // opt-in, same gate as embedding
     // Checked before creating a job: a second job row that immediately
     // self-clears as `alreadyRunning` is a flicker in the JobsPanel the user
     // cannot act on (the same reasoning as isEmbedInFlight, #161 round 1, I2).
-    if (isNearDupeSweepInFlight()) return;
+    if (isNearDupeSweepInFlight()) return null;
 
     job = registry.create("near-dupes", { label: "Finding near-duplicates" });
     groupNearDupes(db, {
@@ -361,7 +384,13 @@ function kickNearDupeSweep(db) {
     } else {
       console.error("kickNearDupeSweep: could not start the grouping pass:", e);
     }
+    return null;
   }
+  // The job id so a caller can await completion — the toolbar button reloads
+  // the feed once grouping lands, because dupeGroupId rides the feed row and a
+  // regrouping the user cannot see is indistinguishable from one that did
+  // nothing (#207).
+  return job?.id ?? null;
 }
 
 /**
@@ -1102,6 +1131,10 @@ export function registerApi(app, { ml } = {}) {
       ...readMlSettings(),
       models: MODELS,
       maxThreads: cpus().length,
+      // The execution providers the panel may offer (#209). Sent from here
+      // rather than hardcoded client-side so the list can never drift from
+      // what writeMlSettings will actually accept.
+      devices: DEVICES,
     });
   });
 
@@ -1247,8 +1280,30 @@ export function registerApi(app, { ml } = {}) {
     if (isEmbedInFlight()) {
       return res.json({ started: false, alreadyRunning: true });
     }
-    kickEmbedSweep(getDb(), getMl, { force: true });
-    res.json({ started: true });
+    // #206: an optional `ids` scope embeds just those photos — the selection,
+    // the current view, or one right-clicked folder — instead of the whole
+    // library. Absent, behaviour is exactly as before.
+    const ids = req.body?.ids;
+    if (ids !== undefined) {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        // Specific over generic: an empty selection is a real thing a user can
+        // do, and "nothing selected" is far more useful than "bad request".
+        return res
+          .status(400)
+          .json({ error: "No photos were selected to embed." });
+      }
+      if (ids.length > 50_000) {
+        return res.status(413).json({
+          error: `That is ${ids.length.toLocaleString()} photos — too many to send at once. Embed the whole library instead.`,
+        });
+      }
+    }
+    kickEmbedSweep(getDb(), getMl, {
+      force: true,
+      scopeIds: ids ?? null,
+      scopeLabel: ids ? `${ids.length.toLocaleString()} photos` : null,
+    });
+    res.json({ started: true, scoped: ids ? ids.length : null });
   });
 
   // POST -> recompute the near-duplicate grouping (#162) against the current
@@ -1275,8 +1330,8 @@ export function registerApi(app, { ml } = {}) {
           "Photo similarity is off. Turn it on in Manage library to compute embeddings first.",
       });
     }
-    kickNearDupeSweep(getDb());
-    res.json({ started: true });
+    const jobId = kickNearDupeSweep(getDb());
+    res.json({ started: true, jobId });
   });
 
   // --- Lazy metadata enrichment --------------------------------------------

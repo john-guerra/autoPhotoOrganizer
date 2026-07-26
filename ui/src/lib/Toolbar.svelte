@@ -45,6 +45,13 @@
   let {
     appVersion = "",
 
+    // Near-duplicate + burst-selection actions (#207) — plumbed straight
+    // through to GridControls, which owns their placement beside the burst gap.
+    selectedCount = 0,
+    dupesRunning = false,
+    onfinddupes,
+    onburstselection,
+
     // Library (the ＋ menu + the add-folder popover).
     scanning = false,
     hasNativePicker = false,
@@ -195,7 +202,16 @@
         {onrevealcurrent}
         {ondetectalbums}
       />
-      <GridControls bind:zoom {zoomMax} bind:burstEnabled bind:burstGapMs />
+      <GridControls
+        bind:zoom
+        {zoomMax}
+        bind:burstEnabled
+        bind:burstGapMs
+        {selectedCount}
+        {dupesRunning}
+        {onfinddupes}
+        {onburstselection}
+      />
       <div class="spacer"></div>
       <SortControl {sort} {onsortchange} />
     </ToolGroup>

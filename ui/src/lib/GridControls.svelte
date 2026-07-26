@@ -19,6 +19,15 @@
     zoomMax = 4,
     burstEnabled = $bindable(true),
     burstGapMs = $bindable(3000),
+    // #207. Near-duplicate detection is a VIEW control in the same family as
+    // the burst gap beside it — how photos are grouped on screen — so it
+    // belongs here rather than behind a settings dialog. The two actions are
+    // callbacks because they hit the network, and this component is
+    // presentational by contract.
+    selectedCount = 0,
+    dupesRunning = false,
+    onfinddupes,
+    onburstselection,
   } = $props();
 </script>
 
@@ -44,9 +53,51 @@
       >{(burstGapMs / 1000).toFixed(1)}s</span
     >
   </label>
+
+  <!-- Stacks the SELECTION by time gaps, which manual stacking cannot do: that
+       forces every selected photo into one stack regardless of the pauses
+       inside it. Hidden rather than disabled with nothing selected — a control
+       that can never apply is noise in a toolbar this dense. -->
+  {#if selectedCount >= 2}
+    <button
+      class="grid-action"
+      data-testid="burst-selection"
+      title={`Stack the ${selectedCount} selected photos into bursts, splitting them wherever the gap exceeds ${(burstGapMs / 1000).toFixed(1)}s`}
+      onclick={() => onburstselection?.()}
+    >
+      Burst selection
+    </button>
+  {/if}
+
+  <button
+    class="grid-action"
+    data-testid="find-dupes"
+    disabled={dupesRunning}
+    title="Find photos of the same shot and stack them, using photo similarity"
+    onclick={() => onfinddupes?.()}
+  >
+    {dupesRunning ? "Finding…" : "Find duplicates"}
+  </button>
 </div>
 
 <style>
+  .grid-action {
+    background: #2c2c2c;
+    color: inherit;
+    border: none;
+    border-radius: 4px;
+    padding: 0.22rem 0.5rem;
+    cursor: pointer;
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+  .grid-action:hover:not(:disabled) {
+    background: #3a3a3a;
+  }
+  .grid-action:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
   .grid-controls {
     display: flex;
     align-items: center;

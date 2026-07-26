@@ -54,6 +54,8 @@ export async function embedAllPending(
     idle = whenIdle,
     job = null,
     onProgress = null,
+    scopeIds = null,
+    device = "auto",
   }
 ) {
   if (embedInFlight)
@@ -62,10 +64,18 @@ export async function embedAllPending(
 
   try {
     const spec = modelById(model);
-    await ml.configure({ modelId: model, threads });
+    // "auto" is the ABSENCE of a pin, not a device name: the worker branches
+    // on `config.device ? [device] : candidateDevices()`, so sending the
+    // string "auto" through would have it try to build a session on an
+    // execution provider that does not exist (#209).
+    await ml.configure({
+      modelId: model,
+      threads,
+      device: device === "auto" ? null : device,
+    });
 
     const { done, failed, paused, pauseReason } = await runSweep(job, {
-      nextBatch: () => pendingEmbedRows(db, model, limit),
+      nextBatch: () => pendingEmbedRows(db, model, limit, scopeIds),
       process: async (rows) => {
         const buffers = [];
         for (const row of rows) {
@@ -173,11 +183,19 @@ export function _resetEmbedSweepForTest() {
  * @param {{done: number, failed: number}} counters
  * @returns {{done: number, phase: string}}
  */
-export function embedProgress({ done, failed }) {
+export function embedProgress({ done, failed }, total = undefined) {
   const embedded = done - failed;
   const phase =
     failed > 0
       ? `${embedded.toLocaleString()} embedded · ${failed} failed`
       : `${embedded.toLocaleString()} embedded`;
-  return { done: embedded, phase };
+  // `total` makes the JobsPanel bar FILL instead of dancing (#208). It was
+  // omitted originally, which left a 34,807-photo sweep rendering as an
+  // indeterminate bar for ~20 minutes — the "frozen control" this project's
+  // usability contract exists to prevent. Passed in rather than counted here
+  // so this stays a pure formatter, and so the count is taken ONCE at the
+  // start of a sweep rather than re-queried on every batch.
+  return total === undefined
+    ? { done: embedded, phase }
+    : { done: embedded, total, phase };
 }

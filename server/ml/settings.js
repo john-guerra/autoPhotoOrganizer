@@ -45,6 +45,21 @@ export class MlSettingsPersistError extends Error {}
 export const DEFAULT_NEAR_DUPE_WINDOW_MS = 60_000;
 
 /**
+ * Execution providers the user may pin from the settings panel (#209).
+ *
+ * "auto" is the default and means loadWithBestDevice picks, validating each
+ * candidate against a REAL batch before trusting it — which is not paranoia:
+ * CoreML on this machine builds a session cleanly and then throws at batch >= 2
+ * (worker/devices.js). Pinning is offered because the measured result is
+ * counter-intuitive enough to be worth confirming on your own hardware:
+ * SigLIP p16-224 at batch 16 ran 38.3 ms/photo on CPU against 61.0 ms on
+ * WebGPU (darwin/arm64, 2026-07-25). A pin that cannot load must FAIL LOUDLY
+ * rather than silently falling back, or the read-out would report a provider
+ * the user did not choose and the measurement would prove nothing.
+ */
+export const DEVICES = ["auto", "cpu", "webgpu", "coreml"];
+
+/**
  * @returns {{modelId: string, threads: number, enabled: boolean,
  *   nearDupeThreshold: number|null, nearDupeWindowMs: number}}
  *
@@ -68,6 +83,7 @@ export function readMlSettings() {
     enabled: false,
     nearDupeThreshold: null,
     nearDupeWindowMs: DEFAULT_NEAR_DUPE_WINDOW_MS,
+    device: "auto",
   };
   const file = settingsFile();
   if (!existsSync(file)) return defaults;
@@ -87,6 +103,7 @@ export function readMlSettings() {
       nearDupeWindowMs: clampWindow(
         raw.nearDupeWindowMs ?? defaults.nearDupeWindowMs
       ),
+      device: DEVICES.includes(raw.device) ? raw.device : defaults.device,
     };
   } catch {
     return defaults;
@@ -127,6 +144,14 @@ export function writeMlSettings(patch) {
   if (patch.modelId !== undefined) {
     modelById(patch.modelId); // throws "unknown model: …" — do not persist it
   }
+  // Same treatment, and for the same reason: a value we never vetted must not
+  // reach the worker. Validated here, outside the try/catch, so a bad device
+  // stays a 400 rather than being reclassified as a disk failure.
+  if (patch.device !== undefined && !DEVICES.includes(patch.device)) {
+    throw new Error(
+      `unknown device: ${patch.device} (expected one of ${DEVICES.join(", ")})`
+    );
+  }
   try {
     const current = readMlSettings();
     const next = { ...current };
@@ -141,6 +166,7 @@ export function writeMlSettings(patch) {
       next.nearDupeThreshold = clampThreshold(patch.nearDupeThreshold);
     if (patch.nearDupeWindowMs !== undefined)
       next.nearDupeWindowMs = clampWindow(patch.nearDupeWindowMs);
+    if (patch.device !== undefined) next.device = patch.device;
     writeFileSync(settingsFile(), JSON.stringify(next, null, 2));
     return next;
   } catch (err) {

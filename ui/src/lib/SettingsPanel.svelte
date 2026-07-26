@@ -18,6 +18,7 @@
     adaptivePageSize = $bindable(),
     scrubberAxis = $bindable(),
     scrubberLandmarks = $bindable(),
+    onopenml,
   } = $props();
 
   const close = () => onclose?.();
@@ -61,6 +62,15 @@
 
 <Modal open={true} title="Scrolling & prefetch" size="md" onclose={close}>
   <div class="settings">
+    <!-- Machine learning is a settings domain of its own (#205), not a
+         subsection of this one — so it gets a doorway here rather than being
+         inlined, and lives in its own panel. -->
+    <section class="other-panel">
+      <button type="button" onclick={() => onopenml?.()}>
+        Machine learning…
+      </button>
+      <small>Model, GPU, photo similarity and near-duplicate stacking.</small>
+    </section>
     <section>
       <h3>Load-ahead</h3>
       <label class="toggle">
@@ -168,6 +178,28 @@
 </Modal>
 
 <style>
+  .other-panel {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+  }
+  .other-panel button {
+    background: #333;
+    color: inherit;
+    border: none;
+    border-radius: 4px;
+    padding: 0.35rem 0.7rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .other-panel button:hover {
+    background: #444;
+  }
+  .other-panel small {
+    color: #888;
+  }
   .settings {
     display: flex;
     flex-direction: column;

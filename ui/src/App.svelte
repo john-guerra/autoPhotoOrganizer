@@ -24,6 +24,7 @@
     dissolveStackMembers,
     selectedStackedMemberIds,
     targetStackMemberIds,
+    burstSelectionIntoStacks,
   } from "./lib/stackActions.js";
   import {
     nextSelectable,
@@ -75,6 +76,8 @@
     revealFolder,
     fetchMissing,
     thumbUrl,
+    startNearDupes,
+    startEmbed,
   } from "./lib/api.js";
   import { buildTreeMenuItems } from "./lib/treeMenu.js";
   import Modal from "./lib/Modal.svelte";
@@ -90,6 +93,7 @@
   import ContextMenu from "./lib/ContextMenu.svelte";
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
   import SettingsPanel from "./lib/SettingsPanel.svelte";
+  import MlPanel from "./lib/MlPanel.svelte";
   import Scrubber from "./lib/Scrubber.svelte";
   import { buildManifest, groupFraction } from "./lib/scrubber/scale.js";
   import {
@@ -883,6 +887,9 @@
   let loupeOpen = $state(false);
   let shortcutsHelpOpen = $state(false); // '?' toggles the keyboard-shortcuts overlay
   let settingsOpen = $state(false); // ',' toggles the scrolling/prefetch settings
+  // Machine learning gets its own panel (#205) rather than living at the
+  // bottom of Manage library, where nobody looking for it would scroll.
+  let mlPanelOpen = $state(false);
 
   // --- Scrolling / prefetch settings (persisted) --------------------------
   // Which prefetch strategy is live, plus the Custom knob values and the
@@ -1934,6 +1941,69 @@
     }
   }
 
+  /**
+   * Toolbar: stack the selection by its own time gaps (#207).
+   *
+   * Different from "make a stack" above, which forces the whole selection into
+   * ONE group regardless of the pauses inside it. This applies the ordinary
+   * burst rule to just the selected photos, so a swept-up run splits where the
+   * user would expect it to.
+   */
+  async function burstSelection() {
+    if (selectedIds.size < 2) return;
+    if (!burstEnabled || burstGapMs <= 0) {
+      // Never a silent no-op: clustering with no gap would find nothing and
+      // the user would press a live button and see the grid unchanged.
+      error =
+        "Burst grouping is off, so there is no time gap to split on. Turn Burst on in the toolbar first.";
+      return;
+    }
+    try {
+      const { nextItems, stacks, photos } = await burstSelectionIntoStacks(
+        items,
+        selectedIds,
+        burstGapMs
+      );
+      items = nextItems;
+      status = stacks
+        ? `Stacked ${photos.toLocaleString()} photos into ${stacks} burst${stacks === 1 ? "" : "s"}`
+        : `No photos in the selection were within ${(burstGapMs / 1000).toFixed(1)}s of each other — nothing stacked`;
+    } catch (e) {
+      error = `Couldn't stack the selection: ${e.message}`;
+    }
+  }
+
+  /**
+   * Toolbar: recompute near-duplicate grouping (#162, #207).
+   *
+   * Cheap by design — it reuses vectors already stored rather than re-reading
+   * photos — so it belongs beside the burst gap as a view control rather than
+   * behind a settings dialog. The feed is reloaded on completion because
+   * `dupeGroupId` rides the feed row, so a regrouping the user cannot see is
+   * indistinguishable from one that did nothing.
+   */
+  async function findDuplicates() {
+    try {
+      const r = await startNearDupes();
+      if (r.alreadyRunning) {
+        status = "Already looking for near-duplicates.";
+        return;
+      }
+      status = "Looking for near-duplicates…";
+      if (r.jobId) await waitForJob(r.jobId);
+      // Rebuild the window through the ONE replace transaction, never a
+      // hand-rolled refetch — `dupeGroupId` arrives on the feed row, so the
+      // grid cannot show the new grouping until the window is replaced, and
+      // CLAUDE.md's "no 7th copy" rule owns how that is done.
+      await loadInitialFeed();
+      status = "Near-duplicate stacks updated";
+    } catch (e) {
+      // Carries the server's own words, including the 409 that names photo
+      // similarity as off and says where to turn it on.
+      error = `Couldn't find near-duplicates: ${e.message}`;
+    }
+  }
+
   // Menu items for the current target. Kept as data so actions can be appended
   // without reworking the menu component; the stack items are built by the module.
   let revealTargetId = $derived(resolvedPhotos[contextMenu.targetIndex]?.id);
@@ -1965,7 +2035,56 @@
       onCreate: onCreateStack,
       onDissolve: onDissolveStack,
     }),
+    // #206: embed just these photos rather than the whole library. On a
+    // 34,807-photo library a full sweep is ~20 minutes before anything is
+    // usable, so being able to point it at the shoot you are culling right
+    // now is what makes near-duplicate stacking usable incrementally.
+    {
+      label: revealWholeSelection
+        ? `Find similar: embed ${selectedIds.size.toLocaleString()} selected`
+        : "Find similar: embed this photo",
+      action: () =>
+        embedScope(
+          revealWholeSelection ? [...selectedIds] : [revealTargetId],
+          revealWholeSelection
+            ? `${selectedIds.size.toLocaleString()} selected photos`
+            : "this photo"
+        ),
+      enabled: typeof revealTargetId === "number",
+    },
+    {
+      // The photos currently loaded in the feed window — "what I am looking
+      // at", which is the scope a user culling one folder actually wants.
+      label: `Find similar: embed these ${items.length.toLocaleString()} loaded`,
+      action: () =>
+        embedScope(
+          items.map((it) => it.id),
+          `${items.length.toLocaleString()} loaded photos`
+        ),
+      enabled: items.length > 0,
+    },
   ]);
+
+  /**
+   * Embed a specific set of photos (#206). The server refuses an empty list
+   * and answers 409 when photo similarity is switched off, both in its own
+   * words — relayed verbatim rather than flattened into "Error".
+   */
+  async function embedScope(ids, what) {
+    const clean = (ids ?? []).filter((id) => typeof id === "number");
+    if (!clean.length) {
+      error = "No photos to embed.";
+      return;
+    }
+    try {
+      const r = await startEmbed(clean);
+      status = r.started
+        ? `Embedding ${what} — watch the jobs panel.`
+        : "A sweep is already running, so nothing new was started.";
+    } catch (e) {
+      error = `Couldn't start embedding: ${e.message}`;
+    }
+  }
 
   function onTileClick(e, entry, i) {
     if (e.metaKey || e.ctrlKey) {
@@ -5614,6 +5733,12 @@
     ondetectalbums={detectAlbums}
     onsortchange={onSortChange}
     onhelp={() => (shortcutsHelpOpen = true)}
+    {selectedCount}
+    dupesRunning={$jobs.some(
+      (j) => j.type === "near-dupes" && j.status === "running"
+    )}
+    onfinddupes={findDuplicates}
+    onburstselection={burstSelection}
     onsettings={() => (settingsOpen = true)}
   >
     {#snippet timeline()}
@@ -6202,7 +6327,15 @@
     bind:adaptivePageSize
     bind:scrubberAxis
     bind:scrubberLandmarks
+    onopenml={() => {
+      settingsOpen = false;
+      mlPanelOpen = true;
+    }}
   />
+{/if}
+
+{#if mlPanelOpen}
+  <MlPanel onclose={() => (mlPanelOpen = false)} />
 {/if}
 
 <style>

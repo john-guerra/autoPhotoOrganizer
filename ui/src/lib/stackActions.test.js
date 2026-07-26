@@ -1,11 +1,21 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// createStack is the only network call burstSelectionIntoStacks makes; stubbed
+// so the clustering itself is what is under test.
+let nextGroupId = 100;
+vi.mock("./api.js", () => ({
+  createStack: vi.fn(async () => ({ groupId: nextGroupId++, count: 0 })),
+  dissolveStackApi: vi.fn(async () => ({ count: 0 })),
+}));
 import {
   applyCreateToItems,
   applyDissolveToItems,
   selectedStackedMemberIds,
   targetStackMemberIds,
   buildStackMenuItems,
+  burstSelectionIntoStacks,
 } from "./stackActions.js";
+import { createStack } from "./api.js";
 
 function item(id, extra = {}) {
   return { id, name: `${id}.jpg`, ...extra };
@@ -165,5 +175,67 @@ describe("buildStackMenuItems", () => {
     menu.find((m) => m.label === "Dissolve stack").action();
     expect(created.sort()).toEqual([1, 2]);
     expect(dissolved).toEqual([1, 2]);
+  });
+});
+
+/**
+ * Stacking a SELECTION by its own time gaps (#207).
+ *
+ * The distinction that matters: "make a stack" forces the whole selection into
+ * ONE group regardless of the pauses inside it. This applies the ordinary
+ * burst rule to just the selected photos, so a swept-up run splits where the
+ * user watching the grid would expect it to.
+ */
+describe("burstSelectionIntoStacks", () => {
+  beforeEach(() => {
+    nextGroupId = 100;
+    createStack.mockClear();
+  });
+
+  const photo = (id, mtimeMs) => ({ id, name: `${id}.jpg`, mtimeMs });
+
+  it("splits the selection where the gap exceeds the burst gap", async () => {
+    const items = [
+      photo(1, 0),
+      photo(2, 500),
+      photo(3, 60_000), // new burst
+      photo(4, 60_400),
+      photo(5, 200_000), // alone — never stacked
+    ];
+    const res = await burstSelectionIntoStacks(
+      items,
+      new Set([1, 2, 3, 4, 5]),
+      1000
+    );
+
+    expect(res.stacks).toBe(2);
+    expect(res.photos).toBe(4);
+    // The lone photo keeps no manual group: a one-photo stack is not a stack,
+    // and persisting one would freeze it out of later automatic bursting.
+    const byId = new Map(res.nextItems.map((it) => [it.id, it]));
+    expect(byId.get(1).manualStackId).toBe(byId.get(2).manualStackId);
+    expect(byId.get(3).manualStackId).toBe(byId.get(4).manualStackId);
+    expect(byId.get(1).manualStackId).not.toBe(byId.get(3).manualStackId);
+    expect(byId.get(5).manualStackId ?? null).toBeNull();
+  });
+
+  it("ignores photos outside the selection entirely", async () => {
+    // 2 sits between 1 and 3 in time and would bridge them if the selection
+    // were ignored — it must not, or the button would stack photos the user
+    // never selected.
+    const items = [photo(1, 0), photo(2, 500), photo(3, 1000)];
+    const res = await burstSelectionIntoStacks(items, new Set([1, 3]), 600);
+
+    expect(res.stacks).toBe(0);
+    expect(createStack).not.toHaveBeenCalled();
+  });
+
+  it("creates nothing when no two selected photos are close enough", async () => {
+    const items = [photo(1, 0), photo(2, 90_000)];
+    const res = await burstSelectionIntoStacks(items, new Set([1, 2]), 1000);
+
+    expect(res).toMatchObject({ stacks: 0, photos: 0 });
+    expect(res.nextItems).toEqual(items);
+    expect(createStack).not.toHaveBeenCalled();
   });
 });

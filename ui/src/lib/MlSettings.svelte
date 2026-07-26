@@ -65,6 +65,16 @@
    */
   let thresholdDraft = $state(0.9);
   let windowSecDraft = $state(60);
+  let deviceDraft = $state("auto");
+
+  /** Plain-language names for the execution providers (#209). The values come
+   *  from the server so the list cannot drift from what it will accept. */
+  const DEVICE_LABELS = {
+    auto: "Auto — measure and pick",
+    cpu: "CPU",
+    webgpu: "WebGPU (GPU)",
+    coreml: "CoreML (Apple Neural Engine)",
+  };
   /** @type {{model:string, provider:string, counts:{total:number,embedded:number,failed:number}, storage:Array<object>}|null} */
   let stats = $state(null);
   let loadFailed = $state(false);
@@ -146,6 +156,7 @@
     // slider shows the number actually in force rather than an invented one.
     thresholdDraft = settings.nearDupeThreshold ?? modelThreshold(settings);
     windowSecDraft = Math.round(settings.nearDupeWindowMs / 1000);
+    deviceDraft = settings.device ?? "auto";
   }
 
   /** The active model's own measured threshold — what `null` means. */
@@ -306,6 +317,16 @@
 
   async function changeThreads() {
     await save({ threads: Number(threadsDraft) });
+  }
+
+  async function changeDevice() {
+    const next = deviceDraft;
+    if (!(await save({ device: next }))) return;
+    say(
+      next === "auto"
+        ? "Back to picking automatically. The provider below updates on the next embed."
+        : `Pinned to ${DEVICE_LABELS[next] ?? next}. It takes effect on the next embed — press “Embed now” to compare, and watch the provider line below to confirm what actually loaded.`
+    );
   }
 
   /**
@@ -636,6 +657,30 @@
       RAW files are skipped — there is no preview AutoGallery can read for one
       yet — so they are left out of these counts rather than counted as
       failures. JPEGs, PNGs and videos are all included.
+    </p>
+
+    <label class="field">
+      <span class="field-label">Run on</span>
+      <select
+        data-testid="ml-device"
+        bind:value={deviceDraft}
+        disabled={busy || !!runningJob}
+        onchange={changeDevice}
+      >
+        {#each settings.devices ?? ["auto"] as d (d)}
+          <option value={d}>{DEVICE_LABELS[d] ?? d}</option>
+        {/each}
+      </select>
+    </label>
+    <p class="hint">
+      Auto measures and picks. On this developer's Mac, CPU actually beat WebGPU
+      — 38.3 ms per photo against 61.0 ms for SigLIP — which is odd enough to be
+      worth checking on your own hardware, so you can pin one and compare. The
+      read-out below always names what really loaded, never what was asked for.
+      {#if deviceDraft !== "auto"}
+        <strong>Pinned:</strong> if this provider can't load, embedding fails loudly
+        rather than quietly falling back — otherwise the comparison would prove nothing.
+      {/if}
     </p>
 
     <p class="provider">

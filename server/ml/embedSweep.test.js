@@ -417,7 +417,60 @@ describe("embedAllPending", () => {
       threads: 4,
       idle: async () => {},
     });
-    expect(ml.configure).toHaveBeenCalledWith({ modelId: MODEL, threads: 4 });
+    // device defaults to "auto", which is the ABSENCE of a pin and must reach
+    // the worker as null — the worker branches on `config.device ? [device] :
+    // candidateDevices()`, so the literal string "auto" would send it looking
+    // for an execution provider by that name (#209).
+    expect(ml.configure).toHaveBeenCalledWith({
+      modelId: MODEL,
+      threads: 4,
+      device: null,
+    });
+  });
+
+  it("passes a pinned execution provider straight through", async () => {
+    const db = getDb();
+    seed(db, 1);
+    const ml = stubMl();
+    await embedAllPending(db, {
+      ml,
+      processing: stubProcessing(),
+      model: MODEL,
+      threads: 4,
+      device: "webgpu",
+      idle: async () => {},
+    });
+    expect(ml.configure).toHaveBeenCalledWith({
+      modelId: MODEL,
+      threads: 4,
+      device: "webgpu",
+    });
+  });
+
+  it("embeds only the scoped photos, and an empty scope embeds nothing", async () => {
+    // #206. The empty case is the one that matters: falling through to the
+    // unscoped worklist would turn an empty selection into a full-library
+    // sweep, which is the most expensive possible way to misread [].
+    const db = getDb();
+    const ids = seed(db, 3);
+    const ml = stubMl();
+    const scoped = await embedAllPending(db, {
+      ml,
+      processing: stubProcessing(),
+      model: MODEL,
+      idle: async () => {},
+      scopeIds: [ids[0]],
+    });
+    expect(scoped.embedded).toBe(1);
+
+    const empty = await embedAllPending(db, {
+      ml,
+      processing: stubProcessing(),
+      model: MODEL,
+      idle: async () => {},
+      scopeIds: [],
+    });
+    expect(empty.embedded).toBe(0);
   });
 
   it("stops when the job is canceled", async () => {
