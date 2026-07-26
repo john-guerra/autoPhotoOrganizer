@@ -141,23 +141,51 @@ describe("groupNearDupes", () => {
     expect(grouping(ids).size).toBe(0);
   });
 
-  it("is transitive: A~B and B~C put all three in one group", async () => {
-    // A and C are 0.6 rad apart (cosine ~0.825) — BELOW the threshold, so they
-    // never match directly. They still belong together because B bridges them,
-    // which is what keeps a burst that drifts across its own span from
-    // splitting into two stacks.
+  it("does NOT chain A~B~C into one group when A and C are too far apart", async () => {
+    // THE REGRESSION THAT LIVE USE FOUND, and the reason this pass uses
+    // complete linkage rather than the obvious union-find.
+    //
+    // A~B and B~C both clear the threshold; A~C does not (0.6 rad, cosine
+    // ~0.825). Single linkage would transitively merge all three. On synthetic
+    // data that looks like a feature — "it holds a drifting burst together" —
+    // and the first version of this test asserted exactly that. Against a real
+    // 176-photo dance-class shoot it produced a single 52-photo stack, because
+    // on a continuously-shot sequence every frame is similar to the next and
+    // the chain never breaks.
+    //
+    // A group must stay as tight as its two most DISTANT members. That is what
+    // "these are the same shot" means, and it is not derivable from any pair.
     const ids = seedWithVectors([
       { time: 1000, angle: 0 },
       { time: 2000, angle: 0.3 },
       { time: 3000, angle: 0.6 },
     ]);
-    expect(Math.cos(0.6)).toBeLessThan(0.9); // the direct pair really is below
+    expect(Math.cos(0.3)).toBeGreaterThan(0.9); // A~B and B~C both qualify…
+    expect(Math.cos(0.6)).toBeLessThan(0.9); // …but A~C does not.
+    const res = await run({ threshold: 0.9 });
+
+    // A and B group; C is left out rather than dragged in behind B.
+    expect(res.groups).toBe(1);
+    expect(res.photos).toBe(2);
+    const g = grouping(ids);
+    expect(g.get(ids[0])).toBe(g.get(ids[1]));
+    expect(g.has(ids[2])).toBe(false);
+  });
+
+  it("keeps a long run of genuinely identical frames in one group", async () => {
+    // Complete linkage must not become so strict that it splits a real burst.
+    // Ten frames that are all but identical to each other stay together.
+    const ids = seedWithVectors(
+      Array.from({ length: 10 }, (_, i) => ({
+        time: 1000 + i * 1000,
+        angle: i * 0.005,
+      }))
+    );
     const res = await run({ threshold: 0.9 });
 
     expect(res.groups).toBe(1);
-    expect(res.photos).toBe(3);
-    const g = grouping(ids);
-    expect(new Set(g.values()).size).toBe(1);
+    expect(res.photos).toBe(10);
+    expect(new Set(grouping(ids).values()).size).toBe(1);
   });
 
   it("bridges a burst across an intruding photo of a different subject", async () => {

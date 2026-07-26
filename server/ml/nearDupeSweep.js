@@ -97,14 +97,13 @@ export async function groupNearDupes(
       bytes: new Int8Array(r.vec.buffer, r.vec.byteOffset, r.vec.byteLength),
     }));
     const total = rows.length;
-    const uf = new UnionFind();
+    /** @type {Array<{members: Array<object>, lastTime: number}>} */
+    const open = [];
+    const closed = [];
     let cancelled = false;
 
-    // Sliding window over the time-ordered rows. `lo` is the first row still
-    // within `windowMs` of row i, so the inner loop only ever visits genuine
-    // time-neighbours — the cost is bounded by the window's density, not by
-    // the library size, which is what keeps this ~O(n) over 114k photos.
-    let lo = 0;
+    // Walk in time order, keeping a set of OPEN groups — those whose most
+    // recent member is still within `windowMs`. Each photo joins at most one.
     for (let i = 0; i < total; i++) {
       if (i % CHUNK === 0) {
         if (job?.cancelled) {
@@ -116,42 +115,74 @@ export async function groupNearDupes(
       }
 
       const cur = rows[i];
-      while (rows[lo].time < cur.time - windowMs) lo++;
+      // Retire groups the window has moved past, so the search below stays
+      // bounded by the window's density rather than by the library size.
+      for (let k = open.length - 1; k >= 0; k--) {
+        if (open[k].lastTime < cur.time - windowMs) {
+          closed.push(open[k]);
+          open.splice(k, 1);
+        }
+      }
 
-      // Compare against every earlier photo still in the window, not merely
-      // the immediately preceding one. A burst with a single intruding frame
-      // (someone walks through shot 3 of 5) would otherwise break the chain
-      // and split one group into two.
-      for (let j = lo; j < i; j++) {
-        const other = rows[j];
-        // Vectors of different length cannot be compared and must never be
-        // silently skipped as "not similar": that would be a wrong ANSWER
-        // rather than a missing one. It can only happen if two models' rows
-        // coexist under one model name, which is a bug, so it is loud.
-        if (other.dim !== cur.dim)
-          throw new Error(
-            `photos ${other.id} and ${cur.id} have ${other.dim}- and ` +
-              `${cur.dim}-dim vectors under model ${model}`
-          );
-        if (cosine(other, cur) >= threshold) uf.union(other.id, cur.id);
+      // COMPLETE LINKAGE, and this is the single most important line in the
+      // file. The obvious implementation — union any two photos that score
+      // above the threshold — is SINGLE linkage, and single linkage chains:
+      // on a continuously-shot sequence every frame is similar to the next,
+      // so A~B~C~…~Z transitively welds the whole window into one group even
+      // though A and Z look nothing alike. That is not a hypothetical. The
+      // first build did exactly this and produced a 52-photo stack out of a
+      // 176-photo dance-class shoot, with 155 of 176 photos absorbed into 21
+      // groups. Every unit test passed; only running it against a real
+      // library showed it.
+      //
+      // Requiring a candidate to clear the threshold against EVERY member
+      // kills the chain: a group stays as tight as its two most distant
+      // members, which is what "these are the same shot" actually means.
+      let best = null;
+      let bestScore = -Infinity;
+      for (const group of open) {
+        let worst = Infinity;
+        for (const m of group.members) {
+          // Vectors of different length cannot be compared and must never be
+          // silently treated as "not similar": that would be a wrong ANSWER
+          // rather than a missing one. It can only happen if two models' rows
+          // coexist under one model name, which is a bug, so it is loud.
+          if (m.dim !== cur.dim)
+            throw new Error(
+              `photos ${m.id} and ${cur.id} have ${m.dim}- and ` +
+                `${cur.dim}-dim vectors under model ${model}`
+            );
+          const s = cosine(m, cur);
+          if (s < worst) worst = s;
+          if (worst < threshold) break; // cannot qualify; stop early
+        }
+        // Ranked by the WEAKEST link, so when two groups both qualify the
+        // photo lands in the one it fits most tightly rather than in
+        // whichever happened to be created first.
+        if (worst >= threshold && worst > bestScore) {
+          bestScore = worst;
+          best = group;
+        }
+      }
+
+      if (best) {
+        best.members.push(cur);
+        best.lastTime = cur.time;
+      } else {
+        open.push({ members: [cur], lastTime: cur.time });
       }
     }
+    closed.push(...open);
 
-    // Only components with a partner are worth storing. A photo that matched
+    // Only groups with a partner are worth storing. A photo that matched
     // nothing is the overwhelmingly common case, and writing a singleton row
     // for each would make the table as large as the library to say nothing.
-    const members = new Map();
-    for (const row of rows) {
-      const root = uf.find(row.id);
-      if (!members.has(root)) members.set(root, []);
-      members.get(root).push(row.id);
-    }
     const out = [];
     let groupId = 0;
-    for (const ids of members.values()) {
-      if (ids.length < 2) continue;
+    for (const group of closed) {
+      if (group.members.length < 2) continue;
       groupId++;
-      for (const id of ids) out.push({ photoId: id, groupId });
+      for (const m of group.members) out.push({ photoId: m.id, groupId });
     }
 
     // A cancelled pass must not replace the stored grouping with its partial
@@ -179,34 +210,6 @@ export async function groupNearDupes(
  */
 function cosine(a, b) {
   return dot(a.bytes, b.bytes) * a.scale * b.scale;
-}
-
-/** Union-find with path compression. Groups are transitive by construction:
- *  if A~B and B~C, then A, B and C are one group even when A and C never
- *  scored above the threshold themselves — which is what makes a burst that
- *  drifts across its own span hold together as a single stack. */
-class UnionFind {
-  #parent = new Map();
-
-  find(x) {
-    let root = x;
-    while (this.#parent.has(root)) root = this.#parent.get(root);
-    // Path compression: re-point everything on the way to the root, so a long
-    // burst does not degrade into a linked-list walk per comparison.
-    let cur = x;
-    while (this.#parent.has(cur)) {
-      const next = this.#parent.get(cur);
-      this.#parent.set(cur, root);
-      cur = next;
-    }
-    return root;
-  }
-
-  union(a, b) {
-    const ra = this.find(a);
-    const rb = this.find(b);
-    if (ra !== rb) this.#parent.set(rb, ra);
-  }
 }
 
 /** Test-only: clear the single-flight latch between cases. */
