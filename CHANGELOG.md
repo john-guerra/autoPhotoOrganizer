@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.33
+
+- **Photo similarity works in the installed app, not just in development**
+  (#203). The background process that reads photos for similarity had never
+  been run from a real packaged build, and if it had failed there it would have
+  failed for every user while looking fine on a developer's machine. Verified
+  against a real macOS build end-to-end — it starts, loads, and produces
+  results. No change was needed, and a test now keeps it that way.
+
 ## 2.18.32
 
 - **Dev:** fixed the two CI-only flakes in `e2e/albums.spec.js`. Album

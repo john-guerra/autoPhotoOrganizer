@@ -126,6 +126,39 @@ Keep this current: when one of these facts changes, update it in the same commit
   `asarUnpack` is still required regardless: a `.node` file cannot be loaded
   from inside an asar archive no matter how it was built. Re-verify this note
   if `onnxruntime-node` is ever upgraded across a major version.
+- **The ML worker DOES spawn from a packaged build — verified end-to-end, not
+  reasoned about** (#203). The chain looked risky enough to gate a release:
+  `OnnxMLService` spawns `process.execPath .../app.asar/server/ml/worker/index.js`
+  with `ELECTRON_RUN_AS_NODE=1`, so an **ESM** entry has to load from inside an
+  asar archive, resolve relative and bare imports there, and reach a native
+  addon that must live outside it. Every link works. Measured on
+  `2.18.32`/darwin-arm64 against a real `electron:build:mac` artifact: the
+  packaged binary spawned the real worker, `health` returned
+  `ort 1.27.0, providers cpu,webgpu,coreml`, and a real `embed` returned 2×768
+  SigLIP vectors on the `cpu` EP. **No `asarUnpack` change is needed** — the
+  pre-emptive `server/ml/worker/**` entry #203 proposed would have been dead
+  weight. Three findings worth not rediscovering:
+  - **`"type": "module"` is not what makes it work.** Electron 43 ships Node 24,
+    whose unflagged module-syntax detection reparses an ESM `.js` as ESM even
+    with no `type` field, warning `MODULE_TYPELESS_PACKAGE_JSON` and parsing
+    twice. Keep the flag for the warning and the startup cost; do not credit it
+    with correctness.
+  - **The ESM loader honours the asar→`app.asar.unpacked` redirect**, not just
+    `require`. That is the path `@huggingface/transformers` reaches
+    `onnxruntime-node` by, and it was the one genuinely unverified link.
+  - **The `onnxruntime-node` entry in `asarUnpack` is anchored, and silently
+    fragile because of it.** It does not match a nested copy under
+    `@huggingface/transformers/node_modules/`. Today npm dedupes the root's
+    1.27.0 with transformers' 1.24.3 request into one top-level install, so it
+    hits. If those ranges ever go disjoint, npm nests a second copy, the glob
+    stops covering the one actually loaded, and the `.node` ships sealed inside
+    the asar with nothing in the build complaining.
+
+  `server/ml/asarPackaging.test.js` pins all of this: config assertions always
+  run, and a live probe packs a miniature asar and runs an ESM entry out of it
+  under the real Electron binary (skipping loudly if that binary is absent).
+  Verification is **darwin/arm64 only** — see #136 for the arch matrix.
+
 - **Place names are versioned, and the version is load-bearing.**
   `photos.gps_checked = 1` is a one-way door meaning "we read this file's EXIF
   GPS", which permanently removes the row from the metadata sweep. That correctly
