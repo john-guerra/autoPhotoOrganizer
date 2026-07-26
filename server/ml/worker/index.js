@@ -52,16 +52,15 @@ let unloadTimer = null;
 let config = { modelId: null, threads: 1, device: null };
 
 /**
- * Execution-provider candidates to try, in order, for this machine — cheapest
- * real accelerator first, `cpu` always last as the guaranteed floor (every
- * platform's onnxruntime-node build has it). Mirrors transformers.js's own
- * `supportedDevices` table (dist/transformers.node.mjs) for the Node
- * environment, which is what this worker actually runs — the OLDER version
- * of this comment (Task 11) claimed prebuilt onnxruntime-node had NO CoreML
- * on any platform; that was wrong (verified directly:
- * `onnxruntime-node`'s `listSupportedBackends()` reports `coreml` as bundled
- * on this darwin/arm64 machine) and the fix is this file, not a second
- * out-of-process host — see task-11-report.md's "Revert and replace" section.
+ * Execution-provider candidates to try, in order, for this machine.
+ * Mirrors transformers.js's own `supportedDevices` table
+ * (dist/transformers.node.mjs) for the Node environment, which is what this
+ * worker actually runs — the OLDER version of this comment (Task 11) claimed
+ * prebuilt onnxruntime-node had NO CoreML on any platform; that was wrong
+ * (verified directly: `onnxruntime-node`'s `listSupportedBackends()` reports
+ * `coreml` as bundled on this darwin/arm64 machine) and the fix is this
+ * file, not a second out-of-process host — see task-11-report.md's "Revert
+ * and replace" section.
  *
  * Deliberately NOT `device: "auto"`: that hands ORT the whole candidate list
  * itself and gives this process no way to learn which EP actually ran, and
@@ -69,10 +68,47 @@ let config = { modelId: null, threads: 1, device: null };
  * rule that it must never claim an accelerator that isn't really running.
  * Trying candidates explicitly, one at a time, is what makes the winner
  * observable.
+ *
+ * win32/linux keep an accelerator-first order (DirectML/CUDA, then WebGPU,
+ * `cpu` last as the untested-but-guaranteed floor) — nobody has measured
+ * those platforms yet; that is the DEFAULT assumption an accelerator beats
+ * CPU, not a measured one. darwin does NOT: see below.
+ *
+ * darwin's order is a MEASURED choice, not the accelerator-first default —
+ * re-measure before "fixing" it back. `ML_INTEGRATION=1 npx vitest run
+ * server/ml/OnnxMLService.test.js` (the two "measures ms/photo" tests) on
+ * this darwin/arm64 machine, 2026-07-25:
+ *
+ *   CLIP ViT-B/32, batch=4, threads=2:
+ *     coreml: BROKEN (constructs fine, throws on first real inference —
+ *              batch-size sensitive: passes at batch=1, fails at batch>=2)
+ *     webgpu: 22.79 ms/photo
+ *     cpu:    12.98 ms/photo
+ *
+ *   SigLIP base patch16-224 (DEFAULT_MODEL_ID) @ batch=16 (embedAllPending's
+ *   real production `limit`), threads=2 — the configuration that actually
+ *   matters, not a cheaper stand-in:
+ *     coreml: BROKEN, same failure signature as above (re-confirmed at
+ *              production batch size, not assumed from the CLIP result)
+ *     webgpu: 60.98 ms/photo
+ *     cpu:    38.93 ms/photo
+ *
+ * CPU wins BOTH configurations, including the real production one, and
+ * CoreML is not merely slower — it does not work at all for either vetted
+ * model at any batch size above 1, on this machine. So darwin leads with
+ * `cpu`, not an accelerator: attempting coreml/webgpu first would only add
+ * a guaranteed-failed attempt (coreml) or a genuinely slower successful one
+ * (webgpu) before falling through to what wins anyway. webgpu/coreml stay
+ * in the list — never both removed — so a future model, a future
+ * onnxruntime-node/CoreML fix, or different hardware still has a path to
+ * being picked; only the ORDER reflects today's measurement. If you're
+ * changing this back to an accelerator-first order "on principle," don't —
+ * re-run the ML_INTEGRATION benchmark on the hardware in front of you first
+ * and update this comment with what it actually says.
  * @returns {string[]}
  */
 function candidateDevices() {
-  if (process.platform === "darwin") return ["coreml", "webgpu", "cpu"];
+  if (process.platform === "darwin") return ["cpu", "webgpu", "coreml"];
   if (process.platform === "win32") return ["dml", "webgpu", "cpu"];
   if (process.platform === "linux") {
     // CUDA in onnxruntime-node's prebuilt is x64-only (no aarch64 CUDA
@@ -118,9 +154,10 @@ function candidateDevices() {
  * caller's own batch someone else's output. One extra forward pass, only on
  * a cold load, is a small price for never getting that wrong.
  *
- * `cpu` is always the last candidate on every platform (candidateDevices()
- * above) and has no further EP to fall back to, so if it ALSO fails this
- * throws for real rather than swallowing it.
+ * `cpu` is ALWAYS somewhere in every platform's candidate list
+ * (candidateDevices() above — first on darwin per its measured order, last
+ * elsewhere) and never has anywhere further to fall back to itself, so if it
+ * ALSO fails this throws for real rather than swallowing it.
  * @param {object} spec model registry entry (models.js)
  * @param {string[]} candidates
  * @param {object} processor already-loaded AutoProcessor (device-independent)

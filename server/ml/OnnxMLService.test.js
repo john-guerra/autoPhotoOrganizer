@@ -711,4 +711,107 @@ integration("OnnxMLService (real child)", () => {
     },
     10 * 60_000
   );
+
+  // #161 "revert and replace", round 2: the CLIP@batch=4 benchmark above is
+  // a fast sanity check, NOT the number the darwin candidate order was set
+  // from — it uses the smaller/cheaper of the two vetted models at a batch
+  // size well below production. `embedAllPending`'s default `limit` is 16
+  // (server/ml/embedSweep.js) and `DEFAULT_MODEL_ID` is SigLIP base
+  // patch16-224 (server/ml/models.js), which does ~4x CLIP's compute per
+  // image (196 patches vs 49 — see models.js's own note). Both differences
+  // push toward a GPU/accelerator amortizing its per-call overhead better,
+  // so a CPU-wins verdict from the smaller benchmark could plausibly flip at
+  // the real configuration — this test measures the REAL configuration
+  // directly rather than extrapolating, and its result is what
+  // worker/index.js's candidateDevices() darwin order is actually set from
+  // (see the comment there for the date and numbers this produced).
+  it(
+    "measures ms/photo per EP at PRODUCTION config (SigLIP base patch16-224, batch=16)",
+    async () => {
+      const sharp = (await import("sharp")).default;
+      const { DEFAULT_MODEL_ID } = await import("./models.js");
+
+      const makeJpeg = (r, g, b) =>
+        sharp({
+          create: {
+            width: 32,
+            height: 32,
+            channels: 3,
+            background: { r, g, b },
+          },
+        })
+          .jpeg()
+          .toBuffer();
+      // 16 distinct colors, not 16 copies of one — extractVectors() rejects
+      // an all-identical/non-finite batch the same way the worker's own
+      // validation would reject degenerate real input, so a lazy "same
+      // image x16" fixture risks masking exactly the kind of failure this
+      // test exists to catch.
+      const palette = Array.from({ length: 16 }, (_, i) => {
+        const t = i / 15;
+        return [
+          Math.round(20 + t * 200),
+          Math.round(220 - t * 200),
+          Math.round(20 + ((i * 37) % 200)),
+        ];
+      });
+      const batch = await Promise.all(
+        palette.map(([r, g, b]) => makeJpeg(r, g, b))
+      );
+
+      const candidates =
+        process.platform === "darwin"
+          ? ["coreml", "webgpu", "cpu"]
+          : process.platform === "win32"
+            ? ["dml", "webgpu", "cpu"]
+            : process.platform === "linux"
+              ? process.arch === "x64"
+                ? ["cuda", "webgpu", "cpu"]
+                : ["webgpu", "cpu"]
+              : ["cpu"];
+
+      // Fewer repeats than the CLIP benchmark — SigLIP@16 is roughly 16x the
+      // per-repeat compute of CLIP@4 (4x model, 4x batch), and 3 repeats is
+      // still enough to sanity-check run-to-run stability without pushing
+      // this test's runtime past what CI patience allows.
+      const REPEATS = 3;
+      const results = {};
+      for (const device of candidates) {
+        const svc = new OnnxMLService();
+        try {
+          await svc.configure({
+            modelId: DEFAULT_MODEL_ID,
+            threads: 2,
+            device,
+          });
+          await svc.embedImages(batch); // warm-up: pays the cold load
+          const t0 = performance.now();
+          for (let i = 0; i < REPEATS; i++) await svc.embedImages(batch);
+          const elapsedMs = performance.now() - t0;
+          results[device] = {
+            msPerPhoto: Number(
+              (elapsedMs / (REPEATS * batch.length)).toFixed(2)
+            ),
+          };
+        } catch (e) {
+          results[device] = {
+            unavailable: true,
+            reason: String(e?.message ?? e),
+          };
+        } finally {
+          svc.stop();
+        }
+      }
+
+      // eslint-disable-next-line no-console -- the printed numbers are the
+      // point; paste this into the report whenever re-measuring.
+      console.log(
+        `ML EP benchmark (ms/photo, ${DEFAULT_MODEL_ID}, batch=16, threads=2):`,
+        JSON.stringify(results, null, 2)
+      );
+
+      expect(results.cpu.unavailable).not.toBe(true);
+    },
+    10 * 60_000
+  );
 });

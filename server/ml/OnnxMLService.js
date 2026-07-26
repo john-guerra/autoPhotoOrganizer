@@ -329,10 +329,13 @@ export class OnnxMLService extends MLService {
   }
 
   /** The execution provider actually running, per the worker's own
-   * candidateDevices()/loadWithBestDevice() (worker/index.js) — CoreML on
-   * darwin, DirectML on win32, CUDA on linux/x64, WebGPU, or the CPU floor,
-   * tried in that order with a real from_pretrained() attempt per candidate
-   * (not `device: "auto"`, which would hide which one actually won). Reports
+   * candidateDevices()/loadWithBestDevice() (worker/index.js) — a per-
+   * platform candidate list (DirectML on win32, CUDA on linux/x64, WebGPU,
+   * CPU; darwin leads with CPU specifically per a MEASURED result, not an
+   * assumption — see candidateDevices()'s own doc for the numbers and date),
+   * each tried with a real from_pretrained() + real forward pass at the
+   * request's own batch size (not `device: "auto"`, which would hide which
+   * one actually won). Reports
    * `#resolvedDevice` if a real embed has confirmed it; before that (no
    * embed has run yet this session/config) it reports "cpu" — never an
    * accelerator that hasn't actually been proven to load on this machine.
