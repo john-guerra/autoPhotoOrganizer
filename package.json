@@ -72,8 +72,12 @@
     "wait-on": "^9.0.10"
   },
   "overrides": {
-    "onnxruntime-node": {
-      "adm-zip": "^0.6.0"
+    "@huggingface/transformers": {
+      "onnxruntime-node": {
+        ".": "$onnxruntime-node",
+        "adm-zip": "^0.6.0"
+      },
+      "sharp": "$sharp"
     }
   },
   "build": {
