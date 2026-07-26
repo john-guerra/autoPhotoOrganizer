@@ -31,6 +31,13 @@ export const MODELS = [
     // while it runs, so a user watching "94 MB" tick by against a panel
     // that said "90 MB" would think the panel was wrong.
     approxDownloadMB: 94,
+    // The settings panel shows this BEFORE the enable toggle, because turning
+    // embedding on is the moment the user consents to fetching this file —
+    // "first use shows what is being fetched, how big, and its licence" (the
+    // spec's own words). Named with the UPSTREAM repo the Xenova export was
+    // converted from, since that repo is where the licence is actually
+    // declared: google/siglip-base-patch16-224 is Apache-2.0.
+    licence: "Apache-2.0 (upstream google/siglip-base-patch16-224)",
     note: "~4x the CPU cost of CLIP per photo, clearly better zero-shot accuracy",
   },
   {
@@ -50,6 +57,9 @@ export const MODELS = [
     // same as "smaller to download"; CLIP and SigLIP's downloads are
     // actually close in size.
     approxDownloadMB: 89,
+    // See the SigLIP entry above for why this is here and why it names the
+    // upstream repo: openai/clip-vit-base-patch32 is MIT.
+    licence: "MIT (upstream openai/clip-vit-base-patch32)",
     note: "49 patches instead of 196 — much cheaper, lower accuracy",
   },
 ];

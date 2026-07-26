@@ -922,6 +922,92 @@ export async function dismissMissing(ids) {
   return res.json();
 }
 
+// --- image embeddings (#161) -------------------------------------------------
+
+/**
+ * Current ML settings plus what a settings panel needs to render a picker
+ * without a second round trip: the vetted model list and this machine's core
+ * count.
+ * @returns {Promise<{enabled:boolean, modelId:string, threads:number, maxThreads:number, models:Array<{id:string,label:string,dim:number,approxDownloadMB:number,licence:string,note:string}>}>}
+ */
+export async function fetchMlSettings() {
+  const res = await fetch("/api/ml/settings");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `ML settings read failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * PATCH-style save of `{enabled?, modelId?, threads?}`. The server answers 400
+ * with a specific message for an invalid model id and 500 when the write to
+ * disk itself failed — both carry `error`, so render THAT rather than a
+ * generic string (CLAUDE.md: specific over generic).
+ * @param {{enabled?:boolean, modelId?:string, threads?:number}} patch
+ * @returns {Promise<{enabled:boolean, modelId:string, threads:number}>}
+ */
+export async function saveMlSettings(patch) {
+  const res = await fetch("/api/ml/settings", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `couldn't save ML settings (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Counts for the ACTIVE model, per-model on-disk storage, and the execution
+ * provider that actually won validation. `counts.embedded` excludes stale
+ * photos; `storage[].rows` counts every stored vector including stale ones —
+ * the two can legitimately differ.
+ * @returns {Promise<{model:string, provider:string, counts:{total:number, embedded:number, failed:number}, storage:Array<{model:string, rows:number, bytes:number}>}>}
+ */
+export async function fetchMlStats() {
+  const res = await fetch("/api/ml/stats");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `ML stats failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Drop every vector and failure sentinel stored under `model`.
+ * @param {string} model @returns {Promise<{rows:number}>} */
+export async function purgeMlModel(model) {
+  const res = await fetch("/api/ml/purge", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `purge failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Kick the background embedder. Fire-and-forget — progress lives in the
+ * JobsPanel. Answers `{started:false, alreadyRunning:true}` when a sweep is
+ * already in flight: the single-flight latch is NOT keyed by model, so this is
+ * the answer a user who just switched models gets, and it must be rendered or
+ * the button is dead.
+ * @returns {Promise<{started:boolean, alreadyRunning?:boolean}>}
+ */
+export async function startEmbed() {
+  const res = await fetch("/api/ml/embed", { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `couldn't start embedding (${res.status})`);
+  }
+  return res.json();
+}
+
 /** Carry a vanished copy's rating/albums/tags/stack onto an unrated survivor. */
 export async function carryMissing(fromId, toId) {
   const res = await fetch("/api/missing/carry", {

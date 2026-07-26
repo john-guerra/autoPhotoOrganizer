@@ -18,6 +18,10 @@ describe("the model registry", () => {
         m.loader
       );
       expect(m.approxDownloadMB).toBeGreaterThan(0);
+      // The settings panel promises the licence is visible BEFORE the user
+      // consents to the download — a blank one there would be an empty
+      // promise, so it is a registry invariant, not a UI detail.
+      expect(m.licence).toMatch(/\S/);
     }
   });
 

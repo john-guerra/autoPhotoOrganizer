@@ -616,6 +616,32 @@ export const timelineFilter = {
   badgeTexts: (page) => page.locator(".time-filter .za-value").allInnerTexts(),
 };
 
+// --- Manage library, and the ML settings section inside it (#161) ------------
+
+/** Open the ＋ menu's "Manage library" dialog and wait for it. */
+export async function openManageLibrary(page) {
+  await toolbar.plus(page).click();
+  await toolbar.menuItem(page, "Manage library").click();
+  await expect(
+    page.locator('dialog.modal[aria-label="Manage library"]')
+  ).toBeVisible();
+}
+
+export const mlSettings = {
+  root: (page) => page.getByTestId("ml-settings"),
+  /** "N of M embedded · F failed · P not computed yet" — pending and failed
+   *  are DIFFERENT answers and are rendered as separate cells on purpose. */
+  counts: (page) => page.getByTestId("ml-counts"),
+  /** The execution provider that actually won validation, verbatim. */
+  provider: (page) => page.getByTestId("ml-provider"),
+  model: (page) => page.getByTestId("ml-model"),
+  enable: (page) => page.getByTestId("ml-enable"),
+  /** The inline status/error line — the panel's only feedback channel. */
+  message: (page) => page.getByTestId("ml-message"),
+  embedNow: (page) => page.getByTestId("ml-embed-now"),
+  storageRows: (page) => page.getByTestId("ml-storage-row"),
+};
+
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------
 
 export const menu = {
