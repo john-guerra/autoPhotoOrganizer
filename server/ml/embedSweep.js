@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { whenIdle } from "../lib/interactive.js";
-import { runSweep } from "./sweep.js";
+import { runSweep, isTransientCode } from "./sweep.js";
+import { markHostFailure, isHostFailure } from "./MLService.js";
 import { thumbBytes } from "./thumbSource.js";
 import { quantize } from "./quantize.js";
 import { modelById } from "./models.js";
@@ -39,7 +40,8 @@ export function isEmbedInFlight() {
  * @param {{ml: object, processing: object, model: string, threads?: number,
  *          limit?: number, idle?: () => Promise<void>, job?: object|null,
  *          onProgress?: (c: {done: number, failed: number}) => void|null}} opts
- * @returns {Promise<{embedded: number, failed: number, paused: boolean, alreadyRunning?: boolean}>}
+ * @returns {Promise<{embedded: number, failed: number, paused: boolean,
+ *   pauseReason?: string, alreadyRunning?: boolean}>}
  */
 export async function embedAllPending(
   db,
@@ -62,7 +64,7 @@ export async function embedAllPending(
     const spec = modelById(model);
     await ml.configure({ modelId: model, threads });
 
-    const { done, failed, paused } = await runSweep(job, {
+    const { done, failed, paused, pauseReason } = await runSweep(job, {
       nextBatch: () => pendingEmbedRows(db, model, limit),
       process: async (rows) => {
         const buffers = [];
@@ -79,7 +81,22 @@ export async function embedAllPending(
             )
           );
         }
-        const vectors = await ml.embedImages(buffers);
+        // Anything the ENCODER itself rejects with is a fact about the
+        // encoder, not about these photos: a model that would not download,
+        // a worker that died, an execution provider that throws on every
+        // batch (measured, and not hypothetical — CoreML does exactly that
+        // above batch=1 on this machine; see worker/devices.js). Tagged HERE
+        // rather than only inside OnnxMLService so the property holds for
+        // ANY host the app is handed — a test double, a future Python
+        // sidecar — instead of depending on each one to cooperate.
+        // OnnxMLService tags at its own boundary too, so a caller other than
+        // this sweep gets the same information.
+        let vectors;
+        try {
+          vectors = await ml.embedImages(buffers);
+        } catch (err) {
+          throw markHostFailure(err);
+        }
         // Structural, not per-implementation: models.js names "a model whose
         // output shape we have not checked writes plausible vectors of the
         // wrong dimension, which nothing downstream can detect" as the exact
@@ -107,11 +124,24 @@ export async function embedAllPending(
       },
       markFailed: (row, err) => markEmbedFailed(db, row.id, model, err),
       folderOf: (row) => row.folder_abs_path,
+      // A sentinel says "this photo cannot be embedded", and only a failure
+      // that is genuinely about the PHOTO earns one. Two things are not:
+      // the moment (the errno set runSweep already knows about — an EMFILE
+      // storm, a flaky external volume), and the HOST (the encoder, the
+      // model download, the worker process). The second is what this adds,
+      // and it is the more dangerous of the two here, because a host failure
+      // is not per-photo at all: it fails EVERY row of EVERY batch, so
+      // marking would write "tried, and could not be read" against the whole
+      // library from one failed download (#161 final review, Critical 1).
+      // Pausing costs one resumed pass; marking costs the truth about the
+      // user's photos — and until POST /api/ml/retry-failed existed there
+      // was no control anywhere in the app that could take it back.
+      isTransient: (err) => isHostFailure(err) || isTransientCode(err),
       onProgress: onProgress ?? undefined,
       idle,
     });
 
-    return { embedded: done - failed, failed, paused };
+    return { embedded: done - failed, failed, paused, pauseReason };
   } finally {
     embedInFlight = false;
   }

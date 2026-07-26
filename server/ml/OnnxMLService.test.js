@@ -4,6 +4,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OnnxMLService } from "./OnnxMLService.js";
+import { isHostFailure } from "./MLService.js";
+import { candidateDevices } from "./worker/devices.js";
 
 // #ensureChild's env falls back to cachePaths.js's modelsDir() (which
 // mkdirSync's a real ~/.autogallery/models) whenever AUTOGALLERY_MODELS_DIR
@@ -135,6 +137,33 @@ describe("OnnxMLService", () => {
     ).not.toThrow();
     await expect(p).rejects.toThrow(/EPIPE/);
     expect(() => svc.stop()).not.toThrow();
+  });
+
+  it("tags a worker-side error as a HOST failure, because the errno cannot survive the protocol", async () => {
+    // The worker replies with `String(e.message)` — an ENOSPC/ETIMEDOUT on a
+    // model download arrives here as a plain string with no `code`. A sweep
+    // classifying on `err.code` alone therefore reads "the encoder is
+    // broken" as "this photo cannot be read", and writes a permanent
+    // sentinel for every row it touches — i.e. the whole library (#161 final
+    // review, Critical 1). The tag is the only thing that survives.
+    const child = fakeChild();
+    const svc = new OnnxMLService({ spawn: () => child });
+    const p = svc.health();
+    const sent = JSON.parse(child.stdin.write.mock.calls[0][0]);
+    child.reply({ id: sent.id, error: "ENOSPC: no space left on device" });
+    const err = await p.catch((e) => e);
+    expect(err.code).toBeUndefined(); // the errno really is gone
+    expect(isHostFailure(err)).toBe(true);
+    svc.stop();
+  });
+
+  it("tags a dead child's rejection as a HOST failure too", async () => {
+    const child = fakeChild();
+    const svc = new OnnxMLService({ spawn: () => child });
+    const p = svc.health();
+    child.emit("exit", 139, null); // segfault mid-request
+    const err = await p.catch((e) => e);
+    expect(isHostFailure(err)).toBe(true);
   });
 
   it("surfaces a malformed line as a rejection, not a crash", async () => {
@@ -726,8 +755,11 @@ integration("OnnxMLService (real child)", () => {
   // coreml/webgpu/cpu all bundled — so the fix is EP selection in THIS
   // worker instead. This test is the actual point of that fix: it embeds the
   // same small batch once per candidate EP for this platform and reports
-  // ms/photo for each, so "did CoreML actually help" is a measured fact in
-  // task-11-report.md's "Revert and replace" section, not an assumption.
+  // ms/photo for each, so "did CoreML actually help" is a measured fact, not an
+  // assumption. What it measured is recorded where it ships — devices.js's
+  // own doc and the spec's "Superseded 2026-07-25" section — rather than in
+  // the gitignored .superpowers/ notes an earlier version of this comment
+  // cited.
   it(
     "measures ms/photo per available execution provider (CLIP ViT-B/32)",
     async () => {
@@ -754,22 +786,13 @@ integration("OnnxMLService (real child)", () => {
       );
       const modelId = "Xenova/clip-vit-base-patch32";
 
-      // Mirrors worker/index.js's candidateDevices(). Duplicated rather than
-      // imported: the worker runs as a separate spawned process (a fresh
-      // Node module graph), not something this test process can import
-      // from directly, and the list is small enough that keeping it in sync
-      // by hand is cheaper than plumbing a shared export across the
-      // stdio boundary just for a benchmark.
-      const candidates =
-        process.platform === "darwin"
-          ? ["coreml", "webgpu", "cpu"]
-          : process.platform === "win32"
-            ? ["dml", "webgpu", "cpu"]
-            : process.platform === "linux"
-              ? process.arch === "x64"
-                ? ["cuda", "webgpu", "cpu"]
-                : ["webgpu", "cpu"]
-              : ["cpu"];
+      // The worker's own list, imported rather than re-typed — it lives in
+      // server/ml/worker/devices.js precisely so both this benchmark and a
+      // fast unit test can read it without importing the worker module
+      // (whose top-level code redirects stdout and imports a native addon).
+      // A hand-copied list would benchmark a set of candidates the worker no
+      // longer tries, which is the one thing this test must not do.
+      const candidates = candidateDevices();
 
       const REPEATS = 5;
       const results = {};

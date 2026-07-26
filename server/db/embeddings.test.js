@@ -13,6 +13,7 @@ import {
   embedCounts,
   markEmbedFailed,
   clearEmbeddingsFor,
+  clearEmbedFailures,
   modelStorage,
   purgeModel,
 } from "./embeddings.js";
@@ -160,6 +161,37 @@ describe("the worklist", () => {
     expect(pendingEmbedRows(db, SIGLIP, 10).map((r) => r.id)).toContain(ids[0]);
   });
 
+  it("never offers a RAW file — there is no image this app can read for one", () => {
+    const db = getDb();
+    upsertScan(db, "/vol/Raw", 1, [
+      { name: "A.jpg", size: 10, mtimeMs: 1700000000000, kind: "image" },
+      { name: "B.CR3", size: 20, mtimeMs: 1700000000001, kind: "raw" },
+      { name: "C.MOV", size: 30, mtimeMs: 1700000000002, kind: "video" },
+    ]);
+
+    // thumbBytes has exactly two branches (video -> videoThumb, everything
+    // else -> thumbnail), and thumbnail() throws RawDecodeUnavailableError
+    // for RAW BY DESIGN (NodeProcessingService). Offering one means a
+    // permanent "tried, and could not be read" sentinel for every RAW file
+    // in the library — which would also survive the day a real RAW decoder
+    // lands, since only a byte change clears a sentinel.
+    const names = pendingEmbedRows(db, SIGLIP, 10).map((r) => r.filename);
+    expect(names).toEqual(expect.arrayContaining(["A.jpg", "C.MOV"]));
+    expect(names).not.toContain("B.CR3");
+  });
+
+  it("leaves RAW out of the counts too, so 'not computed yet' can reach zero", () => {
+    const db = getDb();
+    upsertScan(db, "/vol/Raw", 1, [
+      { name: "A.jpg", size: 10, mtimeMs: 1700000000000, kind: "image" },
+      { name: "B.CR3", size: 20, mtimeMs: 1700000000001, kind: "raw" },
+    ]);
+    // If `total` counted the RAW file the panel would show a permanent
+    // one-photo shortfall that no sweep can ever close — the unexplained-
+    // remainder shape this layer exists to prevent.
+    expect(embedCounts(db, SIGLIP).total).toBe(1);
+  });
+
   it("excludes stale rows", () => {
     const db = getDb();
     seed(db, 3);
@@ -297,6 +329,49 @@ describe("counts and storage reporting", () => {
     expect(purgeModel(db, CLIP)).toEqual({ rows: 1 });
     expect(getEmbedding(db, id, CLIP)).toBeNull();
     expect(getEmbedding(db, id, SIGLIP)).not.toBeNull();
+  });
+});
+
+describe("clearEmbedFailures", () => {
+  it("puts every failed photo back in the worklist, for that model only", () => {
+    const db = getDb();
+    const ids = seed(db, 3);
+    markEmbedFailed(db, ids[0], SIGLIP, new Error("host down"));
+    markEmbedFailed(db, ids[1], SIGLIP, new Error("host down"));
+    markEmbedFailed(db, ids[2], CLIP, new Error("corrupt"));
+
+    expect(clearEmbedFailures(db, SIGLIP)).toEqual({ cleared: 2 });
+    expect(embedCounts(db, SIGLIP).failed).toBe(0);
+    expect(pendingEmbedRows(db, SIGLIP, 10).map((r) => r.id)).toEqual(
+      expect.arrayContaining([ids[0], ids[1]])
+    );
+    // The other model's record is untouched — the button says "retry the
+    // failures for THIS model", and clearing more than that would silently
+    // re-run work the user never asked for.
+    expect(embedCounts(db, CLIP).failed).toBe(1);
+  });
+
+  it("keeps the vectors — this retries failures, it does not undo work", () => {
+    const db = getDb();
+    const ids = seed(db, 2);
+    putEmbedding(db, {
+      photoId: ids[0],
+      model: SIGLIP,
+      dim: 8,
+      ...quantize(vec(1)),
+    });
+    markEmbedFailed(db, ids[1], SIGLIP, new Error("host down"));
+
+    clearEmbedFailures(db, SIGLIP);
+
+    expect(getEmbedding(db, ids[0], SIGLIP)).not.toBeNull();
+    expect(embedCounts(db, SIGLIP).embedded).toBe(1);
+  });
+
+  it("is a no-op with nothing to clear", () => {
+    const db = getDb();
+    seed(db, 1);
+    expect(clearEmbedFailures(db, SIGLIP)).toEqual({ cleared: 0 });
   });
 });
 

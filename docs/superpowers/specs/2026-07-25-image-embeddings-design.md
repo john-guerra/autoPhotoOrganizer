@@ -1,6 +1,11 @@
 # Image embeddings over cached thumbnails — design (#161)
 
-**Status:** approved 2026-07-25 — not yet implemented
+**Status:** SHIPPED 2026-07-25 (2.18.30) — **partly superseded by the
+implementation**, see [Superseded 2026-07-25](#superseded-2026-07-25) at the
+bottom before trusting anything above it. In particular §C's second host was
+built and then DELETED, and the premise it rested on ("the prebuilt native
+addon ships no CoreML on any platform") is FALSE.
+
 **Issue:** [#161](https://github.com/john-guerra/autoPhotoOrganizer/issues/161)
 **Depends on:** #160 (sidecar + `runSweep`) — closed and shipped
 **Feeds:** #162 (near-duplicates), #163 (semantic clusters), #164 (zero-shot
@@ -39,16 +44,16 @@ Electron build, which is precisely how #67 crashed on launch.
 
 ## Decisions (approved 2026-07-25)
 
-| Decision     | Choice                                                   | Why                                                                                                                                                                             |
-| ------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Model        | **SigLIP base patch16-224**, user-switchable             | ~76% vs ~63% zero-shot ImageNet. #164's open-vocabulary tags are the consumer that most needs the accuracy. Costs ~4× CLIP-B/32 per photo.                                      |
-| Runtime      | **`@huggingface/transformers` v4**                       | Owns preprocessing constants, model download/caching, and the BPE tokenizer #164 needs. Hand-rolled normalization is silently wrong — vectors that look fine and cluster badly. |
-| Input        | **320 px cached thumb, generated on miss**               | See correction 1.                                                                                                                                                               |
-| Acceleration | **WebGPU in an Electron renderer**, ONNX child otherwise | See "Two hosts" below.                                                                                                                                                          |
-| CPU share    | **User-choosable, default half the cores**               | The sidecar being a separate process does not stop it competing for cores.                                                                                                      |
-| Old vectors  | **Kept, sized, manually purgeable**                      | Switching back after an A/B is then free. ~87 MB per model at 114k photos.                                                                                                      |
-| Dev mode     | **Silent fallback to the ONNX child**                    | The whole sweep is developable and testable without launching Electron.                                                                                                         |
-| ORT version  | **Try `overrides` to 1.27, fall back to 1.24.3**         | One copy is what matters for packaging; which version is secondary.                                                                                                             |
+| Decision     | Choice                                                                                                                                                                                  | Why                                                                                                                                                                             |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model        | **SigLIP base patch16-224**, user-switchable                                                                                                                                            | ~76% vs ~63% zero-shot ImageNet. #164's open-vocabulary tags are the consumer that most needs the accuracy. Costs ~4× CLIP-B/32 per photo.                                      |
+| Runtime      | **`@huggingface/transformers` v4**                                                                                                                                                      | Owns preprocessing constants, model download/caching, and the BPE tokenizer #164 needs. Hand-rolled normalization is silently wrong — vectors that look fine and cluster badly. |
+| Input        | **320 px cached thumb, generated on miss**                                                                                                                                              | See correction 1.                                                                                                                                                               |
+| Acceleration | ~~**WebGPU in an Electron renderer**, ONNX child otherwise~~ **REVERSED — see "Superseded" below.** The ONNX child selects its own execution provider; darwin leads with CPU, measured. | See "Two hosts" below, then the reversal.                                                                                                                                       |
+| CPU share    | **User-choosable, default half the cores**                                                                                                                                              | The sidecar being a separate process does not stop it competing for cores.                                                                                                      |
+| Old vectors  | **Kept, sized, manually purgeable**                                                                                                                                                     | Switching back after an A/B is then free. ~87 MB per model at 114k photos.                                                                                                      |
+| Dev mode     | **Silent fallback to the ONNX child**                                                                                                                                                   | The whole sweep is developable and testable without launching Electron.                                                                                                         |
+| ORT version  | **Try `overrides` to 1.27, fall back to 1.24.3**                                                                                                                                        | One copy is what matters for packaging; which version is secondary.                                                                                                             |
 
 ### Two overrides of the parent design, recorded deliberately
 
@@ -59,6 +64,11 @@ process as _the_ runtime. Both are overridden here at John's explicit direction:
 - **WebGPU is in scope for this issue**, not a follow-up.
 - **A second execution host is added.** The Node child is not removed — it
   remains the fallback, and the only host under `npm run dev`.
+
+> **FALSE PREMISE — read the "Superseded" section at the bottom.** The
+> paragraph below is the claim the whole two-host design rested on, and it is
+> wrong. It is left in place, not edited, so the reversal has something to
+> point at.
 
 **Two different runtimes, and the distinction is load-bearing.** "No GPU on
 macOS" is a fact about **`onnxruntime-node`'s execution providers**: the
@@ -317,3 +327,133 @@ Consuming the vectors. Near-duplicates (#162), clusters (#163), tags (#164), and
 the scatter (#165) each own their own retrieval path. #161 ends when every photo
 has a vector, the counts are honest, and the sweep never makes the app feel
 slower.
+
+## Superseded 2026-07-25
+
+Everything above is the design as approved. This section is what the
+implementation actually found, recorded here because three shipped source
+comments cite it and because the working notes it originally lived in
+(`.superpowers/sdd/2026-07-25-image-embeddings/`) are **gitignored** — they
+vanish with the worktree, and a comment pointing at them points at nothing.
+
+### The second host was built, then deleted (§C, and the "Acceleration" row)
+
+`WebGpuMLService` — a hidden Electron renderer running transformers.js on
+WebGPU — was implemented as specified, reviewed, and **removed in the same
+session** (commit `36d8b8b`, "revert(ml): delete the WebGPU renderer host").
+Review found three Criticals in it, one of which is the failure this whole
+feature most needs to avoid:
+
+1. The image bytes went through a JSON round-trip, so the renderer built its
+   `Blob` from the STRING `"255,216,255,…"`. Every embed fails — and the sweep
+   then writes a PERMANENT "cannot be read" sentinel for every photo in the
+   library.
+2. The failure path nulled the window reference without `destroy()`: one
+   leaked Chromium renderer PER PHOTO, because the sweep retries a failed
+   batch row by row.
+3. The hidden window counted in `getAllWindows()`, so on macOS closing the
+   main window and clicking the dock reopened nothing — a force-quit on
+   EVERY packaged launch, ML or not.
+
+The replacement is explicit execution-provider selection inside the ONNX child
+that already existed: `server/ml/worker/devices.js` (the candidate order) and
+`loadWithBestDevice()` in `server/ml/worker/index.js` (try each in turn,
+validated by a REAL forward pass at the REAL batch size). `electron/main.js`
+has exactly one `BrowserWindow` again, so Critical 3 is gone by construction.
+
+### The premise was false
+
+The spec asserts as fact that "the prebuilt native addon ships **no CoreML on
+any platform**", sourced from onnxruntime.ai's docs page and never checked
+against the installed binary. Checked now:
+
+```
+onnxruntime-node listSupportedBackends()
+  -> [{name: "cpu", bundled: 1}, {name: "webgpu", bundled: 1}, {name: "coreml", bundled: 1}]
+```
+
+and transformers.js 4.2.0 (`dist/transformers.web.js`) pushes `coreml` on
+darwin, `dml` on win32, `cuda` on linux/x64, then `webgpu`, then `cpu` — in the
+NODE environment. The worker's hardcoded `device: "cpu"` was the only reason
+this app was on CPU. This is exactly the "verify the lowest layer first" rule in
+CLAUDE.md, skipped: one `listSupportedBackends()` call would have prevented a
+whole host from being designed and built.
+
+### The measurement, which reversed the instruction it was gathered under
+
+The instruction was "use the GPU". The numbers said otherwise, and the numbers
+won. darwin/arm64, 2026-07-25, each candidate forced explicitly (no
+fallthrough) via the `ML_INTEGRATION` benchmark in
+`server/ml/OnnxMLService.test.js`; each re-run twice:
+
+**CLIP ViT-B/32, batch=4, threads=2**
+
+| EP     | ms/photo  | Note                              |
+| ------ | --------- | --------------------------------- |
+| coreml | —         | BROKEN (throws on real inference) |
+| webgpu | 22.79     |                                   |
+| cpu    | **12.98** | fastest                           |
+
+**SigLIP base patch16-224 (the default model), batch=16 (the sweep's real
+`limit`), threads=2 — the production configuration, not a cheaper stand-in**
+
+| EP     | ms/photo  | Note                   |
+| ------ | --------- | ---------------------- |
+| coreml | —         | BROKEN, same signature |
+| webgpu | 60.98     |                        |
+| cpu    | **38.93** | fastest                |
+
+CPU wins by ~1.6× at BOTH configurations. So `candidateDevices()` leads with
+`cpu` on darwin — a measured order, not the accelerator-first default —
+while keeping `webgpu` and `coreml` in the list so a future model, a fixed
+CoreML, or different hardware can still win. win32/linux keep an
+accelerator-first order and are EXPLICITLY unmeasured: no such hardware here.
+`server/ml/worker/devices.test.js` pins the darwin order so it cannot be
+"corrected" back on principle without re-running the benchmark.
+
+Implied backfill cost at 114k photos: 114,000 × 38.93 ms ≈ **74 minutes** of
+pure inference, idle-gated.
+
+### The most valuable finding of the run
+
+**CoreML constructs a session cleanly and then throws on first real inference,
+and the failure is BATCH-SIZE SENSITIVE** — fine at batch=1, broken at
+batch ≥ 2. Production batches are 16.
+
+So the obvious validation (load the model, embed one image, accept the EP)
+would have blessed CoreML, reported `describeProvider() -> "coreml"` to the
+user, and then failed EVERY production batch — at which point the sweep's
+permanent classification would have written a sentinel for every photo in the
+library. That is the deleted renderer host's Critical 1, relocated one layer
+down and reached by a different route.
+
+Two things came out of it, and both are load-bearing:
+
+- `loadWithBestDevice()` validates each candidate with the REAL request's own
+  images at its REAL batch size, once per cold load.
+- `runSweep` no longer treats a host-level failure as the photo's fault at all:
+  `embedSweep` passes an `isTransient` hook that classifies anything the
+  encoder rejects with as a PAUSE, not a sentinel (#161 final review, Critical
+  1), and `POST /api/ml/retry-failed` can take back a sentinel that was
+  written for any reason at all.
+
+### Smaller corrections to the text above
+
+- **§C's `WebGpuMLService`** does not exist. `MLService` has one real
+  implementation, `OnnxMLService`.
+- **"Dev mode: silent fallback to the ONNX child"** — there is nothing to fall
+  back from; the ONNX child is the only host, in dev and in the packaged app
+  alike.
+- **RAW is not embeddable** and is excluded from the worklist and the counts
+  (`server/db/embeddings.js`). The spec's input pipeline assumed a 320px thumb
+  exists for every photo; `processing.thumbnail()` throws
+  `RawDecodeUnavailableError` for RAW by design, so attempting one would give
+  every RAW file a permanent failure record.
+- **Embedding is OPT-IN, off by default** (John's ruling during Task 10). The
+  spec's own "first use shows what is being fetched, how big, and its licence"
+  is unimplementable if a scan can start a 94 MB download unasked.
+- **`ORT version: try overrides to 1.27`** — done, and it worked; both
+  duplicated native addons (`onnxruntime-node` AND `sharp`, which the spec
+  missed) are collapsed to one copy each. The `overrides` shape matters: see
+  `_overridesNotes` in `package.json` for the adm-zip landmine a sibling
+  top-level key silently re-opens.

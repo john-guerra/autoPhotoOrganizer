@@ -112,3 +112,34 @@ export function modelsDir() {
 export function thumbCachePath(photo, size) {
   return join(thumbsDir(), `${thumbCacheKey(photo, size)}.jpg`);
 }
+
+/** Monotonic within this process; combined with the pid it makes every
+ *  in-flight temp file unique across processes AND within one. */
+let tmpSeq = 0;
+
+/**
+ * A UNIQUE temp path to write `cachePath` through before renaming it into
+ * place. Callers write here, then `rename()` — the rename is atomic, so a
+ * reader never sees a half-written JPEG.
+ *
+ * The uniqueness is the point, and it is newer than the pattern. Keying the
+ * temp name on the pid alone was safe while GET /api/thumb/:id was the only
+ * writer of a 320px thumb, because two concurrent requests for the same photo
+ * are rare and short. #161 added a SECOND writer in the SAME process — the
+ * embedding sweep (server/ml/thumbSource.js), which walks the entire library
+ * and is not serialized against the endpoint at all. `whenIdle` gates it as a
+ * courtesy, not as a lock: a user scrolling onto the photo the sweep is
+ * currently embedding gives two concurrent writeFile()s to one temp path,
+ * then a rename — a torn JPEG cached under a VALID key and served to the grid
+ * forever after, since the key only changes when the file's bytes do.
+ *
+ * pruneOrphanedCache already deletes any non-`.jpg` file it finds under
+ * thumbsDir(), so a temp file orphaned by a crash is swept without needing to
+ * be findable by name.
+ *
+ * @param {string} cachePath the final path this temp file becomes
+ * @returns {string}
+ */
+export function tmpCachePath(cachePath) {
+  return `${cachePath}.${process.pid}.${++tmpSeq}.tmp`;
+}

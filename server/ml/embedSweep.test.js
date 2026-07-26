@@ -281,6 +281,47 @@ describe("embedAllPending", () => {
     expect(pendingEmbedRows(db, MODEL, 10)).toHaveLength(3);
   });
 
+  it("PAUSES and marks NOTHING when the ENCODER is what failed, not the photos (Critical 1)", async () => {
+    const db = getDb();
+    // A REAL folder: reachable(), so the pause under test can only come from
+    // the classification of the encoder's own error. With a fictional path
+    // this would pass for the folder-unreachable reason instead and prove
+    // nothing.
+    const dir = await mkdtemp(join(tmpdir(), "ag-hostfail-"));
+    try {
+      seed(db, 5, dir);
+      const ml = stubMl();
+      // The shape of a failed model download / a wedged worker / a broken
+      // execution provider: EVERY call rejects, and the error says nothing
+      // about any particular photo. Marking here would write "tried, and
+      // could not be read" against the whole library — 114,125 photos on
+      // John's — for a plane flight, a proxy or a full disk.
+      ml.embedImages = vi
+        .fn()
+        .mockRejectedValue(
+          new Error("Could not locate file: onnx/vision_model_int8.onnx")
+        );
+
+      const r = await embedAllPending(db, {
+        ml,
+        processing: stubProcessing(),
+        model: MODEL,
+        limit: 2,
+        idle: async () => {},
+      });
+
+      expect(r.paused).toBe(true);
+      expect(embedCounts(db, MODEL).failed).toBe(0);
+      // Still owed work: the next kick retries them, once the host works.
+      expect(pendingEmbedRows(db, MODEL, 10)).toHaveLength(5);
+      // And the job's failure text has to name what actually happened, not
+      // the drive (which is right here, mounted).
+      expect(r.pauseReason).toMatch(/onnx/i);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("is single-flight — a second scan must not start a second sweep", async () => {
     const db = getDb();
     seed(db, 2);

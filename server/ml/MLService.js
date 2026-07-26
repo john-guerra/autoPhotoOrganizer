@@ -11,6 +11,51 @@
  *
  * @typedef {{box: [number, number, number, number], score: number, vec: Float32Array}} Face
  */
+
+/**
+ * The flag that says "this failure is the HOST's, not the photo's".
+ *
+ * Why a tag and not a string match: an error that crosses the worker's stdio
+ * boundary is reconstructed from `String(e.message)` — the errno is GONE, and
+ * the message is whatever transformers.js/ORT happened to say this release.
+ * A sweep matching on that text would be one dependency bump away from
+ * classifying a dead model download as "this photo cannot be read" and
+ * sentinel-marking the entire library (#161 final review, Critical 1). The
+ * side that KNOWS ("I am the ML host and I could not do this at all") is the
+ * side that should say so, so the tag is attached where the error crosses out
+ * of the host — see OnnxMLService's #onData/#request/#killChild — and at the
+ * call site in embedSweep, which covers any injected host that predates this
+ * (a test double, a future Python sidecar) without asking it to cooperate.
+ *
+ * A plain own property, not a subclass: the errors being tagged are created
+ * elsewhere (JSON.parse of a worker reply, a timeout, an injected stub), so
+ * there is nothing to subclass at the point we learn the fact. Same technique
+ * runSweep already uses for `e.name = "AbortError"`.
+ */
+const HOST_FAILURE = "mlHostFailure";
+
+/**
+ * Tag `err` as a host-level failure and return it (so callers can
+ * `throw markHostFailure(e)`). Never throws: a frozen/sealed error still
+ * comes back, just untagged — misclassifying is a bug, but crashing the
+ * sweep while trying to classify would be a worse one.
+ * @template T
+ * @param {T} err
+ * @returns {T}
+ */
+export function markHostFailure(err) {
+  try {
+    if (err && typeof err === "object") err[HOST_FAILURE] = true;
+  } catch {
+    // sealed/frozen error object — leave it alone
+  }
+  return err;
+}
+
+/** @param {any} err @returns {boolean} */
+export function isHostFailure(err) {
+  return err?.[HOST_FAILURE] === true;
+}
 export class MLService {
   /**
    * @param {Buffer[]} _buffers JPEG bytes, one per image

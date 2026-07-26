@@ -36,6 +36,7 @@ import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import { registry } from "./jobs/registry.js";
 import { sampleOffsets } from "./db/sampleGroup.js";
 import { modelById } from "./ml/models.js";
+import { markEmbedFailed, embedCounts } from "./db/embeddings.js";
 import { _resetEmbedSweepForTest } from "./ml/embedSweep.js";
 
 /**
@@ -963,6 +964,94 @@ describe("/api/ml", () => {
       expect(seenPhases[seenPhases.length - 1]).not.toMatch(/downloading/);
     } finally {
       registry.off("change", onChange);
+      await gatedSrv.close();
+      await rmScannedDir(gatedPhotosDir);
+    }
+  });
+
+  it("POST /api/ml/retry-failed clears the active model's sentinels so the next sweep tries them again (Critical 1)", async () => {
+    // The recovery half of Critical 1. A sentinel is otherwise clearable
+    // only by changing the file's bytes, deleting the photo, or pressing
+    // Purge — and Purge is rendered per row of `storage`, so a sweep that
+    // failed EVERYTHING and wrote no vectors leaves no button at all. This
+    // route is the one control that always exists.
+    const db = getDb();
+    const { modelId } = await (
+      await fetch(`${mlSrv.base}/api/ml/settings`)
+    ).json();
+    const photo = db
+      .prepare(`SELECT id FROM photos WHERE stale = 0 LIMIT 1`)
+      .get();
+    markEmbedFailed(db, photo.id, modelId, new Error("host was down"));
+    expect(embedCounts(db, modelId).failed).toBeGreaterThan(0);
+
+    const res = await fetch(`${mlSrv.base}/api/ml/retry-failed`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.model).toBe(modelId);
+    expect(body.cleared).toBeGreaterThan(0);
+    expect(embedCounts(db, modelId).failed).toBe(0);
+  });
+
+  it("refuses to purge or retry WHILE a sweep is running, instead of crashing it (Important 2)", async () => {
+    // Both routes delete ml_status rows. Doing that under a running sweep
+    // trips runSweep's stall guard, and the user — who pressed a button the
+    // panel offered them — gets "Embedding stopped: runSweep: row 42 was
+    // marked failed but nextBatch() returned it again…". A 409 that names
+    // the fix is the honest answer.
+    let releaseFirst;
+    const gate = new Promise((r) => (releaseFirst = r));
+    const ml = workingMl();
+    const realEmbedImages = ml.embedImages;
+    let started = false;
+    ml.embedImages = vi.fn(async (buffers) => {
+      if (!started) {
+        started = true;
+        await gate;
+      }
+      return realEmbedImages(buffers);
+    });
+    const gatedSrv = await startServer({ ml });
+    const gatedPhotosDir = await mkdtemp(join(tmpdir(), "ag-ml-guard-"));
+    await sharp({
+      create: {
+        width: 10,
+        height: 10,
+        channels: 3,
+        background: { r: 2, g: 2, b: 2 },
+      },
+    })
+      .jpeg()
+      .toFile(join(gatedPhotosDir, "g.jpg"));
+    try {
+      await scan(gatedSrv.base, gatedPhotosDir);
+      await fetch(`${gatedSrv.base}/api/ml/embed`, { method: "POST" });
+      const start = Date.now();
+      while (!started) {
+        if (Date.now() - start > 2000)
+          throw new Error("sweep never reached the encoder");
+        await new Promise((r) => setTimeout(r, 5));
+      }
+
+      const purge = await fetch(`${gatedSrv.base}/api/ml/purge`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "Xenova/siglip-base-patch16-224" }),
+      });
+      expect(purge.status).toBe(409);
+      expect((await purge.json()).error).toMatch(/sweep is running/i);
+
+      const retry = await fetch(`${gatedSrv.base}/api/ml/retry-failed`, {
+        method: "POST",
+      });
+      expect(retry.status).toBe(409);
+      expect((await retry.json()).error).toMatch(/stop it in the jobs panel/i);
+
+      releaseFirst();
+      await waitNoRunningJobOfType("embed");
+    } finally {
       await gatedSrv.close();
       await rmScannedDir(gatedPhotosDir);
     }

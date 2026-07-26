@@ -19,6 +19,14 @@ user-facing — what you can now do, not how it's built.
 - Analyzing your library in the background leaves thumbnails cached for every
   photo it passes over, so the grid loads instantly everywhere afterwards,
   not just where you've already scrolled. (#161)
+- **A problem with the model or the download no longer writes off your
+  photos.** If the analyzer itself can't run — no connection on the plane, a
+  blocked proxy, a full disk — it now stops and says why, instead of marking
+  every photo "could not be read". And when photos are genuinely marked
+  failed, a **Retry failed** button in Manage library puts them back in line.
+  (#161)
+- RAW files are skipped rather than counted as failures, and the panel says
+  so — there's no preview AutoGallery can read for one yet. (#161)
 
 ## 2.18.29
 

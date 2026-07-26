@@ -57,6 +57,44 @@ test.describe("ML settings", () => {
     expect(errors).toEqual([]);
   });
 
+  test("offers a way back from failed photos, and only when there are some", async ({
+    page,
+  }) => {
+    // A failure record is otherwise permanent — nothing else in the app can
+    // clear one unless vectors also exist, because Purge is rendered per
+    // stored-vector row. This asserts the seam: counts say some failed, so
+    // the control exists, and pressing it actually reaches the API.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await openManageLibrary(page);
+
+    // Nothing has failed in the fixture library, so there is nothing to
+    // retry and no button — the negative half matters as much as the
+    // positive one.
+    await expect(mlSettings.retryFailed(page)).toHaveCount(0);
+    // And the reason RAW files never appear in these numbers is stated,
+    // rather than left as a total that silently doesn't add up.
+    await expect(mlSettings.rawNote(page)).toContainText(/RAW/);
+
+    await page.route("**/api/ml/stats", async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+      await route.fulfill({
+        json: { ...body, counts: { total: 10, embedded: 4, failed: 3 } },
+      });
+    });
+    page.on("dialog", (d) => d.accept());
+
+    await page.getByTestId("ml-settings").getByText("Refresh counts").click();
+    await expect(mlSettings.retryFailed(page)).toBeVisible();
+    await mlSettings.retryFailed(page).click();
+    // The real POST went through and its answer is rendered — the panel
+    // never leaves a pressed button silent.
+    await expect(mlSettings.message(page)).toContainText(/tried again/i);
+
+    expect(errors).toEqual([]);
+  });
+
   test("names the download size and licence before the enable toggle", async ({
     page,
   }) => {

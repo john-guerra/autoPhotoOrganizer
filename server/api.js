@@ -26,6 +26,7 @@ import { revealCommand, revealManyCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import {
   thumbCachePath,
+  tmpCachePath,
   thumbsDir,
   cacheRoot,
   videoProxiesDir,
@@ -74,7 +75,12 @@ import {
   MlSettingsPersistError,
 } from "./ml/settings.js";
 import { MODELS } from "./ml/models.js";
-import { embedCounts, modelStorage, purgeModel } from "./db/embeddings.js";
+import {
+  embedCounts,
+  modelStorage,
+  purgeModel,
+  clearEmbedFailures,
+} from "./db/embeddings.js";
 import { OnnxMLService } from "./ml/OnnxMLService.js";
 import { interactiveRoute } from "./lib/interactive.js";
 import { whyTranscode, playbackPlan } from "./lib/videoPlayback.js";
@@ -243,9 +249,18 @@ function kickEmbedSweep(db, getMl, { force = false } = {}) {
         if (r.alreadyRunning)
           return registry.finish(job.id, { alreadyRunning: true });
         if (r.paused) {
+          // WHY it paused, in the sweep's own words. "Drive not available"
+          // was the only reason a sweep could pause when this was written;
+          // it can now also stand down because the ENCODER failed (a model
+          // that would not download, a dead worker), and telling that user
+          // to check their drive would be both wrong and unactionable.
+          // "Nothing was marked" is stated outright because it is the part
+          // that matters: no photo was written off.
           return registry.update(job.id, {
             status: "failed",
-            error: "paused — drive not available; resumes on the next scan",
+            error:
+              `paused — ${r.pauseReason ?? "drive not available"}. ` +
+              "No photo was marked as failed; it resumes on the next scan.",
           });
         }
         registry.finish(job.id, { embedded: r.embedded, failed: r.failed });
@@ -626,9 +641,19 @@ function parseFilterParam(req) {
  * @param {import("express").Express} app
  */
 export function registerApi(app, { ml } = {}) {
-  // The ML host. Injected by electron/main.js (the WebGPU renderer); otherwise
-  // the ONNX child process, which is also what `npm run dev` gets. server/ must
-  // never import electron — same seam as ProcessingService. Resolved LAZILY:
+  // The ML host. Defaults to the ONNX child process (server/ml/
+  // OnnxMLService.js) — which is what every caller actually gets today:
+  // electron/main.js calls createApp() with no arguments, and nothing else
+  // injects a host either. `ml` exists for TESTS (api.test.js's
+  // workingMl()/inertMl(), which keep the suite from forking a real worker)
+  // and to keep the seam open for a future host, e.g. the Python sidecar
+  // ProcessingService.js has always anticipated. An earlier version of this
+  // comment claimed electron/main.js injected a WebGPU renderer host: that
+  // host existed only briefly on this branch and was DELETED (#161, Task 11
+  // — it had three Criticals, including one leaked Chromium window per
+  // photo; the GPU is taken from the ONNX child's own execution-provider
+  // selection instead, see server/ml/worker/devices.js). server/ must never
+  // import electron — same seam as ProcessingService. Resolved LAZILY:
   // constructing OnnxMLService does not spawn anything (see its constructor) —
   // only the first configure()/embedImages() call does, via #ensureChild() —
   // so no child process exists until an embed sweep actually runs.
@@ -1056,11 +1081,53 @@ export function registerApi(app, { ml } = {}) {
     });
   });
 
+  // The one thing both write routes below must not do: delete rows out from
+  // under a RUNNING sweep. runSweep remembers the ids it sentinel-marked in
+  // the current pass and throws if one comes back from nextBatch() — a real
+  // guard against a caller whose markFailed doesn't remove its row, but it
+  // cannot tell that apart from a purge/retry that legitimately cleared the
+  // record a second ago. The user would then see "Embedding stopped:
+  // runSweep: row 42 was marked failed but nextBatch() returned it again…"
+  // for a button they were invited to press. Refuse with a 409 and say what
+  // to do instead; the settings panel also disables both buttons while a
+  // sweep runs, but the UI check races the sweep's own start and this one
+  // does not (isEmbedInFlight is synchronous, and so is the latch it reads).
+  const SWEEP_RUNNING =
+    "an embedding sweep is running — stop it in the jobs panel first, " +
+    "then try again";
+  /** @param {import("express").Response} res @returns {boolean} answered? */
+  const refuseWhileSweeping = (res) => {
+    if (!isEmbedInFlight()) return false;
+    res.status(409).json({ error: SWEEP_RUNNING });
+    return true;
+  };
+
   // POST { model } -> drop every vector + failure sentinel for that model.
   app.post("/api/ml/purge", (req, res) => {
     const model = String(req.body?.model ?? "");
     if (!model) return res.status(400).json({ error: "model is required" });
+    if (refuseWhileSweeping(res)) return;
     res.json(purgeModel(getDb(), model));
+  });
+
+  // POST -> forget every "this photo could not be embedded" record for the
+  // ACTIVE model, so the next sweep tries them again. The vectors already
+  // computed are untouched.
+  //
+  // This exists because a sentinel was, until now, effectively permanent:
+  // the only three things that clear one need the file's bytes to change,
+  // the photo to be deleted, or the Purge button — and Purge is rendered per
+  // row of `storage`, which is a GROUP BY over photo_embeddings. A sweep
+  // that failed EVERYTHING (a model that would not download; before the
+  // Critical-1 fix, any host failure at all) writes no vectors, so there is
+  // no storage row, no Purge button, and the only recourse left was deleting
+  // index.db — which also destroys ratings, keep-scope, manual stacks and
+  // album names. A failure record the user cannot take back is not an
+  // acceptable end state regardless of how it got written.
+  app.post("/api/ml/retry-failed", (req, res) => {
+    if (refuseWhileSweeping(res)) return;
+    const { modelId } = readMlSettings();
+    res.json({ model: modelId, ...clearEmbedFailures(getDb(), modelId) });
   });
 
   // POST -> (re)kick the background embedder against the current settings,
@@ -1185,7 +1252,9 @@ export function registerApi(app, { ml } = {}) {
         it.kind === "video"
           ? await processing.videoThumb(it.path, size)
           : await processing.thumbnail(it.path, size);
-      const tmp = `${cachePath}.${process.pid}.tmp`;
+      // Unique per write, not just per process: the embedding sweep writes
+      // this same bucket concurrently now — see tmpCachePath's own doc.
+      const tmp = tmpCachePath(cachePath);
       await writeFile(tmp, data);
       await rename(tmp, cachePath);
       res.set("X-Cache", "miss");

@@ -78,6 +78,24 @@ export function getEmbedding(db, photoId, model) {
  * `stale = 0` mirrors pendingHashRows: a row whose file vanished at the last
  * scan must not be swept.
  *
+ * `kind != 'raw'` because there is no image here to embed. The sweep's input
+ * is the 320px cached thumbnail (server/ml/thumbSource.js), and the only way
+ * to make one is `processing.thumbnail()`, which throws
+ * RawDecodeUnavailableError for RAW BY DESIGN — no RAW decoder is wired up
+ * (CLAUDE.md, "Performance thesis"; the embedded-preview path was never
+ * built). Offering a RAW row would therefore hand every single one of them a
+ * permanent "tried, and could not be read" sentinel — and sentinels only
+ * clear when the file's bytes change, so they would outlive the eventual RAW
+ * decoder too. Skipping is the honest answer, and embedCounts below leaves
+ * them out of `total` for the same reason, so "not computed yet" can still
+ * reach zero. The day RAW gains a preview path, delete this clause and the
+ * backlog embeds itself with no migration.
+ *
+ * `s.state = 'failed'` is deliberate rather than incidental: today `failed`
+ * is the only state markEmbedFailed writes, so this changes nothing — but a
+ * future non-terminal state (`queued`, say, for #169's shape) written without
+ * it would silently exclude that photo from the worklist forever.
+ *
  * @param {import("better-sqlite3").Database} db
  * @param {string} model
  * @param {number} limit
@@ -91,13 +109,15 @@ export function pendingEmbedRows(db, model, limit) {
          FROM photos
          JOIN folders ON folders.id = photos.folder_id
         WHERE photos.stale = 0
+          AND photos.kind != 'raw'
           AND NOT EXISTS (
                 SELECT 1 FROM photo_embeddings e
                  WHERE e.photo_id = photos.id AND e.model = @model)
           AND NOT EXISTS (
                 SELECT 1 FROM ml_status s
                  WHERE s.photo_id = photos.id
-                   AND s.stage = @stage AND s.model = @model)
+                   AND s.stage = @stage AND s.model = @model
+                   AND s.state = 'failed')
         LIMIT @limit`
     )
     .all({ model, stage: EMBED_STAGE, limit });
@@ -109,23 +129,31 @@ export function pendingEmbedRows(db, model, limit) {
  * @returns {{total: number, embedded: number, failed: number}} pending is
  *   total - embedded - failed, and the UI must show it as such: "not computed
  *   yet" and "cannot be computed" are different answers to the user.
+ *
+ * All three exclude `kind = 'raw'`, matching pendingEmbedRows — a RAW file is
+ * not embeddable at all today, so counting it in `total` would leave a
+ * permanent remainder in "not computed yet" that no sweep could ever close.
+ * The settings panel says RAW is skipped rather than leaving the user to
+ * infer it from a number that never moves.
  */
 export function embedCounts(db, model) {
   const total = db
-    .prepare(`SELECT COUNT(*) AS n FROM photos WHERE stale = 0`)
+    .prepare(
+      `SELECT COUNT(*) AS n FROM photos WHERE stale = 0 AND kind != 'raw'`
+    )
     .get().n;
   const embedded = db
     .prepare(
       `SELECT COUNT(*) AS n FROM photo_embeddings e
          JOIN photos p ON p.id = e.photo_id
-        WHERE e.model = ? AND p.stale = 0`
+        WHERE e.model = ? AND p.stale = 0 AND p.kind != 'raw'`
     )
     .get(model).n;
   const failed = db
     .prepare(
       `SELECT COUNT(*) AS n FROM ml_status s
          JOIN photos p ON p.id = s.photo_id
-        WHERE s.stage = ? AND s.model = ? AND p.stale = 0`
+        WHERE s.stage = ? AND s.model = ? AND p.stale = 0 AND p.kind != 'raw'`
     )
     .get(EMBED_STAGE, model).n;
   return { total, embedded, failed };
@@ -178,6 +206,38 @@ export function markEmbedFailed(db, photoId, model, error) {
     error: String(error?.message ?? error).slice(0, 500),
     now: Date.now(),
   });
+}
+
+/**
+ * Clear every failure sentinel for one model, putting those photos back in
+ * the worklist. The vectors are NOT touched — this retries what failed, it
+ * does not undo what worked.
+ *
+ * THE ONLY CONTROL IN THE APP THAT CAN TAKE A SENTINEL BACK when no vector
+ * exists (#161 final review, Critical 1). The three other things that clear
+ * one all need something else to be true first: clearEmbeddingsFor needs the
+ * file's bytes to change, ON DELETE CASCADE needs the photo deleted, and
+ * purgeModel is only reachable from the settings panel's Purge button, which
+ * is rendered per row of `modelStorage` — a GROUP BY over photo_embeddings.
+ * So in the exact case that matters most, a sweep that failed EVERYTHING and
+ * wrote no vectors at all, there was no Purge button to press and no way
+ * back short of deleting index.db, which also destroys ratings, keep-scope,
+ * manual stacks and album names.
+ *
+ * MUST NOT run while a sweep is in flight: runSweep tracks the ids it marked
+ * this pass and throws if one comes back from nextBatch(). The route
+ * (POST /api/ml/retry-failed) refuses with a 409 in that case, and the panel
+ * disables the button.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @returns {{cleared: number}}
+ */
+export function clearEmbedFailures(db, model) {
+  const { changes } = db
+    .prepare(`DELETE FROM ml_status WHERE stage = ? AND model = ?`)
+    .run(EMBED_STAGE, model);
+  return { cleared: changes };
 }
 
 /**

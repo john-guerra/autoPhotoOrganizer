@@ -643,6 +643,12 @@ export const mlSettings = {
   message: (page) => page.getByTestId("ml-message"),
   embedNow: (page) => page.getByTestId("ml-embed-now"),
   storageRows: (page) => page.getByTestId("ml-storage-row"),
+  /** The way back from a failure record — only rendered when there ARE
+   *  failures, because it is the only control in the app that can clear one
+   *  when no vector exists to hang a Purge button off. */
+  retryFailed: (page) => page.getByTestId("ml-retry-failed"),
+  /** The line stating that RAW is skipped rather than failed. */
+  rawNote: (page) => page.getByTestId("ml-raw-note"),
 };
 
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------

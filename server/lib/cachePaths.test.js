@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
   thumbCachePath,
+  tmpCachePath,
   thumbCacheKey,
   THUMB_BUCKETS,
   thumbsDir,
@@ -83,5 +84,34 @@ describe("thumbCacheKey", () => {
     const path = thumbCachePath(photo, 320);
     const filename = basename(path, ".jpg");
     expect(thumbCacheKey(photo, 320)).toBe(filename);
+  });
+});
+
+describe("tmpCachePath", () => {
+  const photo = { path: "/vol/Trip/IMG_1.jpg", mtime: 1700000000000, size: 42 };
+
+  it("never hands two writers the same temp path for the same cache entry", () => {
+    // The hazard #161 introduced: GET /api/thumb/:id and the embedding sweep
+    // (server/ml/thumbSource.js) both write the 320px bucket, in the same
+    // process, unserialized. Two concurrent writeFile()s to one temp path
+    // followed by a rename put a TORN JPEG in the cache under a valid key —
+    // and the key only changes when the photo's bytes do, so the grid serves
+    // the corrupt image forever after.
+    const cachePath = thumbCachePath(photo, 320);
+    const a = tmpCachePath(cachePath);
+    const b = tmpCachePath(cachePath);
+    expect(a).not.toBe(b);
+  });
+
+  it("stays under thumbsDir and outside the .jpg key space pruneOrphanedCache keeps", () => {
+    // pruneOrphanedCache sweeps anything here that is not an expected .jpg
+    // key, which is what collects a temp file orphaned by a crash — but it
+    // must never collect a LIVE thumbnail, so the temp name has to be
+    // distinguishable.
+    const cachePath = thumbCachePath(photo, 320);
+    const tmp = tmpCachePath(cachePath);
+    expect(tmp.startsWith(cachePath)).toBe(true);
+    expect(tmp.endsWith(".tmp")).toBe(true);
+    expect(basename(tmp).endsWith(".jpg")).toBe(false);
   });
 });

@@ -15,6 +15,10 @@
 import { format } from "node:util";
 import { modelById } from "../models.js";
 import { extractVectors } from "./embedOutput.js";
+// The EP candidate order — its own module because it encodes a MEASURED
+// result and this file cannot be imported by a test (top-level stdout
+// redirect, dynamic native import, stdin listener). See devices.js.
+import { candidateDevices } from "./devices.js";
 
 // Must run before any dynamic import below — a module's own top-level code
 // can log during initialization, and that has to land on stderr too, not
@@ -48,90 +52,9 @@ let unloadTimer = null;
 // `device`: an explicit EP override, used only by the ML_INTEGRATION
 // benchmark (OnnxMLService.test.js) to force a single candidate with no
 // fallthrough so it can time each EP individually. `null` (the normal path)
-// means "auto-select" — see candidateDevices()/loadWithBestDevice() below.
+// means "auto-select" — see devices.js's candidateDevices() and
+// loadWithBestDevice() below.
 let config = { modelId: null, threads: 1, device: null };
-
-/**
- * Execution-provider candidates to try, in order, for this machine.
- * Mirrors transformers.js's own `supportedDevices` table
- * (dist/transformers.node.mjs) for the Node environment, which is what this
- * worker actually runs — the OLDER version of this comment (Task 11) claimed
- * prebuilt onnxruntime-node had NO CoreML on any platform; that was wrong
- * (verified directly: `onnxruntime-node`'s `listSupportedBackends()` reports
- * `coreml` as bundled on this darwin/arm64 machine) and the fix is this
- * file, not a second out-of-process host — see task-11-report.md's "Revert
- * and replace" section.
- *
- * Deliberately NOT `device: "auto"`: that hands ORT the whole candidate list
- * itself and gives this process no way to learn which EP actually ran, and
- * `describeProvider()` (OnnxMLService.js) is rendered to the user under a
- * rule that it must never claim an accelerator that isn't really running.
- * Trying candidates explicitly, one at a time, is what makes the winner
- * observable.
- *
- * win32/linux keep an accelerator-first order (DirectML/CUDA, then WebGPU,
- * `cpu` last as the untested-but-guaranteed floor) — nobody has measured
- * those platforms yet; that is the DEFAULT assumption an accelerator beats
- * CPU, not a measured one. darwin does NOT: see below.
- *
- * darwin's order is a MEASURED choice, not the accelerator-first default —
- * re-measure before "fixing" it back. `ML_INTEGRATION=1 npx vitest run
- * server/ml/OnnxMLService.test.js` (the two "measures ms/photo" tests) on
- * this darwin/arm64 machine, 2026-07-25:
- *
- *   CLIP ViT-B/32, batch=4, threads=2:
- *     coreml: BROKEN (constructs fine, throws on first real inference —
- *              batch-size sensitive: passes at batch=1, fails at batch>=2)
- *     webgpu: 22.79 ms/photo
- *     cpu:    12.98 ms/photo
- *
- *   SigLIP base patch16-224 (DEFAULT_MODEL_ID) @ batch=16 (embedAllPending's
- *   real production `limit`), threads=2 — the configuration that actually
- *   matters, not a cheaper stand-in:
- *     coreml: BROKEN, same failure signature as above (re-confirmed at
- *              production batch size, not assumed from the CLIP result)
- *     webgpu: 60.98 ms/photo
- *     cpu:    38.93 ms/photo
- *
- * CPU wins BOTH configurations, including the real production one, and
- * CoreML is not merely slower — it does not work at all for either vetted
- * model at any batch size above 1, on this machine. So darwin leads with
- * `cpu`, not an accelerator: attempting coreml/webgpu first would only add
- * a guaranteed-failed attempt (coreml) or a genuinely slower successful one
- * (webgpu) before falling through to what wins anyway. webgpu/coreml stay
- * in the list — never both removed — so a future model, a future
- * onnxruntime-node/CoreML fix, or different hardware still has a path to
- * being picked; only the ORDER reflects today's measurement. If you're
- * changing this back to an accelerator-first order "on principle," don't —
- * re-run the ML_INTEGRATION benchmark on the hardware in front of you first
- * and update this comment with what it actually says.
- *
- * A caveat for whoever measures win32/linux next, where an accelerator
- * still leads: `loadWithBestDevice`'s validation pass only runs once, on
- * the COLD load, using whatever batch triggered it — but a sweep's first
- * batch can be smaller than `limit` (16) if the backlog was under 16 when
- * the sweep started, and later batches (same warm model, no new cold load —
- * see UNLOAD_AFTER_MS below) can be larger. A batch-size-sensitive EP
- * failure that only appears ABOVE the batch size that happened to trigger
- * the cold load — the exact shape CoreML failed in on this machine, just at
- * a size the first validation missed — would not be re-validated once the
- * model is warm. Moot here: `cpu` leads darwin's list now and is immune to
- * this by construction. Live wherever an accelerator is still first.
- * @returns {string[]}
- */
-function candidateDevices() {
-  if (process.platform === "darwin") return ["cpu", "webgpu", "coreml"];
-  if (process.platform === "win32") return ["dml", "webgpu", "cpu"];
-  if (process.platform === "linux") {
-    // CUDA in onnxruntime-node's prebuilt is x64-only (no aarch64 CUDA
-    // build) — falling straight to webgpu/cpu on e.g. a Linux arm64 box
-    // rather than attempting (and always failing) a "cuda" load first.
-    return process.arch === "x64"
-      ? ["cuda", "webgpu", "cpu"]
-      : ["webgpu", "cpu"];
-  }
-  return ["cpu"]; // unknown platform: don't guess at an accelerator name
-}
 
 /**
  * Try each candidate EP in order; the first that both CONSTRUCTS a session
@@ -151,8 +74,11 @@ function candidateDevices() {
  * while every real 16-photo batch failed — precisely the "every embed
  * fails, runSweep writes a permanent sentinel for the whole library"
  * failure mode the deleted WebGPU-renderer host was found to have, just
- * relocated one layer down. See task-11-report.md's "Revert and replace"
- * section for the measured numbers (including this exact failure).
+ * relocated one layer down. The measured numbers (including this exact
+ * failure) are in devices.js's own doc and in the spec's "Superseded
+ * 2026-07-25" section — both of which SHIP, unlike the
+ * .superpowers/ working notes an earlier version of this comment cited,
+ * which are gitignored and vanish with the worktree.
  *
  * `imagesB64` is the REAL request's own images (not a synthetic dummy, not
  * a truncated probe) — whatever batch size actually triggered this cold
@@ -167,8 +93,8 @@ function candidateDevices() {
  * a cold load, is a small price for never getting that wrong.
  *
  * `cpu` is ALWAYS somewhere in every platform's candidate list
- * (candidateDevices() above — first on darwin per its measured order, last
- * elsewhere) and never has anywhere further to fall back to itself, so if it
+ * (candidateDevices(), server/ml/worker/devices.js — first on darwin per its
+ * measured order, last elsewhere; devices.test.js pins that) and never has anywhere further to fall back to itself, so if it
  * ALSO fails this throws for real rather than swallowing it.
  * @param {object} spec model registry entry (models.js)
  * @param {string[]} candidates
@@ -285,8 +211,11 @@ async function ensureModel(modelId, imagesB64) {
     }
 
     // Unsolicited progress frames — no `id`, so the parent's #onData routes
-    // them to its "progress" event instead of a pending-request waiter. Not
-    // wired to any UI yet; Task 10's jobs panel is the intended consumer.
+    // them to its "progress" event instead of a pending-request waiter.
+    // kickEmbedSweep (server/api.js) subscribes and relays them into the
+    // embed job's phase ("downloading onnx/model.onnx 37%"), filtered to
+    // real download chunks and throttled to one update per whole percent —
+    // so a 100 MB first fetch is visible instead of a job frozen at 0 of 0.
     const progress_callback = (p) => reply({ type: "progress", modelId, ...p });
 
     // Built once, before the candidate loop: the processor (resize/normalize/
@@ -298,7 +227,7 @@ async function ensureModel(modelId, imagesB64) {
     );
 
     // `config.device` is set only by the ML_INTEGRATION benchmark forcing a
-    // single EP with no fallthrough (see candidateDevices()'s doc); the
+    // single EP with no fallthrough (see devices.js's own doc); the
     // normal path is auto-select across the whole platform candidate list.
     const candidates = config.device ? [config.device] : candidateDevices();
     const { model, device } = await loadWithBestDevice(

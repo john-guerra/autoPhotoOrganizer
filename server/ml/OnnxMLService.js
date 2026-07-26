@@ -2,7 +2,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { EventEmitter } from "node:events";
-import { MLService } from "./MLService.js";
+import { MLService, markHostFailure } from "./MLService.js";
 import { modelsDir } from "../lib/cachePaths.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -168,6 +168,9 @@ export class OnnxMLService extends MLService {
   #killChild(child, err) {
     if (this.#child !== child) return; // already handled (error THEN exit, or vice versa)
     this.#child = null;
+    // A dead child is the most unambiguous host failure there is: it says
+    // nothing whatsoever about the images that happened to be in flight.
+    markHostFailure(err);
     for (const { reject } of this.#pending.values()) reject(err);
     this.#pending.clear();
   }
@@ -207,7 +210,16 @@ export class OnnxMLService extends MLService {
       const waiter = this.#pending.get(msg.id);
       if (!waiter) continue;
       this.#pending.delete(msg.id);
-      if (msg.error) waiter.reject(new Error(msg.error));
+      // THE ERRNO DIES HERE. The worker replies with `String(e.message)` —
+      // whatever `code` the original error carried (ENOSPC on the model
+      // download, ETIMEDOUT behind a proxy) does not survive the protocol, so
+      // the Error rebuilt on this side has none. A sweep classifying on
+      // `err.code` would therefore read every one of these as "permanent, and
+      // about this photo" and sentinel the entire library from one broken
+      // download. Tag what we DO know — it came out of the ML host — and let
+      // the caller decide what that means (see markHostFailure's doc, and
+      // embedSweep's isTransient).
+      if (msg.error) waiter.reject(markHostFailure(new Error(msg.error)));
       else waiter.resolve(msg);
     }
   }
@@ -242,8 +254,10 @@ export class OnnxMLService extends MLService {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(
-          new Error(
-            `ML worker: "${req.op}" timed out after ${timeoutMs}ms with no reply`
+          markHostFailure(
+            new Error(
+              `ML worker: "${req.op}" timed out after ${timeoutMs}ms with no reply`
+            )
           )
         );
       }, timeoutMs);
@@ -297,7 +311,8 @@ export class OnnxMLService extends MLService {
    * @returns {Promise<Float32Array[]>} raw (un-normalized) model vectors
    */
   async embedImages(buffers) {
-    if (!this.#modelId) throw new Error("OnnxMLService: configure() first");
+    if (!this.#modelId)
+      throw markHostFailure(new Error("OnnxMLService: configure() first"));
     const timeoutMs = this.#modelWarm
       ? EMBED_WARM_TIMEOUT_MS
       : EMBED_COLD_TIMEOUT_MS;

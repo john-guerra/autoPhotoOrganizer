@@ -23,6 +23,7 @@
     saveMlSettings,
     fetchMlStats,
     purgeMlModel,
+    retryMlFailed,
     startEmbed,
     cancelJob,
   } from "./api.js";
@@ -313,6 +314,46 @@
     }
   }
 
+  /**
+   * Take back every "could not be embedded" record for the active model.
+   *
+   * The panel needs this because a failure record is otherwise permanent:
+   * only a change to the file's bytes, deleting the photo, or Purge clears
+   * one — and Purge is rendered per row of `storage`, so a sweep that failed
+   * EVERYTHING (a model that would not download) leaves no vectors, no
+   * storage row, and therefore no button anywhere in the app. The only way
+   * back was deleting index.db, which also takes ratings, keep-scope, manual
+   * stacks and album names with it.
+   */
+  async function retryFailed() {
+    if (
+      !confirm(
+        `Try ${counts.failed.toLocaleString()} failed photo(s) again with ${labelFor(settings.modelId)}? Nothing already embedded is touched.`
+      )
+    ) {
+      return;
+    }
+    busy = true;
+    try {
+      const r = await retryMlFailed();
+      const refreshErr = await refreshStats();
+      say(
+        refreshErr
+          ? `${r.cleared.toLocaleString()} photo(s) will be tried again, but the counts below could not be refreshed (${refreshErr}) — press “Refresh counts”.`
+          : `${r.cleared.toLocaleString()} photo(s) will be tried again — press “Embed now”, or they go with the next scan.`,
+        refreshErr ? "err" : "info"
+      );
+    } catch (e) {
+      // Includes the 409 the server answers while a sweep is running, in its
+      // own words ("stop it in the jobs panel first") — the button is also
+      // disabled then, but the request can still race a sweep that started
+      // a moment ago.
+      say(`Couldn't clear the failures: ${e.message}`, "err");
+    } finally {
+      busy = false;
+    }
+  }
+
   async function purge(row) {
     if (
       !confirm(
@@ -475,6 +516,31 @@
         <span class="of">— tried, and could not be read</span>
       </li>
     </ul>
+    {#if counts.failed > 0}
+      <!-- A failure record used to be permanent: nothing else in the app can
+           clear one unless vectors also exist (Purge is rendered per stored-
+           vector row). So the way back has to live right next to the number
+           it undoes. -->
+      <div class="ml-actions">
+        <button
+          data-testid="ml-retry-failed"
+          disabled={busy || !!runningJob}
+          title={runningJob
+            ? "Stop the running sweep first — clearing these while it runs would interrupt it."
+            : "Forget these failures and try the photos again on the next sweep."}
+          onclick={retryFailed}
+        >
+          Retry {counts.failed.toLocaleString()} failed
+        </button>
+      </div>
+    {/if}
+    <!-- RAW is not attempted at all, and saying so is cheaper than leaving
+         the user to wonder why the totals don't match their library. -->
+    <p class="hint" data-testid="ml-raw-note">
+      RAW files are skipped — there is no preview AutoGallery can read for one
+      yet — so they are left out of these counts rather than counted as
+      failures. JPEGs, PNGs and videos are all included.
+    </p>
 
     <p class="provider">
       Running on <code data-testid="ml-provider">{stats.provider}</code>
@@ -525,7 +591,20 @@
                 row.bytes
               )}</span
             >
-            <button disabled={busy} onclick={() => purge(row)}>Purge</button>
+            <!-- Disabled while a sweep runs: purging deletes the very rows
+                 the sweep is working through, which trips runSweep's stall
+                 guard and kills it with a message that reads like an
+                 internal bug report ("markFailed is not removing the row…")
+                 for an action the panel invited. The server refuses with a
+                 409 too — this only keeps the user from being told off for
+                 pressing an enabled button. -->
+            <button
+              disabled={busy || !!runningJob}
+              title={runningJob
+                ? "Stop the running sweep first — purging while it runs would interrupt it."
+                : `Delete the stored vectors for ${labelFor(row.model)}.`}
+              onclick={() => purge(row)}>Purge</button
+            >
           </li>
         {/each}
       </ul>

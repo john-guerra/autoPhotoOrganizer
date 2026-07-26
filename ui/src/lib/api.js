@@ -992,6 +992,26 @@ export async function purgeMlModel(model) {
 }
 
 /**
+ * Forget every "could not be embedded" record for the ACTIVE model, so the
+ * next sweep tries those photos again. Vectors already computed are kept.
+ *
+ * Answers 409 while a sweep is running (deleting those rows underneath it
+ * would abort it), with a message naming the fix — render it, don't flatten
+ * it.
+ * @returns {Promise<{model:string, cleared:number}>}
+ */
+export async function retryMlFailed() {
+  const res = await fetch("/api/ml/retry-failed", { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      body.error || `couldn't clear the failures (${res.status})`
+    );
+  }
+  return res.json();
+}
+
+/**
  * Kick the background embedder. Fire-and-forget — progress lives in the
  * JobsPanel. Answers `{started:false, alreadyRunning:true}` when a sweep is
  * already in flight: the single-flight latch is NOT keyed by model, so this is
