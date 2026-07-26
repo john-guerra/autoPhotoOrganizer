@@ -30,9 +30,10 @@ const HOST = "127.0.0.1";
 /**
  * @param {{ml?: import("./ml/MLService.js").MLService}} [opts] `ml` is
  *   injectable so tests never spawn the real ONNX child process (registerApi
- *   otherwise constructs one LAZILY on first use — see api.js) and so a
- *   future WebGPU host (electron/main.js) can supply its own without server/
- *   ever importing electron.
+ *   otherwise constructs one LAZILY on first use — see api.js). Keeping this
+ *   seam abstract (MLService, not OnnxMLService) is also what leaves room for
+ *   a genuinely different host later without server/ changing shape — see
+ *   MLService.js's own doc for why it's kept abstract at all.
  */
 export function createApp({ ml } = {}) {
   const app = express();

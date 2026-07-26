@@ -76,6 +76,17 @@ export class OnnxMLService extends MLService {
   // stale-generation check in embedImages().
   #modelGeneration = 0;
   #events = new EventEmitter();
+  // The execution provider the worker actually resolved for the last
+  // successful embed (e.g. "coreml", "webgpu", "cpu") — see
+  // worker/index.js's candidateDevices()/loadWithBestDevice(). `null` until
+  // the first real embed reply arrives; describeProvider() below treats that
+  // as "cpu" (the guaranteed floor, never an overclaim) rather than guessing
+  // an accelerator that hasn't actually been confirmed to work on this
+  // machine. Reset whenever the worker would have to re-resolve it — a fresh
+  // child (#ensureChild) or a configure() (which drops the loaded model
+  // worker-side) — so this never keeps reporting a stale EP from a process
+  // or model that no longer exists.
+  #resolvedDevice = null;
 
   constructor({ spawn = nodeSpawn, workerPath } = {}) {
     super();
@@ -86,6 +97,7 @@ export class OnnxMLService extends MLService {
   #ensureChild() {
     if (this.#child) return this.#child;
     this.#modelWarm = false; // fresh process, nothing loaded yet
+    this.#resolvedDevice = null; // a fresh process re-resolves its own EP
     this.#modelGeneration++;
     // In a packaged build the child runs on ELECTRON's ABI, not Node's —
     // ELECTRON_RUN_AS_NODE makes the Electron binary behave as node. #67 is the
@@ -259,10 +271,15 @@ export class OnnxMLService extends MLService {
   /** Select which model embedImages() uses and cap the worker's thread pool.
    * A thread-count change only takes effect on a fresh session, so the worker
    * drops any loaded model when this is called — the next embedImages() call
-   * pays a cold load again.
-   * @param {{modelId: string, threads: number}} opts */
-  async configure({ modelId, threads }) {
-    await this.#request({ op: "configure", modelId, threads });
+   * pays a cold load again (and re-resolves its execution provider from
+   * scratch, in case a different model succeeds/fails on a different EP).
+   * @param {{modelId: string, threads: number, device?: string}} opts
+   *   `device` is NOT part of the public contract any real caller uses —
+   *   server/api.js never sets it. It exists only so the ML_INTEGRATION
+   *   benchmark (OnnxMLService.test.js) can force one specific EP with no
+   *   automatic fallthrough, to time each candidate individually. */
+  async configure({ modelId, threads, device }) {
+    await this.#request({ op: "configure", modelId, threads, device });
     // Recorded only after the worker confirms — if the child died between
     // spawn and reply, #modelId must stay whatever it was (null, on the
     // first-ever call) so the "configure() first" guard in embedImages()
@@ -271,6 +288,7 @@ export class OnnxMLService extends MLService {
     this.#modelId = modelId;
     this.#threads = threads;
     this.#modelWarm = false;
+    this.#resolvedDevice = null; // re-resolved on the next embed
     this.#modelGeneration++;
   }
 
@@ -284,7 +302,7 @@ export class OnnxMLService extends MLService {
       ? EMBED_WARM_TIMEOUT_MS
       : EMBED_COLD_TIMEOUT_MS;
     const generation = this.#modelGeneration;
-    const { vectors } = await this.#request(
+    const { vectors, device } = await this.#request(
       {
         op: "embed",
         modelId: this.#modelId,
@@ -300,19 +318,30 @@ export class OnnxMLService extends MLService {
     // silently undo a real invalidation that raced it, handing the NEXT
     // embed a 30s warm budget for what is actually a cold reload.
     if (this.#modelGeneration === generation) this.#modelWarm = true;
+    // Same staleness guard as #modelWarm above: only trust `device` if
+    // nothing invalidated this generation while the request was in flight —
+    // a race here would otherwise report an EP resolved against a model/
+    // config that is no longer the current one.
+    if (device && this.#modelGeneration === generation) {
+      this.#resolvedDevice = device;
+    }
     return vectors.map((v) => Float32Array.from(v));
   }
 
-  /** Always CPU: worker/index.js hardcodes `device: "cpu"` when it loads a
-   * model — no CoreML/DirectML/CUDA execution provider is wired up for this
-   * host (see WebGpuMLService's class doc for why prebuilt onnxruntime-node
-   * can't reach a GPU on Apple Silicon at all). A static fact about this
-   * class's own implementation, not a runtime probe — answering it must
-   * never spawn the child just to satisfy a settings-panel GET (see the
-   * comment on ML_PROVIDER_FALLBACK in server/api.js).
+  /** The execution provider actually running, per the worker's own
+   * candidateDevices()/loadWithBestDevice() (worker/index.js) — CoreML on
+   * darwin, DirectML on win32, CUDA on linux/x64, WebGPU, or the CPU floor,
+   * tried in that order with a real from_pretrained() attempt per candidate
+   * (not `device: "auto"`, which would hide which one actually won). Reports
+   * `#resolvedDevice` if a real embed has confirmed it; before that (no
+   * embed has run yet this session/config) it reports "cpu" — never an
+   * accelerator that hasn't actually been proven to load on this machine.
+   * A static fact turned live one: answering it never spawns the child on
+   * its own (see the comment on ML_PROVIDER_FALLBACK in server/api.js) —
+   * it only reflects whatever the LAST real embed already told us.
    * @returns {Promise<string>} */
   async describeProvider() {
-    return "onnxruntime-node (cpu)";
+    return `onnxruntime-node (${this.#resolvedDevice ?? "cpu"})`;
   }
 
   /** Kill the child. Any later request respawns it. */

@@ -233,10 +233,12 @@ describe("embedAllPending", () => {
       // corruption still targets IMG_1 however runSweep re-batches it on
       // retry (a full batch, then a singleton). Simulates a host with no
       // shape validation of its own — today's ONNX worker happens to
-      // validate, but Task 11's WebGPU host has a separate extraction path
-      // and no guarantee of the same check (models.js names this exact
-      // hazard: "a model whose output shape we have not checked writes
-      // plausible vectors of the wrong dimension").
+      // validate (extractVectors in worker/embedOutput.js), but this test's
+      // job is to prove embedSweep/quantize catch it independently, so a
+      // different host implementation (or a future model swap) can't
+      // silently regress this (models.js names this exact hazard: "a model
+      // whose output shape we have not checked writes plausible vectors of
+      // the wrong dimension").
       ml.embedImages = vi.fn(async (buffers) => {
         const vectors = await realEmbedImages(buffers);
         return vectors.map((v, i) =>

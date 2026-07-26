@@ -598,8 +598,117 @@ integration("OnnxMLService (real child)", () => {
       // vectors.
       expect(Array.from(out[0]).every(Number.isFinite)).toBe(true);
       expect(Array.from(out[0])).not.toEqual(Array.from(out[1]));
+      // #161 "revert and replace": the worker now tries a real
+      // execution-provider candidate list (worker/index.js's
+      // candidateDevices()) instead of hardcoding "cpu", and describeProvider
+      // must report whichever one actually won — not a guess, and not still
+      // the pre-embed "cpu" default (see the dedicated EP list below; this
+      // machine's darwin/arm64 candidate list starts with "coreml").
+      const provider = await svc.describeProvider();
+      expect(provider).toMatch(/^onnxruntime-node \((coreml|webgpu|cpu)\)$/);
       svc.stop();
     },
     5 * 60_000
   ); // cold cache: download + load can take minutes
+
+  // #161 "revert and replace": Task 11 built a whole second out-of-process
+  // host (a hidden Electron renderer running transformers.js on WebGPU) on
+  // the premise that prebuilt onnxruntime-node had no CoreML on any
+  // platform. That premise was wrong — `listSupportedBackends()` reports
+  // coreml/webgpu/cpu all bundled — so the fix is EP selection in THIS
+  // worker instead. This test is the actual point of that fix: it embeds the
+  // same small batch once per candidate EP for this platform and reports
+  // ms/photo for each, so "did CoreML actually help" is a measured fact in
+  // task-11-report.md's "Revert and replace" section, not an assumption.
+  it(
+    "measures ms/photo per available execution provider (CLIP ViT-B/32)",
+    async () => {
+      const sharp = (await import("sharp")).default;
+
+      const makeJpeg = (r, g, b) =>
+        sharp({
+          create: {
+            width: 32,
+            height: 32,
+            channels: 3,
+            background: { r, g, b },
+          },
+        })
+          .jpeg()
+          .toBuffer();
+      const batch = await Promise.all(
+        [
+          [220, 20, 20],
+          [20, 220, 20],
+          [20, 20, 220],
+          [220, 220, 20],
+        ].map(([r, g, b]) => makeJpeg(r, g, b))
+      );
+      const modelId = "Xenova/clip-vit-base-patch32";
+
+      // Mirrors worker/index.js's candidateDevices(). Duplicated rather than
+      // imported: the worker runs as a separate spawned process (a fresh
+      // Node module graph), not something this test process can import
+      // from directly, and the list is small enough that keeping it in sync
+      // by hand is cheaper than plumbing a shared export across the
+      // stdio boundary just for a benchmark.
+      const candidates =
+        process.platform === "darwin"
+          ? ["coreml", "webgpu", "cpu"]
+          : process.platform === "win32"
+            ? ["dml", "webgpu", "cpu"]
+            : process.platform === "linux"
+              ? process.arch === "x64"
+                ? ["cuda", "webgpu", "cpu"]
+                : ["webgpu", "cpu"]
+              : ["cpu"];
+
+      const REPEATS = 5;
+      const results = {};
+      for (const device of candidates) {
+        const svc = new OnnxMLService();
+        try {
+          // `device` forces this ONE candidate with no fallthrough (the
+          // ML_INTEGRATION-only knob configure() exposes) — the whole point
+          // here is per-EP numbers, not the auto-selected winner.
+          await svc.configure({ modelId, threads: 2, device });
+          // One warm-up pays the cold load (download/first-session-build
+          // cost) without it polluting the timed loop below.
+          await svc.embedImages(batch);
+          const t0 = performance.now();
+          for (let i = 0; i < REPEATS; i++) await svc.embedImages(batch);
+          const elapsedMs = performance.now() - t0;
+          results[device] = {
+            msPerPhoto: Number(
+              (elapsedMs / (REPEATS * batch.length)).toFixed(2)
+            ),
+          };
+        } catch (e) {
+          // Not a test failure: "bundled" (listSupportedBackends) is not the
+          // same as "works on this exact machine" — a candidate genuinely
+          // failing to construct here (no CUDA GPU present, e.g.) is
+          // precisely the case loadWithBestDevice()'s real fallback exists
+          // to handle, and this benchmark should say so, not crash.
+          results[device] = {
+            unavailable: true,
+            reason: String(e?.message ?? e),
+          };
+        } finally {
+          svc.stop();
+        }
+      }
+
+      // eslint-disable-next-line no-console -- the whole point of this test
+      // is the printed numbers; paste this output into the report.
+      console.log(
+        "ML EP benchmark (ms/photo, CLIP ViT-B/32, threads=2):",
+        JSON.stringify(results, null, 2)
+      );
+
+      // cpu is the guaranteed floor on every platform's candidate list — the
+      // one hard assertion here. Everything else is informational.
+      expect(results.cpu.unavailable).not.toBe(true);
+    },
+    10 * 60_000
+  );
 });

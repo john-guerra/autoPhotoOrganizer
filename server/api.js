@@ -982,17 +982,18 @@ export function registerApi(app, { ml } = {}) {
   });
 
   // --- ML settings and status (#161) ----------------------------------------
-  // Historically a hardcoded string here, true only because the ONNX host
-  // always ran on CPU (worker/index.js hardcodes `device: "cpu"`). Task 11
-  // added a SECOND host (WebGpuMLService) that, when the machine has a WebGPU
-  // adapter, is what electron/main.js actually injects instead — so a static
-  // string here would become a lie on exactly the machines this app most
-  // wants to help. Each MLService implementation now answers for itself via
-  // `describeProvider()` (server/ml/MLService.js), and /api/ml/stats below
-  // asks whichever host is actually configured. This fallback is for legacy
-  // test doubles that predate that method (plain objects, not real
-  // MLService subclasses — see workingMl()/inertMl() in api.test.js) so a
-  // GET never throws just because the injected stub doesn't implement it.
+  // Historically a hardcoded string here, true only by accident: the worker
+  // hardcoded `device: "cpu"` and never tried anything else, even though
+  // onnxruntime-node's prebuilt actually bundles CoreML/DirectML/CUDA too
+  // (worker/index.js's candidateDevices()/loadWithBestDevice() now tries them
+  // in order and records the winner). A static string here would silently
+  // become a lie the moment that changed, so each MLService implementation
+  // now answers for itself via `describeProvider()` (server/ml/MLService.js),
+  // and /api/ml/stats below asks whichever host is actually configured. This
+  // fallback is for legacy test doubles that predate that method (plain
+  // objects, not real MLService subclasses — see workingMl()/inertMl() in
+  // api.test.js) so a GET never throws just because the injected stub
+  // doesn't implement it.
   const ML_PROVIDER_FALLBACK = "onnxruntime-node (cpu)";
 
   // GET current settings plus the vetted model list and the machine's core
@@ -1034,13 +1035,11 @@ export function registerApi(app, { ml } = {}) {
   // embedCounts is the persisted, UI-facing truth.
   //
   // `getMl()` here does NOT spawn anything: constructing OnnxMLService is
-  // inert (see its constructor), and describeProvider() on both real hosts
-  // answers from static/already-known state rather than probing the worker —
-  // OnnxMLService.describeProvider() never touches the child, and
-  // WebGpuMLService.describeProvider() only re-asks a renderer window that
-  // electron/main.js already created (and probed once) at app startup. So
-  // this GET still never triggers the un-opted-in spawn the `enabled` gate
-  // in kickEmbedSweep exists to prevent.
+  // inert (see its constructor), and describeProvider() answers from
+  // already-known state (the EP the last real embed reported, or "cpu" if
+  // none has run yet) rather than probing the worker — it never touches the
+  // child process on its own. So this GET still never triggers the
+  // un-opted-in spawn the `enabled` gate in kickEmbedSweep exists to prevent.
   app.get("/api/ml/stats", async (req, res) => {
     const db = getDb();
     const { modelId } = readMlSettings();

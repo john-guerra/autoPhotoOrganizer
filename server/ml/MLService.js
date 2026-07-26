@@ -16,11 +16,13 @@ export class MLService {
    * @param {Buffer[]} _buffers JPEG bytes, one per image
    * @returns {Promise<Float32Array[]>}
    *
-   * Bytes, not paths — deliberately. Task 11's WebGPU host runs in a renderer
-   * with no filesystem access, so the caller must read the file and hand over
-   * the bytes; the boundary this crosses is a byte buffer, not a path string,
-   * so safeResolve (server/lib/safeResolve.js) gains no new attack surface
-   * from this method.
+   * Bytes, not paths — deliberately. The host runs out-of-process (a spawned
+   * child today; see OnnxMLService — any future host is free to be a
+   * different kind of process, e.g. one with no filesystem access at all)
+   * and the caller already has the file open for thumbnailing, so it reads
+   * the bytes here rather than handing the host a path to open itself; the
+   * boundary this crosses is a byte buffer, not a path string, so safeResolve
+   * (server/lib/safeResolve.js) gains no new attack surface from this method.
    */
   async embedImages(_buffers) {
     throw new Error("MLService.embedImages is not implemented");
@@ -38,12 +40,13 @@ export class MLService {
    * Human-readable label for the compute backend THIS instance actually runs
    * inference on — surfaced in the settings/status panel (#161, Task 12). The
    * one hard rule: it must never claim an accelerator that is not really
-   * running (see OnnxMLService.describeProvider and WebGpuMLService's, which
-   * is the whole reason this method exists rather than the static string
-   * server/api.js used to hardcode). Unlike the methods above, this does NOT
-   * throw by default — a host that hasn't overridden it gets an honest
-   * "unknown" rather than crashing a status GET, but every real host
-   * (OnnxMLService, WebGpuMLService) overrides it with the truth.
+   * running (see OnnxMLService.describeProvider, which is the whole reason
+   * this method exists rather than the static string server/api.js used to
+   * hardcode — that string was truthful only by accident, back when the
+   * worker hardcoded `device: "cpu"` and never tried anything else). Unlike
+   * the methods above, this does NOT throw by default — a host that hasn't
+   * overridden it gets an honest "unknown" rather than crashing a status GET,
+   * but every real host (OnnxMLService) overrides it with the truth.
    * @returns {Promise<string>}
    */
   async describeProvider() {
