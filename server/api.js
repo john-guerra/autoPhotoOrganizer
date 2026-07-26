@@ -982,15 +982,18 @@ export function registerApi(app, { ml } = {}) {
   });
 
   // --- ML settings and status (#161) ----------------------------------------
-  // The ONNX host always runs on CPU only (worker/index.js hardcodes
-  // `device: "cpu"`) — a fact about the current implementation, not a
-  // runtime probe. Reporting it here costs nothing; ASKING the worker
-  // directly (ml.health()) would spawn it just to answer a settings-panel
-  // GET, which is exactly the un-opted-in spawn the `enabled` gate above
-  // exists to prevent. Task 11's WebGPU host is a SEPARATE class with its
-  // own provider string — this must never claim an accelerator that isn't
-  // actually running (#161 fix round 1, Minor 5).
-  const ML_PROVIDER = "onnxruntime-node (cpu)";
+  // Historically a hardcoded string here, true only because the ONNX host
+  // always ran on CPU (worker/index.js hardcodes `device: "cpu"`). Task 11
+  // added a SECOND host (WebGpuMLService) that, when the machine has a WebGPU
+  // adapter, is what electron/main.js actually injects instead — so a static
+  // string here would become a lie on exactly the machines this app most
+  // wants to help. Each MLService implementation now answers for itself via
+  // `describeProvider()` (server/ml/MLService.js), and /api/ml/stats below
+  // asks whichever host is actually configured. This fallback is for legacy
+  // test doubles that predate that method (plain objects, not real
+  // MLService subclasses — see workingMl()/inertMl() in api.test.js) so a
+  // GET never throws just because the injected stub doesn't implement it.
+  const ML_PROVIDER_FALLBACK = "onnxruntime-node (cpu)";
 
   // GET current settings plus the vetted model list and the machine's core
   // count (`maxThreads`, for a 1..N threads slider — Task 12), so a settings
@@ -1024,16 +1027,31 @@ export function registerApi(app, { ml } = {}) {
 
   // GET embedded/failed/total counts for the ACTIVE model, plus per-model
   // on-disk storage so a settings panel can offer a targeted purge, and the
-  // provider string (see ML_PROVIDER above). Counts come from embedCounts
-  // (queries `photos` directly), not from a sweep's live counters — a
-  // concurrent-delete race can transiently overstate a live `failed` tally,
-  // but embedCounts is the persisted, UI-facing truth.
-  app.get("/api/ml/stats", (req, res) => {
+  // provider string (see ML_PROVIDER_FALLBACK above — `describeProvider()`
+  // is the real source of truth). Counts come from embedCounts (queries
+  // `photos` directly), not from a sweep's live counters — a concurrent-
+  // delete race can transiently overstate a live `failed` tally, but
+  // embedCounts is the persisted, UI-facing truth.
+  //
+  // `getMl()` here does NOT spawn anything: constructing OnnxMLService is
+  // inert (see its constructor), and describeProvider() on both real hosts
+  // answers from static/already-known state rather than probing the worker —
+  // OnnxMLService.describeProvider() never touches the child, and
+  // WebGpuMLService.describeProvider() only re-asks a renderer window that
+  // electron/main.js already created (and probed once) at app startup. So
+  // this GET still never triggers the un-opted-in spawn the `enabled` gate
+  // in kickEmbedSweep exists to prevent.
+  app.get("/api/ml/stats", async (req, res) => {
     const db = getDb();
     const { modelId } = readMlSettings();
+    const ml = getMl();
+    const provider =
+      typeof ml.describeProvider === "function"
+        ? await ml.describeProvider()
+        : ML_PROVIDER_FALLBACK;
     res.json({
       model: modelId,
-      provider: ML_PROVIDER,
+      provider,
       counts: embedCounts(db, modelId),
       storage: modelStorage(db),
     });

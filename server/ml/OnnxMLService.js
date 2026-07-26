@@ -303,6 +303,18 @@ export class OnnxMLService extends MLService {
     return vectors.map((v) => Float32Array.from(v));
   }
 
+  /** Always CPU: worker/index.js hardcodes `device: "cpu"` when it loads a
+   * model — no CoreML/DirectML/CUDA execution provider is wired up for this
+   * host (see WebGpuMLService's class doc for why prebuilt onnxruntime-node
+   * can't reach a GPU on Apple Silicon at all). A static fact about this
+   * class's own implementation, not a runtime probe — answering it must
+   * never spawn the child just to satisfy a settings-panel GET (see the
+   * comment on ML_PROVIDER_FALLBACK in server/api.js).
+   * @returns {Promise<string>} */
+  async describeProvider() {
+    return "onnxruntime-node (cpu)";
+  }
+
   /** Kill the child. Any later request respawns it. */
   stop() {
     if (!this.#child) return;

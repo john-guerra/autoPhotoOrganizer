@@ -33,4 +33,20 @@ export class MLService {
   async detectFaces(_path) {
     throw new Error("MLService.detectFaces is not implemented");
   }
+
+  /**
+   * Human-readable label for the compute backend THIS instance actually runs
+   * inference on — surfaced in the settings/status panel (#161, Task 12). The
+   * one hard rule: it must never claim an accelerator that is not really
+   * running (see OnnxMLService.describeProvider and WebGpuMLService's, which
+   * is the whole reason this method exists rather than the static string
+   * server/api.js used to hardcode). Unlike the methods above, this does NOT
+   * throw by default — a host that hasn't overridden it gets an honest
+   * "unknown" rather than crashing a status GET, but every real host
+   * (OnnxMLService, WebGpuMLService) overrides it with the truth.
+   * @returns {Promise<string>}
+   */
+  async describeProvider() {
+    return "unknown ML provider";
+  }
 }
