@@ -6,6 +6,20 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.30
+
+- **AutoGallery can now analyze your photos by what they look like, so future
+  features can find them without you having tagged anything — off by default.**
+  Turn it on from Manage library, which shows you the model, its download
+  size, and its licence before anything downloads. (#161)
+- **New ML settings in Manage library**: pick the model, cap how many cores it
+  can use (half your machine by default, so browsing stays smooth), see how
+  many photos are done and how many failed, and reclaim the disk space a
+  model's data uses. (#161)
+- Analyzing your library in the background leaves thumbnails cached for every
+  photo it passes over, so the grid loads instantly everywhere afterwards,
+  not just where you've already scrolled. (#161)
+
 ## 2.18.29
 
 - **Internal:** step 5 of the jump/landing refactor (#189) — every feed-window
