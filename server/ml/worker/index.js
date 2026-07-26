@@ -6,12 +6,33 @@
  * and runs real inference (`configure`, `embed`).
  *
  * Nothing here may write to stdout except a reply line — stdout IS the
- * protocol. Diagnostics go to stderr. transformers.js can print progress bars
- * for in-flight downloads; that output is routed to stderr below (see
- * `transformers.env` / console redirection) precisely so it can never land on
- * stdout and corrupt the JSON-lines stream.
+ * protocol. Diagnostics go to stderr. Both `console.*` and the underlying
+ * `process.stdout.write` are redirected to stderr below, before any dynamic
+ * import that might log during its own module initialization (onnxruntime-node,
+ * then later @huggingface/transformers) — `reply()` alone keeps a bound
+ * reference to the real stdout stream, captured before the redirect.
  */
+import { format } from "node:util";
 import { modelById } from "../models.js";
+import { extractVectors } from "./embedOutput.js";
+
+// Must run before any dynamic import below — a module's own top-level code
+// can log during initialization, and that has to land on stderr too, not
+// just calls made after this point.
+const realStdoutWrite = process.stdout.write.bind(process.stdout);
+for (const level of ["log", "info", "warn", "error", "debug"]) {
+  // node:util's `format` handles %s/%d specifiers and renders objects/Errors
+  // properly (util.inspect under the hood) — stderr is this process's ONLY
+  // diagnostic channel, so a `[object Object]` or a stack-less Error here is
+  // a failure nobody can debug.
+  console[level] = (...args) => process.stderr.write(format(...args) + "\n");
+}
+// Belt and suspenders: nothing legitimately calls process.stdout.write
+// directly except reply() (which uses the saved realStdoutWrite reference
+// above) — redirect the raw stream too, so a stray write from a future
+// dependency bump degrades to a stderr line instead of corrupting the
+// JSON-lines protocol every reply() line depends on.
+process.stdout.write = (chunk, ...rest) => process.stderr.write(chunk, ...rest);
 
 let ort = null;
 let loadError = null;
@@ -21,20 +42,22 @@ try {
   loadError = e;
 }
 
-// transformers.js logs load/download progress via console.log, and console.log
-// writes to stdout by default — which would corrupt the JSON-lines protocol
-// with non-JSON lines. Stdout must carry ONLY reply() lines, so redirect every
-// console method to stderr for the lifetime of this process. This runs before
-// the dynamic `import("@huggingface/transformers")` in ensureModel() below, so
-// there is no window where its module-load side effects could reach stdout.
-for (const level of ["log", "info", "warn", "error", "debug"]) {
-  console[level] = (...args) => process.stderr.write(args.join(" ") + "\n");
-}
-
 let transformers = null;
 let loaded = null; // { id, model, processor, outputKey, dim }
 let unloadTimer = null;
 let config = { modelId: null, threads: 1 };
+
+// In-flight load memo, keyed by the model id being loaded. `handle()` is
+// async and stdin delivers one line per microtask turn with no queueing, so
+// two `embed` requests arriving in the same chunk can both observe
+// `loaded === null` before either finishes loading. Without this, both call
+// `from_pretrained` concurrently: two ~100 MB downloads racing to write the
+// same cache files (a truncated .onnx from the loser can leave the model
+// permanently unloadable, with no checksum to catch it), two sessions
+// resident at once (~800 MB), and `loaded` clobbered by whichever finishes
+// last.
+let loadingPromise = null;
+let loadingModelId = null;
 
 /** Models return their RAM after this long idle. A 114k backfill runs for
  *  hours; holding ~400 MB resident afterwards for nothing is not acceptable
@@ -43,37 +66,68 @@ const UNLOAD_AFTER_MS = 120_000;
 
 async function ensureModel(modelId) {
   if (loaded?.id === modelId) return loaded;
-  const spec = modelById(modelId);
+  if (loadingPromise && loadingModelId === modelId) return loadingPromise;
 
-  if (!transformers) {
-    transformers = await import("@huggingface/transformers");
-    // Models are a rebuildable cache on the INTERNAL disk, like every other
-    // derived artifact this app writes. NOT under cache/thumbs/ —
-    // pruneOrphanedCache deletes anything there that isn't a known thumb key,
-    // regardless of extension, and would eat the model on the next prune.
-    transformers.env.cacheDir = process.env.AUTOGALLERY_MODELS_DIR;
-    // Cap the intra-op pool. A separate PROCESS is not a separate CPU: left
-    // uncapped, ORT grabs every core and starves the libvips pool that
-    // server/index.js:19 reserves for thumbnails — measured at 15ms -> 90ms
-    // with tiles abandoned mid-scroll (lib/interactive.js).
-    transformers.env.backends.onnx.wasm.numThreads = config.threads;
+  loadingModelId = modelId;
+  loadingPromise = (async () => {
+    const spec = modelById(modelId);
+
+    if (!transformers) {
+      transformers = await import("@huggingface/transformers");
+      // Models are a rebuildable cache on the INTERNAL disk, like every other
+      // derived artifact this app writes. NOT under cache/thumbs/ —
+      // pruneOrphanedCache deletes anything there that isn't a known thumb
+      // key, regardless of extension, and would eat the model on the next
+      // prune. Refuse to guess: an unset/empty var would otherwise fall back
+      // to transformers' own default ('./.cache', relative to CWD) — an
+      // invisible-to-cacheStats download into the repo or the user's home.
+      const modelsDir = process.env.AUTOGALLERY_MODELS_DIR;
+      if (!modelsDir) {
+        throw new Error(
+          "AUTOGALLERY_MODELS_DIR is not set — refusing to let transformers.js " +
+            "fall back to its default cache location"
+        );
+      }
+      transformers.env.cacheDir = modelsDir;
+      // Cap the intra-op pool. A separate PROCESS is not a separate CPU: left
+      // uncapped, ORT grabs every core and starves the libvips pool that
+      // server/index.js:19 reserves for thumbnails — measured at 15ms -> 90ms
+      // with tiles abandoned mid-scroll (lib/interactive.js).
+      transformers.env.backends.onnx.wasm.numThreads = config.threads;
+    }
+
+    // Unsolicited progress frames — no `id`, so the parent's #onData routes
+    // them to its "progress" event instead of a pending-request waiter. Not
+    // wired to any UI yet; Task 10's jobs panel is the intended consumer.
+    const progress_callback = (p) => reply({ type: "progress", modelId, ...p });
+
+    const Loader = transformers[spec.loader];
+    const model = await Loader.from_pretrained(spec.id, {
+      dtype: spec.dtype,
+      device: "cpu",
+      session_options: { intraOpNumThreads: config.threads },
+      progress_callback,
+    });
+    const processor = await transformers.AutoProcessor.from_pretrained(
+      spec.id,
+      { progress_callback }
+    );
+    loaded = {
+      id: spec.id,
+      model,
+      processor,
+      outputKey: spec.outputKey,
+      dim: spec.dim,
+    };
+    return loaded;
+  })();
+
+  try {
+    return await loadingPromise;
+  } finally {
+    loadingPromise = null;
+    loadingModelId = null;
   }
-
-  const Loader = transformers[spec.loader];
-  const model = await Loader.from_pretrained(spec.id, {
-    dtype: spec.dtype,
-    device: "cpu",
-    session_options: { intraOpNumThreads: config.threads },
-  });
-  const processor = await transformers.AutoProcessor.from_pretrained(spec.id);
-  loaded = {
-    id: spec.id,
-    model,
-    processor,
-    outputKey: spec.outputKey,
-    dim: spec.dim,
-  };
-  return loaded;
 }
 
 function touchUnloadTimer() {
@@ -130,7 +184,9 @@ async function handle(line) {
     }
 
     if (req.op === "embed") {
-      const { model, processor, outputKey } = await ensureModel(req.modelId);
+      const { model, processor, outputKey, dim } = await ensureModel(
+        req.modelId
+      );
       const { RawImage } = transformers;
       const images = await Promise.all(
         req.images.map((b64) =>
@@ -140,13 +196,16 @@ async function handle(line) {
       const inputs = await processor(images);
       const out = await model(inputs);
       const tensor = out[outputKey];
-      const [n, dim] = tensor.dims;
       // One tensor holds the whole batch; slice per image and send FLOATS.
-      // Quantization happens in the parent so the worker stays a pure encoder.
-      const vectors = [];
-      for (let i = 0; i < n; i++) {
-        vectors.push(Array.from(tensor.data.slice(i * dim, (i + 1) * dim)));
-      }
+      // Quantization happens in the parent so the worker stays a pure
+      // encoder. extractVectors() validates shape and batch size against the
+      // registry and rejects non-finite values — see embedOutput.js for why.
+      const vectors = extractVectors(tensor, {
+        modelId: req.modelId,
+        outputKey,
+        dim,
+        batchSize: req.images.length,
+      });
       touchUnloadTimer();
       return reply({ id: req.id, vectors, dim });
     }
@@ -159,5 +218,5 @@ async function handle(line) {
 
 /** @param {object} obj */
 function reply(obj) {
-  process.stdout.write(JSON.stringify(obj) + "\n");
+  realStdoutWrite(JSON.stringify(obj) + "\n");
 }
