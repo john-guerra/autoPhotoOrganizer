@@ -116,6 +116,26 @@ async function scan(base, dir) {
   return res.json();
 }
 
+/**
+ * Un-index a scanned folder, THEN remove it from disk. Use this — never a
+ * bare `rm(dir, {recursive:true, force:true})` — for any temp dir this file
+ * scanned. A plain rm() leaves a permanently non-stale `photos` row pointing
+ * at a folder that no longer exists: every LATER embed sweep's
+ * pendingEmbedRows would still include it, and runSweep's reachability
+ * check pauses the WHOLE sweep on the first unreachable row it hits
+ * (marking nothing), before it ever reaches anything else pending. This
+ * cost a full debugging round the first time it happened — a single test
+ * doing a bare rm() silently broke six *other* tests' embed sweeps
+ * (#161 fix round 1, Important 3 / fix round 2, Defensive). One helper,
+ * used everywhere a scanned dir gets deleted, beats relying on every new
+ * test remembering the two-line pattern (or on it happening to be
+ * "probably fine" because the photo was already embedded by then).
+ */
+async function rmScannedDir(dir) {
+  deleteFolderSubtree(getDb(), dir);
+  await rm(dir, { recursive: true, force: true });
+}
+
 /** Poll the in-process registry until `id` leaves "running". */
 async function waitJob(id, { timeoutMs = 5000 } = {}) {
   const start = Date.now();
@@ -435,19 +455,11 @@ describe("POST /api/scan", () => {
         body: JSON.stringify({ enabled: false }),
       });
       await brokenSrv.close();
-      // Un-index before removing from disk — this folder was scanned (twice)
-      // above, and this photo was NEVER actually embedded (the simulated
-      // ml.on() throw stops kickEmbedSweep before embedAllPending ever
-      // runs). Deleting the directory without also deleting its `photos`
-      // rows would leave a permanently non-stale row pointing at a vanished
-      // folder — exactly the poisoned-worklist scenario the "/api/ml"
-      // describe block's own position-dependency comment warns about: ANY
-      // later sweep's pendingEmbedRows would include it, runSweep's
-      // reachability check would PAUSE the whole sweep on it, and every
-      // subsequent embed test in this file would silently stop embedding
-      // anything at all.
-      deleteFolderSubtree(getDb(), scanDir);
-      await rm(scanDir, { recursive: true, force: true });
+      // Un-index before removing from disk — this photo was NEVER actually
+      // embedded (the simulated ml.on() throw stops kickEmbedSweep before
+      // embedAllPending ever runs), so a bare rm() here would poison every
+      // later embed sweep in the file. See rmScannedDir's own doc comment.
+      await rmScannedDir(scanDir);
     }
   });
 });
@@ -511,7 +523,10 @@ describe("/api/ml", () => {
       body: JSON.stringify({ enabled: false }),
     });
     await mlSrv?.close();
-    await rm(mlPhotosDir, { recursive: true, force: true });
+    // rmScannedDir, not a bare rm(): see its own doc comment — a scanned
+    // folder deleted without un-indexing poisons every LATER embed sweep's
+    // worklist (#161 fix round 2, Defensive).
+    await rmScannedDir(mlPhotosDir);
   });
 
   it("reports the default model, available models, embedding OFF, and maxThreads", async () => {
@@ -681,7 +696,7 @@ describe("/api/ml", () => {
         body: JSON.stringify({ enabled: false }),
       });
       await gateSrv.close();
-      await rm(gatePhotosDir, { recursive: true, force: true });
+      await rmScannedDir(gatePhotosDir);
     }
   });
 
@@ -744,7 +759,7 @@ describe("/api/ml", () => {
       await waitNoRunningJobOfType("embed");
     } finally {
       await gatedSrv.close();
-      await rm(gatedPhotosDir, { recursive: true, force: true });
+      await rmScannedDir(gatedPhotosDir);
     }
   });
 
@@ -876,7 +891,7 @@ describe("/api/ml", () => {
     } finally {
       updateSpy.mockRestore();
       await gatedSrv.close();
-      await rm(gatedPhotosDir, { recursive: true, force: true });
+      await rmScannedDir(gatedPhotosDir);
     }
   });
 
@@ -949,7 +964,7 @@ describe("/api/ml", () => {
     } finally {
       registry.off("change", onChange);
       await gatedSrv.close();
-      await rm(gatedPhotosDir, { recursive: true, force: true });
+      await rmScannedDir(gatedPhotosDir);
     }
   });
 });

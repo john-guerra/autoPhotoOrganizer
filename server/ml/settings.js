@@ -67,27 +67,38 @@ export function readMlSettings() {
 /**
  * @param {{modelId?: string, threads?: number, enabled?: boolean}} patch
  * @throws {Error} a plain Error for a validation failure (bad modelId) —
- *   the route maps this to 400.
- * @throws {MlSettingsPersistError} for a failure to persist a validated
- *   patch — the route maps this to 500.
+ *   the route maps this to 400. Validated FIRST, and outside the try/catch
+ *   below, so it can never be reclassified as a persistence failure.
+ * @throws {MlSettingsPersistError} for anything that goes wrong AFTER
+ *   validation passes — the route maps this to 500. This deliberately
+ *   covers `readMlSettings()` (called below to get `current`) as well as
+ *   the `writeFileSync` itself: both call `settingsFile()`, and its
+ *   unguarded `mkdirSync(cacheRoot(), {recursive: true})` is exactly as
+ *   likely to be the thing that throws on EACCES/EROFS as the write is
+ *   (#161 fix round 2, Important) — `readMlSettings()`'s OWN try/catch only
+ *   covers a corrupt/malformed ml.json, not a cache root it can't even
+ *   mkdir into.
  */
 export function writeMlSettings(patch) {
-  const current = readMlSettings();
-  const next = { ...current };
+  // Validate BEFORE the try/catch below, and using `patch` directly (not
+  // `current`, not yet read) — a bad modelId must stay a plain Error no
+  // matter what shape the persistence code below takes.
   if (patch.modelId !== undefined) {
     modelById(patch.modelId); // throws "unknown model: …" — do not persist it
-    next.modelId = patch.modelId;
   }
-  if (patch.threads !== undefined) next.threads = clampThreads(patch.threads);
-  if (patch.enabled !== undefined) next.enabled = Boolean(patch.enabled);
   try {
+    const current = readMlSettings();
+    const next = { ...current };
+    if (patch.modelId !== undefined) next.modelId = patch.modelId;
+    if (patch.threads !== undefined) next.threads = clampThreads(patch.threads);
+    if (patch.enabled !== undefined) next.enabled = Boolean(patch.enabled);
     writeFileSync(settingsFile(), JSON.stringify(next, null, 2));
+    return next;
   } catch (err) {
     throw new MlSettingsPersistError(
       `could not save ML settings: ${err.message}`
     );
   }
-  return next;
 }
 
 function clampThreads(n) {
