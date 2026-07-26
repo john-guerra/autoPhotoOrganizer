@@ -10,9 +10,10 @@ user-facing — what you can now do, not how it's built.
 
 - **Internal:** a test that proves the new photo analysis actually understands
   what it is looking at, rather than merely producing numbers of the right
-  shape. Two frames of the same scene now have to score as near-identical and
-  a different scene has to score far apart, or the build fails — the check
-  that #162's duplicate detection and #163's clusters quietly depend on (#161).
+  shape. A burst, the same scene re-framed, and an unrelated subject now have
+  to come out in that order with a usable margin between them, or the build
+  fails — the check that #162's duplicate detection and #163's clusters
+  quietly depend on (#161).
 
 ## 2.18.30
 
