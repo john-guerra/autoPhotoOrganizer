@@ -65,6 +65,20 @@ export async function embedAllPending(
           );
         }
         const vectors = await ml.embedImages(buffers);
+        // Structural, not per-implementation: models.js names "a model whose
+        // output shape we have not checked writes plausible vectors of the
+        // wrong dimension, which nothing downstream can detect" as the exact
+        // hazard the model allowlist exists to avoid. Today's only host (the
+        // ONNX worker) happens to validate shape worker-side, but Task 11
+        // adds a second host (WebGPU) with its own extraction path and no
+        // guarantee of the same check — so a bad-shape vector must fail HERE,
+        // not silently quantize and poison every future ranking.
+        rows.forEach((row, i) => {
+          if (vectors[i]?.length !== spec.dim)
+            throw new Error(
+              `photo ${row.id}: model returned a ${vectors[i]?.length}-dim vector, expected ${spec.dim}`
+            );
+        });
         putEmbeddings(
           db,
           rows.map((row, i) => ({

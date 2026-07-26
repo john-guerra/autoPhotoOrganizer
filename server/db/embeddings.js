@@ -140,6 +140,23 @@ export function embedCounts(db, model) {
  * reason the sweep terminates. runSweep's stall guard throws loudly if it
  * doesn't.
  *
+ * MUST NOT THROW for a photo that no longer exists. `nextBatch()` runs
+ * synchronously but `process()` then yields for seconds (thumbnail work plus
+ * an inference round-trip), and a user can hard-delete photos in that window
+ * (folder removal, deletePhotosByIds, resetLibrary, relocateMissing all
+ * DELETE FROM photos, and are all user-triggered mid-sweep). The write this
+ * function makes is an INSERT, unlike hashing's sentinel (an UPDATE, which
+ * silently affects zero rows for a vanished parent) — an unguarded INSERT
+ * referencing a photo_id that just disappeared throws
+ * SQLITE_CONSTRAINT_FOREIGNKEY, and runSweep does not wrap this call in
+ * try/catch (sweep.js), so that throw would escape the per-row retry loop
+ * entirely and reject the whole sweep with an opaque SQLite error — exactly
+ * the generic, non-actionable failure CLAUDE.md's Usability section forbids.
+ * The `WHERE EXISTS` guard makes the INSERT a no-op instead: a photo that no
+ * longer exists needs no sentinel, because it is already out of the worklist
+ * (pendingEmbedRows joins against `photos`, so a deleted photo can never come
+ * back from nextBatch() regardless of whether a sentinel was written for it).
+ *
  * @param {import("better-sqlite3").Database} db
  * @param {number} photoId
  * @param {string} model
@@ -148,7 +165,8 @@ export function embedCounts(db, model) {
 export function markEmbedFailed(db, photoId, model, error) {
   db.prepare(
     `INSERT INTO ml_status (photo_id, stage, model, state, attempts, error, updated_at)
-     VALUES (@photoId, @stage, @model, 'failed', 1, @error, @now)
+     SELECT @photoId, @stage, @model, 'failed', 1, @error, @now
+      WHERE EXISTS (SELECT 1 FROM photos WHERE id = @photoId)
      ON CONFLICT(photo_id, stage, model) DO UPDATE SET
        attempts = ml_status.attempts + 1,
        error = excluded.error,

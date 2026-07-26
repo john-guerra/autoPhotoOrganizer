@@ -430,6 +430,27 @@ describe("ON DELETE CASCADE from photos (#161 fix round 1)", () => {
   });
 });
 
+// #161 embedSweep review, fix round 1: a photo can be hard-deleted (folder
+// removal, resetLibrary, relocateMissing) DURING the seconds-long window
+// process() spends generating thumbnails and calling the encoder. markFailed
+// is called unwrapped by runSweep (sweep.js), so it must never throw for a
+// vanished parent — the sibling hasher's UPDATE-based sentinel is immune to
+// this by accident; this one is an INSERT and needed the WHERE EXISTS guard.
+describe("markEmbedFailed tolerates a concurrently deleted photo (#161 fix round 1)", () => {
+  it("does not throw and writes no sentinel when the photo is already gone", () => {
+    const db = getDb();
+    const [id] = seed(db, 1);
+    deletePhotosByIds(db, [id]);
+
+    expect(() =>
+      markEmbedFailed(db, id, SIGLIP, new Error("model refused this image"))
+    ).not.toThrow();
+    expect(
+      db.prepare(`SELECT * FROM ml_status WHERE photo_id = ?`).get(id)
+    ).toBeUndefined();
+  });
+});
+
 describe("rescan invalidation", () => {
   const file = (over = {}) => ({
     name: "IMG_0.jpg",
