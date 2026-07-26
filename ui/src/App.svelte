@@ -2290,7 +2290,11 @@
             "Couldn't jump to that group — it isn't in the loaded range. Open it (click its icon) and try again.";
         }
       } else {
-        selected = nextSelectable(displayEntries, 0, 1) ?? 0;
+        // Shared with the keyboard/label jump and the re-center path — one
+        // tested resolver (issue #189 step 5). No targetId here: a startPath
+        // jump has no focus id to seek to, so it lands on the first selectable
+        // entry from the top.
+        selected = resolveSelectedIndex(displayEntries, null);
         focusPending = true;
         // Hold the landing through the metadata reflow, exactly as the keyboard
         // jump (jumpGroupBoundary) does — and hold it the SAME way: until the user
@@ -5509,19 +5513,16 @@
       hasMoreBefore = beforePage.length >= PAGE_SIZE;
       hasMoreAfter = afterPage.length >= PAGE_SIZE;
       await tick();
-      // findEntryIndexForId, not a plain resolvePhoto(en).id === targetId
-      // search: targetId is a server-resolved photo id with no awareness
-      // of client-side burst grouping, so it can legitimately be a
-      // non-cover member of a collapsed stack — resolvePhoto only ever
-      // returns a stack's cover, so a bare equality search would silently
-      // miss it and fall through to index 0, landing on an unrelated
-      // photo instead of the jump target.
-      const targetIndex = findEntryIndexForId(displayEntries, targetId);
-      const t =
-        targetIndex !== -1
-          ? nextSelectable(displayEntries, targetIndex, 1)
-          : null;
-      selected = t ?? nextSelectable(displayEntries, 0, 1) ?? 0;
+      // resolveSelectedIndex (which uses findEntryIndexForId internally, not a
+      // plain resolvePhoto(en).id === targetId search): targetId is a
+      // server-resolved photo id with no awareness of client-side burst
+      // grouping, so it can legitimately be a non-cover member of a collapsed
+      // stack — resolvePhoto only ever returns a stack's cover, so a bare
+      // equality search would silently miss it and fall through to index 0,
+      // landing on an unrelated photo instead of the jump target. Shared with
+      // jumpToPath and recenterFeedOnId (issue #189 step 5); see its JSDoc for
+      // why no skip-forward off the found index is needed.
+      selected = resolveSelectedIndex(displayEntries, targetId);
       status = `${items.length} photo${items.length === 1 ? "" : "s"} loaded`;
       // Metadata refines the layout (row heights) as it streams in — one of
       // the two reflows the pin below rides out.

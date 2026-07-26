@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.29
+
+- **Internal:** step 5 of the jump/landing refactor (#189) — every feed-window
+  jump (tree/scrubber click, Option+←/→, group ‹/› buttons) now resolves which
+  photo to land on through the single tested resolver the re-center path already
+  used, instead of three near-identical hand-rolled copies. No behavior change;
+  one fewer place for the "jump lands on the wrong photo" bug class to hide.
+
 ## 2.18.27
 
 - **Internal:** second step of the jump/landing refactor (#189) — the two
