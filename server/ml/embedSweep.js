@@ -95,16 +95,29 @@ export async function embedAllPending(
         try {
           vectors = await ml.embedImages(buffers);
         } catch (err) {
-          throw markHostFailure(err);
+          // Coerced to an Error first: markHostFailure can only tag an
+          // OBJECT, so a host rejecting with a string, `null`, or
+          // `undefined` (a hand-written `reject("boom")`, or a future host
+          // relaying a foreign runtime's error) would come back untagged —
+          // and an untagged host failure is C1 again, through a narrow door.
+          throw markHostFailure(
+            err instanceof Error ? err : new Error(String(err))
+          );
         }
         // Structural, not per-implementation: models.js names "a model whose
         // output shape we have not checked writes plausible vectors of the
         // wrong dimension, which nothing downstream can detect" as the exact
-        // hazard the model allowlist exists to avoid. Today's only host (the
-        // ONNX worker) happens to validate shape worker-side, but Task 11
-        // adds a second host (WebGPU) with its own extraction path and no
-        // guarantee of the same check — so a bad-shape vector must fail HERE,
-        // not silently quantize and poison every future ranking.
+        // hazard the model allowlist exists to avoid. The only host that
+        // exists today (the ONNX worker) happens to validate shape
+        // worker-side, in extractVectors (worker/embedOutput.js) — but that
+        // is ITS choice, not part of the MLService contract, so nothing
+        // obliges the next host to make it. Whatever crosses this boundary
+        // gets checked HERE, by the side that knows what it asked for,
+        // rather than silently quantizing and poisoning every future
+        // ranking. (An earlier version of this comment justified the check
+        // by a WebGPU host "Task 11 adds"; that host was built and then
+        // deleted in 36d8b8b — the check outlived its original reason and
+        // earns its keep on the contract argument alone.)
         rows.forEach((row, i) => {
           if (vectors[i]?.length !== spec.dim)
             throw new Error(

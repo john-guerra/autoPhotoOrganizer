@@ -78,7 +78,8 @@ export class OnnxMLService extends MLService {
   #events = new EventEmitter();
   // The execution provider the worker actually resolved for the last
   // successful embed (e.g. "coreml", "webgpu", "cpu") — see
-  // worker/index.js's candidateDevices()/loadWithBestDevice(). `null` until
+  // candidateDevices() (worker/devices.js) and loadWithBestDevice()
+  // (worker/index.js). `null` until
   // the first real embed reply arrives; describeProvider() below treats that
   // as "cpu" (the guaranteed floor, never an overclaim) rather than guessing
   // an accelerator that hasn't actually been confirmed to work on this
@@ -343,11 +344,11 @@ export class OnnxMLService extends MLService {
     return vectors.map((v) => Float32Array.from(v));
   }
 
-  /** The execution provider actually running, per the worker's own
-   * candidateDevices()/loadWithBestDevice() (worker/index.js) — a per-
+  /** The execution provider actually running, per candidateDevices()
+   * (worker/devices.js) and loadWithBestDevice() (worker/index.js) — a per-
    * platform candidate list (DirectML on win32, CUDA on linux/x64, WebGPU,
    * CPU; darwin leads with CPU specifically per a MEASURED result, not an
-   * assumption — see candidateDevices()'s own doc for the numbers and date),
+   * assumption — see devices.js's own doc for the numbers and date),
    * each tried with a real from_pretrained() + real forward pass at the
    * request's own batch size (not `device: "auto"`, which would hide which
    * one actually won). Reports

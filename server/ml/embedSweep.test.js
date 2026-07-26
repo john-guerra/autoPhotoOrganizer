@@ -322,6 +322,35 @@ describe("embedAllPending", () => {
     }
   });
 
+  it("pauses even when the host rejects with a STRING rather than an Error", async () => {
+    // The narrow door back into Critical 1: markHostFailure can only tag an
+    // object, so `reject("boom")` — legal, and what a host relaying a
+    // foreign runtime's error can easily produce — would arrive untagged and
+    // be classified as "this photo cannot be read" for every row it touched.
+    const db = getDb();
+    const dir = await mkdtemp(join(tmpdir(), "ag-hoststr-"));
+    try {
+      seed(db, 3, dir);
+      const ml = stubMl();
+      // eslint-disable-next-line prefer-promise-reject-errors
+      ml.embedImages = vi.fn(() => Promise.reject("worker went away"));
+
+      const r = await embedAllPending(db, {
+        ml,
+        processing: stubProcessing(),
+        model: MODEL,
+        limit: 2,
+        idle: async () => {},
+      });
+
+      expect(r.paused).toBe(true);
+      expect(embedCounts(db, MODEL).failed).toBe(0);
+      expect(r.pauseReason).toMatch(/worker went away/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("is single-flight — a second scan must not start a second sweep", async () => {
     const db = getDb();
     seed(db, 2);

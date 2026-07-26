@@ -736,7 +736,7 @@ integration("OnnxMLService (real child)", () => {
       expect(Array.from(out[0]).every(Number.isFinite)).toBe(true);
       expect(Array.from(out[0])).not.toEqual(Array.from(out[1]));
       // #161 "revert and replace": the worker now tries a real
-      // execution-provider candidate list (worker/index.js's
+      // execution-provider candidate list (worker/devices.js's
       // candidateDevices()) instead of hardcoding "cpu", and describeProvider
       // must report whichever one actually won — not a guess, and not still
       // the pre-embed "cpu" default (see the dedicated EP list below; this
@@ -854,7 +854,7 @@ integration("OnnxMLService (real child)", () => {
   // so a CPU-wins verdict from the smaller benchmark could plausibly flip at
   // the real configuration — this test measures the REAL configuration
   // directly rather than extrapolating, and its result is what
-  // worker/index.js's candidateDevices() darwin order is actually set from
+  // worker/devices.js's candidateDevices() darwin order is actually set from
   // (see the comment there for the date and numbers this produced).
   it(
     "measures ms/photo per EP at PRODUCTION config (SigLIP base patch16-224, batch=16)",
@@ -890,16 +890,15 @@ integration("OnnxMLService (real child)", () => {
         palette.map(([r, g, b]) => makeJpeg(r, g, b))
       );
 
-      const candidates =
-        process.platform === "darwin"
-          ? ["coreml", "webgpu", "cpu"]
-          : process.platform === "win32"
-            ? ["dml", "webgpu", "cpu"]
-            : process.platform === "linux"
-              ? process.arch === "x64"
-                ? ["cuda", "webgpu", "cpu"]
-                : ["webgpu", "cpu"]
-              : ["cpu"];
+      // The worker's own list, imported — NOT re-typed. The hand-copy that
+      // used to sit here had ALREADY drifted: it still read
+      // ["coreml", "webgpu", "cpu"] for darwin after the measured order this
+      // very test produced flipped devices.js to ["cpu", "webgpu", "coreml"].
+      // That is the whole failure T9 exists to prevent — re-measure on new
+      // hardware, time a candidate order the worker no longer uses, then
+      // update devices.js from numbers gathered under the wrong one — and
+      // being ML_INTEGRATION-gated, no CI run would ever have caught it.
+      const candidates = candidateDevices();
 
       // Fewer repeats than the CLIP benchmark — SigLIP@16 is roughly 16x the
       // per-repeat compute of CLIP@4 (4x model, 4x batch), and 3 repeats is

@@ -1010,7 +1010,8 @@ export function registerApi(app, { ml } = {}) {
   // Historically a hardcoded string here, true only by accident: the worker
   // hardcoded `device: "cpu"` and never tried anything else, even though
   // onnxruntime-node's prebuilt actually bundles CoreML/DirectML/CUDA too
-  // (worker/index.js's candidateDevices()/loadWithBestDevice() now tries them
+  // (worker/devices.js's candidateDevices() and worker/index.js's
+  // loadWithBestDevice() now try them
   // in order and records the winner). A static string here would silently
   // become a lie the moment that changed, so each MLService implementation
   // now answers for itself via `describeProvider()` (server/ml/MLService.js),
