@@ -21,7 +21,7 @@ import {
   sep,
   isAbsolute,
 } from "node:path";
-import { homedir } from "node:os";
+import { homedir, cpus } from "node:os";
 import { revealCommand, revealManyCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import {
@@ -63,8 +63,16 @@ import {
 } from "./db/photos.js";
 import { hashAllPending, hashProgress } from "./db/hashing.js";
 import { runSweep } from "./ml/sweep.js";
-import { embedAllPending, embedProgress } from "./ml/embedSweep.js";
-import { readMlSettings, writeMlSettings } from "./ml/settings.js";
+import {
+  embedAllPending,
+  embedProgress,
+  isEmbedInFlight,
+} from "./ml/embedSweep.js";
+import {
+  readMlSettings,
+  writeMlSettings,
+  MlSettingsPersistError,
+} from "./ml/settings.js";
 import { MODELS } from "./ml/models.js";
 import { embedCounts, modelStorage, purgeModel } from "./db/embeddings.js";
 import { OnnxMLService } from "./ml/OnnxMLService.js";
@@ -140,72 +148,133 @@ function kickHashSweep(db) {
     .catch((e) => registry.fail(job.id, e));
 }
 
-/** Kick the background embedder with a JobsPanel entry. Fire-and-forget: it
- *  must never block a scan's response.
+/**
+ * Kick the background embedder with a JobsPanel entry. Fire-and-forget: it
+ * must never block a scan's response.
+ *
+ * OPT-IN, off by default (#161 fix round 1, Critical): the spec's own words
+ * are "models are downloaded, never bundled — first use shows what is being
+ * fetched, how big, and its licence." A scan that silently spends tens of MB
+ * of someone's connection breaks that promise, so a SCAN-triggered kick is a
+ * no-op — no job row, no `getMl()`, nothing touches the ML host — until the
+ * user has turned this on in the settings panel. `force: true` is the one
+ * escape hatch, and it exists for exactly one caller: `POST /api/ml/embed`.
+ * Calling that endpoint IS the explicit consent this whole gate exists to
+ * require — do not remove `force` thinking it re-opens the hole; it only
+ * ever fires from a route the user had to deliberately hit.
+ *
+ * The whole body is wrapped in try/catch (Important 3): `readMlSettings()`
+ * does synchronous fs work (mkdirSync/existsSync/readFileSync) that CAN
+ * throw (EACCES/EROFS on the cache root, EMFILE under load). Uncaught, that
+ * throw would escape into the CALLER's control flow — the recursive scan's
+ * own try/catch would report a completed scan as FAILED, and the
+ * non-recursive scan handler (async, nothing catches a synchronous throw in
+ * Express 4) would take the request down entirely. "ML failing must never
+ * read as the app failing" applies to this setup work too, not just the
+ * async sweep below.
+ *
  * @param {import("better-sqlite3").Database} db
  * @param {() => import("./ml/OnnxMLService.js").OnnxMLService} getMl lazy —
- *   only called (and so only spawns the ONNX child) once a sweep actually runs. */
-function kickEmbedSweep(db, getMl) {
-  const { modelId, threads } = readMlSettings();
-  const job = registry.create("embed", { label: "Embedding photos" });
-  const ml = getMl();
+ *   only called (and so only spawns the ONNX child) once a sweep actually
+ *   runs, and only when this function actually proceeds past the gates
+ *   above.
+ * @param {{force?: boolean}} [opts] `force` bypasses the `enabled` gate —
+ *   NOT the single-flight latch (see isEmbedInFlight, checked by the
+ *   /api/ml/embed route itself before calling this).
+ */
+function kickEmbedSweep(db, getMl, { force = false } = {}) {
+  let job;
+  try {
+    const { modelId, threads, enabled } = readMlSettings();
+    if (!enabled && !force) return; // opt-in; silent when off — see doc above
 
-  // A first embed against a freshly-selected model means the worker has to
-  // download it (tens of MB, per models.js's approxDownloadMB) before it can
-  // embed a single photo — embedAllPending's own onProgress (per-photo
-  // done/failed counts) has nothing to report during that window, so without
-  // this the job would sit at "Embedding photos" / 0 of 0 for however long
-  // the download takes, indistinguishable from a frozen control (CLAUDE.md,
-  // "Usability"). Relay OnnxMLService's unsolicited download/load frames
-  // into the job's phase instead. Guarded — `on`/`off` are that class's own
-  // transport detail, not part of the MLService contract, so an injected
-  // host without them (a test stub, or a future host with no out-of-process
-  // download step to report) simply gets no relay rather than a crash.
-  const canStreamProgress =
-    typeof ml.on === "function" && typeof ml.off === "function";
-  const onDownloadProgress = (msg) => {
-    if (msg.modelId !== modelId) return; // a stale frame from a prior model
-    const pct = Number.isFinite(msg.progress)
-      ? ` ${Math.round(msg.progress)}%`
-      : "";
-    registry.update(job.id, {
-      phase: `downloading ${msg.file ?? modelId}${pct}`,
-    });
-  };
-  if (canStreamProgress) ml.on("progress", onDownloadProgress);
+    job = registry.create("embed", { label: "Embedding photos" });
+    const ml = getMl();
 
-  embedAllPending(db, {
-    ml,
-    processing,
-    model: modelId,
-    threads,
-    job,
-    onProgress: (counters) => registry.update(job.id, embedProgress(counters)),
-  })
-    .then((r) => {
-      // Mirrors kickHashSweep above: "embed" is SELF_CLEARING, so finish()
-      // (not dismiss()) is what actually removes a successful run's row.
-      if (r.alreadyRunning)
-        return registry.finish(job.id, { alreadyRunning: true });
-      if (r.paused) {
-        return registry.update(job.id, {
-          status: "failed",
-          error: "paused — drive not available; resumes on the next scan",
-        });
-      }
-      registry.finish(job.id, { embedded: r.embedded, failed: r.failed });
+    // A first embed against a freshly-selected model means the worker has to
+    // download it (tens of MB, per models.js's approxDownloadMB) before it
+    // can embed a single photo — embedAllPending's own onProgress (per-photo
+    // done/failed counts) has nothing to report during that window, so
+    // without this the job would sit at "Embedding photos" / 0 of 0 for
+    // however long the download takes, indistinguishable from a frozen
+    // control (CLAUDE.md, "Usability"). Relay OnnxMLService's unsolicited
+    // download/load frames into the job's phase instead. Guarded — `on`/`off`
+    // are that class's own transport detail, not part of the MLService
+    // contract, so an injected host without them (a test stub, or a future
+    // host with no out-of-process download step to report) simply gets no
+    // relay rather than a crash.
+    const canStreamProgress =
+      typeof ml.on === "function" && typeof ml.off === "function";
+    // Filtered to real download chunks and throttled to one registry.update
+    // (== one SSE broadcast to every connected client) per {file, whole
+    // percentage point} — transformers.js's progress_callback fires per HTTP
+    // chunk, thousands of times for a 94 MB file, and a "ready"/"done" frame
+    // at 100% for an ALREADY-CACHED model would otherwise render as
+    // "downloading … 100%" on every single embed, which reads as re-fetching
+    // the model every time (#161 fix round 1, Minor 1).
+    let lastRelayed = null;
+    const onDownloadProgress = (msg) => {
+      if (msg.modelId !== modelId) return; // a stale frame from a prior model
+      if (msg.status !== "progress") return; // "initiate"/"done"/"ready" aren't download chunks
+      const pct = Number.isFinite(msg.progress)
+        ? Math.round(msg.progress)
+        : null;
+      const key = `${msg.file ?? ""}:${pct}`;
+      if (key === lastRelayed) return;
+      lastRelayed = key;
+      registry.update(job.id, {
+        phase: `downloading ${msg.file ?? modelId}${pct !== null ? ` ${pct}%` : ""}`,
+      });
+    };
+    if (canStreamProgress) ml.on("progress", onDownloadProgress);
+
+    embedAllPending(db, {
+      ml,
+      processing,
+      model: modelId,
+      threads,
+      job,
+      onProgress: (counters) =>
+        registry.update(job.id, embedProgress(counters)),
     })
-    .catch((e) =>
+      .then((r) => {
+        // Mirrors kickHashSweep above: "embed" is SELF_CLEARING, so finish()
+        // (not dismiss()) is what actually removes a successful run's row.
+        if (r.alreadyRunning)
+          return registry.finish(job.id, { alreadyRunning: true });
+        if (r.paused) {
+          return registry.update(job.id, {
+            status: "failed",
+            error: "paused — drive not available; resumes on the next scan",
+          });
+        }
+        registry.finish(job.id, { embedded: r.embedded, failed: r.failed });
+      })
+      .catch((e) =>
+        registry.fail(
+          job.id,
+          // Name the stage and keep the app usable. ML failing must never
+          // read as the app failing.
+          new Error(`Embedding stopped: ${e.message}. Photos are unaffected.`)
+        )
+      )
+      .finally(() => {
+        if (canStreamProgress) ml.off("progress", onDownloadProgress);
+      });
+  } catch (e) {
+    if (job) {
       registry.fail(
         job.id,
-        // Name the stage and keep the app usable. ML failing must never read
-        // as the app failing.
         new Error(`Embedding stopped: ${e.message}. Photos are unaffected.`)
-      )
-    )
-    .finally(() => {
-      if (canStreamProgress) ml.off("progress", onDownloadProgress);
-    });
+      );
+    } else {
+      // Failed before a job existed to attach the failure to (e.g. reading
+      // settings itself threw) — there's nothing for the JobsPanel to show,
+      // but this must not be silent to the operator, and it must not
+      // propagate into the scan/route that triggered the kick.
+      console.error("kickEmbedSweep: could not start the embed sweep:", e);
+    }
+  }
 }
 
 /**
@@ -913,33 +982,58 @@ export function registerApi(app, { ml } = {}) {
   });
 
   // --- ML settings and status (#161) ----------------------------------------
-  // GET current settings plus the vetted model list, so a settings panel can
-  // render a picker without a second round trip.
+  // The ONNX host always runs on CPU only (worker/index.js hardcodes
+  // `device: "cpu"`) — a fact about the current implementation, not a
+  // runtime probe. Reporting it here costs nothing; ASKING the worker
+  // directly (ml.health()) would spawn it just to answer a settings-panel
+  // GET, which is exactly the un-opted-in spawn the `enabled` gate above
+  // exists to prevent. Task 11's WebGPU host is a SEPARATE class with its
+  // own provider string — this must never claim an accelerator that isn't
+  // actually running (#161 fix round 1, Minor 5).
+  const ML_PROVIDER = "onnxruntime-node (cpu)";
+
+  // GET current settings plus the vetted model list and the machine's core
+  // count (`maxThreads`, for a 1..N threads slider — Task 12), so a settings
+  // panel can render a picker without a second round trip.
   app.get("/api/ml/settings", (req, res) => {
-    res.json({ ...readMlSettings(), models: MODELS });
+    res.json({
+      ...readMlSettings(),
+      models: MODELS,
+      maxThreads: cpus().length,
+    });
   });
 
-  // PUT a patch ({modelId?, threads?}). writeMlSettings throws a specific
-  // "unknown model: …" for a bad id — caught here and returned as a 400 with
-  // that message, never a generic 500 (CLAUDE.md, "specific over generic").
+  // PUT a patch ({modelId?, threads?, enabled?}). writeMlSettings throws a
+  // plain Error with a specific "unknown model: …" for a bad id (a
+  // VALIDATION failure — the user gave us something invalid, 400) or an
+  // MlSettingsPersistError when the write to disk itself failed (ENOSPC,
+  // EACCES, a read-only cache root — not the user's fault, 500). Never a
+  // generic 500 for the validation case, and never a 400 that blames the
+  // user for a disk problem (CLAUDE.md, "specific over generic"; #161 fix
+  // round 1, Minor 4).
   app.put("/api/ml/settings", (req, res) => {
     try {
       res.json(writeMlSettings(req.body ?? {}));
     } catch (err) {
+      if (err instanceof MlSettingsPersistError) {
+        return res.status(500).json({ error: err.message });
+      }
       res.status(400).json({ error: err.message });
     }
   });
 
   // GET embedded/failed/total counts for the ACTIVE model, plus per-model
-  // on-disk storage so a settings panel can offer a targeted purge. Counts
-  // come from embedCounts (queries `photos` directly), not from a sweep's
-  // live counters — a concurrent-delete race can transiently overstate a
-  // live `failed` tally, but embedCounts is the persisted, UI-facing truth.
+  // on-disk storage so a settings panel can offer a targeted purge, and the
+  // provider string (see ML_PROVIDER above). Counts come from embedCounts
+  // (queries `photos` directly), not from a sweep's live counters — a
+  // concurrent-delete race can transiently overstate a live `failed` tally,
+  // but embedCounts is the persisted, UI-facing truth.
   app.get("/api/ml/stats", (req, res) => {
     const db = getDb();
     const { modelId } = readMlSettings();
     res.json({
       model: modelId,
+      provider: ML_PROVIDER,
       counts: embedCounts(db, modelId),
       storage: modelStorage(db),
     });
@@ -955,13 +1049,28 @@ export function registerApi(app, { ml } = {}) {
   // POST -> (re)kick the background embedder against the current settings,
   // e.g. after switching models. Fire-and-forget, mirroring /api/scan: the
   // response confirms the kick, not completion — progress lives in the
-  // JobsPanel (GET /api/jobs, /api/jobs/events). The single-flight latch in
-  // embedAllPending is NOT keyed by model, so a kick while a sweep against a
-  // DIFFERENT model is still running comes back as an "alreadyRunning" job
-  // that does nothing — the JobsPanel must render that, or a model switch
-  // mid-sweep looks like a dead button.
+  // JobsPanel (GET /api/jobs, /api/jobs/events).
+  //
+  // Two things this route alone is responsible for, that a scan-triggered
+  // kick is not:
+  //  1. `force: true` — hitting this endpoint IS the explicit user consent
+  //     the `enabled` gate (kickEmbedSweep, above) requires, so it bypasses
+  //     that gate on purpose. Do not remove it thinking it's a hole.
+  //  2. The single-flight latch in embedAllPending is NOT keyed by model, so
+  //     a kick while a sweep against a DIFFERENT model is still running
+  //     would otherwise silently no-op — kickEmbedSweep's own alreadyRunning
+  //     handling creates a job, finishes it, and self-clears it in the same
+  //     tick, which is invisible to anyone who didn't already have an SSE
+  //     subscription open. That's fine for a SCAN's silent background kick,
+  //     but not for a button the user just clicked (#161 fix round 1,
+  //     Important 2) — so check isEmbedInFlight() FIRST and answer
+  //     synchronously instead, before a job (that would vanish before
+  //     anyone could read it) ever gets created.
   app.post("/api/ml/embed", (req, res) => {
-    kickEmbedSweep(getDb(), getMl);
+    if (isEmbedInFlight()) {
+      return res.json({ started: false, alreadyRunning: true });
+    }
+    kickEmbedSweep(getDb(), getMl, { force: true });
     res.json({ started: true });
   });
 

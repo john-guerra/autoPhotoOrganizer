@@ -13,6 +13,21 @@ import {
 let embedInFlight = false;
 
 /**
+ * Whether a sweep is currently running, checked synchronously — the same
+ * flag `embedAllPending` sets as its own first statement, before any
+ * `await`. A caller that wants to distinguish "I kicked it" from "something
+ * else already has the single-flight latch" (the explicit `/api/ml/embed`
+ * route — see api.js's kickEmbedSweep) can check this INSTEAD of calling
+ * embedAllPending and discovering `alreadyRunning` only after a job row was
+ * created and immediately self-cleared, which a caller has no way to read
+ * back (#161 fix round 1, Important 2).
+ * @returns {boolean}
+ */
+export function isEmbedInFlight() {
+  return embedInFlight;
+}
+
+/**
  * Embed the whole library's pending photos in the background, to completion.
  *
  * The drain, the idle gating, cancellation, poison-file isolation and — most
