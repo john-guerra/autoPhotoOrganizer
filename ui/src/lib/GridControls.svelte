@@ -26,6 +26,7 @@
     // presentational by contract.
     selectedCount = 0,
     dupesRunning = false,
+    mlEnabled = false,
     onfinddupes,
     onburstselection,
   } = $props();
@@ -60,24 +61,35 @@
        that can never apply is noise in a toolbar this dense. -->
   {#if selectedCount >= 2}
     <button
-      class="grid-action"
+      class="grid-action icon"
       data-testid="burst-selection"
+      aria-label={`Stack the ${selectedCount} selected photos into bursts`}
       title={`Stack the ${selectedCount} selected photos into bursts, splitting them wherever the gap exceeds ${(burstGapMs / 1000).toFixed(1)}s`}
       onclick={() => onburstselection?.()}
     >
-      Burst selection
+      ⛓
     </button>
   {/if}
 
-  <button
-    class="grid-action"
-    data-testid="find-dupes"
-    disabled={dupesRunning}
-    title="Find photos of the same shot and stack them, using photo similarity"
-    onclick={() => onfinddupes?.()}
-  >
-    {dupesRunning ? "Finding…" : "Find duplicates"}
-  </button>
+  <!-- Only when photo similarity is actually switched on. Not merely to avoid
+       a dead control: the toolbar folds by WIDTH, and two extra buttons here
+       were enough to push the whole Group group (grouping pills, the Add…
+       input, the Tree/Fisheye switch) into an overflow popover at ordinary
+       window sizes. That is a real regression e2e caught and no unit test
+       could — so a control that can do nothing must not spend width either. -->
+  {#if mlEnabled}
+    <button
+      class="grid-action icon"
+      class:working={dupesRunning}
+      data-testid="find-dupes"
+      disabled={dupesRunning}
+      aria-label="Find near-duplicate photos and stack them"
+      title="Find photos of the same shot and stack them, using photo similarity"
+      onclick={() => onfinddupes?.()}
+    >
+      ⧉
+    </button>
+  {/if}
 </div>
 
 <style>
@@ -93,6 +105,18 @@
   }
   .grid-action:hover:not(:disabled) {
     background: #3a3a3a;
+  }
+  /* Icon-only, matching the toolbar's existing gear/help buttons. The labels
+     live in title + aria-label: this row folds by WIDTH, and two text buttons
+     here were enough to push the whole Group group into its overflow popover
+     (see the comment on the Find duplicates button). */
+  .grid-action.icon {
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0.2rem 0.35rem;
+  }
+  .grid-action.working {
+    opacity: 0.6;
   }
   .grid-action:disabled {
     opacity: 0.5;

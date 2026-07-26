@@ -78,6 +78,7 @@
     thumbUrl,
     startNearDupes,
     startEmbed,
+    fetchMlSettings,
   } from "./lib/api.js";
   import { buildTreeMenuItems } from "./lib/treeMenu.js";
   import Modal from "./lib/Modal.svelte";
@@ -890,6 +891,16 @@
   // Machine learning gets its own panel (#205) rather than living at the
   // bottom of Manage library, where nobody looking for it would scroll.
   let mlPanelOpen = $state(false);
+  // Whether photo similarity is switched on, read once at startup. Drives
+  // whether the toolbar spends width on "Find duplicates" (#207): the toolbar
+  // folds by width, and an always-present button pushed the whole Group group
+  // into its overflow popover. Failure is silent and defaults to OFF — the
+  // feature is opt-in, so "could not ask" and "not enabled" are the same
+  // answer, and no user-facing action depends on it.
+  let mlEnabled = $state(false);
+  fetchMlSettings()
+    .then((s) => (mlEnabled = !!s.enabled))
+    .catch(() => {});
 
   // --- Scrolling / prefetch settings (persisted) --------------------------
   // Which prefetch strategy is live, plus the Custom knob values and the
@@ -5734,6 +5745,7 @@
     onsortchange={onSortChange}
     onhelp={() => (shortcutsHelpOpen = true)}
     {selectedCount}
+    {mlEnabled}
     dupesRunning={$jobs.some(
       (j) => j.type === "near-dupes" && j.status === "running"
     )}

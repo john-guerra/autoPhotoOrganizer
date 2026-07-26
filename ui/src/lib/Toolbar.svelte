@@ -49,6 +49,7 @@
     // through to GridControls, which owns their placement beside the burst gap.
     selectedCount = 0,
     dupesRunning = false,
+    mlEnabled = false,
     onfinddupes,
     onburstselection,
 
@@ -209,6 +210,7 @@
         bind:burstGapMs
         {selectedCount}
         {dupesRunning}
+        {mlEnabled}
         {onfinddupes}
         {onburstselection}
       />
