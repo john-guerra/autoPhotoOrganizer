@@ -534,6 +534,114 @@ describe("progress events", () => {
   });
 });
 
+// #resolvedDevice has the identical shape as #modelWarm above (a value the
+// worker reports unsolicited-ish via a reply field, recorded only if
+// nothing invalidated its generation while the request was in flight) — but
+// unlike #modelWarm, it had no fast test of its own before this block. The
+// only prior coverage was the ML_INTEGRATION-gated test's string-shape
+// check after a successful real embed, which never exercises the guard
+// itself (server/ml/OnnxMLService.js's `if (device && this.#modelGeneration
+// === generation)`). Reviewed finding (#161, Task 11 review round):
+// simplifying that condition to `if (device)` is an entirely plausible
+// tidy-up that the 1282-test suite would not catch, and the resulting bug —
+// describeProvider() reporting an EP that isn't actually running for the
+// CURRENT config — is exactly the one thing that field is under a hard rule
+// never to do.
+describe("describeProvider", () => {
+  it("reports cpu before any real embed has confirmed otherwise", async () => {
+    // No configure(), no embed — #resolvedDevice is still null. Must not
+    // guess an accelerator it has never actually run.
+    const svc = new OnnxMLService({ spawn: () => fakeChild() });
+    await expect(svc.describeProvider()).resolves.toBe(
+      "onnxruntime-node (cpu)"
+    );
+    svc.stop();
+  });
+
+  it("records the EP a real embed reply confirms, and surfaces it", async () => {
+    const child = fakeChild();
+    const svc = new OnnxMLService({ spawn: () => child });
+    const cfg = svc.configure({
+      modelId: "Xenova/clip-vit-base-patch32",
+      threads: 1,
+    });
+    let sent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+    child.reply({ id: sent.id, ok: true });
+    await cfg;
+
+    const embed = svc.embedImages([Buffer.from("x")]);
+    sent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+    child.reply({ id: sent.id, vectors: [[1]], dim: 1, device: "coreml" });
+    await embed;
+
+    await expect(svc.describeProvider()).resolves.toBe(
+      "onnxruntime-node (coreml)"
+    );
+    svc.stop();
+  });
+
+  it("discards a device-bearing reply that arrives from a STALE generation, rather than recording it", async () => {
+    // Same shape as "does not resurrect #modelWarm if 'unloaded' arrives
+    // WHILE an embed is in flight" above: a reconfigure can land WHILE an
+    // OLDER embed's reply is still in flight, and that reply's `device`
+    // field describes the OLD config, not the one active by the time it
+    // arrives. Recording it anyway would make describeProvider() claim an
+    // EP for a model/config it was never actually run against.
+    const child = fakeChild();
+    const svc = new OnnxMLService({ spawn: () => child });
+
+    // Baseline: configure, then one confirmed embed on "cpu".
+    let cfg = svc.configure({
+      modelId: "Xenova/clip-vit-base-patch32",
+      threads: 1,
+    });
+    let sent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+    child.reply({ id: sent.id, ok: true });
+    await cfg;
+
+    const first = svc.embedImages([Buffer.from("x")]);
+    sent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+    child.reply({ id: sent.id, vectors: [[1]], dim: 1, device: "cpu" });
+    await first;
+    await expect(svc.describeProvider()).resolves.toBe(
+      "onnxruntime-node (cpu)"
+    );
+
+    // Start a SECOND embed — it's now in flight, awaiting its reply.
+    const stale = svc.embedImages([Buffer.from("y")]);
+    const staleSent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+
+    // A reconfigure lands WHILE that embed is still in flight — this bumps
+    // #modelGeneration (and independently resets #resolvedDevice to null;
+    // that reset is NOT what this test is proving — what happens next is).
+    cfg = svc.configure({
+      modelId: "Xenova/siglip-base-patch16-224",
+      threads: 1,
+    });
+    sent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+    child.reply({ id: sent.id, ok: true });
+    await cfg;
+
+    // NOW the stale embed's reply arrives, claiming "coreml" — for the
+    // generation that configure() just moved past, not the current one.
+    child.reply({
+      id: staleSent.id,
+      vectors: [[2]],
+      dim: 1,
+      device: "coreml",
+    });
+    await expect(stale).resolves.toBeDefined();
+
+    // Must still report "cpu" (the safe default), NOT "coreml" — a reply
+    // from a generation that no longer applies must not be trusted just
+    // because it happened to carry a `device` field.
+    await expect(svc.describeProvider()).resolves.toBe(
+      "onnxruntime-node (cpu)"
+    );
+    svc.stop();
+  });
+});
+
 // The ONLY test that spawns a real child. Off by default so the suite stays
 // fast and hermetic — but without it, "does the worker start at all" would be
 // discovered by a user rather than by CI.

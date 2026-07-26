@@ -105,6 +105,18 @@ let config = { modelId: null, threads: 1, device: null };
  * changing this back to an accelerator-first order "on principle," don't —
  * re-run the ML_INTEGRATION benchmark on the hardware in front of you first
  * and update this comment with what it actually says.
+ *
+ * A caveat for whoever measures win32/linux next, where an accelerator
+ * still leads: `loadWithBestDevice`'s validation pass only runs once, on
+ * the COLD load, using whatever batch triggered it — but a sweep's first
+ * batch can be smaller than `limit` (16) if the backlog was under 16 when
+ * the sweep started, and later batches (same warm model, no new cold load —
+ * see UNLOAD_AFTER_MS below) can be larger. A batch-size-sensitive EP
+ * failure that only appears ABOVE the batch size that happened to trigger
+ * the cold load — the exact shape CoreML failed in on this machine, just at
+ * a size the first validation missed — would not be re-validated once the
+ * model is warm. Moot here: `cpu` leads darwin's list now and is immune to
+ * this by construction. Live wherever an accelerator is still first.
  * @returns {string[]}
  */
 function candidateDevices() {
