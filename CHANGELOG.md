@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.31
+
+- **Internal:** a test that proves the new photo analysis actually understands
+  what it is looking at, rather than merely producing numbers of the right
+  shape. Two frames of the same scene now have to score as near-identical and
+  a different scene has to score far apart, or the build fails — the check
+  that #162's duplicate detection and #163's clusters quietly depend on (#161).
+
 ## 2.18.30
 
 - **AutoGallery can now analyze your photos by what they look like, so future

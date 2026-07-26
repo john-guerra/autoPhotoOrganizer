@@ -20,6 +20,22 @@ Keep this current: when one of these facts changes, update it in the same commit
 - **A test that never failed proves nothing.** Revert the fix, watch the test go
   red, restore. (Also in CLAUDE.md — repeated here because it's the most-skipped
   step.)
+- **ML tests are gated twice, and both gates are deliberate.** `npm test` must
+  never download a model or spawn a child, so anything needing real inference
+  sits behind `ML_INTEGRATION=1`. The semantic check
+  (`server/ml/embeddingSimilarity.test.js`) additionally needs real photographs,
+  which cannot live in a public repo — every other image fixture in the tree is
+  sharp-generated at test time. Point `AUTOGALLERY_EMBED_FIXTURES` at a local
+  folder holding two near-duplicate frames and one clearly different photo:
+
+  ```bash
+  AUTOGALLERY_EMBED_FIXTURES=/path/to/folder ML_INTEGRATION=1 \
+    npx vitest run server/ml/embeddingSimilarity.test.js
+  ```
+
+  Record the path in the gitignored `docs/TEST_FOLDERS.local.md`. Without it the
+  test skips **loudly** (a console warning), because a silent skip on the only
+  check that the vectors mean anything is indistinguishable from a pass.
 
 ## Dev-server & process gotchas
 
