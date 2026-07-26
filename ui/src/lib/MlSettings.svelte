@@ -30,6 +30,26 @@
 
   /** @type {{enabled:boolean, modelId:string, threads:number, maxThreads:number, models:Array<object>}|null} */
   let settings = $state(null);
+  /**
+   * What the three controls currently SHOW, mirrored out of `settings`.
+   *
+   * They exist because a one-way `checked={settings.enabled}` cannot revert.
+   * Svelte 5 caches the last value it wrote to an attribute and skips the DOM
+   * write when the new value matches that cache — it never looks at the
+   * element's real state. So after the user ticks the box and the PUT fails
+   * (a read-only `~/.autogallery`, which is the whole reason
+   * MlSettingsPersistError exists), re-reading `enabled: false` from the server
+   * writes nothing: `false` was already the cached value, and the checkbox
+   * stays visibly ON while the server stored nothing. Same for the `<select>`
+   * (stuck on the model that was refused) and the slider (thumb at 8 above a
+   * label reading "4 of 8 cores").
+   *
+   * `bind:` assigns unconditionally, so these mirrors are what makes
+   * `syncDrafts()` — and therefore every failure path — actually revert the UI.
+   */
+  let enabledDraft = $state(false);
+  let modelDraft = $state("");
+  let threadsDraft = $state(1);
   /** @type {{model:string, provider:string, counts:{total:number,embedded:number,failed:number}, storage:Array<object>}|null} */
   let stats = $state(null);
   let loadFailed = $state(false);
@@ -58,6 +78,18 @@
     settings?.models?.find((m) => m.id === settings.modelId) ?? null
   );
   const counts = $derived(stats?.counts ?? null);
+  /**
+   * Do the counts on screen describe the model that is selected above them?
+   *
+   * /api/ml/stats answers for ONE model and says which, so when a refresh
+   * fails after a model switch the block would otherwise show the old model's
+   * numbers under the new model's name — "12,431 embedded of 12,500" for a
+   * model with zero vectors. That is the exact counts-honesty failure this
+   * panel exists to prevent, so the mismatch is rendered rather than hidden.
+   */
+  const countsStale = $derived(
+    !!stats && !!settings && stats.model !== settings.modelId
+  );
   /** Neither embedded nor failed: nobody has tried yet. Computed here and
    *  nowhere else — /api/ml/stats is the only source for any of these. */
   const pending = $derived(
@@ -80,30 +112,70 @@
     return settings?.models?.find((m) => m.id === modelId)?.label ?? modelId;
   }
 
+  /** Put the controls back to exactly what the server last told us. */
+  function syncDrafts() {
+    if (!settings) return;
+    enabledDraft = settings.enabled;
+    modelDraft = settings.modelId;
+    threadsDraft = settings.threads;
+  }
+
+  /**
+   * Every one of these returns its failure instead of announcing it, because
+   * they are called from handlers that go on to say something else — and the
+   * LAST `say()` wins. A refresh failure swallowed into the message channel
+   * and then overwritten by "Switched to CLIP" is a success banner on top of
+   * the previous model's numbers.
+   * @returns {Promise<string|null>} null on success, the reason otherwise.
+   */
   async function load() {
-    loadFailed = false;
     try {
       const [s, st] = await Promise.all([fetchMlSettings(), fetchMlStats()]);
       settings = s;
       stats = st;
+      syncDrafts();
+      loadFailed = false;
+      return null;
     } catch (e) {
       // A panel that renders nothing and says nothing is the failure mode this
       // whole section exists to avoid.
       loadFailed = true;
-      say(
-        `Couldn't read the image-understanding settings: ${e.message}`,
-        "err"
-      );
+      return e.message;
     }
   }
-  load();
+  async function retryLoad() {
+    const err = await load();
+    say(
+      err
+        ? `Couldn't read the image-understanding settings: ${err}`
+        : "Settings reloaded.",
+      err ? "err" : "info"
+    );
+  }
+  load().then((err) => {
+    if (err) {
+      say(`Couldn't read the image-understanding settings: ${err}`, "err");
+    }
+  });
 
+  /** @returns {Promise<string|null>} null on success, the reason otherwise. */
   async function refreshStats() {
     try {
       stats = await fetchMlStats();
+      return null;
     } catch (e) {
-      say(`Couldn't refresh the embedding counts: ${e.message}`, "err");
+      return e.message;
     }
+  }
+
+  async function refreshStatsAnnounced() {
+    const err = await refreshStats();
+    say(
+      err
+        ? `Couldn't refresh the embedding counts: ${err}`
+        : "Counts refreshed.",
+      err ? "err" : "info"
+    );
   }
 
   // A sweep that just ended leaves the counts on screen stale. The dependency
@@ -113,7 +185,15 @@
     const id = runningJob?.id ?? null;
     const ended = lastJobId !== null && id === null;
     lastJobId = id;
-    if (ended) refreshStats();
+    if (ended) {
+      // Job ids are per-process (`job-${++seq}`), so a server restart hands out
+      // `job-3` again: an uncleared stoppingId would render the NEXT sweep as
+      // "Stopping…" with Stop disabled, forever.
+      stoppingId = null;
+      refreshStats().then((err) => {
+        if (err) say(`Couldn't refresh the embedding counts: ${err}`, "err");
+      });
+    }
   });
 
   /** @param {{enabled?:boolean, modelId?:string, threads?:number}} patch */
@@ -121,23 +201,34 @@
     busy = true;
     try {
       settings = { ...settings, ...(await saveMlSettings(patch)) };
+      syncDrafts();
       return true;
     } catch (e) {
       // The server distinguishes "you gave us something invalid" (400) from
       // "we couldn't save it" (500) and words each specifically — pass that
       // through instead of flattening it.
-      say(`Couldn't save: ${e.message}`, "err");
-      // Put the controls back to what is actually stored, so the UI never
-      // shows a setting the server rejected.
-      await load();
+      const why = `Couldn't save: ${e.message}`;
+      // Put the controls back to what is actually STORED, so the panel never
+      // shows a setting the server rejected. `syncDrafts` runs either way: if
+      // the re-read also failed, reverting to the last known-stored values is
+      // still closer to the truth than leaving the user's rejected input on
+      // screen.
+      const reloadErr = await load();
+      syncDrafts();
+      say(
+        reloadErr
+          ? `${why} Re-reading the stored settings failed too (${reloadErr}), so these controls may not match what is on disk.`
+          : why,
+        "err"
+      );
       return false;
     } finally {
       busy = false;
     }
   }
 
-  async function toggleEnabled(event) {
-    const next = event.currentTarget.checked;
+  async function toggleEnabled() {
+    const next = enabledDraft; // bind: has already applied the click
     if (!(await save({ enabled: next }))) return;
     say(
       next
@@ -146,19 +237,26 @@
     );
   }
 
-  async function changeModel(event) {
-    const nextId = event.currentTarget.value;
+  async function changeModel() {
+    const nextId = modelDraft;
     const previous = labelFor(settings.modelId);
     if (nextId === settings.modelId) return;
     if (!(await save({ modelId: nextId }))) return;
-    await refreshStats();
+    const switched = `Switched to ${labelFor(nextId)}. Every photo needs a fresh backfill — vectors from two models are not comparable — but ${previous}'s vectors are kept, so switching back needs no re-embedding.`;
+    const refreshErr = await refreshStats();
+    // Never a success banner over the OLD model's counts: if the refresh
+    // failed, that is the headline, and the counts block below labels itself
+    // with the model it actually describes.
     say(
-      `Switched to ${labelFor(nextId)}. Every photo needs a fresh backfill — vectors from two models are not comparable — but ${previous}'s vectors are kept, so switching back needs no re-embedding.`
+      refreshErr
+        ? `${switched} The counts below could not be refreshed (${refreshErr}) — they still describe ${previous}. Press “Refresh counts”.`
+        : switched,
+      refreshErr ? "err" : "info"
     );
   }
 
-  async function changeThreads(event) {
-    await save({ threads: Number(event.currentTarget.value) });
+  async function changeThreads() {
+    await save({ threads: Number(threadsDraft) });
   }
 
   async function embedNow() {
@@ -226,10 +324,13 @@
     busy = true;
     try {
       const r = await purgeMlModel(row.model);
+      const refreshErr = await refreshStats();
       say(
-        `Deleted ${r.rows.toLocaleString()} vector(s) for ${labelFor(row.model)}.`
+        refreshErr
+          ? `Deleted ${r.rows.toLocaleString()} vector(s) for ${labelFor(row.model)}, but the counts below could not be refreshed (${refreshErr}) — press “Refresh counts”.`
+          : `Deleted ${r.rows.toLocaleString()} vector(s) for ${labelFor(row.model)}.`,
+        refreshErr ? "err" : "info"
       );
-      await refreshStats();
     } catch (e) {
       say(`Couldn't purge ${labelFor(row.model)}: ${e.message}`, "err");
     } finally {
@@ -253,7 +354,7 @@
 
   {#if loadFailed}
     <div class="ml-actions">
-      <button onclick={load}>Try again</button>
+      <button onclick={retryLoad}>Try again</button>
     </div>
   {:else if !settings || !stats}
     <p class="empty">Loading…</p>
@@ -264,17 +365,13 @@
       ever uploaded.
     </p>
 
-    <label class="toggle">
-      <input
-        type="checkbox"
-        data-testid="ml-enable"
-        checked={settings.enabled}
-        disabled={busy}
-        onchange={toggleEnabled}
-      />
-      <span>Embed photos in the background</span>
-    </label>
-    <p class="hint consent" data-testid="ml-consent">
+    <!-- BEFORE the toggle, in DOM order, not merely above it visually: a
+         keyboard or screen-reader user reaches controls in this order, and the
+         checkbox's own name is just "Embed photos in the background" — the
+         size and the licence are the part they are consenting to. Also wired
+         as the checkbox's description, so it is announced with it either
+         way. -->
+    <p class="hint consent" id="ml-consent-text" data-testid="ml-consent">
       Off until you turn it on, because turning it on downloads
       <strong>{activeModel?.label ?? settings.modelId}</strong>
       — about
@@ -293,12 +390,23 @@
         >
       {/if}
     </p>
+    <label class="toggle">
+      <input
+        type="checkbox"
+        data-testid="ml-enable"
+        bind:checked={enabledDraft}
+        aria-describedby="ml-consent-text"
+        disabled={busy}
+        onchange={toggleEnabled}
+      />
+      <span>Embed photos in the background</span>
+    </label>
 
     <label class="field">
       <span class="field-label">Model</span>
       <select
         data-testid="ml-model"
-        value={settings.modelId}
+        bind:value={modelDraft}
         disabled={busy}
         onchange={changeModel}
       >
@@ -324,12 +432,14 @@
         type="range"
         min="1"
         max={settings.maxThreads}
-        value={settings.threads}
+        bind:value={threadsDraft}
         disabled={busy}
         onchange={changeThreads}
       />
+      <!-- The DRAFT, so the label tracks the thumb while it is being dragged
+           and reverts with it when a save is refused. -->
       <span class="field-value"
-        >{settings.threads} of {settings.maxThreads} cores</span
+        >{threadsDraft} of {settings.maxThreads} cores</span
       >
     </label>
     <p class="hint">
@@ -338,7 +448,20 @@
       meanwhile.
     </p>
 
-    <ul class="counts" data-testid="ml-counts">
+    <!-- Which model these numbers describe, ALWAYS — /api/ml/stats answers for
+         one model and says which, so there is no state in which the counts sit
+         on screen unlabelled. When it disagrees with the picker above (a
+         refresh that didn't come through), that is said outright rather than
+         left for the user to misread as the new model's progress. -->
+    <p class="counts-for" class:stale={countsStale} data-testid="ml-counts-for">
+      {#if countsStale}
+        Showing {labelFor(stats.model)}'s counts — not the model selected above.
+        Press “Refresh counts”.
+      {:else}
+        Counts for {labelFor(stats.model)}
+      {/if}
+    </p>
+    <ul class="counts" class:stale={countsStale} data-testid="ml-counts">
       <li>
         <strong>{counts.embedded.toLocaleString()}</strong> embedded
         <span class="of">of {counts.total.toLocaleString()} photos</span>
@@ -370,7 +493,9 @@
           {stopping ? "Stopping…" : "Stop"}
         </button>
       {/if}
-      <button disabled={busy} onclick={refreshStats}>Refresh counts</button>
+      <button disabled={busy} onclick={refreshStatsAnnounced}
+        >Refresh counts</button
+      >
     </div>
 
     {#if runningJob}
@@ -490,9 +615,20 @@
     color: #aaa;
     white-space: nowrap;
   }
+  .counts-for {
+    margin: 0.7rem 0 0;
+    font-size: 0.78rem;
+    color: #888;
+  }
+  .counts-for.stale {
+    color: #c9b48a;
+  }
+  .counts.stale {
+    opacity: 0.65;
+  }
   .counts {
     list-style: none;
-    margin: 0.7rem 0 0;
+    margin: 0.3rem 0 0;
     padding: 0;
     display: flex;
     flex-wrap: wrap;

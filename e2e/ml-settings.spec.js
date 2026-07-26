@@ -18,8 +18,16 @@ import {
  */
 test.describe("ML settings", () => {
   // The settings live in a JSON file under AUTOGALLERY_HOME, so they outlive a
-  // spec exactly like ratings do. Put the model back afterwards rather than
-  // leaving the next run's default silently changed.
+  // spec exactly like ratings do — set them BEFORE as well as after. Before,
+  // because `enabled` left true by a previous run or a manual dev session is
+  // what would let a click here start a real 94 MB download; after, so the
+  // next run's default isn't silently changed.
+  test.beforeEach(async ({ page }) => {
+    await page.request.put("/api/ml/settings", {
+      data: { modelId: "Xenova/siglip-base-patch16-224", enabled: false },
+    });
+  });
+
   test.afterEach(async ({ page }) => {
     await page.request.put("/api/ml/settings", {
       data: { modelId: "Xenova/siglip-base-patch16-224", enabled: false },
@@ -112,6 +120,14 @@ test.describe("ML settings", () => {
     await openApp(page);
     await openManageLibrary(page);
 
+    // This whole spec rests on the feature being OFF: that is what makes the
+    // confirm fire, and dismissing the confirm is what stops the POST. If a
+    // stray dev session left `enabled: true` in a shared AUTOGALLERY_HOME, no
+    // dialog would appear, the click would POST with force:true, and the suite
+    // would download 94 MB before failing. Assert the precondition instead of
+    // assuming it.
+    await expect(mlSettings.enable(page)).not.toBeChecked();
+
     let asked = null;
     page.on("dialog", (d) => {
       asked = d.message();
@@ -146,11 +162,46 @@ test.describe("ML settings", () => {
     expect(errors).toEqual([]);
   });
 
+  test("a refused save is rendered in the server's own words, and the control goes back", async ({
+    page,
+  }) => {
+    // The failure this covers is real and unreachable from a test machine:
+    // ~/.autogallery read-only or full, which is the entire reason
+    // MlSettingsPersistError exists. Two things have to happen, and the second
+    // is the one that silently didn't: the user reads the EACCES message, AND
+    // the checkbox goes back to OFF. A one-way `checked={settings.enabled}`
+    // leaves it visibly ON — Svelte skips the DOM write because `false` is
+    // already the value it cached — so the panel would claim a setting the
+    // server never stored.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await openManageLibrary(page);
+    await expect(mlSettings.enable(page)).not.toBeChecked();
+
+    const eacces =
+      "could not save ML settings: EACCES: permission denied, open '/Users/nobody/.autogallery/ml.json'";
+    await page.route("**/api/ml/settings", async (route) => {
+      if (route.request().method() !== "PUT") return route.continue();
+      await route.fulfill({ status: 500, json: { error: eacces } });
+    });
+
+    await mlSettings.enable(page).click();
+
+    await expect(mlSettings.message(page)).toContainText("EACCES");
+    await expect(mlSettings.message(page)).toContainText(/permission denied/i);
+    await expect(mlSettings.enable(page)).not.toBeChecked();
+
+    // The stubbed 500 is the point of the spec, so it is the one response
+    // trackPageErrors is allowed to have seen.
+    expect(errors.filter((e) => !/500/.test(e))).toEqual([]);
+  });
+
   test("the model picker refuses an id the server never vetted, in the server's own words", async ({
     page,
   }) => {
-    // Not reachable from the <select>, but it is the one PUT failure with a
-    // specific server message — assert the panel renders THAT, not "Error".
+    // Not reachable from the <select> — this is the API-level half, asserting
+    // the 400 carries a specific message at all. The spec above is what proves
+    // the panel RENDERS such a message.
     const res = await page.request.put("/api/ml/settings", {
       data: { modelId: "evil/model" },
     });
