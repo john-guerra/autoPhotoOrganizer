@@ -60,11 +60,21 @@ export class OnnxMLService extends MLService {
   #threads = null;
   // True once an embed has succeeded against the currently-configured model
   // in the currently-running child. Reset to false on configure() (the
-  // worker drops its loaded model then) and whenever a fresh child is
-  // spawned (a respawned worker starts with nothing loaded) — both mean the
-  // NEXT embed may have to download+load a model, so it gets the generous
-  // cold timeout instead of the warm one.
+  // worker drops its loaded model then), whenever a fresh child is spawned
+  // (a respawned worker starts with nothing loaded), and when the worker
+  // reports an idle-timer "unloaded" frame — all mean the NEXT embed may
+  // have to download+load a model, so it gets the generous cold timeout
+  // instead of the warm one.
   #modelWarm = false;
+  // Bumped every time something above sets #modelWarm = false. The worker's
+  // idle timer is independent of in-flight embed handling and model(inputs)
+  // is genuinely async, so an "unloaded" frame (or a configure()/respawn)
+  // can land WHILE an embed is awaiting its reply. That embed still resolves
+  // correctly (its local model/processor refs were already captured
+  // worker-side), but embedImages() must not then stamp #modelWarm back to
+  // true and undo the invalidation that arrived mid-request — see the
+  // stale-generation check in embedImages().
+  #modelGeneration = 0;
   #events = new EventEmitter();
 
   constructor({ spawn = nodeSpawn, workerPath } = {}) {
@@ -76,6 +86,7 @@ export class OnnxMLService extends MLService {
   #ensureChild() {
     if (this.#child) return this.#child;
     this.#modelWarm = false; // fresh process, nothing loaded yet
+    this.#modelGeneration++;
     // In a packaged build the child runs on ELECTRON's ABI, not Node's —
     // ELECTRON_RUN_AS_NODE makes the Electron binary behave as node. #67 is the
     // cautionary tale: a Node-ABI native addon in an Electron build crashes on
@@ -177,6 +188,7 @@ export class OnnxMLService extends MLService {
         // >2-minute gap between embed batches is the NORMAL case here
         // (sweeps are whenIdle-gated), not a rare one.
         this.#modelWarm = false;
+        this.#modelGeneration++;
         this.#events.emit("unloaded", msg);
         continue;
       }
@@ -259,6 +271,7 @@ export class OnnxMLService extends MLService {
     this.#modelId = modelId;
     this.#threads = threads;
     this.#modelWarm = false;
+    this.#modelGeneration++;
   }
 
   /**
@@ -270,6 +283,7 @@ export class OnnxMLService extends MLService {
     const timeoutMs = this.#modelWarm
       ? EMBED_WARM_TIMEOUT_MS
       : EMBED_COLD_TIMEOUT_MS;
+    const generation = this.#modelGeneration;
     const { vectors } = await this.#request(
       {
         op: "embed",
@@ -278,7 +292,14 @@ export class OnnxMLService extends MLService {
       },
       timeoutMs
     );
-    this.#modelWarm = true;
+    // Only mark warm if nothing invalidated it WHILE this request was in
+    // flight (an idle-unload frame, a concurrent configure(), a respawn).
+    // This embed's own result is still valid and returned either way — its
+    // local model/processor refs were captured before any of that could
+    // happen — but stamping #modelWarm = true unconditionally here would
+    // silently undo a real invalidation that raced it, handing the NEXT
+    // embed a 30s warm budget for what is actually a cold reload.
+    if (this.#modelGeneration === generation) this.#modelWarm = true;
     return vectors.map((v) => Float32Array.from(v));
   }
 

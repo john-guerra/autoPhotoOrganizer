@@ -416,6 +416,66 @@ describe("request timeout", () => {
       vi.useRealTimers();
     }
   });
+
+  it("does not resurrect #modelWarm if 'unloaded' arrives WHILE an embed is in flight", async () => {
+    // The worker's idle setTimeout is independent of in-flight embed
+    // handling, and model(inputs) is genuinely async — so the timer can
+    // fire mid-embed. The handler's local model/processor refs are already
+    // captured by then, so that embed still completes correctly even though
+    // module-level `loaded` is now null worker-side. If the "unloaded" frame
+    // is written before the embed's own reply (very likely, given the
+    // ordering), the parent must not let the embed's resolution stamp
+    // #modelWarm back to true and undo the invalidation that raced it.
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild();
+      const svc = new OnnxMLService({ spawn: () => child });
+      const cfg = svc.configure({
+        modelId: "Xenova/clip-vit-base-patch32",
+        threads: 1,
+      });
+      const configureSent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+      child.reply({ id: configureSent.id, ok: true });
+      await cfg;
+
+      // Warm it up first.
+      const first = svc.embedImages([Buffer.from("x")]);
+      let sent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+      child.reply({ id: sent.id, vectors: [[1]], dim: 1 });
+      await first;
+
+      // Start a second embed — it's now in flight, awaiting its reply.
+      const second = svc.embedImages([Buffer.from("y")]);
+      sent = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
+
+      // The idle timer fires mid-embed and reports unloaded BEFORE the
+      // embed's own reply arrives.
+      child.reply({
+        type: "unloaded",
+        modelId: "Xenova/clip-vit-base-patch32",
+      });
+      // The in-flight embed still succeeds — its own result is legitimate.
+      child.reply({ id: sent.id, vectors: [[2]], dim: 1 });
+      await expect(second).resolves.toBeDefined();
+
+      // The NEXT embed must get the COLD budget — #modelWarm must not have
+      // been resurrected by `second` resolving after the unloaded frame.
+      const third = svc.embedImages([Buffer.from("z")]);
+      let settled = false;
+      third.then(
+        () => (settled = true),
+        () => (settled = true)
+      );
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(settled).toBe(false); // warm (30s) budget did NOT fire
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(settled).toBe(true); // cold (10min) budget did
+      await expect(third).rejects.toThrow(/embed.*timed out/i);
+      svc.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("progress events", () => {

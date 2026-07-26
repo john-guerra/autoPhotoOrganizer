@@ -22,10 +22,15 @@ export const MODELS = [
     dtype: "int8",
     // Measured, not guessed: a real from_pretrained() download of the int8
     // ONNX export (vision_model_int8.onnx + config + preprocessor config)
-    // came to 94,099,141 bytes (89.7 MB) on 2026-07-25. Rendered in a later
-    // task's settings panel before the user starts the download — a wrong
-    // number there is a metered-connection surprise, not a cosmetic bug.
-    approxDownloadMB: 90,
+    // came to 94,099,141 bytes on 2026-07-25 — confirmed against Hugging
+    // Face's own reported file size for onnx/vision_model_int8.onnx
+    // (94,098,316 bytes) plus a few KB of config JSON. Deliberately decimal
+    // MB (bytes / 1e6 = 94.1, rounded), NOT MiB (bytes / 1048576 = 89.7) —
+    // this is rendered in a later task's settings panel before the user
+    // starts the download, and decimal MB is what the OS/browser will show
+    // while it runs, so a user watching "94 MB" tick by against a panel
+    // that said "90 MB" would think the panel was wrong.
+    approxDownloadMB: 94,
     note: "~4x the CPU cost of CLIP per photo, clearly better zero-shot accuracy",
   },
   {
@@ -35,12 +40,16 @@ export const MODELS = [
     outputKey: "image_embeds",
     dim: 512,
     dtype: "int8",
-    // Measured the same way as SigLIP above: 88,653,921 bytes (84.5 MB) for
-    // the int8 vision_model_int8.onnx + config + preprocessor config,
-    // 2026-07-25. The old 45 MB estimate undersold this by roughly half —
-    // "faster to run" (fewer patches) is not the same as "smaller to
-    // download"; CLIP and SigLIP's downloads are actually close in size.
-    approxDownloadMB: 85,
+    // Measured the same way as SigLIP above: 88,653,921 bytes for the int8
+    // vision_model_int8.onnx + config + preprocessor config, 2026-07-25 —
+    // confirmed against Hugging Face's reported 88,648,877 bytes for
+    // onnx/vision_model_int8.onnx plus a few KB of config JSON. Decimal MB
+    // (bytes / 1e6 = 88.65, rounded), not MiB (84.5) — see the note on the
+    // SigLIP entry above for why. The original 45 MB estimate undersold
+    // this by roughly half — "faster to run" (fewer patches) is not the
+    // same as "smaller to download"; CLIP and SigLIP's downloads are
+    // actually close in size.
+    approxDownloadMB: 89,
     note: "49 patches instead of 196 — much cheaper, lower accuracy",
   },
 ];
