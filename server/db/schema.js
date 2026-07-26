@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS photos (
   height INTEGER,
   camera TEXT,
   kind TEXT NOT NULL,
-  perceptual_hash TEXT,
   rating INTEGER NOT NULL DEFAULT 0,
   preferred_cover INTEGER NOT NULL DEFAULT 0,
   stale INTEGER NOT NULL DEFAULT 0,
@@ -244,6 +243,26 @@ export function applySchema(db) {
     db.exec(`DROP TABLE IF EXISTS ml_status`);
     db.pragma("user_version = 2");
   }
+  if (dataVersion < 3) {
+    // #162: `perceptual_hash` was carved into the photos table and then
+    // referenced by absolutely nothing — a pre-allocated slot for a feature
+    // nobody built. Embeddings (#161) answer the question it was reserved for,
+    // and far better than a hash could: a perceptual hash finds "the same
+    // pixels, re-encoded", while a vector finds "the same shot, one frame
+    // later", which is what near-duplicate stacking actually needs.
+    //
+    // Dropped rather than left in place because a column that looks like a
+    // feature but has never held a value is actively misleading — that is
+    // exactly how `content_hash` read as working dedup for two releases while
+    // only ~50 rows were ever populated. Removing it from the CREATE TABLE
+    // alone would only affect fresh databases, so existing libraries need this
+    // ALTER; nothing reads the column, so there is no data to preserve.
+    const hasColumn = db
+      .prepare(`SELECT 1 FROM pragma_table_info('photos') WHERE name = ?`)
+      .get("perceptual_hash");
+    if (hasColumn) db.exec(`ALTER TABLE photos DROP COLUMN perceptual_hash`);
+    db.pragma("user_version = 3");
+  }
 
   // --- ML artifacts (#161) --------------------------------------------------
   // Their OWN tables, never columns on `photos`. The feed's hot path is
@@ -322,6 +341,39 @@ export function applySchema(db) {
   db.exec(
     `CREATE INDEX IF NOT EXISTS idx_ml_status_lookup
        ON ml_status(stage, model, photo_id)`
+  );
+
+  // --- Near-duplicate groups (#162) -----------------------------------------
+  // The output of nearDupeSweep: which photos are the SAME SHOT as which
+  // others. `group_id` is an opaque component label — equal values mean "same
+  // group", and nothing else about the number is meaningful or stable across
+  // sweeps.
+  //
+  // photo_id alone is the PK, unlike photo_embeddings' (photo_id, model). A
+  // photo has one vector PER model simultaneously, but it belongs to one
+  // near-dupe grouping at a time: the sweep computes the whole grouping under
+  // the active model and replaces it wholesale. `model` is carried anyway so a
+  // stale grouping left by a previous model is recognizable as stale rather
+  // than silently mixed into the current one.
+  //
+  // ON DELETE CASCADE for the same reason as the two tables above, which is
+  // not a style preference: better-sqlite3 enables PRAGMA foreign_keys by
+  // default, so without it every `DELETE FROM photos` path in the app throws
+  // the moment a photo lands in a group. That was #161's Critical 1, and a
+  // plain `REFERENCES` here would reproduce it exactly.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS near_dupe_groups (
+      photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+      group_id INTEGER NOT NULL,
+      model    TEXT    NOT NULL
+    )
+  `);
+  // Serves "how many groups are there" and the whole-grouping wipe that starts
+  // each sweep; both filter on model with no photo_id bound, so without this
+  // they scan the table.
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_near_dupe_group
+       ON near_dupe_groups(model, group_id)`
   );
 
   // The metadata sweep's to-do list is PENDING_CONDITION (see db/enrich.js —

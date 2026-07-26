@@ -30,6 +30,34 @@
  *    artifact whose owner has stated nothing. Asserting "MIT" there would be
  *    telling the user a fact about someone else's IP that its owner never
  *    said — worse than an honest gap, because the user would rely on it.
+ *
+ * ## Why `nearDupeThreshold` is per-model and not one constant (#162)
+ *
+ * Measured on real photographs (darwin/arm64, 2026-07-26 — the fixture set
+ * behind `embeddingSimilarity.test.js`):
+ *
+ *   relation                          SigLIP    CLIP
+ *   burst pair (same moment)          0.9608   0.9657
+ *   same scene, re-framed             0.9326   0.8854
+ *   two DIFFERENT outdoor scenes      0.6071   0.6771
+ *   vs. an unrelated subject          0.50-0.56  0.41-0.52
+ *
+ * Two facts in that table decide the design. First, the two models disagree by
+ * ~0.05 on the case that matters most (the re-framed pair), so a single global
+ * constant would be correct for at most one of them — hence a field here,
+ * beside `dim`, rather than a shared export.
+ *
+ * Second, "unrelated" is not one number. Two photographs that merely share a
+ * genre score 0.61-0.68, far above the 0.41-0.56 of wholly different subjects.
+ * That is the model being RIGHT, and it means a cutoff tuned by eye on
+ * obviously-different photos will merge distinct shots on a library that is
+ * mostly one genre — which is what a travel archive is. The near-dupe sweep
+ * intersects this threshold with a time window for exactly that reason.
+ *
+ * Chosen deliberately conservative, just under the re-framed pair rather than
+ * midway to the noise band: a missed duplicate is invisible to the user, while
+ * a false merge HIDES a photo behind a stack cover. Those costs are not
+ * symmetric.
  */
 export const MODELS = [
   {
@@ -41,6 +69,9 @@ export const MODELS = [
     outputKey: "pooler_output",
     dim: 768,
     dtype: "int8",
+    // Sits below the measured re-framed pair (0.9326) and far above the
+    // shared-genre band (0.61). See the module doc for the full table.
+    nearDupeThreshold: 0.93,
     // Measured, not guessed: a real from_pretrained() download of the int8
     // ONNX export (vision_model_int8.onnx + config + preprocessor config)
     // came to 94,099,141 bytes on 2026-07-25 — confirmed against Hugging
@@ -67,6 +98,11 @@ export const MODELS = [
     outputKey: "image_embeds",
     dim: 512,
     dtype: "int8",
+    // Lower than SigLIP's, and not by preference: CLIP scored the same
+    // re-framed pair at 0.8854 where SigLIP gave 0.9326. Using SigLIP's 0.93
+    // here would silently miss every re-framed duplicate under this model —
+    // which is how a shared constant fails, invisibly.
+    nearDupeThreshold: 0.88,
     // Measured the same way as SigLIP above: 88,653,921 bytes for the int8
     // vision_model_int8.onnx + config + preprocessor config, 2026-07-25 —
     // confirmed against Hugging Face's reported 88,648,877 bytes for

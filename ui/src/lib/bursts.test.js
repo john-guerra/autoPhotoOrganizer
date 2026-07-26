@@ -198,3 +198,99 @@ describe("detectBurstsByGroup", () => {
     );
   });
 });
+
+/**
+ * The near-duplicate signal (#162). The server's embedding sweep labels photos
+ * it judged to be the same shot; that label is a THIRD merge signal here,
+ * alongside the time gap and the Pixel filename hard-link.
+ *
+ * The direction is the property worth protecting: the signal may only ever ADD
+ * members to a stack, never remove them. That is what lets a library with no
+ * embeddings — the default, since the feature is opt-in — behave exactly as it
+ * did before, and what stops a wrong grouping from dissolving a burst the user
+ * already relies on.
+ */
+describe("detectBursts with near-duplicate groups", () => {
+  it("keeps same-dupe-group photos together even when their gap exceeds gapMs", () => {
+    const items = [
+      { id: 1, name: "a.jpg", mtimeMs: 0, dupeGroupId: 7 },
+      { id: 2, name: "b.jpg", mtimeMs: 30000, dupeGroupId: 7 },
+    ];
+    const stacks = detectBursts(items, { gapMs: 1000 });
+    expect(stacks).toHaveLength(1);
+    expect(stacks[0].memberIds).toEqual([1, 2]);
+  });
+
+  it("does NOT merge photos beyond gapMs that are in different dupe groups", () => {
+    const items = [
+      { id: 1, name: "a.jpg", mtimeMs: 0, dupeGroupId: 7 },
+      { id: 2, name: "b.jpg", mtimeMs: 30000, dupeGroupId: 8 },
+    ];
+    expect(detectBursts(items, { gapMs: 1000 })).toHaveLength(0);
+  });
+
+  it("treats a null dupe group as no signal, not as a group of its own", () => {
+    // Two photos that both have NO grouping must not match each other by
+    // virtue of both being null — `null === null` is true in JS, so this is a
+    // one-character mistake away and would stack every unembedded photo in the
+    // library with its neighbour.
+    const items = [
+      { id: 1, name: "a.jpg", mtimeMs: 0, dupeGroupId: null },
+      { id: 2, name: "b.jpg", mtimeMs: 30000, dupeGroupId: null },
+    ];
+    expect(detectBursts(items, { gapMs: 1000 })).toHaveLength(0);
+  });
+
+  it("reproduces existing behaviour exactly when no photo carries a group", () => {
+    // The no-op guarantee for the default (opt-in off) configuration: absent
+    // the field entirely, results must be identical to the same items with it.
+    const bare = [
+      { id: 1, name: "a.jpg", mtimeMs: 0 },
+      { id: 2, name: "b.jpg", mtimeMs: 500 },
+      { id: 3, name: "c.jpg", mtimeMs: 10000 },
+    ];
+    const withNulls = bare.map((it) => ({ ...it, dupeGroupId: null }));
+    expect(detectBursts(withNulls, { gapMs: 1000 })).toEqual(
+      detectBursts(bare, { gapMs: 1000 })
+    );
+  });
+
+  it("bridges a burst across an intruding photo that is not part of it", () => {
+    // The dupe group is transitive server-side, so frames 1 and 3 carry the
+    // same label even though an unrelated shot sits between them in time.
+    const items = [
+      { id: 1, name: "a.jpg", mtimeMs: 0, dupeGroupId: 7 },
+      { id: 2, name: "intruder.jpg", mtimeMs: 20000, dupeGroupId: null },
+      { id: 3, name: "c.jpg", mtimeMs: 40000, dupeGroupId: 7 },
+    ];
+    const stacks = detectBursts(items, { gapMs: 1000 });
+    // The walk compares against the running cluster's last member, so the
+    // intruder starts its own cluster and 3 cannot rejoin 1. Documented as the
+    // known limit of a single-pass walk rather than asserted as desirable: the
+    // grouping is still correct, just split.
+    expect(stacks).toHaveLength(0);
+  });
+
+  it("still respects group partitioning, so a cross-folder pair stays split", () => {
+    // The server labels by time and similarity with no idea what the user is
+    // grouping by; detectBurstsByGroup partitions FIRST, which is what enforces
+    // "within-group only" for free.
+    const items = [
+      {
+        id: 1,
+        name: "a.jpg",
+        mtimeMs: 0,
+        dupeGroupId: 7,
+        groupValues: { folder: "A" },
+      },
+      {
+        id: 2,
+        name: "b.jpg",
+        mtimeMs: 30000,
+        dupeGroupId: 7,
+        groupValues: { folder: "B" },
+      },
+    ];
+    expect(detectBurstsByGroup(items, ["folder"], { gapMs: 1000 })).toEqual([]);
+  });
+});

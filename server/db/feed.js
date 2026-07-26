@@ -329,6 +329,12 @@ function rowToItem(r, dims) {
     // into (null = none), and whether it's been dissolved out of auto-stacking.
     manualStackId: r.manualStackId ?? null,
     keepSeparate: r.keepSeparate === 1,
+    // The near-duplicate grouping (#162) — an opaque label; equal values mean
+    // "the same shot" and nothing else. bursts.js treats it as a third merge
+    // signal alongside the time gap and the Pixel filename hard-link. Null
+    // whenever embedding is off (the default) or the sweep has not reached
+    // this photo, in which case burst detection behaves exactly as before.
+    dupeGroupId: r.dupeGroupId ?? null,
     groupValues,
   };
 }
@@ -616,6 +622,7 @@ export function getFeedPage(
                 photos.preferred_cover AS preferredCover,
                 photos.no_auto_stack AS keepSeparate,
                 (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
+                (SELECT group_id FROM near_dupe_groups WHERE photo_id = photos.id) AS dupeGroupId,
                 photos.width, photos.height, photos.taken_at, photos.btime, photos.kind, photos.duration,
                 ${selectDimAndSortCols}
          FROM photos JOIN folders ON folders.id = photos.folder_id
@@ -680,6 +687,7 @@ export function getFeedPage(
                 photos.preferred_cover AS preferredCover,
                 photos.no_auto_stack AS keepSeparate,
                 (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
+                (SELECT group_id FROM near_dupe_groups WHERE photo_id = photos.id) AS dupeGroupId,
                 photos.width, photos.height, photos.taken_at, photos.btime, photos.kind, photos.duration,
                 ${selectDimAndSortCols}
          FROM photos
@@ -809,6 +817,7 @@ export function fetchGroupRowsAtOffsets(
             photos.preferred_cover AS preferredCover,
             photos.no_auto_stack AS keepSeparate,
             (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
+                (SELECT group_id FROM near_dupe_groups WHERE photo_id = photos.id) AS dupeGroupId,
             photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
             ${selectDimAndSortCols}
      FROM photos

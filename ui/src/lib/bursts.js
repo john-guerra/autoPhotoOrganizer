@@ -11,7 +11,7 @@ import { pickCoverId } from "./pickCover.js";
  * mechanism and filename matching is a supporting signal, not a
  * competing gate).
  *
- * @param {Array<{id: number|string, name: string, rating?: number, preferredCover?: boolean, mtimeMs: number, takenAt?: string|number|null}>} items
+ * @param {Array<{id: number|string, name: string, rating?: number, preferredCover?: boolean, mtimeMs: number, takenAt?: string|number|null, dupeGroupId?: number|null}>} items
  * @param {{ gapMs: number }} opts
  * @returns {Array<{ id: string, memberIds: Array<number|string>, coverId: number|string, count: number }>}
  */
@@ -23,14 +23,25 @@ export function detectBursts(items, { gapMs }) {
       item,
       time: toMs(item.takenAt) ?? item.mtimeMs,
       burstKey: burstFilenameKey(item.name),
+      dupeGroup: item.dupeGroupId ?? null,
     }))
     .sort((a, b) => a.time - b.time);
 
   // Walk consecutive photos (in chronological order), merging into a
-  // running cluster whenever either the gap is within gapMs, or both
-  // photos share the same Pixel burst-filename prefix (a hard-link
-  // override for the rare case a genuine burst's timestamps land wider
-  // apart than gapMs).
+  // running cluster whenever ANY of three independent signals says so:
+  // the gap is within gapMs; both photos share the same Pixel
+  // burst-filename prefix (a hard-link override for the rare case a genuine
+  // burst's timestamps land wider apart than gapMs); or both were placed in
+  // the same near-duplicate group by the server's embedding sweep (#162).
+  //
+  // The third is the same SHAPE as the second, which is why it lands as one
+  // more disjunct rather than a new kind of stack: a supporting signal that
+  // can rescue a burst the time gap alone would split, never a competing
+  // gate that can break one it wouldn't. That direction is deliberate and
+  // load-bearing — near-dupe grouping can only ever ADD members to a stack,
+  // so a library with no embeddings (the default: the feature is opt-in)
+  // gets byte-for-byte today's behaviour, and a wrong grouping can never
+  // dissolve a burst the user already relies on.
   const clusters = [];
   let current = [withTime[0]];
   for (let i = 1; i < withTime.length; i++) {
@@ -38,7 +49,9 @@ export function detectBursts(items, { gapMs }) {
     const cur = withTime[i];
     const withinGap = cur.time - prev.time <= gapMs;
     const sameBurst = prev.burstKey !== null && prev.burstKey === cur.burstKey;
-    if (withinGap || sameBurst) {
+    const sameDupe =
+      prev.dupeGroup !== null && prev.dupeGroup === cur.dupeGroup;
+    if (withinGap || sameBurst || sameDupe) {
       current.push(cur);
     } else {
       clusters.push(current);
