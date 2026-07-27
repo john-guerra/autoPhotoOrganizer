@@ -24,13 +24,11 @@
  * test skips LOUDLY, because a silent skip on the only check that the vectors
  * describe faces is indistinguishable from a pass.
  */
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readdirSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { detectFaces } from "./faceDetect.js";
-import { faceModelById } from "./faceModels.js";
-import { DET_SIZE } from "./faceGeometry.js";
+import { createFaceEngine } from "./faceEngine.js";
 
 const RUN = process.env.ML_INTEGRATION === "1";
 const FIXTURES = process.env.AUTOGALLERY_FACE_FIXTURES;
@@ -57,69 +55,37 @@ if (RUN && !ready) {
 describe.runIf(ready)(
   "faces, against real weights and real photographs",
   () => {
-    let ort, sharp, detector, recognizer, photos;
+    let engine, photos, sharp;
 
     beforeAll(async () => {
-      ort = (await import("onnxruntime-node")).default;
+      const ort = (await import("onnxruntime-node")).default;
       sharp = (await import("sharp")).default;
-      const mk = async (file, single) => {
-        const s = await ort.InferenceSession.create(join(MODELS, file), {
-          executionProviders: ["cpu"],
-        });
-        return {
-          inputName: s.inputNames[0],
-          outputNames: s.outputNames,
-          outputName: s.outputNames[0],
-          run: (feeds) => s.run(feeds),
-        };
-      };
-      detector = await mk("detection.onnx");
-      recognizer = await mk("recognition.onnx");
-
+      // THE POINT of this file after the engine extraction: it drives the
+      // SHIPPED adapter, not a copy of it. A test that reimplements the
+      // rotation, the letterbox pad and the tensor construction only proves
+      // the test agrees with itself.
+      engine = createFaceEngine({
+        modelId: PACK,
+        pathFor: (file) => join(MODELS, file),
+        runtime: { ort, sharp },
+        readFile,
+      });
       photos = readdirSync(FIXTURES)
         .filter((f) => /\.(jpe?g|png)$/i.test(f))
         .slice(0, 40)
         .map((f) => join(FIXTURES, f));
     }, 120_000);
 
-    /** The real adapters the worker will use. Kept here so the test exercises
-     *  the SAME sharp calls production does — the letterbox pad in particular. */
-    const probe = async (bytes) => {
-      const buf = await sharp(bytes).rotate().toBuffer();
-      const m = await sharp(buf).metadata();
-      return { width: m.width, height: m.height, buf };
-    };
-    const makeDecode = (rotated) => async (_bytes, plan) => {
-      if (!plan) {
-        const { data, info } = await sharp(rotated)
-          .removeAlpha()
-          .raw()
-          .toBuffer({ resolveWithObject: true });
-        return { data, width: info.width, height: info.height };
-      }
-      const { data } = await sharp(rotated)
-        .resize(plan.resize.width, plan.resize.height)
-        .extend({ ...plan.pad, background: { r: 0, g: 0, b: 0 } })
-        .removeAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-      return { data, width: DET_SIZE, height: DET_SIZE };
-    };
-    const tensor = (shape, data) => new ort.Tensor("float32", data, shape);
+    afterAll(async () => engine?.close());
 
-    async function run(path) {
-      const bytes = await readFile(path);
-      const { width, height, buf } = await probe(bytes);
-      return detectFaces({
-        detector,
-        recognizer,
-        probe: async () => ({ width, height }),
-        decode: makeDecode(buf),
-        tensor,
-        bytes,
-        dim: faceModelById(PACK).dim,
-      });
-    }
+    const run = (path) => engine.detect({ path });
+    const sizeOf = async (path) => {
+      const buf = await sharp(await readFile(path))
+        .rotate()
+        .toBuffer();
+      const m = await sharp(buf).metadata();
+      return { width: m.width, height: m.height };
+    };
 
     it("finds faces in a real archive, and not in everything", async () => {
       const results = [];
@@ -147,8 +113,7 @@ describe.runIf(ready)(
       for (const p of photos.slice(0, 15)) {
         let r, size;
         try {
-          const bytes = await readFile(p);
-          size = await probe(bytes);
+          size = await sizeOf(p);
           r = await run(p);
         } catch {
           continue;
