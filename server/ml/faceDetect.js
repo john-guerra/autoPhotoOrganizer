@@ -48,8 +48,14 @@ export const NMS_IOU = 0.4;
  * upscaling more than the person. Those vectors are not merely weak, they are
  * actively harmful to #167: near-identical blurry crops cluster with EACH
  * OTHER, producing a large confident "person" made of unrelated strangers.
- * Dropping them is the honest answer, and the box is still recorded so the UI
- * can say a face was seen there.
+ * Dropping them is the honest answer.
+ *
+ * They are COUNTED — `skipped` in the result — but not stored. An earlier
+ * version of this comment said the box was recorded "so the UI can say a face
+ * was seen there"; it never was, and could not be: `photo_faces.vec` is NOT
+ * NULL, so a face with no embedding has nowhere to live. Showing them would
+ * mean a nullable vec plus a filter on every query that reads the table —
+ * a design change, not a docstring.
  */
 export const MIN_FACE_PX = 32;
 

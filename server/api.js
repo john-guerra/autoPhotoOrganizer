@@ -82,6 +82,7 @@ import {
   FACE_MODELS,
   DEFAULT_FACE_MODEL_ID,
   faceModelById,
+  faceModelFiles,
 } from "./ml/faceModels.js";
 import { checkFaceModel, downloadFaceModel } from "./ml/faceDownload.js";
 import { sweepFaces, isFaceSweepInFlight } from "./ml/faceSweep.js";
@@ -95,7 +96,9 @@ import {
   renamePerson,
   mergePersons,
   detachFace,
+  clearFaceFailures,
 } from "./db/faces.js";
+import { assignNewFaces } from "./ml/faceAssign.js";
 import { clusterFaces } from "./ml/faceClusters.js";
 import sharp from "sharp";
 
@@ -145,6 +148,38 @@ function faceIo(modelId) {
     unlink: (path) => fsp.unlink(path),
     fetchImpl: (url) => fetch(url),
   };
+}
+
+/**
+ * `checkFaceModel`, but not 191 MB of SHA-256 per call.
+ *
+ * The settings panel polls GET /api/ml/faces every 2 s while a sweep runs, and
+ * that route verifies the digests. Over a buffalo_l sweep that is tens of
+ * gigabytes of reads, competing for disk with the sweep itself. The digest is
+ * still what decides — this only skips RE-computing it for bytes that have not
+ * changed, keyed on each file's size and mtime, which is the same identity the
+ * scanner uses for photos.
+ */
+const faceWeightsCache = new Map();
+async function faceWeightsStatus(modelId) {
+  const io = faceIo(modelId);
+  const sig = (
+    await Promise.all(
+      faceModelFiles(modelId).map(async (f) => {
+        try {
+          const s = await fsp.stat(io.pathFor(f.file));
+          return `${f.file}:${s.size}:${s.mtimeMs}`;
+        } catch {
+          return `${f.file}:absent`;
+        }
+      })
+    )
+  ).join("|");
+  const hit = faceWeightsCache.get(modelId);
+  if (hit?.sig === sig) return hit.value;
+  const value = await checkFaceModel(modelId, io);
+  faceWeightsCache.set(modelId, { sig, value });
+  return value;
 }
 import {
   embedCounts,
@@ -1554,7 +1589,8 @@ export function registerApi(app, { ml } = {}) {
   app.get("/api/ml/faces", async (req, res) => {
     const modelId = faceModelIdOf(req.query.model);
     const model = faceModelById(modelId);
-    const model_ = await checkFaceModel(modelId, faceIo(modelId));
+    const model_ = await faceWeightsStatus(modelId);
+    const counts = faceCounts(getDb(), modelId);
     res.json({
       models: FACE_MODELS.map((m) => ({
         id: m.id,
@@ -1568,11 +1604,11 @@ export function registerApi(app, { ml } = {}) {
       modelId,
       weights: model_,
       running: isFaceSweepInFlight(),
-      counts: faceCounts(getDb(), modelId),
+      counts,
       // The estimate the user is really deciding about. Rounded hard and
       // labelled "about" in the UI — see models.js on approxMsPerPhoto.
       approxMinutes: Math.round(
-        (faceCounts(getDb(), modelId).total * model.approxMsPerPhoto) / 60000
+        (counts.total * model.approxMsPerPhoto) / 60000
       ),
     });
   });
@@ -1614,7 +1650,7 @@ export function registerApi(app, { ml } = {}) {
     }
     const modelId = faceModelIdOf(req.body?.model);
     const model = faceModelById(modelId);
-    const weights = await checkFaceModel(modelId, faceIo(modelId));
+    const weights = await faceWeightsStatus(modelId);
     if (!weights.ready) {
       // Specific over generic, and the two cases need different fixes: absent
       // means "press download", corrupt means "what you have is wrong".
@@ -1626,6 +1662,33 @@ export function registerApi(app, { ml } = {}) {
         weights,
       });
     }
+    // BEFORE the job exists, and before the response is sent. This used to sit
+    // inline in `runtime:` below, i.e. after res.json() and outside the try —
+    // so a rejected onnxruntime-node import (the exact case asarPackaging.test
+    // exists for) left a job that was never finished or failed. The panel span
+    // forever, nothing was reported, and pressing the button again made
+    // another zombie.
+    let ort;
+    try {
+      ort = await loadOrt();
+    } catch (e) {
+      return res.status(500).json({
+        error:
+          `Can't look for faces — the face-detection runtime failed to load: ${e.message}. ` +
+          `This is a problem with the app's install rather than with your photos; ` +
+          `nothing was changed. Restarting the app is worth trying first.`,
+      });
+    }
+
+    // Re-check AFTER every await. Two requests can both pass the guard at the
+    // top of this handler and then both sit in `checkFaceModel`; the loser
+    // would create a second job that reports success having scanned nothing.
+    // `sweepFaces` sets its own flag synchronously, so from here down there is
+    // no yield for a third request to slip through.
+    if (isFaceSweepInFlight()) {
+      return res.json({ started: false, alreadyRunning: true });
+    }
+
     const job = registry.create("faces", {
       label: `Finding faces (${model.label})`,
     });
@@ -1634,7 +1697,7 @@ export function registerApi(app, { ml } = {}) {
     const engine = createFaceEngine({
       modelId,
       pathFor: (file) => join(faceModelDir(modelId), file),
-      runtime: { ort: await loadOrt(), sharp },
+      runtime: { ort, sharp },
       readFile: (p) => fsp.readFile(p),
     });
     try {
@@ -1662,17 +1725,29 @@ export function registerApi(app, { ml } = {}) {
           )
         );
       } else {
+        // New faces join the people who already have NAMES, without a
+        // re-cluster. This is the everyday import case #167 names: the
+        // alternative is re-running the whole O(n^2) pass to file six photos.
+        const assigned = assignNewFaces(getDb(), modelId);
         registry.finish(job.id, {
           scanned: r.done,
           faces: r.faces,
           failed: r.failed,
+          ...assigned,
         });
       }
     } catch (e) {
       registry.fail(
         job.id,
         new Error(
-          `Face detection stopped: ${e.message}. No photos were changed.`
+          // NOT "no photos were changed" — every photo scanned before the
+          // failure has its faces and its `done` marker committed, and saying
+          // otherwise would send the user looking for work that is already
+          // done. Nothing on DISK was touched either way, which is the
+          // reassurance actually worth giving.
+          `Face detection stopped: ${e.message}. Whatever was scanned before ` +
+            `that is kept, and the rest will be picked up next time. None of ` +
+            `your photo files were touched.`
         )
       );
     } finally {
@@ -1688,7 +1763,7 @@ export function registerApi(app, { ml } = {}) {
    *  Detecting faces is ~14 minutes of inference; clustering the vectors
    *  already on disk is arithmetic. Someone adjusting the threshold needs the
    *  cheap one on its own. */
-  app.post("/api/ml/faces/cluster", (req, res) => {
+  app.post("/api/ml/faces/cluster", async (req, res) => {
     if (isFaceSweepInFlight()) {
       return res.status(409).json({
         error:
@@ -1704,11 +1779,21 @@ export function registerApi(app, { ml } = {}) {
       });
     }
     const threshold = Number(req.body?.threshold);
-    const { clusters } = clusterFaces(
+    // Yields to the event loop as it goes, so the server keeps serving
+    // thumbnails and the feed through a ~10,000-face pass.
+    const { clusters } = await clusterFaces(
       vectors,
       Number.isFinite(threshold) ? { threshold } : {}
     );
-    const r = saveClusters(getDb(), clusters);
+    // A second scan may have started while that ran; writing now would clear
+    // person assignments for faces it is still producing.
+    if (isFaceSweepInFlight()) {
+      return res.status(409).json({
+        error:
+          "A face scan started while these were being grouped, so nothing was saved. Try again once it finishes.",
+      });
+    }
+    const r = saveClusters(getDb(), clusters, { model: modelId });
     res.json({ ...r, faces: vectors.ids.length });
   });
 
@@ -1785,6 +1870,25 @@ export function registerApi(app, { ml } = {}) {
       });
     }
     res.json(purgeFaces(getDb(), faceModelIdOf(req.body?.model)));
+  });
+
+  /** Try the unreadable photos again.
+   *
+   *  The escape hatch a permanent sentinel needs, and it had none — which is
+   *  half the defect, because "permanent" here means "until the file's bytes
+   *  change", i.e. never. A bad model file or a since-fixed bug could mark the
+   *  whole library unscannable with no way back short of deleting index.db,
+   *  which also destroys ratings, keep-scope and album names. Deliberately
+   *  does NOT touch `done` rows: re-scanning photos correctly found to hold
+   *  nobody is pure waste. */
+  app.post("/api/ml/faces/retry-failed", (req, res) => {
+    if (isFaceSweepInFlight()) {
+      return res.status(409).json({
+        error:
+          "A face scan is running. Wait for it to finish, then try the unreadable photos again.",
+      });
+    }
+    res.json(clearFaceFailures(getDb(), faceModelIdOf(req.body?.model)));
   });
 
   app.post("/api/ml/near-dupes/counts", (req, res) => {

@@ -77,6 +77,26 @@ export const SAME_PERSON_COSINE = 0.8;
 export const MAX_DEGREE = 24;
 
 /**
+ * How many rows of the pairwise scan run before the event loop gets a turn.
+ *
+ * The scan is O(n^2) and this app's own library is ~10,700 faces, i.e. 57
+ * million int8 dot products — tens of seconds. Run straight through, that is a
+ * server that answers nothing: no thumbnails, no feed, no jobs panel, and no
+ * way for the user to tell a wedge from a crash. CLAUDE.md's rule is that
+ * heavy work never blocks the event loop, and clustering was the one place in
+ * this feature that did.
+ *
+ * 512 is chosen so a yield lands roughly every few milliseconds at library
+ * scale, which is often enough to keep the server responsive and rare enough
+ * that the awaits are nowhere near the hot path.
+ */
+export const YIELD_EVERY = 512;
+
+/** One turn of the event loop. `setImmediate` rather than `await null`, which
+ *  resolves as a microtask and therefore never lets I/O run at all. */
+const breathe = () => new Promise((r) => setImmediate(r));
+
+/**
  * Cluster face vectors into people.
  *
  * @param {{ids: Int32Array|number[], scales: Float32Array|number[], dim: number, data: Int8Array}} vectors
@@ -87,16 +107,18 @@ export const MAX_DEGREE = 24;
  * @param {number} [opts.minSize] clusters smaller than this stay unassigned.
  *   1 by default, i.e. a face seen once is still a (singleton) person — see
  *   #167: "a person with no name should still be browsable".
- * @returns {{clusters: Array<number[]>, singletons: number[]}} `clusters` are
- *   arrays of FACE ids, largest first — which is the order #167 wants for
- *   naming, since ten minutes spent on the biggest clusters covers most of a
- *   library.
+ * @param {number} [opts.yieldEvery] rows between yields to the event loop.
+ * @returns {Promise<{clusters: Array<number[]>, singletons: number[]}>}
+ *   `clusters` are arrays of FACE ids, largest first — which is the order #167
+ *   wants for naming, since ten minutes spent on the biggest clusters covers
+ *   most of a library.
  */
-export function clusterFaces(vectors, opts = {}) {
+export async function clusterFaces(vectors, opts = {}) {
   const {
     threshold = SAME_PERSON_COSINE,
     maxDegree = MAX_DEGREE,
     minSize = 1,
+    yieldEvery = YIELD_EVERY,
   } = opts;
   const { ids, scales, dim, data } = vectors;
   const n = ids.length;
@@ -126,7 +148,11 @@ export function clusterFaces(vectors, opts = {}) {
   // thing, and the escape hatch (an ANN index) is a change to this loop
   // alone, not to the union-find or the caller. Measure before reaching for
   // it; the near-dupe sweep taught that these scans are faster than they look.
+  //
+  // It yields every `yieldEvery` rows so the server keeps answering while it
+  // runs — see YIELD_EVERY. That is the only reason this function is async.
   for (let i = 0; i < n; i++) {
+    if (i > 0 && i % yieldEvery === 0) await breathe();
     if (degree[i] >= maxDegree) continue;
     const vi = data.subarray(i * dim, (i + 1) * dim);
     for (let j = i + 1; j < n; j++) {

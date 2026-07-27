@@ -12,7 +12,13 @@ user-facing — what you can now do, not how it's built.
   downloads a small face model (16 MB) and looks through your library for
   people — about 14 minutes for 32,000 photos. Faces stay in this app's local
   index and never leave your machine, and one button forgets all of them.
-  Naming people and filtering by person come next (#167).
+- **Group those faces into people, and name them** (#167). Naming sticks: it
+  survives re-grouping and new imports, and photos of someone you have named
+  are filed under them automatically as they arrive. Merge two people, or pull
+  a face out of the wrong one, and that correction sticks too.
+- **Filter the grid by person** from the toolbar, once you have named someone.
+- If any photos could not be read, one button offers to **try them again** on
+  the next scan.
 
 ## 2.18.38
 

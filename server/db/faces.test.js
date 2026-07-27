@@ -365,7 +365,7 @@ describe("people (#167)", () => {
   it("creates a person per cluster and assigns its faces", () => {
     const db = getDb();
     const f = seedFaces(db, 4);
-    const r = saveClusters(db, [[f[0], f[1], f[2]], [f[3]]]);
+    const r = saveClusters(db, [[f[0], f[1], f[2]], [f[3]]], { model: MODEL });
 
     expect(r.people).toBe(2);
     expect(r.assigned).toBe(4);
@@ -379,11 +379,11 @@ describe("people (#167)", () => {
     // a feature whose whole cost is ten minutes of typing.
     const db = getDb();
     const f = seedFaces(db, 3);
-    saveClusters(db, [[f[0], f[1], f[2]]]);
+    saveClusters(db, [[f[0], f[1], f[2]]], { model: MODEL });
     const id = listPersons(db)[0].id;
     renamePerson(db, id, "Ana");
 
-    saveClusters(db, [[f[0]], [f[1], f[2]]]);
+    saveClusters(db, [[f[0]], [f[1], f[2]]], { model: MODEL });
 
     // NOT `some(p => p.name === "Ana")` — that passes with Ana at ZERO faces,
     // which is exactly the bug it was supposed to catch and did not. Naming a
@@ -402,13 +402,13 @@ describe("people (#167)", () => {
     // contract photo_tags.source has for semantic tags.
     const db = getDb();
     const f = seedFaces(db, 3);
-    saveClusters(db, [[f[0], f[1], f[2]]]);
+    saveClusters(db, [[f[0], f[1], f[2]]], { model: MODEL });
     const personId = listPersons(db)[0].id;
     db.prepare(
       `UPDATE photo_faces SET person_id = ?, person_source = 'manual' WHERE id = ?`
     ).run(personId, f[2]);
 
-    const r = saveClusters(db, [[f[0]], [f[1]]]);
+    const r = saveClusters(db, [[f[0]], [f[1]]], { model: MODEL });
 
     expect(r.keptManual).toBe(1);
     const still = db
@@ -420,7 +420,7 @@ describe("people (#167)", () => {
   it("trims a name and treats blank as clearing it", () => {
     const db = getDb();
     const f = seedFaces(db, 1);
-    saveClusters(db, [[f[0]]]);
+    saveClusters(db, [[f[0]]], { model: MODEL });
     const id = listPersons(db)[0].id;
     expect(renamePerson(db, id, "  Ana  ").name).toBe("Ana");
     expect(renamePerson(db, id, "   ").name).toBe(null);
@@ -432,7 +432,7 @@ describe("people (#167)", () => {
     // covers the SQL end; a facet missing from any layer is silently dropped.
     const db = getDb();
     const f = seedFaces(db, 3);
-    saveClusters(db, [[f[0], f[1]], [f[2]]]);
+    saveClusters(db, [[f[0], f[1]], [f[2]]], { model: MODEL });
     const personId = listPersons(db)[0].id;
 
     const { sql, params } = buildFilter({ personId });
@@ -476,10 +476,14 @@ describe("correcting the clustering, durably (#167)", () => {
     // offering it at all.
     const db = getDb();
     const f = seedFaces(db, 4);
-    saveClusters(db, [
-      [f[0], f[1]],
-      [f[2], f[3]],
-    ]);
+    saveClusters(
+      db,
+      [
+        [f[0], f[1]],
+        [f[2], f[3]],
+      ],
+      { model: MODEL }
+    );
     const [a, b] = listPersons(db);
 
     const r = mergePersons(db, a.id, b.id);
@@ -488,20 +492,28 @@ describe("correcting the clustering, durably (#167)", () => {
     expect(listPersons(db)[0].faces).toBe(4);
 
     // The model changes its mind and proposes the ORIGINAL split again.
-    saveClusters(db, [
-      [f[0], f[1]],
-      [f[2], f[3]],
-    ]);
+    saveClusters(
+      db,
+      [
+        [f[0], f[1]],
+        [f[2], f[3]],
+      ],
+      { model: MODEL }
+    );
     expect(listPersons(db).some((p) => p.faces === 4)).toBe(true);
   });
 
   it("keeps a name when merging an unnamed person into a named one, and vice versa", () => {
     const db = getDb();
     const f = seedFaces(db, 4);
-    saveClusters(db, [
-      [f[0], f[1]],
-      [f[2], f[3]],
-    ]);
+    saveClusters(
+      db,
+      [
+        [f[0], f[1]],
+        [f[2], f[3]],
+      ],
+      { model: MODEL }
+    );
     const [a, b] = listPersons(db);
     renamePerson(db, b.id, "Ana");
 
@@ -514,7 +526,7 @@ describe("correcting the clustering, durably (#167)", () => {
   it("refuses to merge a person into themselves, or a stranger", () => {
     const db = getDb();
     const f = seedFaces(db, 2);
-    saveClusters(db, [[f[0], f[1]]]);
+    saveClusters(db, [[f[0], f[1]]], { model: MODEL });
     const [a] = listPersons(db);
     expect(() => mergePersons(db, a.id, a.id)).toThrow(/into themselves/);
     expect(() => mergePersons(db, a.id, 9999)).toThrow(/no such person/);
@@ -525,13 +537,13 @@ describe("correcting the clustering, durably (#167)", () => {
     // inside someone's photo set.
     const db = getDb();
     const f = seedFaces(db, 3);
-    saveClusters(db, [[f[0], f[1], f[2]]]);
+    saveClusters(db, [[f[0], f[1], f[2]]], { model: MODEL });
     expect(listPersons(db)[0].faces).toBe(3);
 
     detachFace(db, f[2]);
     expect(listPersons(db)[0].faces).toBe(2);
 
-    saveClusters(db, [[f[0], f[1], f[2]]]);
+    saveClusters(db, [[f[0], f[1], f[2]]], { model: MODEL });
     const still = db
       .prepare(`SELECT person_id FROM photo_faces WHERE id = ?`)
       .get(f[2]);
@@ -540,5 +552,83 @@ describe("correcting the clustering, durably (#167)", () => {
 
   it("refuses to detach a face that does not exist", () => {
     expect(() => detachFace(getDb(), 9999)).toThrow(/no such face/);
+  });
+});
+
+describe("saveClusters is scoped and deliberate", () => {
+  /** Score is separate from the vector seed here, so id order and confidence
+   *  order can be made to DISAGREE -- the only arrangement that can tell
+   *  "first member" from "best member" apart. */
+  const face = (seedVal, score = 0.9) => {
+    const v = new Float32Array(512);
+    for (let i = 0; i < 512; i++) v[i] = Math.sin(i * 0.1 + seedVal);
+    const { scale, bytes } = quantize(v);
+    return { box: [0, 0, 50, 50], score, dim: 512, scale, bytes };
+  };
+
+  it("covers a person with their most CONFIDENT face, not their oldest", () => {
+    // clusterFaces returns members in faceVectors' order, which is ORDER BY
+    // id -- so "the first member" is the oldest face, not the best one. The
+    // comment claimed otherwise for the whole of this branch. A cover chosen
+    // effectively at random is how someone ends up represented by the back of
+    // their head.
+    const db = getDb();
+    const ids = seed(db, 3);
+    ids.forEach((id, i) =>
+      putFaces(db, {
+        photoId: id,
+        model: MODEL,
+        // The LAST face is the confident one, so id order and score order
+        // disagree -- which is the only arrangement that can tell them apart.
+        faces: [face(i, 0.5 + i * 0.2)],
+      })
+    );
+    const f = db
+      .prepare(`SELECT id FROM photo_faces ORDER BY id`)
+      .all()
+      .map((r) => r.id);
+
+    saveClusters(db, [f], { model: MODEL });
+    expect(listPersons(db)[0].coverFaceId).toBe(f[2]);
+  });
+
+  it("does not clear another model's people", () => {
+    // Everything else in this file is keyed by model, because a buffalo_s
+    // vector and a buffalo_l vector describe different spaces. saveClusters
+    // cleared person_id across ALL of them, so grouping under one pack wiped
+    // the other's assignments -- silently, since the two never appear on
+    // screen together.
+    const db = getDb();
+    const ids = seed(db, 2);
+    ids.forEach((id, i) => {
+      putFaces(db, {
+        photoId: id,
+        model: MODEL,
+        faces: [face(i)],
+      });
+      putFaces(db, {
+        photoId: id,
+        model: "buffalo_s",
+        faces: [face(i)],
+      });
+    });
+    const idsOf = (m) =>
+      db
+        .prepare(`SELECT id FROM photo_faces WHERE model = ? ORDER BY id`)
+        .all(m)
+        .map((r) => r.id);
+
+    saveClusters(db, [idsOf("buffalo_s")], { model: "buffalo_s" });
+    const small = listPersons(db)[0];
+    expect(small.faces).toBe(2);
+
+    // Now group the OTHER pack. buffalo_s's person must be untouched.
+    saveClusters(db, [idsOf(MODEL)], { model: MODEL });
+    const after = listPersons(db).find((p) => p.id === small.id);
+    expect(after.faces).toBe(2);
+  });
+
+  it("refuses to run without a model rather than clearing everything", () => {
+    expect(() => saveClusters(getDb(), [])).toThrow(/needs a model/);
   });
 });

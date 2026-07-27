@@ -24,6 +24,7 @@
     downloadFaceModel,
     startFaceScan,
     purgeFaces,
+    retryFailedFaces,
     clusterPeople,
     fetchPeople,
     renamePerson,
@@ -191,6 +192,27 @@
               ? "All photos scanned"
               : `Find faces in ${n(pending)} photos`}
         </button>
+
+        {#if status.counts.failed > 0}
+          <!-- A "could not be read" verdict only clears when the file's bytes
+               change, i.e. never. Without this button a bad model file or a
+               since-fixed bug would mark photos unscannable for good. -->
+          <button
+            disabled={!!busy || status.running}
+            onclick={() =>
+              act("retry", async () => {
+                const r = await retryFailedFaces(modelId);
+                onnotice?.(
+                  `${n(r.cleared)} photo${r.cleared === 1 ? "" : "s"} will be tried again on the next scan.`
+                );
+              })}
+            data-testid="face-retry-failed"
+          >
+            {busy === "retry"
+              ? "Resetting…"
+              : `Try the ${n(status.counts.failed)} unreadable again`}
+          </button>
+        {/if}
 
         {#if status.counts.scanned > 0}
           <button

@@ -1208,6 +1208,29 @@ export async function purgeFaces(model) {
   return res.json();
 }
 
+/**
+ * Clear the "could not be read" verdicts so the next scan tries them again.
+ *
+ * The escape hatch a permanent sentinel needs: "permanent" means "until the
+ * file's bytes change", i.e. never, so a bad model file or a since-fixed bug
+ * could otherwise mark photos unscannable with no way back short of deleting
+ * the whole index — which also destroys ratings and album names.
+ *
+ * @param {string} model
+ */
+export async function retryFailedFaces(model) {
+  const res = await fetch("/api/ml/faces/retry-failed", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `could not reset (${res.status})`);
+  }
+  return res.json();
+}
+
 /** Group the faces found so far into people (#167). Cheap — arithmetic over
  *  vectors already on disk, unlike the scan that produced them. */
 export async function clusterPeople(model, threshold) {

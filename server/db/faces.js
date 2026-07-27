@@ -325,12 +325,18 @@ export function clearFaceFailures(db, model) {
  * cluster for them. Losing a name to a re-run would make naming feel unsafe,
  * which is fatal for a feature whose whole cost is ten minutes of typing.
  *
+ * Scoped to ONE model, like everything else in this file. Clearing across all
+ * of them would let a buffalo_s grouping wipe every buffalo_l assignment, and
+ * silently — the two never appear on screen together, so nothing would look
+ * wrong until the user switched packs back.
+ *
  * @param {import("better-sqlite3").Database} db
  * @param {Array<number[]>} clusters arrays of FACE ids, largest first
- * @param {number} [now]
+ * @param {{model: string, now?: number}} opts
  * @returns {{people: number, assigned: number, keptManual: number}}
  */
-export function saveClusters(db, clusters, now = Date.now()) {
+export function saveClusters(db, clusters, { model, now = Date.now() } = {}) {
+  if (!model) throw new Error("saveClusters needs a model");
   return db.transaction(() => {
     // PROTECTED = a face the model must not take back. Two kinds, and the
     // second was missing, which broke the feature's whole point:
@@ -344,29 +350,24 @@ export function saveClusters(db, clusters, now = Date.now()) {
     //      zero photos. Reproduced before fixing; the old test passed
     //      throughout because it only asked whether SOMEONE was still called
     //      Ana, which is true of an empty row.
+    const PROTECTED = `SELECT f.id FROM photo_faces f
+         LEFT JOIN persons p ON p.id = f.person_id
+        WHERE f.model = @model
+          AND (f.person_source = 'manual'
+               OR (p.name IS NOT NULL AND p.name <> ''))`;
     const protectedIds = new Set(
       db
-        .prepare(
-          `SELECT f.id FROM photo_faces f
-             LEFT JOIN persons p ON p.id = f.person_id
-            WHERE f.person_source = 'manual'
-               OR (p.name IS NOT NULL AND p.name <> '')`
-        )
-        .all()
+        .prepare(PROTECTED)
+        .all({ model })
         .map((r) => r.id)
     );
     const manual = protectedIds;
 
-    // Clear only what the model still owns.
+    // Clear only what the model still owns, and only within THIS pack.
     db.prepare(
       `UPDATE photo_faces SET person_id = NULL
-        WHERE id NOT IN (
-          SELECT f.id FROM photo_faces f
-            LEFT JOIN persons p ON p.id = f.person_id
-           WHERE f.person_source = 'manual'
-              OR (p.name IS NOT NULL AND p.name <> '')
-        )`
-    ).run();
+        WHERE model = @model AND id NOT IN (${PROTECTED})`
+    ).run({ model });
     db.prepare(
       `DELETE FROM persons WHERE id NOT IN (
          SELECT DISTINCT person_id FROM photo_faces WHERE person_id IS NOT NULL
@@ -380,16 +381,29 @@ export function saveClusters(db, clusters, now = Date.now()) {
       `UPDATE photo_faces SET person_id = ?, person_source = 'model' WHERE id = ?`
     );
 
+    // The cover face is the CONFIDENT one, looked up rather than assumed. It
+    // used to be `fresh[0]`, described as "the highest-scoring face" — but
+    // clusterFaces returns members in faceVectors' order, which is `ORDER BY
+    // id`, so the cover was really the oldest face in the cluster. A cover
+    // chosen effectively at random is how a person ends up represented by the
+    // back of their head.
+    const scoreOf = new Map(
+      db
+        .prepare(`SELECT id, det_score FROM photo_faces WHERE model = ?`)
+        .all(model)
+        .map((r) => [r.id, r.det_score])
+    );
+    const bestOf = (ids) =>
+      ids.reduce((a, b) =>
+        (scoreOf.get(b) ?? 0) > (scoreOf.get(a) ?? 0) ? b : a
+      );
+
     let assigned = 0;
     let people = 0;
     for (const cluster of clusters) {
       const fresh = cluster.filter((id) => !manual.has(id));
       if (!fresh.length) continue;
-      // The cover is the first member, which is the highest-scoring face of
-      // the largest cluster — facesFor orders by det_score, and clusterFaces
-      // orders clusters by size. A cover chosen at random is how a person
-      // ends up represented by the back of their head.
-      const personId = newPerson.run(fresh[0], now).lastInsertRowid;
+      const personId = newPerson.run(bestOf(fresh), now).lastInsertRowid;
       people++;
       for (const faceId of fresh) {
         assign.run(personId, faceId);
@@ -401,6 +415,98 @@ export function saveClusters(db, clusters, now = Date.now()) {
       assigned,
       keptManual: protectedIds.size,
     };
+  })();
+}
+
+/**
+ * The vectors of everyone who has a NAME, for assigning newly-imported faces
+ * without a full re-cluster (#167).
+ *
+ * Only named people, because an unnamed cluster is the model's own guess and
+ * growing it silently compounds whatever it got wrong. A name is the user
+ * saying "this cluster is a person", which is what makes it worth extending.
+ *
+ * `perPerson` caps the members loaded. Someone photographed constantly can
+ * have thousands of faces, and the mean of 64 of them is the same answer as
+ * the mean of 3,000 for a fraction of the memory. Highest-scoring first, so
+ * the cap keeps the clearest views of them rather than an arbitrary slice.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @param {{perPerson?: number}} [opts]
+ * @returns {Array<{personId: number, name: string, members: Array<{scale: number, bytes: Int8Array}>}>}
+ */
+export function namedPersonMembers(db, model, { perPerson = 64 } = {}) {
+  const people = db
+    .prepare(
+      `SELECT id, name FROM persons WHERE name IS NOT NULL AND name <> ''`
+    )
+    .all();
+  const members = db.prepare(
+    `SELECT scale, vec FROM photo_faces
+      WHERE model = ? AND person_id = ?
+      ORDER BY det_score DESC, id LIMIT ?`
+  );
+  return people.map((p) => ({
+    personId: p.id,
+    name: p.name,
+    members: members.all(model, p.id, perPerson).map((r) => ({
+      scale: r.scale,
+      bytes: new Int8Array(r.vec.buffer, r.vec.byteOffset, r.vec.byteLength),
+    })),
+  }));
+}
+
+/**
+ * Faces this model found that belong to nobody yet.
+ *
+ * Excludes faces the user DETACHED. A detach is `person_id = NULL` plus
+ * `person_source = 'manual'`, which is the user saying "not this person" —
+ * putting it straight back on the next sweep is exactly the undo-my-undo loop
+ * #167 warns about, and it would look like the button did nothing.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @returns {Array<{id: number, scale: number, bytes: Int8Array}>}
+ */
+export function unassignedFaces(db, model) {
+  return db
+    .prepare(
+      `SELECT id, scale, vec FROM photo_faces
+        WHERE model = ? AND person_id IS NULL
+          AND (person_source IS NULL OR person_source <> 'manual')
+        ORDER BY id`
+    )
+    .all(model)
+    .map((r) => ({
+      id: r.id,
+      scale: r.scale,
+      bytes: new Int8Array(r.vec.buffer, r.vec.byteOffset, r.vec.byteLength),
+    }));
+}
+
+/**
+ * File faces under the people they were matched to.
+ *
+ * `person_source = 'model'`, not 'manual': this is still the model's guess, so
+ * a later re-cluster is free to revise it. Marking it manual would freeze a
+ * machine decision beyond the reach of the correction that fixes it.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {Array<{faceId: number, personId: number}>} pairs
+ * @returns {{assigned: number}}
+ */
+export function attachFaces(db, pairs) {
+  const set = db.prepare(
+    `UPDATE photo_faces SET person_id = ?, person_source = 'model'
+      WHERE id = ? AND person_id IS NULL`
+  );
+  return db.transaction(() => {
+    let assigned = 0;
+    for (const { faceId, personId } of pairs) {
+      assigned += set.run(personId, faceId).changes;
+    }
+    return { assigned };
   })();
 }
 
