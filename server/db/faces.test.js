@@ -385,7 +385,16 @@ describe("people (#167)", () => {
 
     saveClusters(db, [[f[0]], [f[1], f[2]]]);
 
-    expect(listPersons(db).some((p) => p.name === "Ana")).toBe(true);
+    // NOT `some(p => p.name === "Ana")` — that passes with Ana at ZERO faces,
+    // which is exactly the bug it was supposed to catch and did not. Naming a
+    // cluster asserts "these faces are Ana"; the assertion is worthless if the
+    // photos walk away to a new unnamed person on the next pass.
+    const ana = listPersons(db).find((p) => p.name === "Ana");
+    expect(ana).toBeDefined();
+    expect(ana.faces).toBe(3);
+    expect(ana.photos).toBe(3);
+    // ...and no shadow person was created holding the same faces.
+    expect(listPersons(db)).toHaveLength(1);
   });
 
   it("keeps a MANUAL assignment when the model changes its mind", () => {

@@ -328,28 +328,45 @@ export function clearFaceFailures(db, model) {
  * @param {import("better-sqlite3").Database} db
  * @param {Array<number[]>} clusters arrays of FACE ids, largest first
  * @param {number} [now]
- * @returns {{people: number, assigned: number, keptManual: number, keptNamed: number}}
+ * @returns {{people: number, assigned: number, keptManual: number}}
  */
 export function saveClusters(db, clusters, now = Date.now()) {
   return db.transaction(() => {
-    const manual = new Set(
+    // PROTECTED = a face the model must not take back. Two kinds, and the
+    // second was missing, which broke the feature's whole point:
+    //
+    //   1. `person_source = 'manual'` — a merge or a split the user performed.
+    //   2. Any face belonging to a NAMED person. Naming a cluster IS the
+    //      assertion "these faces are Ana". Without this, renamePerson set
+    //      persons.name and nothing else, so the next pass cleared every one
+    //      of her faces, spared her now-empty row (it has a name), and built
+    //      a fresh UNNAMED person for the same cluster. Ana survived with
+    //      zero photos. Reproduced before fixing; the old test passed
+    //      throughout because it only asked whether SOMEONE was still called
+    //      Ana, which is true of an empty row.
+    const protectedIds = new Set(
       db
-        .prepare(`SELECT id FROM photo_faces WHERE person_source = 'manual'`)
+        .prepare(
+          `SELECT f.id FROM photo_faces f
+             LEFT JOIN persons p ON p.id = f.person_id
+            WHERE f.person_source = 'manual'
+               OR (p.name IS NOT NULL AND p.name <> '')`
+        )
         .all()
         .map((r) => r.id)
     );
-    const named = db
-      .prepare(`SELECT id FROM persons WHERE name IS NOT NULL AND name <> ''`)
-      .all()
-      .map((r) => r.id);
+    const manual = protectedIds;
 
-    // Clear only what the model owns. A manual assignment survives, and so
-    // does the person it points at.
+    // Clear only what the model still owns.
     db.prepare(
       `UPDATE photo_faces SET person_id = NULL
-        WHERE person_source IS NULL OR person_source <> 'manual'`
+        WHERE id NOT IN (
+          SELECT f.id FROM photo_faces f
+            LEFT JOIN persons p ON p.id = f.person_id
+           WHERE f.person_source = 'manual'
+              OR (p.name IS NOT NULL AND p.name <> '')
+        )`
     ).run();
-    const keepIds = new Set(named);
     db.prepare(
       `DELETE FROM persons WHERE id NOT IN (
          SELECT DISTINCT person_id FROM photo_faces WHERE person_id IS NOT NULL
@@ -382,8 +399,7 @@ export function saveClusters(db, clusters, now = Date.now()) {
     return {
       people,
       assigned,
-      keptManual: manual.size,
-      keptNamed: keepIds.size,
+      keptManual: protectedIds.size,
     };
   })();
 }
