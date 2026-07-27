@@ -33,9 +33,20 @@
   let sweepError = $state("");
 
   let running = $derived($jobs.filter((j) => j.status === "running"));
-  let broken = $derived(
-    $jobs.filter((j) => j.status === "failed" || j.status === "canceled")
-  );
+  /**
+   * Genuinely wrong, as opposed to merely stopped.
+   *
+   * A cancellation is an OUTCOME the user asked for, not a failure — and
+   * dressing it as one teaches people to distrust the error channel, which is
+   * the one thing this pill exists to be believed about. Stopping a sweep (or
+   * restarting the server mid-sweep) used to render "✗ 1 failed" in red, for
+   * something that did exactly what was requested.
+   *
+   * Counted separately rather than dropped: a cancelled job still deserves a
+   * row and a Dismiss, it just does not deserve an alarm.
+   */
+  let broken = $derived($jobs.filter((j) => j.status === "failed"));
+  let stopped = $derived($jobs.filter((j) => j.status === "canceled"));
   let finished = $derived($jobs.filter((j) => j.status !== "running"));
 
   // What the pill says, in priority order: something is wrong > something is
@@ -44,16 +55,19 @@
   let pill = $derived(
     broken.length
       ? { kind: "err", icon: "✗", text: `${broken.length} failed` }
-      : running.length
-        ? {
-            kind: "busy",
-            icon: "◐",
-            text:
-              running.length === 1
-                ? running[0].label
-                : `${running.length} jobs running`,
-          }
-        : { kind: "ok", icon: "✓", text: `${finished.length} done` }
+      : stopped.length && !running.length
+        ? // Neutral, not red: nothing went wrong, something was stopped.
+          { kind: "idle", icon: "◼", text: `${stopped.length} stopped` }
+        : running.length
+          ? {
+              kind: "busy",
+              icon: "◐",
+              text:
+                running.length === 1
+                  ? running[0].label
+                  : `${running.length} jobs running`,
+            }
+          : { kind: "ok", icon: "✓", text: `${finished.length} done` }
   );
 
   // A single bar for everything in flight. Jobs that can't count their own work
@@ -364,6 +378,12 @@
   .jobs-pill.err {
     border-color: #7a3535;
     color: #ff8a80;
+  }
+  /* Stopped is not an alarm: neutral grey, deliberately NOT the red .err
+     treatment, because the user asked for it. */
+  .jobs-pill.idle {
+    border-color: #4a4a4a;
+    color: #b0b0b0;
   }
   .jobs-pill.busy {
     border-color: #35507a;

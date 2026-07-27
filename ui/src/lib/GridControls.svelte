@@ -19,6 +19,16 @@
     zoomMax = 4,
     burstEnabled = $bindable(true),
     burstGapMs = $bindable(3000),
+    // #207. Near-duplicate detection is a VIEW control in the same family as
+    // the burst gap beside it — how photos are grouped on screen — so it
+    // belongs here rather than behind a settings dialog. The two actions are
+    // callbacks because they hit the network, and this component is
+    // presentational by contract.
+    selectedCount = 0,
+    dupesRunning = false,
+    mlEnabled = false,
+    onfinddupes,
+    onburstselection,
   } = $props();
 </script>
 
@@ -44,9 +54,130 @@
       >{(burstGapMs / 1000).toFixed(1)}s</span
     >
   </label>
+
+  <!-- Stacks the SELECTION by time gaps, which manual stacking cannot do: that
+       forces every selected photo into one stack regardless of the pauses
+       inside it. Hidden rather than disabled with nothing selected — a control
+       that can never apply is noise in a toolbar this dense. -->
+  {#if selectedCount >= 2}
+    <span
+      class="tip"
+      data-tip={`Stack the ${selectedCount} selected photos into bursts, splitting wherever the gap exceeds ${(burstGapMs / 1000).toFixed(1)}s`}
+    >
+      <button
+        class="grid-action icon"
+        data-testid="burst-selection"
+        aria-label={`Stack the ${selectedCount} selected photos into bursts`}
+        title={`Stack the ${selectedCount} selected photos into bursts, splitting them wherever the gap exceeds ${(burstGapMs / 1000).toFixed(1)}s`}
+        onclick={() => onburstselection?.()}
+      >
+        ⛓
+      </button>
+    </span>
+  {/if}
+
+  <!-- Only when photo similarity is actually switched on. Not merely to avoid
+       a dead control: the toolbar folds by WIDTH, and two extra buttons here
+       were enough to push the whole Group group (grouping pills, the Add…
+       input, the Tree/Fisheye switch) into an overflow popover at ordinary
+       window sizes. That is a real regression e2e caught and no unit test
+       could — so a control that can do nothing must not spend width either. -->
+  {#if mlEnabled}
+    <span
+      class="tip"
+      data-tip={dupesRunning
+        ? "Looking for near-duplicates…"
+        : "Find duplicates — stack photos of the same shot, using photo similarity"}
+    >
+      <button
+        class="grid-action icon"
+        class:working={dupesRunning}
+        data-testid="find-dupes"
+        disabled={dupesRunning}
+        aria-label="Find near-duplicate photos and stack them"
+        title="Find photos of the same shot and stack them, using photo similarity"
+        onclick={() => onfinddupes?.()}
+      >
+        {dupesRunning ? "◴" : "⧉"}
+      </button>
+    </span>
+  {/if}
 </div>
 
 <style>
+  /* A REAL tooltip, not the native `title` attribute.
+
+     `title` needs a deliberate hover-and-wait of about a second, never appears
+     for keyboard users, and cannot be styled — which is why an icon button
+     carrying only a `title` reads as unlabelled in practice, however correct
+     the markup is. This shows instantly on hover AND on keyboard focus, so the
+     icon is self-describing by the time you have finished pointing at it.
+
+     aria-label stays on the button regardless: this is a visual affordance,
+     not an accessibility mechanism, and the two must not be confused. */
+  .tip {
+    position: relative;
+    display: inline-flex;
+  }
+  .tip::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0d0d0d;
+    color: #e8e8e8;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    white-space: normal;
+    width: max-content;
+    max-width: 15rem;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 40;
+    transition: opacity 90ms ease-out;
+  }
+  .tip:hover::after,
+  .tip:focus-within::after {
+    opacity: 1;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tip::after {
+      transition: none;
+    }
+  }
+  .grid-action {
+    background: #2c2c2c;
+    color: inherit;
+    border: none;
+    border-radius: 4px;
+    padding: 0.22rem 0.5rem;
+    cursor: pointer;
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+  .grid-action:hover:not(:disabled) {
+    background: #3a3a3a;
+  }
+  /* Icon-only, matching the toolbar's existing gear/help buttons. The labels
+     live in title + aria-label: this row folds by WIDTH, and two text buttons
+     here were enough to push the whole Group group into its overflow popover
+     (see the comment on the Find duplicates button). */
+  .grid-action.icon {
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0.2rem 0.35rem;
+  }
+  .grid-action.working {
+    opacity: 0.6;
+  }
+  .grid-action:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
   .grid-controls {
     display: flex;
     align-items: center;

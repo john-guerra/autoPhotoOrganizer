@@ -29,6 +29,17 @@
   } from "./api.js";
   import { jobs } from "./jobs.js";
 
+  /**
+   * The ids the grid can offer as a scope (#215). Both default to empty so the
+   * panel still works standalone (Manage library renders it with no grid
+   * context) — the scope selector simply offers fewer choices there.
+   */
+  let { selectedIds = [], visibleIds = [] } = $props();
+
+  /** What "Embed now" will act on. Defaults to the whole library, matching the
+   *  behaviour this control had before a choice existed. */
+  let scopeChoice = $state("all");
+
   /** @type {{enabled:boolean, modelId:string, threads:number, maxThreads:number, models:Array<object>}|null} */
   let settings = $state(null);
   /**
@@ -51,6 +62,29 @@
   let enabledDraft = $state(false);
   let modelDraft = $state("");
   let threadsDraft = $state(1);
+  /**
+   * The near-duplicate controls (#162), mirrored for the same reason as the
+   * three above.
+   *
+   * `thresholdDraft` always holds a NUMBER, never null, because a range input
+   * has no representation for "unset" — it would silently render 0.5 (its min)
+   * and the user would be looking at a value the server is not using. The
+   * stored setting keeps null meaning "use the active model's own value", so
+   * the draft is seeded from the model's default and a Reset control puts the
+   * null back. Whether the user is currently on the default is `usingModelDefault`.
+   */
+  let thresholdDraft = $state(0.9);
+  let windowSecDraft = $state(60);
+  let deviceDraft = $state("auto");
+
+  /** Plain-language names for the execution providers (#209). The values come
+   *  from the server so the list cannot drift from what it will accept. */
+  const DEVICE_LABELS = {
+    auto: "Auto — measure and pick",
+    cpu: "CPU",
+    webgpu: "WebGPU (GPU)",
+    coreml: "CoreML (Apple Neural Engine)",
+  };
   /** @type {{model:string, provider:string, counts:{total:number,embedded:number,failed:number}, storage:Array<object>}|null} */
   let stats = $state(null);
   let loadFailed = $state(false);
@@ -69,12 +103,21 @@
   // below, and making it reactive would make the effect depend on its own
   // write.
   let lastJobId = null;
+  /** Same bookkeeping, for the grouping pass — its counts live in the same
+   *  /api/ml/stats payload, so a finished pass leaves them stale too. */
+  let lastDupeJobId = null;
   /** Set by Stop; cleared automatically once that job actually stops. */
   let stoppingId = $state(null);
   const stopping = $derived(
     stoppingId !== null && runningJob?.id === stoppingId
   );
 
+  const dupeJob = $derived(
+    $jobs.find((j) => j.type === "near-dupes" && j.status === "running") ?? null
+  );
+  /** Whether the stored setting is still `null` — i.e. following the active
+   *  model's own value rather than an override the user typed. */
+  const usingModelDefault = $derived(settings?.nearDupeThreshold == null);
   const activeModel = $derived(
     settings?.models?.find((m) => m.id === settings.modelId) ?? null
   );
@@ -96,6 +139,74 @@
   const pending = $derived(
     counts ? Math.max(0, counts.total - counts.embedded - counts.failed) : 0
   );
+
+  /**
+   * The scope choices, with how many photos each covers (#215).
+   *
+   * "All" reports PENDING, not the library total: re-embedding what is already
+   * done is not work the sweep will do, so quoting 34,807 when only 200 remain
+   * would overstate the cost by two orders of magnitude. Selected and Visible
+   * report their raw counts — the sweep skips already-embedded rows inside
+   * them too, so those are upper bounds, and the estimate says "up to".
+   */
+  const scopes = $derived([
+    { key: "selected", label: "Selected", n: selectedIds.length },
+    { key: "visible", label: "Visible", n: visibleIds.length },
+    { key: "all", label: "All", n: pending },
+  ]);
+  const activeScope = $derived(
+    scopes.find((s) => s.key === scopeChoice) ?? scopes[2]
+  );
+  const scopeIds = $derived(
+    scopeChoice === "selected"
+      ? selectedIds
+      : scopeChoice === "visible"
+        ? visibleIds
+        : null // null = the whole pending library, the unscoped sweep
+  );
+
+  /**
+   * Roughly how long that will take, from the model's measured per-photo cost.
+   *
+   * Stated because "Embed now" otherwise reads 34,807 photos — about twenty
+   * minutes — with nothing on screen saying so beforehand. The panel is
+   * scrupulous about the 94 MB download and was silent about the far larger
+   * cost, which is the one place it broke its own contract.
+   *
+   * Rounded hard and prefixed "about": this is an order-of-magnitude honesty
+   * aid measured on one machine, not a promise.
+   */
+  const estimate = $derived.by(() => {
+    const ms = activeModel?.approxMsPerPhoto;
+    if (!ms || !activeScope?.n) return null;
+    const secs = Math.round((activeScope.n * ms) / 1000);
+    if (secs < 60) return `about ${Math.max(1, secs)}s`;
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `about ${mins} min`;
+    const hours = (mins / 60).toFixed(1);
+    return `about ${hours} h`;
+  });
+
+  /**
+   * "3 minutes ago", or "unknown" for a grouping that predates the timestamp
+   * column (a library upgraded across user_version 4).
+   *
+   * `computedAt === null` means no grouping exists at all and is handled by the
+   * branch above this label ever rendering — "never run" and "run at an unknown
+   * time" are different answers and must not collapse into one.
+   */
+  const lastRunLabel = $derived.by(() => {
+    const t = stats?.nearDupes?.computedAt;
+    if (!t) return "at an unknown time";
+    const secs = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (secs < 45) return "just now";
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"} ago`;
+  });
 
   function say(text, kind = "info") {
     message = text;
@@ -119,6 +230,16 @@
     enabledDraft = settings.enabled;
     modelDraft = settings.modelId;
     threadsDraft = settings.threads;
+    // null (the default) resolves to the ACTIVE model's own threshold, so the
+    // slider shows the number actually in force rather than an invented one.
+    thresholdDraft = settings.nearDupeThreshold ?? modelThreshold(settings);
+    windowSecDraft = Math.round(settings.nearDupeWindowMs / 1000);
+    deviceDraft = settings.device ?? "auto";
+  }
+
+  /** The active model's own measured threshold — what `null` means. */
+  function modelThreshold(s) {
+    return s?.models?.find((m) => m.id === s.modelId)?.nearDupeThreshold ?? 0.9;
   }
 
   /**
@@ -197,6 +318,49 @@
     }
   });
 
+  /**
+   * Keep the read-outs live DURING a sweep (#214).
+   *
+   * The effect below this one only fires when a job DISAPPEARS, which meant
+   * "Running on" and the embedded count sat frozen for the entire run and
+   * corrected themselves the moment you pressed Stop — the one window where
+   * the answer actually matters is the one window it was stale.
+   *
+   * A slow interval rather than reacting to the jobs stream: progress frames
+   * arrive per batch (thousands over a full sweep) and each one would trigger
+   * a fetch. The dependency is the job ID, a PRIMITIVE — never a DOM node, per
+   * CLAUDE.md's first reactivity trap.
+   */
+  $effect(() => {
+    const id = runningJob?.id ?? dupeJob?.id ?? null;
+    if (!id) return;
+    const timer = setInterval(() => {
+      refreshStats().then((err) => {
+        // Deliberately silent: this is a background refresh the user did not
+        // ask for, and turning a transient blip into a red banner over a
+        // running sweep would be worse than a slightly stale number.
+        if (err) clearInterval(timer);
+      });
+    }, 4000);
+    return () => clearInterval(timer);
+  });
+
+  // The grouping pass, same shape. Kept as its own effect rather than folded
+  // into the one above because the two jobs end independently — a single
+  // effect reading both ids would re-run (and re-fetch) whenever EITHER
+  // changed, including while the other is still mid-sweep.
+  $effect(() => {
+    const id = dupeJob?.id ?? null;
+    const ended = lastDupeJobId !== null && id === null;
+    lastDupeJobId = id;
+    if (ended) {
+      refreshStats().then((err) => {
+        if (err)
+          say(`Couldn't refresh the near-duplicate counts: ${err}`, "err");
+      });
+    }
+  });
+
   /** @param {{enabled?:boolean, modelId?:string, threads?:number}} patch */
   async function save(patch) {
     busy = true;
@@ -260,6 +424,66 @@
     await save({ threads: Number(threadsDraft) });
   }
 
+  /**
+   * NOT disabled while a sweep runs, unlike Purge and Retry.
+   *
+   * Those two delete rows the sweep is walking through and genuinely must
+   * wait. Changing the device does nothing to a running sweep — the worker
+   * resolved its provider at `configure` time — so blocking it only stops the
+   * user setting up the NEXT run, which is exactly what someone comparing
+   * CPU against GPU is trying to do. It is the first thing they reach for
+   * while watching a slow sweep, and the control was dead in their hands.
+   */
+  async function changeDevice() {
+    const next = deviceDraft;
+    if (!(await save({ device: next }))) return;
+    if (runningJob) {
+      // Say why nothing appears to change: the read-out still names the
+      // provider the RUNNING sweep resolved, not the one just picked.
+      say(
+        `Saved. A sweep is already running on ${stats?.provider ?? "its own provider"}, so this takes effect on the next one — stop it below to compare now.`
+      );
+      return;
+    }
+    say(
+      next === "auto"
+        ? "Back to picking automatically. The provider below updates on the next embed."
+        : `Pinned to ${DEVICE_LABELS[next] ?? next}. It takes effect on the next embed — press “Embed now” to compare, and watch the provider line below to confirm what actually loaded.`
+    );
+  }
+
+  /**
+   * Changing either near-duplicate input makes the STORED grouping describe a
+   * rule that is no longer in force, so the server clears it and starts a
+   * fresh pass. Say that plainly: a user who tightens the threshold and sees
+   * their stacks vanish for a few seconds should know it is regrouping, not
+   * broken.
+   */
+  async function changeThreshold() {
+    if (!(await save({ nearDupeThreshold: Number(thresholdDraft) }))) return;
+    say(regroupingNote());
+  }
+
+  async function changeWindow() {
+    if (!(await save({ nearDupeWindowMs: Number(windowSecDraft) * 1000 })))
+      return;
+    say(regroupingNote());
+  }
+
+  /** Back to the active model's own measured value — the `null` the setting
+   *  stores, not a number copied out of the model, so a later model switch
+   *  follows the new model instead of carrying this one's value across. */
+  async function resetThreshold() {
+    if (!(await save({ nearDupeThreshold: null }))) return;
+    say(
+      `Back to ${labelFor(settings.modelId)}'s own value (${modelThreshold(settings).toFixed(2)}). ${regroupingNote()}`
+    );
+  }
+
+  function regroupingNote() {
+    return "Regrouping now — stacks update when the job finishes. No photo is moved or deleted.";
+  }
+
   async function embedNow() {
     // The endpoint force-starts a sweep even while the feature is switched
     // off (that click IS the consent, by design — see the route's comment).
@@ -275,9 +499,11 @@
     }
     busy = true;
     try {
-      const r = await startEmbed();
+      const r = await startEmbed(scopeIds);
       if (r.started) {
-        say("Embedding started — watch it in the jobs panel.");
+        say(
+          `Embedding ${activeScope.n.toLocaleString()} photo(s) — ${estimate}. Watch it in the jobs panel.`
+        );
       } else if (r.alreadyRunning) {
         // The single-flight latch is not keyed by model, so this is exactly
         // what a user who just switched models gets. Unrendered, the button
@@ -542,17 +768,73 @@
       failures. JPEGs, PNGs and videos are all included.
     </p>
 
+    <label class="field">
+      <span class="field-label">Run on</span>
+      <select
+        data-testid="ml-device"
+        bind:value={deviceDraft}
+        disabled={busy}
+        onchange={changeDevice}
+      >
+        {#each settings.devices ?? ["auto"] as d (d)}
+          <option value={d}>{DEVICE_LABELS[d] ?? d}</option>
+        {/each}
+      </select>
+    </label>
+    <p class="hint">
+      Auto measures and picks. On this developer's Mac, CPU actually beat WebGPU
+      — 38.3 ms per photo against 61.0 ms for SigLIP — which is odd enough to be
+      worth checking on your own hardware, so you can pin one and compare. The
+      read-out below always names what really loaded, never what was asked for.
+      {#if deviceDraft !== "auto"}
+        <strong>Pinned:</strong> if this provider can't load, embedding fails loudly
+        rather than quietly falling back — otherwise the comparison would prove nothing.
+      {/if}
+    </p>
+
     <p class="provider">
       Running on <code data-testid="ml-provider">{stats.provider}</code>
+    </p>
+
+    <!-- WHAT to embed, and what that will cost, before the button is pressed
+         (#215). A scope with no photos is offered but disabled rather than
+         hidden, so the set of choices does not shift under the cursor as a
+         selection changes. -->
+    <fieldset class="scope" data-testid="ml-scope">
+      <legend>Embed</legend>
+      {#each scopes as s (s.key)}
+        <label class="scope-opt" class:empty={!s.n}>
+          <input
+            type="radio"
+            name="ml-scope"
+            value={s.key}
+            checked={scopeChoice === s.key}
+            disabled={busy || !s.n}
+            onchange={() => (scopeChoice = s.key)}
+          />
+          <span>{s.label}</span>
+          <span class="scope-n">{s.n.toLocaleString()}</span>
+        </label>
+      {/each}
+    </fieldset>
+    <p class="hint" data-testid="ml-estimate">
+      {#if !activeScope?.n}
+        Nothing to embed in this scope.
+      {:else}
+        Up to {activeScope.n.toLocaleString()} photos ·
+        <strong>{estimate}</strong>
+        at ~{activeModel?.approxMsPerPhoto}ms each on this model. Already-read
+        photos are skipped, so it is often faster.
+      {/if}
     </p>
 
     <div class="ml-actions">
       <button
         data-testid="ml-embed-now"
-        disabled={busy || !!runningJob}
+        disabled={busy || !!runningJob || !activeScope?.n}
         onclick={embedNow}
       >
-        {runningJob ? "Embedding…" : "Embed now"}
+        {runningJob ? "Embedding…" : `Embed ${activeScope?.label ?? "all"}`}
       </button>
       {#if runningJob}
         <button disabled={stopping} onclick={stopSweep}>
@@ -574,6 +856,95 @@
           · stopping after the current batch (up to 16 more photos)
         {/if}
       </p>
+    {/if}
+
+    <h4>Near-duplicates</h4>
+    <p class="hint">
+      Photos of the same shot are stacked together, even when the pause between
+      them is too long for burst detection to catch on timing alone. Only photos
+      taken within the time window below are ever compared — the same scene
+      re-shot on another day is left alone.
+    </p>
+
+    <label class="field">
+      <span class="field-label">Similarity</span>
+      <!-- Floor 0.5, matching the server's clamp. Below the band where two
+           unrelated photos that merely share a genre already score (0.61-0.68),
+           a lower value does not group "more aggressively" — it collapses whole
+           minutes of a shoot into one stack. -->
+      <input
+        type="range"
+        data-testid="ml-dupe-threshold"
+        min="0.5"
+        max="0.99"
+        step="0.01"
+        bind:value={thresholdDraft}
+        disabled={busy}
+        onchange={changeThreshold}
+      />
+      <span class="field-value">{Number(thresholdDraft).toFixed(2)}</span>
+    </label>
+    <p class="hint">
+      Higher means only near-identical frames stack — safer, and the reason the
+      default is deliberately strict: a missed duplicate is invisible, but a
+      wrong one hides a photo behind a stack cover.
+      {#if usingModelDefault}
+        Using {labelFor(settings.modelId)}'s own value.
+      {:else}
+        <button class="linkish" disabled={busy} onclick={resetThreshold}>
+          Reset to {labelFor(settings.modelId)}'s value ({modelThreshold(
+            settings
+          ).toFixed(2)})
+        </button>
+      {/if}
+    </p>
+
+    <label class="field">
+      <span class="field-label">Time window</span>
+      <input
+        type="range"
+        data-testid="ml-dupe-window"
+        min="3"
+        max="600"
+        step="1"
+        bind:value={windowSecDraft}
+        disabled={busy}
+        onchange={changeWindow}
+      />
+      <span class="field-value">{windowSecDraft}s</span>
+    </label>
+
+    <ul class="counts" data-testid="ml-dupe-counts">
+      <li>
+        <strong>{(stats.nearDupes?.groups ?? 0).toLocaleString()}</strong>
+        groups found
+        <span class="of"
+          >— covering {(stats.nearDupes?.photos ?? 0).toLocaleString()} photos</span
+        >
+      </li>
+    </ul>
+
+    <!-- STATE, not a second trigger (Recommendation 4 of
+         docs/ML-UX-REVIEW-2026-07-26.md). There used to be a "Find
+         near-duplicates now" button here as well as the ⧉ control in the
+         toolbar and the automatic pass after an embed sweep — three ways to
+         start the same work, with three different names and three different
+         kinds of feedback, and no way to tell whether they were one action or
+         three. Grouping is a view concern, so the toolbar owns it; this panel
+         answers "did it work, and when", which no button ever did. -->
+    <p class="hint" data-testid="ml-dupe-state">
+      {#if dupeJob}
+        Looking for near-duplicates now — {dupeJob.phase || "comparing photos"}.
+      {:else if !stats.nearDupes?.groups}
+        No groups yet. Use <strong>⧉ Find duplicates</strong> in the toolbar — it
+        takes seconds, because it reuses the photos already read.
+      {:else}
+        Last run {lastRunLabel} · reuses the photos already read, so it never re-reads
+        them. Re-run it with <strong>⧉ Find duplicates</strong> in the toolbar.
+      {/if}
+    </p>
+    {#if dupeJob}
+      <p class="hint">{dupeJob.phase || "Comparing photos"}</p>
     {/if}
 
     <h4>Stored vectors</h4>
@@ -618,6 +989,35 @@
 </section>
 
 <style>
+  .scope {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 0.35rem 0.6rem;
+    margin: 0.7rem 0 0;
+  }
+  .scope legend {
+    padding: 0 0.3rem;
+    font-size: 0.78rem;
+    color: #ccc;
+  }
+  .scope-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .scope-opt.empty {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .scope-n {
+    color: #888;
+    font-variant-numeric: tabular-nums;
+  }
   h3 {
     margin: 0.75rem 0 0.4rem;
     font-size: 0.95rem;
@@ -781,5 +1181,20 @@
   .storage-size {
     font-size: 0.8rem;
     color: #aaa;
+  }
+  /* An inline action inside a hint paragraph — the reset belongs beside the
+     sentence explaining what it resets to, not in the button row below. */
+  .linkish {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #6aa9ff;
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .linkish:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>

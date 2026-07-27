@@ -101,7 +101,26 @@ export function getEmbedding(db, photoId, model) {
  * @param {number} limit
  * @returns {Array<{id: number, folder_abs_path: string, filename: string, mtime: number, size: number, kind: string}>}
  */
-export function pendingEmbedRows(db, model, limit) {
+export function pendingEmbedRows(db, model, limit, scopeIds = null) {
+  // #206: a scope restricts the worklist to specific photos, so the user can
+  // embed the shoot they are culling right now instead of waiting out a
+  // 34,807-photo library. Built as an extra WHERE clause on the SAME query
+  // rather than a second one, so the scoped and unscoped worklists can never
+  // disagree about what "pending" means — the RAW exclusion and both
+  // anti-joins apply identically either way.
+  //
+  // Inlined as a literal id list because SQLite has no array parameter and
+  // this is called once per batch. Every id is coerced through Number and
+  // filtered to finite integers first: they arrive from a request body, and
+  // string-concatenating an unvalidated value into SQL is the injection this
+  // codebase already guards against elsewhere (safeResolve, for paths).
+  const ids = normalizeScope(scopeIds);
+  // An explicitly EMPTY scope means "these zero photos", never "all of them".
+  // Falling through to the unscoped query here would turn a caller's empty
+  // selection into a full-library sweep — the most expensive possible way to
+  // misread an empty array.
+  if (ids !== null && ids.length === 0) return [];
+  const scopeClause = ids ? `AND photos.id IN (${ids.join(",")})` : "";
   return db
     .prepare(
       `SELECT photos.id, photos.filename, photos.mtime, photos.size, photos.kind,
@@ -110,6 +129,7 @@ export function pendingEmbedRows(db, model, limit) {
          JOIN folders ON folders.id = photos.folder_id
         WHERE photos.stale = 0
           AND photos.kind != 'raw'
+          ${scopeClause}
           AND NOT EXISTS (
                 SELECT 1 FROM photo_embeddings e
                  WHERE e.photo_id = photos.id AND e.model = @model)
@@ -121,6 +141,19 @@ export function pendingEmbedRows(db, model, limit) {
         LIMIT @limit`
     )
     .all({ model, stage: EMBED_STAGE, limit });
+}
+
+/**
+ * @param {Array<number|string>|null|undefined} scopeIds
+ * @returns {number[]|null} `null` when no scope was given at all (sweep the
+ *   library). Otherwise the ids that survived validation — possibly EMPTY,
+ *   which the caller must treat as "no photos", not as "no scope". Keeping
+ *   those two cases distinct is the whole job of this function.
+ */
+function normalizeScope(scopeIds) {
+  if (scopeIds === null || scopeIds === undefined) return null;
+  if (!Array.isArray(scopeIds)) return [];
+  return scopeIds.map((v) => Number(v)).filter((n) => Number.isSafeInteger(n));
 }
 
 /**

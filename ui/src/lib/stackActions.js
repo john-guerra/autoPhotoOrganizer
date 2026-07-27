@@ -12,6 +12,7 @@
  */
 import { createStack, dissolveStackApi } from "./api.js";
 import { canCreateManualStack } from "./stackOverrides.js";
+import { detectBursts } from "./bursts.js";
 
 /** New items array with `ids` forced into manual stack `groupId` (clears the
  * keep-separate flag — mutual exclusion). Pure. */
@@ -122,4 +123,54 @@ export function buildStackMenuItems({
   });
 
   return menu;
+}
+
+/**
+ * Stack a SELECTION by its own time gaps (#207).
+ *
+ * Manual stacking forces every selected photo into ONE stack no matter how the
+ * shots are spread out inside it — which is right when the user is asserting
+ * "these belong together", and wrong when they have swept up a run of photos
+ * and want the ordinary burst rule applied to just that run. This is the
+ * second thing: it clusters the selection exactly the way the grid's automatic
+ * detection would, then persists each cluster as a manual stack so the result
+ * survives a rescan and a change to the burst slider.
+ *
+ * Clusters of one are skipped rather than stacked alone: a one-photo stack is
+ * not a stack, and persisting a manual group for it would freeze that photo
+ * out of later automatic bursting for no benefit.
+ *
+ * Reuses `detectBursts` rather than re-deriving the rule. A second
+ * implementation of "what counts as a burst" would drift from the one the grid
+ * renders, and the user would get stacks that do not match what they were
+ * looking at when they pressed the button.
+ *
+ * @param {Array<object>} items the feed window
+ * @param {Set<number>|Iterable<number>} selectedIds
+ * @param {number} gapMs the toolbar's current burst gap
+ * @returns {Promise<{nextItems: Array<object>, stacks: number, photos: number}>}
+ */
+export async function burstSelectionIntoStacks(items, selectedIds, gapMs) {
+  const set = selectedIds instanceof Set ? selectedIds : new Set(selectedIds);
+  const selected = items.filter((it) => set.has(it.id));
+  // gapMs 0 means the user has burst detection turned off; clustering with it
+  // would put every photo in its own cluster and create nothing, so the caller
+  // gets an honest zero rather than a silent no-op it cannot explain.
+  const clusters = detectBursts(selected, { gapMs }).filter(
+    (c) => c.memberIds.length >= 2
+  );
+
+  let nextItems = items;
+  let photos = 0;
+  for (const cluster of clusters) {
+    // Sequential, not Promise.all: each call allocates a group_id server-side,
+    // and the failure story matters more than the latency here — if one call
+    // fails, the stacks already created stay created and the returned items
+    // describe exactly those, rather than a half-applied batch nobody can
+    // reconcile.
+    const { groupId } = await createStack(cluster.memberIds);
+    nextItems = applyCreateToItems(nextItems, cluster.memberIds, groupId);
+    photos += cluster.memberIds.length;
+  }
+  return { nextItems, stacks: clusters.length, photos };
 }

@@ -1019,11 +1019,38 @@ export async function retryMlFailed() {
  * the button is dead.
  * @returns {Promise<{started:boolean, alreadyRunning?:boolean}>}
  */
-export async function startEmbed() {
-  const res = await fetch("/api/ml/embed", { method: "POST" });
+/**
+ * Kick the background embedder. With `ids`, embeds ONLY those photos (#206) —
+ * the selection, the current view, or one right-clicked folder — so a user can
+ * point it at the shoot they are culling instead of waiting out the library.
+ * @param {number[]|null} [ids]
+ */
+export async function startEmbed(ids = null) {
+  const res = await fetch("/api/ml/embed", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(ids ? { ids } : {}),
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `couldn't start embedding (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Recompute the near-duplicate grouping (#162) from vectors already stored —
+ * seconds of arithmetic, not the ~72 minutes a full re-embed of 114k photos
+ * costs. Separate from startEmbed for exactly that reason: tuning the
+ * threshold must not imply re-reading every photo.
+ */
+export async function startNearDupes() {
+  const res = await fetch("/api/ml/near-dupes", { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      body.error || `couldn't start near-duplicate detection (${res.status})`
+    );
   }
   return res.json();
 }

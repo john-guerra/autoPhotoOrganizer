@@ -73,15 +73,24 @@ import {
   readMlSettings,
   writeMlSettings,
   MlSettingsPersistError,
+  effectiveThreshold,
+  DEVICES,
 } from "./ml/settings.js";
 import { MODELS } from "./ml/models.js";
 import {
   embedCounts,
+  pendingEmbedRows,
   modelStorage,
   purgeModel,
   clearEmbedFailures,
 } from "./db/embeddings.js";
 import { OnnxMLService } from "./ml/OnnxMLService.js";
+import {
+  groupNearDupes,
+  isNearDupeSweepInFlight,
+  nearDupeProgress,
+} from "./ml/nearDupeSweep.js";
+import { nearDupeCounts, clearNearDupeGroups } from "./db/nearDupes.js";
 import { interactiveRoute } from "./lib/interactive.js";
 import { whyTranscode, playbackPlan } from "./lib/videoPlayback.js";
 import {
@@ -188,13 +197,32 @@ function kickHashSweep(db) {
  *   NOT the single-flight latch (see isEmbedInFlight, checked by the
  *   /api/ml/embed route itself before calling this).
  */
-function kickEmbedSweep(db, getMl, { force = false } = {}) {
+function kickEmbedSweep(
+  db,
+  getMl,
+  { force = false, scopeIds = null, scopeLabel = null } = {}
+) {
   let job;
   try {
-    const { modelId, threads, enabled } = readMlSettings();
+    const { modelId, threads, enabled, device } = readMlSettings();
     if (!enabled && !force) return; // opt-in; silent when off — see doc above
 
-    job = registry.create("embed", { label: "Embedding photos" });
+    // How many photos this sweep will actually touch, counted ONCE, up front.
+    // Without it the job's `total` stays 0 and the JobsPanel renders an
+    // indeterminate bar for the whole run (#208) — on a 34,807-photo library
+    // that is ~20 minutes of a control that looks frozen. Scoped sweeps count
+    // their own scope, so "3 of 12" means what it says.
+    const pending = scopeIds
+      ? pendingEmbedRows(db, modelId, Number.MAX_SAFE_INTEGER, scopeIds).length
+      : (() => {
+          const c = embedCounts(db, modelId);
+          return Math.max(0, c.total - c.embedded - c.failed);
+        })();
+
+    job = registry.create("embed", {
+      label: scopeLabel ? `Embedding ${scopeLabel}` : "Embedding photos",
+      total: pending,
+    });
     const ml = getMl();
 
     // A first embed against a freshly-selected model means the worker has to
@@ -240,8 +268,10 @@ function kickEmbedSweep(db, getMl, { force = false } = {}) {
       model: modelId,
       threads,
       job,
+      scopeIds,
+      device,
       onProgress: (counters) =>
-        registry.update(job.id, embedProgress(counters)),
+        registry.update(job.id, embedProgress(counters, pending)),
     })
       .then((r) => {
         // Mirrors kickHashSweep above: "embed" is SELF_CLEARING, so finish()
@@ -264,6 +294,11 @@ function kickEmbedSweep(db, getMl, { force = false } = {}) {
           });
         }
         registry.finish(job.id, { embedded: r.embedded, failed: r.failed });
+        // Vectors just changed, so the grouping computed from them is stale.
+        // Chained on success only: after a pause or a failure the vector set
+        // is incomplete, and regrouping then would stack photos from a
+        // half-embedded library and look like a finished answer.
+        kickNearDupeSweep(db);
       })
       .catch((e) =>
         registry.fail(
@@ -290,6 +325,72 @@ function kickEmbedSweep(db, getMl, { force = false } = {}) {
       console.error("kickEmbedSweep: could not start the embed sweep:", e);
     }
   }
+}
+
+/**
+ * Recompute the near-duplicate grouping (#162) in the background.
+ *
+ * Runs AFTER an embed sweep finishes rather than alongside it, because the
+ * grouping is whole-library by nature: one new photo can merge two previously
+ * separate groups, so there is no meaningful partial answer to compute while
+ * vectors are still arriving. Also kicked directly when a setting that
+ * PRODUCED the grouping changes.
+ *
+ * Never throws into its caller — like kickEmbedSweep, this hangs off scan and
+ * settings paths that must not fail because an optional feature did.
+ *
+ * @param {import("better-sqlite3").Database} db
+ */
+function kickNearDupeSweep(db) {
+  let job;
+  try {
+    const settings = readMlSettings();
+    if (!settings.enabled) return null; // opt-in, same gate as embedding
+    // Checked before creating a job: a second job row that immediately
+    // self-clears as `alreadyRunning` is a flicker in the JobsPanel the user
+    // cannot act on (the same reasoning as isEmbedInFlight, #161 round 1, I2).
+    if (isNearDupeSweepInFlight()) return null;
+
+    job = registry.create("near-dupes", { label: "Finding near-duplicates" });
+    groupNearDupes(db, {
+      model: settings.modelId,
+      threshold: effectiveThreshold(settings),
+      windowMs: settings.nearDupeWindowMs,
+      job,
+      onProgress: (c) => registry.update(job.id, nearDupeProgress(c)),
+    })
+      .then((r) => {
+        if (r.alreadyRunning)
+          return registry.finish(job.id, { alreadyRunning: true });
+        if (r.cancelled)
+          return registry.finish(job.id, { cancelled: true, groups: 0 });
+        registry.finish(job.id, { groups: r.groups, photos: r.photos });
+      })
+      .catch((e) =>
+        registry.fail(
+          job.id,
+          new Error(
+            `Near-duplicate detection stopped: ${e.message}. ` +
+              "Photos and existing stacks are unaffected."
+          )
+        )
+      );
+  } catch (e) {
+    if (job) {
+      registry.fail(
+        job.id,
+        new Error(`Near-duplicate detection stopped: ${e.message}.`)
+      );
+    } else {
+      console.error("kickNearDupeSweep: could not start the grouping pass:", e);
+    }
+    return null;
+  }
+  // The job id so a caller can await completion — the toolbar button reloads
+  // the feed once grouping lands, because dupeGroupId rides the feed row and a
+  // regrouping the user cannot see is indistinguishable from one that did
+  // nothing (#207).
+  return job?.id ?? null;
 }
 
 /**
@@ -1030,6 +1131,10 @@ export function registerApi(app, { ml } = {}) {
       ...readMlSettings(),
       models: MODELS,
       maxThreads: cpus().length,
+      // The execution providers the panel may offer (#209). Sent from here
+      // rather than hardcoded client-side so the list can never drift from
+      // what writeMlSettings will actually accept.
+      devices: DEVICES,
     });
   });
 
@@ -1043,7 +1148,23 @@ export function registerApi(app, { ml } = {}) {
   // round 1, Minor 4).
   app.put("/api/ml/settings", (req, res) => {
     try {
-      res.json(writeMlSettings(req.body ?? {}));
+      const before = readMlSettings();
+      const next = writeMlSettings(req.body ?? {});
+      // A stored grouping is the OUTPUT of these three inputs. Leaving it in
+      // place after one of them changes would keep stacking photos by a rule
+      // the user has just revoked — silently, and with the panel reporting the
+      // new setting as if it were in force. Cleared immediately rather than at
+      // the end of the next sweep, so the grid never shows a grouping that no
+      // setting on screen would produce.
+      const regroupingInputChanged =
+        next.modelId !== before.modelId ||
+        next.nearDupeThreshold !== before.nearDupeThreshold ||
+        next.nearDupeWindowMs !== before.nearDupeWindowMs;
+      if (regroupingInputChanged) {
+        clearNearDupeGroups(getDb());
+        kickNearDupeSweep(getDb());
+      }
+      res.json(next);
     } catch (err) {
       if (err instanceof MlSettingsPersistError) {
         return res.status(500).json({ error: err.message });
@@ -1079,6 +1200,10 @@ export function registerApi(app, { ml } = {}) {
       provider,
       counts: embedCounts(db, modelId),
       storage: modelStorage(db),
+      // #162. Reported as "photos in a group" and "groups", never as a
+      // percentage of the library: most photos have no near-duplicate, so a
+      // percentage would read as low coverage when it is the correct answer.
+      nearDupes: nearDupeCounts(db, modelId),
     });
   });
 
@@ -1155,8 +1280,58 @@ export function registerApi(app, { ml } = {}) {
     if (isEmbedInFlight()) {
       return res.json({ started: false, alreadyRunning: true });
     }
-    kickEmbedSweep(getDb(), getMl, { force: true });
-    res.json({ started: true });
+    // #206: an optional `ids` scope embeds just those photos — the selection,
+    // the current view, or one right-clicked folder — instead of the whole
+    // library. Absent, behaviour is exactly as before.
+    const ids = req.body?.ids;
+    if (ids !== undefined) {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        // Specific over generic: an empty selection is a real thing a user can
+        // do, and "nothing selected" is far more useful than "bad request".
+        return res
+          .status(400)
+          .json({ error: "No photos were selected to embed." });
+      }
+      if (ids.length > 50_000) {
+        return res.status(413).json({
+          error: `That is ${ids.length.toLocaleString()} photos — too many to send at once. Embed the whole library instead.`,
+        });
+      }
+    }
+    kickEmbedSweep(getDb(), getMl, {
+      force: true,
+      scopeIds: ids ?? null,
+      scopeLabel: ids ? `${ids.length.toLocaleString()} photos` : null,
+    });
+    res.json({ started: true, scoped: ids ? ids.length : null });
+  });
+
+  // POST -> recompute the near-duplicate grouping (#162) against the current
+  // settings, without re-embedding anything. Separate from /api/ml/embed
+  // because the two costs are wildly different: embedding 114k photos is
+  // ~72 minutes of inference, regrouping them is seconds of arithmetic over
+  // vectors already on disk. A user tuning the threshold needs the cheap one
+  // on its own.
+  //
+  // Answers synchronously when a pass is already running, for the same reason
+  // /api/ml/embed does: a job row created and self-cleared in one tick is
+  // invisible to anyone without an SSE subscription already open, which is
+  // not an acceptable answer to a button the user just clicked.
+  app.post("/api/ml/near-dupes", (req, res) => {
+    if (isNearDupeSweepInFlight()) {
+      return res.json({ started: false, alreadyRunning: true });
+    }
+    if (!readMlSettings().enabled) {
+      // Specific over generic (CLAUDE.md): the button is reachable from the
+      // panel, so saying WHY nothing happened, and what to do about it, is
+      // the difference between a dead control and an actionable one.
+      return res.status(409).json({
+        error:
+          "Photo similarity is off. Turn it on in Manage library to compute embeddings first.",
+      });
+    }
+    const jobId = kickNearDupeSweep(getDb());
+    res.json({ started: true, jobId });
   });
 
   // --- Lazy metadata enrichment --------------------------------------------

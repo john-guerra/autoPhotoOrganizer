@@ -6,6 +6,38 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.34
+
+- **Photos of the same shot now stack together, even when you paused between
+  them** (#162). Burst detection used to rely on timing alone, so a retake a few
+  seconds later — same scene, framed slightly differently — landed as a separate
+  photo. With photo similarity turned on, AutoGallery recognises them as the
+  same shot and stacks them. Nothing is moved or deleted, and you can still pull
+  any photo out of a stack as before.
+- **Tune it yourself in Manage library:** a Similarity slider for how alike two
+  photos must be, and a Time window for how far apart they may be taken. The
+  defaults are deliberately strict — a missed duplicate is invisible, a wrong
+  one hides a photo. Changing either regroups in seconds, without re-reading
+  your photos.
+- If photo similarity is off (the default), burst detection behaves exactly as
+  it did before.
+- **Find duplicates and Burst selection are in the toolbar**, next to the burst
+  gap (#207). "Burst selection" stacks just the photos you have selected,
+  splitting them wherever the pause is longer than the gap — which making a
+  manual stack can't do, since that forces everything into one stack.
+- **Machine learning has its own panel** (#205), reached from the settings menu
+  instead of being buried under the thumbnail cache in Manage library.
+- **Embed just the photos you care about** (#206). Right-click to read the
+  selection, or everything currently loaded, instead of waiting for the whole
+  library — on a 34,000-photo library that is the difference between twenty
+  minutes and a few seconds.
+- **The embedding progress bar actually fills now** (#208), instead of dancing
+  with no idea how far along it is.
+- **You can pin which processor runs the model** — CPU, GPU or Apple's Neural
+  Engine (#209). Auto still measures and picks; the read-out always names what
+  really loaded, so you can check the surprising result (CPU beat the GPU here)
+  on your own machine.
+
 ## 2.18.33
 
 - **Photo similarity works in the installed app, not just in development**
