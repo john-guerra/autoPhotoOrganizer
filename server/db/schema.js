@@ -409,6 +409,30 @@ export function applySchema(db) {
   // It exists so the panel can report STATE rather than offer a second trigger
   // (Recommendation 4, docs/ML-UX-REVIEW-2026-07-26.md): "608 groups, last run
   // 3 minutes ago" answers "did this work?", which a button never did.
+  // How alike each photo is to the one immediately BEFORE it in capture time
+  // (#216). Distinct from near_dupe_groups, which answers "which photos are the
+  // same shot" at the discovery threshold (0.93): this answers "is this photo
+  // even related to its predecessor", which the refiner asks at a much lower
+  // bar (0.6). One grouping cannot encode two thresholds, and a second
+  // component grouping would be wrong for this job — complete linkage means
+  // membership implies similarity to EVERY member, so two photos scoring 0.65
+  // can land in different components and be split despite being related.
+  //
+  // `prev_id` is stored, not implied, and it is what makes this SAFE. The
+  // client walks its own time order inside whatever grouping is active, which
+  // need not match the order this was computed in. It compares prev_id against
+  // the photo it actually has in hand and, on any mismatch, declines to split —
+  // degrading to today's pure-time behaviour rather than acting on a
+  // comparison between the wrong pair.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS photo_neighbor_sim (
+      photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+      prev_id  INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+      sim      REAL    NOT NULL,
+      model    TEXT    NOT NULL
+    )
+  `);
+
   // Serves "how many groups are there" and the whole-grouping wipe that starts
   // each sweep; both filter on model with no photo_id bound, so without this
   // they scan the table.

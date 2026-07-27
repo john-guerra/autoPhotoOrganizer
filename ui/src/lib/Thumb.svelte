@@ -340,6 +340,22 @@
     {#if item.rating > 0}
       <span class="badge"><Stars rating={item.rating} /></span>
     {/if}
+    {#if item.hasEmbedding}
+      <!-- "This photo has been read by the vision model."
+           Deliberately the quietest mark on the tile: a small dot, low
+           contrast, no background plate. It answers a question the user only
+           asks occasionally ("has this been processed, or would embedding
+           these do real work?") and must not compete with rating, stack count
+           or duration, which are read constantly.
+           Not rendered at all when absent — an "unread" marker would put a
+           glyph on almost every tile of a fresh library, which is noise about
+           the app rather than information about the photos. -->
+      <span
+        class="embed-dot"
+        title="Read by the vision model — used for finding duplicates"
+        aria-hidden="true"
+      ></span>
+    {/if}
     {#if stackCount}
       <BurstOverlay count={stackCount} />
     {/if}
@@ -497,6 +513,20 @@
     left: 5px;
     bottom: 5px;
     pointer-events: none;
+  }
+  /* See the markup for why this is as quiet as it is. Top-right, opposite the
+     rating badge, so the two never collide. */
+  .embed-dot {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.55);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    z-index: 100;
   }
   .size-badge {
     position: absolute;

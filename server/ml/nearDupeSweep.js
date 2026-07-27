@@ -4,6 +4,7 @@ import { modelById } from "./models.js";
 import {
   embeddedPhotosInTimeOrder,
   replaceNearDupeGroups,
+  replaceNeighborSim,
 } from "../db/nearDupes.js";
 
 /**
@@ -100,6 +101,10 @@ export async function groupNearDupes(
     /** @type {Array<{members: Array<object>, lastTime: number}>} */
     const open = [];
     const closed = [];
+    // #216: how alike each photo is to its immediate predecessor in time. Free
+    // here — the rows are already loaded, time-ordered and vector-ready, so
+    // this is one extra dot product per photo rather than a second pass.
+    const neighbors = [];
     let cancelled = false;
 
     // Walk in time order, keeping a set of OPEN groups — those whose most
@@ -115,6 +120,16 @@ export async function groupNearDupes(
       }
 
       const cur = rows[i];
+      if (i > 0) {
+        const prev = rows[i - 1];
+        if (prev.dim === cur.dim) {
+          neighbors.push({
+            photoId: cur.id,
+            prevId: prev.id,
+            sim: cosine(prev, cur),
+          });
+        }
+      }
       // Retire groups the window has moved past, so the search below stays
       // bounded by the window's density rather than by the library size.
       for (let k = open.length - 1; k >= 0; k--) {
@@ -193,6 +208,7 @@ export async function groupNearDupes(
       return { photos: 0, groups: 0, scanned: total, cancelled: true };
 
     const written = replaceNearDupeGroups(db, model, out);
+    replaceNeighborSim(db, model, neighbors);
     onProgress?.({ done: total, total });
     return { ...written, scanned: total, cancelled: false };
   } finally {

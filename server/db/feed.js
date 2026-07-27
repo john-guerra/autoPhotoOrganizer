@@ -335,6 +335,28 @@ function rowToItem(r, dims) {
     // whenever embedding is off (the default) or the sweep has not reached
     // this photo, in which case burst detection behaves exactly as before.
     dupeGroupId: r.dupeGroupId ?? null,
+    // Whether this photo has been READ by a vision model yet. Surfaced so the
+    // grid can mark it: without this the user has no way to tell an un-embedded
+    // photo from an embedded one, which made "embed these" feel like it might
+    // be redundant work. (It never is — pendingEmbedRows excludes anything
+    // already embedded — but the app gave no way to know that.)
+    //
+    // KNOWN LIMITATION, deliberate and scoped: this is not filtered by the
+    // ACTIVE model, so a photo embedded under CLIP reads as "read" while
+    // SigLIP is selected, even though no SigLIP vector exists for it. Filtering
+    // properly means threading the active model into every feed query — a
+    // change across several call sites for an edge that only appears after a
+    // model switch, which the panel already warns starts a fresh backfill. The
+    // mark therefore means "read at least once", and the panel's counts remain
+    // the per-model source of truth. Tracked rather than left implicit.
+    hasEmbedding: r.hasEmbedding === 1,
+    // #216: how alike this photo is to the one before it in capture time, and
+    // WHICH photo that was. bursts.js splits a time-adjacent pair only when
+    // simPrevId matches the photo it actually has in hand — on any mismatch it
+    // declines to split rather than acting on a comparison between the wrong
+    // pair, degrading to pure-time behaviour.
+    simPrevId: r.simPrevId ?? null,
+    simPrev: r.simPrev ?? null,
     groupValues,
   };
 }
@@ -623,6 +645,9 @@ export function getFeedPage(
                 photos.no_auto_stack AS keepSeparate,
                 (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
                 (SELECT group_id FROM near_dupe_groups WHERE photo_id = photos.id) AS dupeGroupId,
+                EXISTS (SELECT 1 FROM photo_embeddings e WHERE e.photo_id = photos.id) AS hasEmbedding,
+                (SELECT prev_id FROM photo_neighbor_sim n WHERE n.photo_id = photos.id) AS simPrevId,
+                (SELECT sim FROM photo_neighbor_sim n WHERE n.photo_id = photos.id) AS simPrev,
                 photos.width, photos.height, photos.taken_at, photos.btime, photos.kind, photos.duration,
                 ${selectDimAndSortCols}
          FROM photos JOIN folders ON folders.id = photos.folder_id
@@ -688,6 +713,9 @@ export function getFeedPage(
                 photos.no_auto_stack AS keepSeparate,
                 (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
                 (SELECT group_id FROM near_dupe_groups WHERE photo_id = photos.id) AS dupeGroupId,
+                EXISTS (SELECT 1 FROM photo_embeddings e WHERE e.photo_id = photos.id) AS hasEmbedding,
+                (SELECT prev_id FROM photo_neighbor_sim n WHERE n.photo_id = photos.id) AS simPrevId,
+                (SELECT sim FROM photo_neighbor_sim n WHERE n.photo_id = photos.id) AS simPrev,
                 photos.width, photos.height, photos.taken_at, photos.btime, photos.kind, photos.duration,
                 ${selectDimAndSortCols}
          FROM photos
@@ -818,6 +846,9 @@ export function fetchGroupRowsAtOffsets(
             photos.no_auto_stack AS keepSeparate,
             (SELECT group_id FROM manual_stacks WHERE photo_id = photos.id) AS manualStackId,
                 (SELECT group_id FROM near_dupe_groups WHERE photo_id = photos.id) AS dupeGroupId,
+                EXISTS (SELECT 1 FROM photo_embeddings e WHERE e.photo_id = photos.id) AS hasEmbedding,
+                (SELECT prev_id FROM photo_neighbor_sim n WHERE n.photo_id = photos.id) AS simPrevId,
+                (SELECT sim FROM photo_neighbor_sim n WHERE n.photo_id = photos.id) AS simPrev,
             photos.width, photos.height, photos.taken_at, photos.btime, photos.kind,
             ${selectDimAndSortCols}
      FROM photos

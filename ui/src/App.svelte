@@ -201,6 +201,22 @@
   const LS_ZOOM_PX = "autogallery.zoomPx";
   const LS_BURST_GAP = "autogallery.burstGapMs";
   const DEFAULT_BURST_GAP_MS = 3000;
+  /**
+   * The refiner bar (#216): a time-adjacent pair scoring below this is not
+   * stacked, even though the clock says they belong together.
+   *
+   * 0.6, and deliberately far below the 0.93 used to MERGE photos the clock
+   * separated. The two ask opposite questions — "are these obviously
+   * unrelated?" versus "are these the same shot?" — and splitting a real burst
+   * costs more than leaving a slightly-off one, so the veto only fires on
+   * pairs down in the band where measured cosine says different subject
+   * entirely (unrelated subjects score 0.41-0.56; see server/ml/models.js).
+   *
+   * Inert without embeddings: the veto needs a measured score for the exact
+   * pair in hand, so a library that has never been embedded stacks exactly as
+   * it always did.
+   */
+  const UNRELATED_BELOW = 0.6;
   const DEFAULT_RATIO = 1.5; // placeholder until real dimensions arrive
 
   const hasNativePicker =
@@ -4459,6 +4475,7 @@
   let autoStacks = $derived(
     detectBurstsByGroup(items, groupBy, {
       gapMs: burstEnabled ? burstGapMs : 0,
+      unrelatedBelow: UNRELATED_BELOW,
     })
   );
   // Fold in the persisted manual create/dissolve overrides (issue #24) — all
