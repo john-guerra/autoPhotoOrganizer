@@ -6,6 +6,7 @@ import { getDb, _resetDbForTest } from "./connection.js";
 import { upsertScan } from "./photos.js";
 import { EMBED_STAGE, putEmbedding } from "./embeddings.js";
 import { quantize } from "../ml/quantize.js";
+import { buildFilter } from "./filters.js";
 import {
   FACES_STAGE,
   putFaces,
@@ -14,6 +15,9 @@ import {
   faceCounts,
   faceVectors,
   purgeFaces,
+  saveClusters,
+  listPersons,
+  renamePerson,
 } from "./faces.js";
 
 const MODEL = "buffalo_l";
@@ -330,5 +334,109 @@ describe("bulk reads and purge", () => {
     expect(purgeFaces(db, MODEL)).toEqual({ faces: 1, markers: 2 });
     expect(faceCounts(db, MODEL)).toMatchObject({ scanned: 0, faces: 0 });
     expect(pendingFaceRows(db, MODEL, 10)).toHaveLength(2);
+  });
+});
+
+describe("people (#167)", () => {
+  const face = (box, seedVal, score = 0.9) => {
+    const v = new Float32Array(512);
+    for (let i = 0; i < 512; i++) v[i] = Math.sin(i * 0.1 + seedVal);
+    const { scale, bytes } = quantize(v);
+    return { box, score, dim: 512, scale, bytes };
+  };
+
+  function seedFaces(db, n) {
+    const ids = seed(db, n);
+    ids.forEach((id, i) =>
+      putFaces(db, {
+        photoId: id,
+        model: MODEL,
+        faces: [face([0, 0, 50, 50], i)],
+      })
+    );
+    return db
+      .prepare(`SELECT id FROM photo_faces ORDER BY id`)
+      .all()
+      .map((r) => r.id);
+  }
+
+  it("creates a person per cluster and assigns its faces", () => {
+    const db = getDb();
+    const f = seedFaces(db, 4);
+    const r = saveClusters(db, [[f[0], f[1], f[2]], [f[3]]]);
+
+    expect(r.people).toBe(2);
+    expect(r.assigned).toBe(4);
+    const people = listPersons(db);
+    expect(people.map((p) => p.faces)).toEqual([3, 1]); // largest first
+    expect(people[0].name).toBe(null); // unnamed, and still browsable
+  });
+
+  it("keeps a NAME across a re-cluster", () => {
+    // Losing a name to a re-run makes naming feel unsafe, which is fatal for
+    // a feature whose whole cost is ten minutes of typing.
+    const db = getDb();
+    const f = seedFaces(db, 3);
+    saveClusters(db, [[f[0], f[1], f[2]]]);
+    const id = listPersons(db)[0].id;
+    renamePerson(db, id, "Ana");
+
+    saveClusters(db, [[f[0]], [f[1], f[2]]]);
+
+    expect(listPersons(db).some((p) => p.name === "Ana")).toBe(true);
+  });
+
+  it("keeps a MANUAL assignment when the model changes its mind", () => {
+    // #167: the correction must be durable across the next sweep. Same
+    // contract photo_tags.source has for semantic tags.
+    const db = getDb();
+    const f = seedFaces(db, 3);
+    saveClusters(db, [[f[0], f[1], f[2]]]);
+    const personId = listPersons(db)[0].id;
+    db.prepare(
+      `UPDATE photo_faces SET person_id = ?, person_source = 'manual' WHERE id = ?`
+    ).run(personId, f[2]);
+
+    const r = saveClusters(db, [[f[0]], [f[1]]]);
+
+    expect(r.keptManual).toBe(1);
+    const still = db
+      .prepare(`SELECT person_id FROM photo_faces WHERE id = ?`)
+      .get(f[2]);
+    expect(still.person_id).toBe(personId);
+  });
+
+  it("trims a name and treats blank as clearing it", () => {
+    const db = getDb();
+    const f = seedFaces(db, 1);
+    saveClusters(db, [[f[0]]]);
+    const id = listPersons(db)[0].id;
+    expect(renamePerson(db, id, "  Ana  ").name).toBe("Ana");
+    expect(renamePerson(db, id, "   ").name).toBe(null);
+    expect(() => renamePerson(db, 9999, "X")).toThrow(/no such person/);
+  });
+
+  it("filters the feed by person through buildFilter", () => {
+    // The facet has to survive client spec -> server allowlist -> SQL. This
+    // covers the SQL end; a facet missing from any layer is silently dropped.
+    const db = getDb();
+    const f = seedFaces(db, 3);
+    saveClusters(db, [[f[0], f[1]], [f[2]]]);
+    const personId = listPersons(db)[0].id;
+
+    const { sql, params } = buildFilter({ personId });
+    const matched = db
+      .prepare(`SELECT photos.id FROM photos WHERE ${sql}`)
+      .all(...params);
+    expect(matched).toHaveLength(2);
+  });
+
+  it("is phrased as a subquery, never a JOIN", () => {
+    // Required rather than stylistic: a facet written as a JOIN works in
+    // getFeedPage and silently breaks getTreeNode and countGroupPath, which
+    // do not join extra tables.
+    const { sql } = buildFilter({ personId: 1 });
+    expect(sql).toMatch(/photos\.id IN \(SELECT photo_id FROM photo_faces/);
+    expect(sql).not.toMatch(/\bJOIN\b/);
   });
 });

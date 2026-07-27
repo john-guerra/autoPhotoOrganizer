@@ -538,6 +538,12 @@ export function applySchema(db) {
     `CREATE INDEX IF NOT EXISTS idx_photo_faces_person
        ON photo_faces(person_id) WHERE person_id IS NOT NULL`
   );
+  // WHO said this face is this person (#167). 'manual' means a human did,
+  // and a re-cluster must not overwrite it — exactly what photo_tags.source
+  // does for semantic tags. Without this column a re-run silently discards
+  // every correction the user made, which #167 names as the thing that must
+  // survive ("durable — it survives the next sweep and new photos").
+  ensureColumn(db, "photo_faces", "person_source", "TEXT");
 
   ensureFeedIndexes(db);
 }

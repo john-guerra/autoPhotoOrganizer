@@ -311,3 +311,116 @@ export function clearFaceFailures(db, model) {
     .run(FACES_STAGE, model);
   return { cleared: changes };
 }
+
+/**
+ * Persist a clustering as people.
+ *
+ * REPLACES the model's automatic assignments and leaves manual ones alone —
+ * the same contract saveTag has for semantic tags, and for the same reason:
+ * a re-cluster is the model changing its mind, and it has no business
+ * discarding a decision a person made. #167 calls this out directly ("that
+ * correction must be durable — it survives the next sweep and new photos").
+ *
+ * A person the user has NAMED is never deleted, even when this pass finds no
+ * cluster for them. Losing a name to a re-run would make naming feel unsafe,
+ * which is fatal for a feature whose whole cost is ten minutes of typing.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {Array<number[]>} clusters arrays of FACE ids, largest first
+ * @param {number} [now]
+ * @returns {{people: number, assigned: number, keptManual: number, keptNamed: number}}
+ */
+export function saveClusters(db, clusters, now = Date.now()) {
+  return db.transaction(() => {
+    const manual = new Set(
+      db
+        .prepare(`SELECT id FROM photo_faces WHERE person_source = 'manual'`)
+        .all()
+        .map((r) => r.id)
+    );
+    const named = db
+      .prepare(`SELECT id FROM persons WHERE name IS NOT NULL AND name <> ''`)
+      .all()
+      .map((r) => r.id);
+
+    // Clear only what the model owns. A manual assignment survives, and so
+    // does the person it points at.
+    db.prepare(
+      `UPDATE photo_faces SET person_id = NULL
+        WHERE person_source IS NULL OR person_source <> 'manual'`
+    ).run();
+    const keepIds = new Set(named);
+    db.prepare(
+      `DELETE FROM persons WHERE id NOT IN (
+         SELECT DISTINCT person_id FROM photo_faces WHERE person_id IS NOT NULL
+       ) AND (name IS NULL OR name = '')`
+    ).run();
+
+    const newPerson = db.prepare(
+      `INSERT INTO persons (name, cover_face_id, created_at) VALUES (NULL, ?, ?)`
+    );
+    const assign = db.prepare(
+      `UPDATE photo_faces SET person_id = ?, person_source = 'model' WHERE id = ?`
+    );
+
+    let assigned = 0;
+    let people = 0;
+    for (const cluster of clusters) {
+      const fresh = cluster.filter((id) => !manual.has(id));
+      if (!fresh.length) continue;
+      // The cover is the first member, which is the highest-scoring face of
+      // the largest cluster — facesFor orders by det_score, and clusterFaces
+      // orders clusters by size. A cover chosen at random is how a person
+      // ends up represented by the back of their head.
+      const personId = newPerson.run(fresh[0], now).lastInsertRowid;
+      people++;
+      for (const faceId of fresh) {
+        assign.run(personId, faceId);
+        assigned++;
+      }
+    }
+    return {
+      people,
+      assigned,
+      keptManual: manual.size,
+      keptNamed: keepIds.size,
+    };
+  })();
+}
+
+/**
+ * People, largest first — the order #167 wants for naming, because ten
+ * minutes on the biggest clusters covers most of a library and a wall of
+ * singletons first is a chore.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @returns {Array<{id:number, name:string|null, faces:number, photos:number, coverFaceId:number|null}>}
+ */
+export function listPersons(db) {
+  return db
+    .prepare(
+      `SELECT p.id, p.name, p.cover_face_id AS coverFaceId,
+              COUNT(f.id) AS faces,
+              COUNT(DISTINCT f.photo_id) AS photos
+         FROM persons p
+         LEFT JOIN photo_faces f ON f.person_id = p.id
+        GROUP BY p.id
+        ORDER BY faces DESC, p.id`
+    )
+    .all();
+}
+
+/**
+ * Name a person, or clear the name with null/"".
+ * @param {import("better-sqlite3").Database} db
+ * @param {number} personId
+ * @param {string|null} name
+ */
+export function renamePerson(db, personId, name) {
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  const { changes } = db
+    .prepare(`UPDATE persons SET name = ? WHERE id = ?`)
+    .run(trimmed || null, personId);
+  if (!changes) throw new Error(`no such person: ${personId}`);
+  return { id: personId, name: trimmed || null };
+}

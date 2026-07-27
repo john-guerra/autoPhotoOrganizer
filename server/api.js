@@ -775,6 +775,16 @@ function parseFilterParam(req) {
   // allowlist entry is load-bearing in the quiet way this file warns about
   // above: correct SQL in filters.js and correct UI in filterSpec.js still
   // produce a filter that does NOTHING if the key never gets past here.
+  // Person (#167). A facet missing from THIS allowlist is silently dropped
+  // however correct the SQL and the UI are, and that failure looks like
+  // nothing at all from the client side — see the warning above.
+  if (raw.personId !== undefined && raw.personId !== null) {
+    const id = Number(raw.personId);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return { spec: {}, error: "personId must be a positive integer" };
+    }
+    spec.personId = id;
+  }
   if (raw.tag !== undefined && raw.tag !== null) {
     if (typeof raw.tag !== "string" || !raw.tag.length) {
       return { spec: {}, error: "tag must be a non-empty string" };
