@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.35
+
+- **Photo similarity now makes bursts better, not just bigger** (#216). Photos
+  taken seconds apart used to stack together no matter what was in them — and
+  on a real library a quarter of those stacks turned out to hold visibly
+  unrelated photos. When similarity is on, AutoGallery now splits those apart
+  as well as pulling matching ones together.
+- **A dot on a photo means it has been read** by the vision model, so you can
+  see at a glance what has been processed and what has not.
+- Bursts behave exactly as before on any library that has not been embedded.
+
 ## 2.18.34
 
 - **Photos of the same shot now stack together, even when you paused between

@@ -201,6 +201,27 @@
   const LS_ZOOM_PX = "autogallery.zoomPx";
   const LS_BURST_GAP = "autogallery.burstGapMs";
   const DEFAULT_BURST_GAP_MS = 3000;
+  /**
+   * The refiner bar (#216): a time-adjacent pair scoring below this is not
+   * stacked, even though the clock says they belong together.
+   *
+   * 0.6, and deliberately far below the 0.93 used to MERGE photos the clock
+   * separated. The two ask opposite questions — "are these obviously
+   * unrelated?" versus "are these the same shot?" — and splitting a real burst
+   * costs more than leaving a slightly-off one, so the veto only fires on
+   * pairs down in the band where measured cosine says different subject
+   * entirely (unrelated subjects score 0.41-0.56; see server/ml/models.js).
+   *
+   * Inert without embeddings: the veto needs a measured score for the exact
+   * pair in hand, so a library that has never been embedded stacks exactly as
+   * it always did.
+   *
+   * Read from the ML settings and updated live when the panel changes it —
+   * unlike the discovery threshold, moving this costs nothing (the scores are
+   * already stored), so the grid can regroup on the spot.
+   */
+  const DEFAULT_UNRELATED_BELOW = 0.6;
+  let unrelatedBelow = $state(DEFAULT_UNRELATED_BELOW);
   const DEFAULT_RATIO = 1.5; // placeholder until real dimensions arrive
 
   const hasNativePicker =
@@ -900,7 +921,10 @@
   // answer, and no user-facing action depends on it.
   let mlEnabled = $state(false);
   fetchMlSettings()
-    .then((s) => (mlEnabled = !!s.enabled))
+    .then((s) => {
+      mlEnabled = !!s.enabled;
+      if (typeof s.refineBelow === "number") unrelatedBelow = s.refineBelow;
+    })
     .catch(() => {});
 
   // --- Scrolling / prefetch settings (persisted) --------------------------
@@ -4459,6 +4483,7 @@
   let autoStacks = $derived(
     detectBurstsByGroup(items, groupBy, {
       gapMs: burstEnabled ? burstGapMs : 0,
+      unrelatedBelow,
     })
   );
   // Fold in the persisted manual create/dissolve overrides (issue #24) — all
@@ -6398,6 +6423,7 @@
     onclose={() => (mlPanelOpen = false)}
     selectedIds={[...selectedIds]}
     visibleIds={items.map((it) => it.id)}
+    onrefinechange={(v) => (unrelatedBelow = v)}
   />
 {/if}
 

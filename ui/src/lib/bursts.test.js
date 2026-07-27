@@ -294,3 +294,85 @@ describe("detectBursts with near-duplicate groups", () => {
     expect(detectBurstsByGroup(items, ["folder"], { gapMs: 1000 })).toEqual([]);
   });
 });
+
+/**
+ * The refiner (#216): similarity vetoing a time merge.
+ *
+ * The reverse of the disjunct above, and the reason it was worth reversing
+ * #162's "additive only" rule — measured over 10,424 time-adjacent pairs in a
+ * real library, the median similarity inside a 3s gap is 0.677 and the lower
+ * quartile 0.508. A quarter of what the gap stacks together is visibly
+ * unrelated.
+ *
+ * Every test here is really about one thing: the veto must fire ONLY when the
+ * pair in front of it was actually measured. Splitting a burst on a comparison
+ * between the wrong two photos would be worse than never splitting at all.
+ */
+describe("detectBursts with the similarity refiner", () => {
+  const pair = (simPrev, simPrevId) => [
+    { id: 1, name: "a.jpg", mtimeMs: 0 },
+    { id: 2, name: "b.jpg", mtimeMs: 500, simPrev, simPrevId },
+  ];
+
+  it("splits a time-adjacent pair the model says is unrelated", () => {
+    const stacks = detectBursts(pair(0.42, 1), {
+      gapMs: 1000,
+      unrelatedBelow: 0.6,
+    });
+    expect(stacks).toHaveLength(0);
+  });
+
+  it("keeps a time-adjacent pair the model says is related", () => {
+    const stacks = detectBursts(pair(0.85, 1), {
+      gapMs: 1000,
+      unrelatedBelow: 0.6,
+    });
+    expect(stacks).toHaveLength(1);
+  });
+
+  it("leaves the agnostic band to time — between the two bars, nothing changes", () => {
+    // 0.7 is below the 0.93 merge bar and above the 0.6 veto bar: the signal
+    // is not confident either way, so time's verdict stands.
+    expect(
+      detectBursts(pair(0.7, 1), { gapMs: 1000, unrelatedBelow: 0.6 })
+    ).toHaveLength(1);
+  });
+
+  it("does NOT split when the score describes a different pair", () => {
+    // simPrevId points at photo 99, not at the photo actually preceding this
+    // one in the client's order. Acting on it would compare the wrong two
+    // photos, so the veto declines and time wins.
+    const stacks = detectBursts(pair(0.1, 99), {
+      gapMs: 1000,
+      unrelatedBelow: 0.6,
+    });
+    expect(stacks).toHaveLength(1);
+  });
+
+  it("does NOT split when a photo has no score at all", () => {
+    // Un-embedded photos have no row, so there is nothing to judge them on —
+    // the whole library must keep working before any embedding has run.
+    expect(
+      detectBursts(pair(null, null), { gapMs: 1000, unrelatedBelow: 0.6 })
+    ).toHaveLength(1);
+  });
+
+  it("is inert when the caller does not opt in", () => {
+    // The default bar is 0, which nothing can score below — so an app that
+    // never passes unrelatedBelow behaves exactly as it did before #216.
+    expect(detectBursts(pair(0.01, 1), { gapMs: 1000 })).toHaveLength(1);
+  });
+
+  it("splits one long run into two where the scene actually changes", () => {
+    const items = [
+      { id: 1, name: "a.jpg", mtimeMs: 0 },
+      { id: 2, name: "b.jpg", mtimeMs: 500, simPrev: 0.97, simPrevId: 1 },
+      { id: 3, name: "c.jpg", mtimeMs: 1000, simPrev: 0.35, simPrevId: 2 },
+      { id: 4, name: "d.jpg", mtimeMs: 1500, simPrev: 0.96, simPrevId: 3 },
+    ];
+    const stacks = detectBursts(items, { gapMs: 3000, unrelatedBelow: 0.6 });
+    expect(stacks).toHaveLength(2);
+    expect(stacks[0].memberIds).toEqual([1, 2]);
+    expect(stacks[1].memberIds).toEqual([3, 4]);
+  });
+});

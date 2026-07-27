@@ -129,3 +129,44 @@ export function nearDupeCounts(db, model) {
 export function clearNearDupeGroups(db) {
   db.prepare(`DELETE FROM near_dupe_groups`).run();
 }
+
+/**
+ * Replace the neighbour-similarity table (#216) — how alike each photo is to
+ * the one immediately before it in capture time.
+ *
+ * Wholesale, in one transaction, for the same reason the grouping is: insert a
+ * photo in the middle of a sequence and every downstream neighbour changes, so
+ * there is no correct per-row update and no partial state worth keeping.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @param {Array<{photoId: number, prevId: number, sim: number}>} rows
+ * @returns {{rows: number}}
+ */
+export function replaceNeighborSim(db, model, rows) {
+  const wipe = db.prepare(`DELETE FROM photo_neighbor_sim WHERE model = ?`);
+  const insert = db.prepare(
+    `INSERT INTO photo_neighbor_sim (photo_id, prev_id, sim, model)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(photo_id) DO UPDATE SET prev_id = excluded.prev_id,
+                                         sim     = excluded.sim,
+                                         model   = excluded.model`
+  );
+  const run = db.transaction(() => {
+    wipe.run(model);
+    for (const r of rows) insert.run(r.photoId, r.prevId, r.sim, model);
+  });
+  run();
+  return { rows: rows.length };
+}
+
+/** Test/inspection helper: the stored neighbour similarity for one photo. */
+export function neighborSim(db, photoId) {
+  return (
+    db
+      .prepare(
+        `SELECT prev_id AS prevId, sim FROM photo_neighbor_sim WHERE photo_id = ?`
+      )
+      .get(photoId) ?? null
+  );
+}

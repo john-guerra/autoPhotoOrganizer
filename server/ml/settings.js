@@ -60,6 +60,24 @@ export const DEFAULT_NEAR_DUPE_WINDOW_MS = 60_000;
 export const DEVICES = ["auto", "cpu", "webgpu", "coreml"];
 
 /**
+ * The REFINER bar (#216): a pair the clock says belongs together is split when
+ * their measured similarity falls below this.
+ *
+ * Deliberately far below nearDupeThreshold (0.93). The two ask opposite
+ * questions — "are these obviously unrelated?" versus "are these the same
+ * shot?" — and the costs are asymmetric in opposite directions: a false merge
+ * hides a photo, a false split breaks a burst the photographer took on
+ * purpose. Measured over 10,424 time-adjacent pairs in a real library, p25 is
+ * 0.508 and the median 0.677, so 0.6 vetoes roughly the bottom 40%: wholly
+ * unrelated subjects (0.41-0.56) plus the same-genre-different-moment band.
+ *
+ * Unlike every other similarity setting here, this one costs NOTHING to change
+ * — the per-neighbour scores are already stored, so only the client-side
+ * comparison moves. No sweep, no re-read.
+ */
+export const DEFAULT_REFINE_BELOW = 0.6;
+
+/**
  * @returns {{modelId: string, threads: number, enabled: boolean,
  *   nearDupeThreshold: number|null, nearDupeWindowMs: number}}
  *
@@ -84,6 +102,7 @@ export function readMlSettings() {
     nearDupeThreshold: null,
     nearDupeWindowMs: DEFAULT_NEAR_DUPE_WINDOW_MS,
     device: "auto",
+    refineBelow: DEFAULT_REFINE_BELOW,
   };
   const file = settingsFile();
   if (!existsSync(file)) return defaults;
@@ -104,6 +123,7 @@ export function readMlSettings() {
         raw.nearDupeWindowMs ?? defaults.nearDupeWindowMs
       ),
       device: DEVICES.includes(raw.device) ? raw.device : defaults.device,
+      refineBelow: clampRefine(raw.refineBelow ?? defaults.refineBelow),
     };
   } catch {
     return defaults;
@@ -167,6 +187,8 @@ export function writeMlSettings(patch) {
     if (patch.nearDupeWindowMs !== undefined)
       next.nearDupeWindowMs = clampWindow(patch.nearDupeWindowMs);
     if (patch.device !== undefined) next.device = patch.device;
+    if (patch.refineBelow !== undefined)
+      next.refineBelow = clampRefine(patch.refineBelow);
     writeFileSync(settingsFile(), JSON.stringify(next, null, 2));
     return next;
   } catch (err) {
@@ -197,6 +219,15 @@ function clampWindow(v) {
   const n = Math.floor(Number(v));
   if (!Number.isFinite(n)) return DEFAULT_NEAR_DUPE_WINDOW_MS;
   return Math.min(3_600_000, Math.max(3_000, n));
+}
+
+/** 0 disables splitting entirely (the pre-#216 behaviour, and a legitimate
+ *  choice). Capped at 0.9 so it can never approach the merge bar, where it
+ *  would split almost every burst in the library. */
+function clampRefine(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DEFAULT_REFINE_BELOW;
+  return Math.min(0.9, Math.max(0, n));
 }
 
 function clampThreads(n) {

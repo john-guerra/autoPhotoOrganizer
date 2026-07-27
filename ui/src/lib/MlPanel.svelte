@@ -20,7 +20,7 @@
 
   /** Passed straight through to MlSettings so its scope selector can offer
    *  "Selected" and "Visible" (#215) — the panel itself owns no grid state. */
-  let { onclose, selectedIds = [], visibleIds = [] } = $props();
+  let { onclose, selectedIds = [], visibleIds = [], onrefinechange } = $props();
 </script>
 
 <Modal
@@ -30,7 +30,7 @@
   onclose={() => onclose?.()}
 >
   <div class="ml-panel">
-    <MlSettings {selectedIds} {visibleIds} />
+    <MlSettings {selectedIds} {visibleIds} {onrefinechange} />
   </div>
 </Modal>
 

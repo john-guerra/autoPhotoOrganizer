@@ -54,6 +54,7 @@ import {
   MlSettingsPersistError,
   effectiveThreshold,
   DEFAULT_NEAR_DUPE_WINDOW_MS,
+  DEFAULT_REFINE_BELOW,
 } from "./settings.js";
 import { DEFAULT_MODEL_ID } from "./models.js";
 
@@ -231,6 +232,37 @@ describe("near-duplicate settings", () => {
     ).toBe(3_600_000);
     expect(writeMlSettings({ nearDupeWindowMs: "nope" }).nearDupeWindowMs).toBe(
       DEFAULT_NEAR_DUPE_WINDOW_MS
+    );
+  });
+});
+
+/**
+ * The refiner bar (#216) — the threshold below which a pair the clock says
+ * belongs together gets split apart instead.
+ */
+describe("the refiner threshold", () => {
+  it("defaults to 0.6, well below the merge bar", () => {
+    const s = readMlSettings();
+    expect(s.refineBelow).toBe(DEFAULT_REFINE_BELOW);
+    // The two bars ask opposite questions and must not converge: at the merge
+    // bar (0.93) a refiner would split nearly every burst in the library.
+    expect(s.refineBelow).toBeLessThan(effectiveThreshold(s));
+  });
+
+  it("accepts 0 as a real value — splitting off entirely", () => {
+    // Not a falsy accident to be coerced back to the default: turning
+    // splitting off is a legitimate choice, and the pre-#216 behaviour.
+    expect(writeMlSettings({ refineBelow: 0 }).refineBelow).toBe(0);
+  });
+
+  it("caps well short of the merge bar", () => {
+    expect(writeMlSettings({ refineBelow: 0.99 }).refineBelow).toBe(0.9);
+    expect(writeMlSettings({ refineBelow: -1 }).refineBelow).toBe(0);
+  });
+
+  it("falls back to the default on a garbage value", () => {
+    expect(writeMlSettings({ refineBelow: "loose" }).refineBelow).toBe(
+      DEFAULT_REFINE_BELOW
     );
   });
 });
