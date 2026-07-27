@@ -1,0 +1,173 @@
+/**
+ * Turning face vectors into people (#167).
+ *
+ * ## Why agglomerative-by-threshold and not k-means
+ *
+ * k-means needs k. Nobody knows how many people are in a photo archive, and
+ * guessing wrong is not a quality question but a correctness one: too small a
+ * k merges strangers into one person, too large splits a parent across four.
+ * It also forces EVERY face into some cluster, and a real archive is full of
+ * faces that belong to nobody in particular — a stranger in the background of
+ * one photo, seen once.
+ *
+ * So: connect two faces when their cosine clears a threshold, and take the
+ * connected components. That yields a natural "seen once, belongs to nobody"
+ * outcome (a singleton), needs no k, and is what the threshold means in
+ * ArcFace's own terms — its operating point is a cosine, published per model.
+ *
+ * ## The transitivity hazard, stated plainly
+ *
+ * Single-linkage components chain: A~B and B~C puts A, B and C together even
+ * when A and C are nothing alike. For faces this is exactly how one cluster
+ * swallows a family — a blurry face that is 0.5-similar to everyone is a
+ * bridge between every person in the library.
+ *
+ * This is mitigated three ways rather than pretended away:
+ *   1. The threshold is deliberately HIGH (ArcFace's own same-identity bar,
+ *      not the middle of the distribution).
+ *   2. Faces too small to embed meaningfully never get here at all — see
+ *      MIN_FACE_PX in faceDetect.js, which drops the blurry bridges before
+ *      they can connect anything.
+ *   3. `maxDegree` caps how many neighbours one face may connect through, so
+ *      a single promiscuous vector cannot fuse two otherwise-separate groups.
+ *
+ * It is NOT solved. #167's own text says clustering is never right the first
+ * time and the user must be able to merge and split; this module produces a
+ * starting point, and the durable corrections are the caller's job.
+ */
+import { dot } from "./quantize.js";
+
+/**
+ * ArcFace's same-identity operating point, as a cosine over L2-normalized
+ * embeddings. Deliberately conservative: a missed match leaves two clusters
+ * the user can merge in one click, while a false match puts a stranger in
+ * someone's photo set and is far harder to notice and undo. Those costs are
+ * not symmetric, and the asymmetry is why this is not tuned to the midpoint.
+ */
+export const SAME_PERSON_COSINE = 0.5;
+
+/** How many neighbours one face may link through. See the transitivity note
+ *  in the module doc — this is the cap that stops one promiscuous vector from
+ *  fusing two separate people. */
+export const MAX_DEGREE = 24;
+
+/**
+ * Cluster face vectors into people.
+ *
+ * @param {{ids: Int32Array|number[], scales: Float32Array|number[], dim: number, data: Int8Array}} vectors
+ *   As returned by db/faces.js `faceVectors` — one flat int8 buffer.
+ * @param {object} [opts]
+ * @param {number} [opts.threshold]
+ * @param {number} [opts.maxDegree]
+ * @param {number} [opts.minSize] clusters smaller than this stay unassigned.
+ *   1 by default, i.e. a face seen once is still a (singleton) person — see
+ *   #167: "a person with no name should still be browsable".
+ * @returns {{clusters: Array<number[]>, singletons: number[]}} `clusters` are
+ *   arrays of FACE ids, largest first — which is the order #167 wants for
+ *   naming, since ten minutes spent on the biggest clusters covers most of a
+ *   library.
+ */
+export function clusterFaces(vectors, opts = {}) {
+  const {
+    threshold = SAME_PERSON_COSINE,
+    maxDegree = MAX_DEGREE,
+    minSize = 1,
+  } = opts;
+  const { ids, scales, dim, data } = vectors;
+  const n = ids.length;
+  if (!n || !dim) return { clusters: [], singletons: [] };
+
+  const parent = new Int32Array(n);
+  for (let i = 0; i < n; i++) parent[i] = i;
+  const degree = new Int32Array(n);
+
+  const find = (x) => {
+    // Path halving — iterative, because a chained component in a 60,000-face
+    // library is deep enough that a recursive find can blow the stack.
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  const union = (a, b) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+
+  // O(n^2) over the upper triangle. At 60,000 faces that is 1.8e9 int8 dot
+  // products, which is too slow — but the pairwise scan is the honest simple
+  // thing, and the escape hatch (an ANN index) is a change to this loop
+  // alone, not to the union-find or the caller. Measure before reaching for
+  // it; the near-dupe sweep taught that these scans are faster than they look.
+  for (let i = 0; i < n; i++) {
+    if (degree[i] >= maxDegree) continue;
+    const vi = data.subarray(i * dim, (i + 1) * dim);
+    for (let j = i + 1; j < n; j++) {
+      if (degree[j] >= maxDegree) continue;
+      const vj = data.subarray(j * dim, (j + 1) * dim);
+      // quantize()'s contract: the int8 dot times both scales is the cosine,
+      // because it L2-normalizes BEFORE quantizing. Recomputing norms here
+      // would be both slower and wrong.
+      const cos = dot(vi, vj) * scales[i] * scales[j];
+      if (cos >= threshold) {
+        union(i, j);
+        degree[i]++;
+        degree[j]++;
+        if (degree[i] >= maxDegree) break;
+      }
+    }
+  }
+
+  const byRoot = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    if (!byRoot.has(r)) byRoot.set(r, []);
+    byRoot.get(r).push(ids[i]);
+  }
+
+  const clusters = [];
+  const singletons = [];
+  for (const members of byRoot.values()) {
+    if (members.length < minSize) singletons.push(...members);
+    else clusters.push(members);
+  }
+  // Largest first: #167 wants naming ordered by size, because ten minutes on
+  // the biggest clusters covers most of a library and a wall of unnamed
+  // singletons is a chore rather than a feature.
+  clusters.sort((a, b) => b.length - a.length || a[0] - b[0]);
+  return { clusters, singletons };
+}
+
+/**
+ * Assign ONE new face to an existing person without re-clustering.
+ *
+ * The everyday case as photos arrive: re-running the whole O(n^2) pass for
+ * every import would be absurd, and #167 names this explicitly. Compares
+ * against each person's members and takes the best mean similarity, so a
+ * person represented by twenty photos is not decided by whichever single one
+ * happens to be first.
+ *
+ * @param {{scale: number, bytes: Int8Array}} face
+ * @param {Array<{personId: number, members: Array<{scale: number, bytes: Int8Array}>}>} people
+ * @param {number} [threshold]
+ * @returns {{personId: number, score: number}|null} null when it matches
+ *   nobody — which is a real answer, not a failure, and must leave the face
+ *   unassigned rather than forcing it into the nearest person.
+ */
+export function assignToPerson(face, people, threshold = SAME_PERSON_COSINE) {
+  let best = null;
+  for (const p of people) {
+    if (!p.members.length) continue;
+    let sum = 0;
+    for (const m of p.members) {
+      sum += dot(face.bytes, m.bytes) * face.scale * m.scale;
+    }
+    const score = sum / p.members.length;
+    if (score >= threshold && (!best || score > best.score)) {
+      best = { personId: p.personId, score };
+    }
+  }
+  return best;
+}
