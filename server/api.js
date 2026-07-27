@@ -101,6 +101,7 @@ import {
   rankByVector,
   scoreQuantiles,
 } from "./ml/textSearch.js";
+import { saveTag, listTags, deleteTag } from "./db/tags.js";
 import { interactiveRoute } from "./lib/interactive.js";
 import { whyTranscode, playbackPlan } from "./lib/videoPlayback.js";
 import {
@@ -711,6 +712,16 @@ function parseFilterParam(req) {
   // "Keep only" working set, referenced by flag; the ids live in the keep_scope
   // table (set via POST /api/scope), so there is no size cap here.
   if (raw.keepScope) spec.keepScope = true;
+  // A saved semantic tag (#164), matched by the value the user typed. This
+  // allowlist entry is load-bearing in the quiet way this file warns about
+  // above: correct SQL in filters.js and correct UI in filterSpec.js still
+  // produce a filter that does NOTHING if the key never gets past here.
+  if (raw.tag !== undefined && raw.tag !== null) {
+    if (typeof raw.tag !== "string" || !raw.tag.length) {
+      return { spec: {}, error: "tag must be a non-empty string" };
+    }
+    spec.tag = raw.tag;
+  }
   // Folder-focus scope ("open a folder"): the abs_path of the focused subtree
   // root. Only ever compared against the indexed folders.abs_path column (never
   // resolved to a file), so no safeResolve is needed here.
@@ -1409,6 +1420,36 @@ export function registerApi(app, { ml } = {}) {
         .status(500)
         .json({ error: `Couldn't search by phrase: ${e?.message ?? e}` });
     }
+  });
+
+  // The saved half of #164. Searching is disposable and costs ~10ms; what is
+  // worth storing is the user's DECISION about where a ranked list stopped
+  // being dogs, which no threshold can reproduce.
+  app.get("/api/ml/tags", (req, res) => res.json({ tags: listTags(getDb()) }));
+
+  app.post("/api/ml/tags", (req, res) => {
+    const value = typeof req.body?.value === "string" ? req.body.value : "";
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+    if (!value.trim())
+      return res.status(400).json({ error: "tag needs a name" });
+    if (!ids) {
+      return res
+        .status(400)
+        .json({ error: "ids must be an array of photo ids" });
+    }
+    try {
+      res.json(saveTag(getDb(), value, ids));
+    } catch (e) {
+      res
+        .status(500)
+        .json({ error: `Couldn't save the tag: ${e?.message ?? e}` });
+    }
+  });
+
+  app.delete("/api/ml/tags/:value", (req, res) => {
+    const { removed } = deleteTag(getDb(), req.params.value);
+    if (!removed) return res.status(404).json({ error: "no such tag" });
+    res.json({ removed });
   });
 
   // POST -> how much of the stored grouping the caller's photos account for

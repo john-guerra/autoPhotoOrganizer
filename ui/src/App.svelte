@@ -6456,6 +6456,15 @@
     selectedIds={[...selectedIds]}
     visibleIds={items.map((it) => it.id)}
     onrefinechange={(v) => (unrelatedBelow = v)}
+    onsemanticapply={(ids) => {
+      // Straight into the ONE id-scope seam the rest of the app uses (#42's
+      // rule: never a seventh hand-rolled copy of the feed-window guard).
+      // A semantic result is an id set like any other, so "Keep only" and
+      // "show my sunset photos" land in exactly the same place — which also
+      // means the scope chip, the counts and Clear all work already.
+      applyScope(idsScope(ids));
+      status = `Showing the ${ids.length.toLocaleString()} best matches`;
+    }}
   />
 {/if}
 

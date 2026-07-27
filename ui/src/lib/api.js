@@ -1081,6 +1081,49 @@ export async function fetchNearDupeCounts(ids) {
   return res.json();
 }
 
+/**
+ * Rank the library against a phrase (#164). Costs no per-photo inference —
+ * the text tower shares the image tower's vector space, so this is one small
+ * text encode plus arithmetic over vectors already stored.
+ * @param {string} q
+ * @param {number} [limit]
+ */
+export async function searchByPhrase(q, limit = 300) {
+  const res = await fetch("/api/ml/search", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ q, limit }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    // Carries the server's own words, including the 409s that name photo
+    // similarity as off, or the library as not yet read by the model.
+    throw new Error(body.error || `search failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Persist a search result the user decided to keep (#164). */
+export async function saveSemanticTag(value, ids) {
+  const res = await fetch("/api/ml/tags", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ value, ids }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `couldn't save tag (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Every saved semantic tag with its photo count. */
+export async function fetchSemanticTags() {
+  const res = await fetch("/api/ml/tags");
+  if (!res.ok) throw new Error(`couldn't load tags (${res.status})`);
+  return res.json();
+}
+
 /** Carry a vanished copy's rating/albums/tags/stack onto an unrated survivor. */
 export async function carryMissing(fromId, toId) {
   const res = await fetch("/api/missing/carry", {
