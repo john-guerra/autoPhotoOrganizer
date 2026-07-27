@@ -79,6 +79,7 @@
     thumbUrl,
     startNearDupes,
     fetchNearDupeCounts,
+    fetchSemanticTags,
     startEmbed,
     fetchMlSettings,
     fetchMlStats,
@@ -840,6 +841,36 @@
    * way of validating what was completed") reappearing in a new place, so the
    * result goes to the persistent channel rather than the transient one. */
   let dupeNotice = $state("");
+  /** Saved semantic tags (#164), for the filter group's picker. App owns this
+   * because FilterControls is presentational; it is re-read after the ML panel
+   * closes, since that is the only place a tag can be created or deleted. */
+  let semanticTags = $state([]);
+  /** Why the tag filter just cleared itself (#164). NOT `status`: clearing the
+   * filter rebuilds the feed, and the rebuild's "N photos loaded" overwrites
+   * that line about a second later — the same way it swallowed the
+   * Find-duplicates result until #211 moved it here. Twice now, so: an
+   * explanation that outlives a feed reload belongs in `notice`. */
+  let tagNotice = $state("");
+
+  async function refreshSemanticTags() {
+    // A failure here must not surface: the picker is additive, and a library
+    // with no tags looks exactly like one whose tag fetch failed — an error
+    // banner for a control the user has never used would be noise.
+    semanticTags = await fetchSemanticTags()
+      .then((r) => r.tags ?? [])
+      .catch(() => []);
+    // A tag can be deleted while it is the ACTIVE filter, which would leave an
+    // empty feed and a picker naming something that no longer exists — a
+    // silent no-op with no way for the user to work out what happened. Drop
+    // the filter and say so instead.
+    if (filter.tag && !semanticTags.some((t) => t.value === filter.tag)) {
+      const gone = filter.tag;
+      const next = { ...filter };
+      delete next.tag;
+      onFilterChange(next);
+      tagNotice = `The tag “${gone}” no longer exists — showing everything again`;
+    }
+  }
   // Scope to the folder once it's in? (The old "Open a folder…" entry, now an
   // option on the one Add panel rather than a second door to the same room.)
   let focusAfterAdd = $state(false);
@@ -1044,6 +1075,7 @@
     loadInitialFeed();
     refreshCounts();
     refreshMissingCount();
+    refreshSemanticTags();
   });
 
   /** THE one guarded feed-window-replace transaction (issue #42). Every
@@ -5812,6 +5844,7 @@
     bind:subdirsOpen
     {filter}
     {filterMode}
+    {semanticTags}
     {groupBy}
     bind:sidebarMode
     {cyclingAll}
@@ -6306,7 +6339,9 @@
     {selectedCount}
     {status}
     {error}
-    notice={[scanNotice, dupeNotice, missingNotice].filter(Boolean).join(" · ")}
+    notice={[scanNotice, dupeNotice, tagNotice, missingNotice]
+      .filter(Boolean)
+      .join(" · ")}
     {thumbProgress}
     {thumbCounts}
   >
@@ -6452,7 +6487,12 @@
 
 {#if mlPanelOpen}
   <MlPanel
-    onclose={() => (mlPanelOpen = false)}
+    onclose={() => {
+      mlPanelOpen = false;
+      // The panel is the only place a tag is created or deleted, so closing it
+      // is exactly when the picker's list can be stale.
+      refreshSemanticTags();
+    }}
     selectedIds={[...selectedIds]}
     visibleIds={items.map((it) => it.id)}
     onrefinechange={(v) => (unrelatedBelow = v)}
