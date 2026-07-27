@@ -1,6 +1,7 @@
 name: CI
 
-# Fast checks on every push and PR to main: the test suite, a Prettier format
+# Fast checks on every push and PR to the two long-lived branches: the test
+# suite, a Prettier format
 # gate (keeps the #76 baseline clean — a stray unformatted file fails here
 # rather than drifting the tree back to "only format your own files"), a
 # production build, and the browser tier.
@@ -14,12 +15,17 @@ name: CI
 # delays the fast unit feedback.
 #
 # The heavier native/electron packaging lives in release.yml (tag-triggered).
+#
+# `testing` is the trunk every feature PR targets and `main` is the release
+# line, so BOTH need the gate. Listing only `main` — as this file did until the
+# split — means a PR into `testing` runs no checks at all and reports itself
+# mergeable, which is worse than having no CI: it looks green.
 
 on:
   push:
-    branches: [main]
+    branches: [main, testing]
   pull_request:
-    branches: [main]
+    branches: [main, testing]
 
 jobs:
   check:

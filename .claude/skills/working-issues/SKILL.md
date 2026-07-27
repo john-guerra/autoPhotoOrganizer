@@ -103,11 +103,33 @@ Never hand-write an identifier, and never use `$CLAUDE_SESSION_ID` — that
 variable does not exist (it is `CLAUDE_CODE_SESSION_ID`), and reading it
 silently yields an empty string rather than failing.
 
+## Two long-lived branches: `testing` is the trunk, `main` is the release line
+
+**Every feature PR branches from `origin/testing` and targets `testing`.** Do
+not branch from `main` and do not open a PR against it — `main` is the branch
+John has already signed off on, and `release.yml` cuts packaged builds from the
+`v*` tags that land on it.
+
+```
+issue-$N-slug ──PR──> testing ──(John validates)──> main ──tag v*──> release
+```
+
+- `package.json` and `CHANGELOG.md` advance on **`testing`**. `main` sits at
+  the last released version until John merges a validated batch forward, so
+  main's version number is behind and is NOT the base for a new claim —
+  `claim-version.sh` reads `origin/testing` for exactly this reason.
+- CI (`ci.yml`, `codeql.yml`) gates both branches. If a PR into `testing` shows
+  no checks at all, your branch predates the split — rebase onto
+  `origin/testing` and the triggers come with it.
+- Promoting `testing` → `main` is **John's** call, like closing an issue. Never
+  merge to `main` yourself, and never cut a `v*` tag.
+
 ## The loop
 
 ```
-check free → claim issue → claim version → worktree → commit often
-  → progress comments → PR (Refs #N) → merge → needs-validation → John closes → clean up
+check free → claim issue → claim version → worktree off testing → commit often
+  → progress comments → PR into testing (Refs #N) → merge → needs-validation
+  → John closes → clean up
 ```
 
 ## 1. Check it is free — MANDATORY, before anything else
@@ -165,8 +187,13 @@ VERSION=$(.claude/skills/working-issues/claim-version.sh $N)   # add --minor onl
 ## 4. Work in a worktree, commit often
 
 ```bash
-git worktree add .claude/worktrees/issue-$N-<slug> -b issue-$N-<slug> origin/main
+git fetch -q origin testing
+git worktree add .claude/worktrees/issue-$N-<slug> -b issue-$N-<slug> origin/testing
 ```
+
+**`origin/testing`, not `origin/main`** — see the branch model above. Branching
+off `main` silently starts you from the last _release_, which is many patches
+behind the trunk.
 
 Then per `CLAUDE.md`: every stable state is a checkpoint commit — a slice that
 builds with tests green gets committed right then, not batched. Reference the
@@ -197,19 +224,23 @@ test that never failed proves nothing.
 ## 6. Finish: PR → validation → close
 
 ```bash
-gh pr create --title "fix(tree): … (#$N)" --body "Refs #$N
+gh pr create --base testing --title "fix(tree): … (#$N)" --body "Refs #$N
 
 <what the user can now do, why, and the evidence>"
 ```
 
+**Pass `--base testing` explicitly.** `gh` defaults the base to the repo's
+default branch, so an omitted `--base` quietly opens the PR against `main` —
+into the release line, past John's validation gate.
+
 **Use `Refs #N`, never `Closes #N`.** John validates by hand at
 `localhost:5173`; merging must not close the issue out from under him.
 
-Before marking ready, rebase on `main` and check two things:
+Before marking ready, rebase on `testing` and check two things:
 
 - `CHANGELOG.md` conflicts with any PR merged since you branched. Resolution is
   mechanical: keep both entries, newest version on top.
-- **If `main`'s version has passed your claim**, your number is now stale.
+- **If `testing`'s version has passed your claim**, your number is now stale.
   Release it and re-claim: `git push origin :refs/tags/claim/$VERSION` then
   re-run `claim-version.sh`. The lock guarantees _uniqueness_, not that claim
   order matches merge order.

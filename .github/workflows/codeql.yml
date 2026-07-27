@@ -1,16 +1,17 @@
 name: CodeQL
 
 # Static security analysis (code scanning) for the JS/Svelte sources. Runs on
-# every push/PR to main and weekly, so a newly-introduced injection or unsafe
-# path pattern surfaces as a GitHub code-scanning alert rather than reaching a
-# release. Complements the runtime guardrails (safeResolve, Electron hardening)
-# and the npm-audit supply-chain gate in ci.yml.
+# every push/PR to `testing` (the trunk) and `main` (the release line), and
+# weekly, so a newly-introduced injection or unsafe path pattern surfaces as a
+# GitHub code-scanning alert rather than reaching a release. Complements the
+# runtime guardrails (safeResolve, Electron hardening) and the npm-audit
+# supply-chain gate in ci.yml.
 
 on:
   push:
-    branches: [main]
+    branches: [main, testing]
   pull_request:
-    branches: [main]
+    branches: [main, testing]
   schedule:
     - cron: "27 3 * * 1"
 

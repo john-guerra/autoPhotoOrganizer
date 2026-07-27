@@ -123,8 +123,12 @@ backlog triage happens on GitHub.
   `docs/TEST_FOLDERS.local.md` (gitignored).
 - **Challenge him with evidence** — he explicitly asked not to be agreed
   with by default.
-- Direct pushes to `main` may be blocked by tooling; push to the
-  `v2-reorg` branch (John merges/fast-forwards `main` himself).
+- **`testing` is the trunk; `main` is the release line.** Branch every issue
+  off `origin/testing` and target `testing` with the PR. John validates a
+  batch there, then merges `testing` → `main` and tags `v*`, which is what
+  `release.yml` builds. Never merge to `main` or cut a `v*` tag yourself —
+  both are his call, for the same reason he closes issues himself. (This
+  replaced the old `v2-reorg` push target.)
 - Commit early; the working tree should not accumulate multi-feature
   batches (an interrupted session nearly stranded uncommitted work once).
 

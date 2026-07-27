@@ -209,8 +209,14 @@ Full ladder, filing template, and the parallel-agent claim protocol → the
   builds, tests pass, and a slice works, commit it as a small, focused commit.
   Frequent known-good points make it cheap to bisect a regression or roll back,
   and keep the working tree from piling up into one big unreviewable batch.
-  Prefer many small checkpoint commits over one large one. (Branch/merge flow:
-  see `docs/ROADMAP.md`.)
+  Prefer many small checkpoint commits over one large one.
+- **`testing` is the trunk; `main` is the release line.** Branch off
+  `origin/testing`, open the PR with `--base testing`. `package.json` and
+  `CHANGELOG.md` advance on `testing`; `main` stays at the last released
+  version until John validates a batch and merges it forward, then tags `v*`.
+  Never merge to `main` or push a `v*` tag yourself. Full protocol (and the
+  reason `claim-version.sh` reads its base from `testing`, not `main`) → the
+  `working-issues` skill; rationale → `docs/ROADMAP.md`.
 - **Commit proactively — don't wait to be asked.** Whenever there's a stable
   version or a significant change (a fix verified, a feature slice landed, a
   refactor at a green state), commit it right then so we always have

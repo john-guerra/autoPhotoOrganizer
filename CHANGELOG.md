@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.38
+
+- **Work is now validated on a `testing` branch before it reaches `main`.**
+  `main` holds only what has been signed off and is what release builds are
+  cut from; everything else lands on `testing` first. No change to the app
+  itself — this is how changes get to you, not what they do.
+
 ## 2.18.37
 
 - **Search your photos by what is in them** (#164). Type "sunset", "whiteboard",

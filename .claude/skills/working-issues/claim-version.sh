@@ -21,7 +21,14 @@ MODE="${2:---patch}"
 WHO="$("$(dirname "${BASH_SOURCE[0]}")/agent-id.sh")"
 BRANCH="$(git branch --show-current 2>/dev/null || echo detached)"
 
-git fetch -q origin main
+# The TRUNK, not the release line. `testing` is where package.json advances;
+# `main` only catches up when John cuts a release. Reading the base from `main`
+# (as this did before the branch split) breaks the moment a claim tag is
+# released: five PRs merge into `testing` as 2.18.38..42, their claim tags are
+# deleted on merge, `main` is still 2.18.37 -- and the next agent computes
+# 2.18.38 all over again, colliding with shipped work. The claim tags only
+# guarantee uniqueness among LIVE claims; the base has to supply the floor.
+git fetch -q origin testing
 
 # Versions already claimed by other agents. `ls-remote` returns annotated tags
 # TWICE -- `claim/2.18.8` and the peeled `claim/2.18.8^{}` -- so strip `^{}`
@@ -33,7 +40,7 @@ claimed() {
 }
 
 base_version() {
-  git show origin/main:package.json \
+  git show origin/testing:package.json \
     | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).version))"
 }
 
@@ -42,8 +49,8 @@ bump() { # bump <version> <--patch|--minor>
   if [ "$2" = "--minor" ]; then echo "$a.$((b + 1)).0"; else echo "$a.$b.$((c + 1))"; fi
 }
 
-# Start above BOTH what main ships and what every live claim holds, so a claim
-# is never lower than a version already spoken for.
+# Start above BOTH what the trunk carries and what every live claim holds, so a
+# claim is never lower than a version already spoken for.
 HIGHEST="$( { base_version; claimed; } \
   | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 )"
 CANDIDATE="$(bump "$HIGHEST" "$MODE")"
