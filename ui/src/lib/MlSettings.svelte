@@ -34,7 +34,7 @@
    * panel still works standalone (Manage library renders it with no grid
    * context) — the scope selector simply offers fewer choices there.
    */
-  let { selectedIds = [], visibleIds = [] } = $props();
+  let { selectedIds = [], visibleIds = [], onrefinechange } = $props();
 
   /** What "Embed now" will act on. Defaults to the whole library, matching the
    *  behaviour this control had before a choice existed. */
@@ -76,6 +76,7 @@
   let thresholdDraft = $state(0.9);
   let windowSecDraft = $state(60);
   let deviceDraft = $state("auto");
+  let refineDraft = $state(0.6);
 
   /** Plain-language names for the execution providers (#209). The values come
    *  from the server so the list cannot drift from what it will accept. */
@@ -235,6 +236,7 @@
     thresholdDraft = settings.nearDupeThreshold ?? modelThreshold(settings);
     windowSecDraft = Math.round(settings.nearDupeWindowMs / 1000);
     deviceDraft = settings.device ?? "auto";
+    refineDraft = settings.refineBelow ?? 0.6;
   }
 
   /** The active model's own measured threshold — what `null` means. */
@@ -462,6 +464,23 @@
   async function changeThreshold() {
     if (!(await save({ nearDupeThreshold: Number(thresholdDraft) }))) return;
     say(regroupingNote());
+  }
+
+  /**
+   * Unlike every other control here, this one needs no sweep — the
+   * per-neighbour scores are already stored, so only the client-side
+   * comparison moves. Saying so matters: the slider beside it costs a full
+   * regroup, and a user who has learned to expect that would otherwise wait
+   * for something that already happened.
+   */
+  async function changeRefine() {
+    if (!(await save({ refineBelow: Number(refineDraft) }))) return;
+    onrefinechange?.(Number(refineDraft));
+    say(
+      Number(refineDraft) === 0
+        ? "Splitting off — bursts are grouped by timing alone again. Applied immediately."
+        : `Splitting unlike photos below ${Number(refineDraft).toFixed(2)}. Applied immediately — close this panel to see the grid regroup.`
+    );
   }
 
   async function changeWindow() {
@@ -897,6 +916,37 @@
           ).toFixed(2)})
         </button>
       {/if}
+    </p>
+
+    <!-- The refiner (#216). Deliberately placed BELOW the merge threshold and
+         labelled as the opposite question, because two sliders both called
+         "similarity" would read as one control with two knobs rather than two
+         controls asking opposite things. -->
+    <label class="field">
+      <span class="field-label">Split unlike</span>
+      <input
+        type="range"
+        data-testid="ml-refine-below"
+        min="0"
+        max="0.9"
+        step="0.05"
+        bind:value={refineDraft}
+        disabled={busy}
+        onchange={changeRefine}
+      />
+      <span class="field-value"
+        >{Number(refineDraft) === 0
+          ? "off"
+          : Number(refineDraft).toFixed(2)}</span
+      >
+    </label>
+    <p class="hint">
+      Photos taken seconds apart are stacked together by timing alone — but on a
+      real library a quarter of those turn out to be visibly unrelated. This
+      splits those back apart. Higher splits more aggressively;
+      <strong>0 turns splitting off</strong> and leaves timing in charge. Unlike
+      the slider above, this applies <strong>instantly</strong> — the comparisons
+      are already stored, so nothing has to be recomputed.
     </p>
 
     <label class="field">

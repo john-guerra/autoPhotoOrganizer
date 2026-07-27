@@ -215,8 +215,13 @@
    * Inert without embeddings: the veto needs a measured score for the exact
    * pair in hand, so a library that has never been embedded stacks exactly as
    * it always did.
+   *
+   * Read from the ML settings and updated live when the panel changes it —
+   * unlike the discovery threshold, moving this costs nothing (the scores are
+   * already stored), so the grid can regroup on the spot.
    */
-  const UNRELATED_BELOW = 0.6;
+  const DEFAULT_UNRELATED_BELOW = 0.6;
+  let unrelatedBelow = $state(DEFAULT_UNRELATED_BELOW);
   const DEFAULT_RATIO = 1.5; // placeholder until real dimensions arrive
 
   const hasNativePicker =
@@ -916,7 +921,10 @@
   // answer, and no user-facing action depends on it.
   let mlEnabled = $state(false);
   fetchMlSettings()
-    .then((s) => (mlEnabled = !!s.enabled))
+    .then((s) => {
+      mlEnabled = !!s.enabled;
+      if (typeof s.refineBelow === "number") unrelatedBelow = s.refineBelow;
+    })
     .catch(() => {});
 
   // --- Scrolling / prefetch settings (persisted) --------------------------
@@ -4475,7 +4483,7 @@
   let autoStacks = $derived(
     detectBurstsByGroup(items, groupBy, {
       gapMs: burstEnabled ? burstGapMs : 0,
-      unrelatedBelow: UNRELATED_BELOW,
+      unrelatedBelow,
     })
   );
   // Fold in the persisted manual create/dissolve overrides (issue #24) — all
@@ -6415,6 +6423,7 @@
     onclose={() => (mlPanelOpen = false)}
     selectedIds={[...selectedIds]}
     visibleIds={items.map((it) => it.id)}
+    onrefinechange={(v) => (unrelatedBelow = v)}
   />
 {/if}
 
