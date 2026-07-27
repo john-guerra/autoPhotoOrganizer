@@ -214,7 +214,33 @@ describe("groupNearDupes", () => {
     const res = await run({ threshold: 0.9 });
 
     expect(res.photos).toBe(0);
-    expect(nearDupeCounts(getDb(), MODEL)).toEqual({ photos: 0, groups: 0 });
+    // `computedAt: null` means "no grouping exists", which the panel must not
+    // confuse with a grouping that ran at an unknown time (0) — "never run"
+    // and "run, but we don't know when" are different answers to the user.
+    expect(nearDupeCounts(getDb(), MODEL)).toEqual({
+      photos: 0,
+      groups: 0,
+      computedAt: null,
+    });
+  });
+
+  it("stamps the grouping with when it ran, once for the whole pass", async () => {
+    const before = Date.now();
+    seedWithVectors([
+      { time: 1000, angle: 0 },
+      { time: 2000, angle: 0.01 },
+    ]);
+    await run({ threshold: 0.9 });
+
+    const { computedAt } = nearDupeCounts(getDb(), MODEL);
+    expect(computedAt).toBeGreaterThanOrEqual(before);
+    expect(computedAt).toBeLessThanOrEqual(Date.now());
+    // One timestamp for the whole grouping, not one per row — a wholesale
+    // replacement happened at a moment.
+    const distinct = getDb()
+      .prepare(`SELECT COUNT(DISTINCT computed_at) AS n FROM near_dupe_groups`)
+      .get().n;
+    expect(distinct).toBe(1);
   });
 
   it("replaces the previous grouping wholesale rather than accumulating", async () => {

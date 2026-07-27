@@ -25,7 +25,6 @@
     purgeMlModel,
     retryMlFailed,
     startEmbed,
-    startNearDupes,
     cancelJob,
   } from "./api.js";
   import { jobs } from "./jobs.js";
@@ -186,6 +185,27 @@
     if (mins < 60) return `about ${mins} min`;
     const hours = (mins / 60).toFixed(1);
     return `about ${hours} h`;
+  });
+
+  /**
+   * "3 minutes ago", or "unknown" for a grouping that predates the timestamp
+   * column (a library upgraded across user_version 4).
+   *
+   * `computedAt === null` means no grouping exists at all and is handled by the
+   * branch above this label ever rendering — "never run" and "run at an unknown
+   * time" are different answers and must not collapse into one.
+   */
+  const lastRunLabel = $derived.by(() => {
+    const t = stats?.nearDupes?.computedAt;
+    if (!t) return "at an unknown time";
+    const secs = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (secs < 45) return "just now";
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"} ago`;
   });
 
   function say(text, kind = "info") {
@@ -462,22 +482,6 @@
 
   function regroupingNote() {
     return "Regrouping now — stacks update when the job finishes. No photo is moved or deleted.";
-  }
-
-  async function findNearDupesNow() {
-    busy = true;
-    try {
-      const r = await startNearDupes();
-      if (r.started) say("Looking for near-duplicates — watch the jobs panel.");
-      else if (r.alreadyRunning)
-        say("Already looking for near-duplicates.", "warn");
-    } catch (e) {
-      // Includes the server's 409 when the feature is off, in its own words
-      // ("Turn it on in Manage library to compute embeddings first").
-      say(`Couldn't start near-duplicate detection: ${e.message}`, "err");
-    } finally {
-      busy = false;
-    }
   }
 
   async function embedNow() {
@@ -920,18 +924,24 @@
       </li>
     </ul>
 
-    <div class="ml-actions">
-      <button
-        data-testid="ml-find-dupes"
-        disabled={busy || !!dupeJob}
-        onclick={findNearDupesNow}
-      >
-        {dupeJob ? "Looking…" : "Find near-duplicates now"}
-      </button>
-    </div>
-    <p class="hint">
-      Uses the vectors already stored, so this takes seconds — it never re-reads
-      your photos.
+    <!-- STATE, not a second trigger (Recommendation 4 of
+         docs/ML-UX-REVIEW-2026-07-26.md). There used to be a "Find
+         near-duplicates now" button here as well as the ⧉ control in the
+         toolbar and the automatic pass after an embed sweep — three ways to
+         start the same work, with three different names and three different
+         kinds of feedback, and no way to tell whether they were one action or
+         three. Grouping is a view concern, so the toolbar owns it; this panel
+         answers "did it work, and when", which no button ever did. -->
+    <p class="hint" data-testid="ml-dupe-state">
+      {#if dupeJob}
+        Looking for near-duplicates now — {dupeJob.phase || "comparing photos"}.
+      {:else if !stats.nearDupes?.groups}
+        No groups yet. Use <strong>⧉ Find duplicates</strong> in the toolbar — it
+        takes seconds, because it reuses the photos already read.
+      {:else}
+        Last run {lastRunLabel} · reuses the photos already read, so it never re-reads
+        them. Re-run it with <strong>⧉ Find duplicates</strong> in the toolbar.
+      {/if}
     </p>
     {#if dupeJob}
       <p class="hint">{dupeJob.phase || "Comparing photos"}</p>

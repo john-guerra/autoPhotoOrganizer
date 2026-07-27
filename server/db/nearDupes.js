@@ -70,14 +70,20 @@ export function embeddedPhotosInTimeOrder(db, model) {
 export function replaceNearDupeGroups(db, model, rows) {
   const wipe = db.prepare(`DELETE FROM near_dupe_groups WHERE model = ?`);
   const insert = db.prepare(
-    `INSERT INTO near_dupe_groups (photo_id, group_id, model)
-     VALUES (?, ?, ?)
-     ON CONFLICT(photo_id) DO UPDATE SET group_id = excluded.group_id,
-                                         model    = excluded.model`
+    `INSERT INTO near_dupe_groups (photo_id, group_id, model, computed_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(photo_id) DO UPDATE SET group_id    = excluded.group_id,
+                                         model       = excluded.model,
+                                         computed_at = excluded.computed_at`
   );
+  // One timestamp for the whole grouping, taken ONCE before the transaction
+  // rather than per row: a wholesale replacement happened at a moment, and
+  // letting each row stamp itself would make MAX(computed_at) drift by however
+  // long the write took.
+  const at = Date.now();
   const run = db.transaction(() => {
     wipe.run(model);
-    for (const r of rows) insert.run(r.photoId, r.groupId, model);
+    for (const r of rows) insert.run(r.photoId, r.groupId, model, at);
   });
   run();
   return {
@@ -97,11 +103,19 @@ export function replaceNearDupeGroups(db, model, rows) {
 export function nearDupeCounts(db, model) {
   const row = db
     .prepare(
-      `SELECT COUNT(*) AS photos, COUNT(DISTINCT group_id) AS groups
+      `SELECT COUNT(*) AS photos, COUNT(DISTINCT group_id) AS groups,
+              MAX(computed_at) AS computedAt
          FROM near_dupe_groups WHERE model = ?`
     )
     .get(model);
-  return { photos: row?.photos ?? 0, groups: row?.groups ?? 0 };
+  return {
+    photos: row?.photos ?? 0,
+    groups: row?.groups ?? 0,
+    // 0 means "a grouping exists but predates this column" (a library upgraded
+    // across user_version 4); null means there is no grouping at all. The
+    // panel must distinguish them — "last run: unknown" is not "never run".
+    computedAt: row?.photos ? (row.computedAt ?? 0) : null,
+  };
 }
 
 /**

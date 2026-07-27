@@ -263,6 +263,34 @@ export function applySchema(db) {
     if (hasColumn) db.exec(`ALTER TABLE photos DROP COLUMN perceptual_hash`);
     db.pragma("user_version = 3");
   }
+  if (dataVersion < 4) {
+    // #162 / Recommendation 4: near_dupe_groups gained `computed_at` so the ML
+    // panel can say when the grouping last ran instead of offering a duplicate
+    // trigger. `CREATE TABLE IF NOT EXISTS` is a no-op against a table that
+    // already exists, so a library created between 2.18.34 and now needs the
+    // column added explicitly.
+    //
+    // NOT a DROP, unlike the user_version 2 step above: that one was safe only
+    // because #161 had never shipped, and its comment says in terms not to
+    // copy it forward. Existing groupings are real derived data — cheap to
+    // recompute, but dropping them would silently un-stack a user's grid until
+    // they noticed and re-ran it. The DEFAULT 0 reads as "unknown", which the
+    // panel renders as "last run: unknown" rather than as the epoch.
+    const hasColumn = db
+      .prepare(
+        `SELECT 1 FROM pragma_table_info('near_dupe_groups') WHERE name = ?`
+      )
+      .get("computed_at");
+    const tableExists = db
+      .prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`)
+      .get("near_dupe_groups");
+    if (tableExists && !hasColumn) {
+      db.exec(
+        `ALTER TABLE near_dupe_groups ADD COLUMN computed_at INTEGER NOT NULL DEFAULT 0`
+      );
+    }
+    db.pragma("user_version = 4");
+  }
 
   // --- ML artifacts (#161) --------------------------------------------------
   // Their OWN tables, never columns on `photos`. The feed's hot path is
@@ -363,11 +391,24 @@ export function applySchema(db) {
   // plain `REFERENCES` here would reproduce it exactly.
   db.exec(`
     CREATE TABLE IF NOT EXISTS near_dupe_groups (
-      photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
-      group_id INTEGER NOT NULL,
-      model    TEXT    NOT NULL
+      photo_id    INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+      group_id    INTEGER NOT NULL,
+      model       TEXT    NOT NULL,
+      computed_at INTEGER NOT NULL DEFAULT 0
     )
   `);
+  // `computed_at` repeats the same value on every row, which is not normalized
+  // and is deliberate. The grouping is replaced WHOLESALE (see
+  // replaceNearDupeGroups), so there is exactly one timestamp per grouping and
+  // no partial state a separate table could describe more truthfully. Storing
+  // it here means it is deleted with the data it describes — including via the
+  // CASCADE above — instead of outliving it as a stale "last run" for a
+  // grouping that no longer exists. At ~1,500 rows the duplication costs about
+  // 12 KB.
+  //
+  // It exists so the panel can report STATE rather than offer a second trigger
+  // (Recommendation 4, docs/ML-UX-REVIEW-2026-07-26.md): "608 groups, last run
+  // 3 minutes ago" answers "did this work?", which a button never did.
   // Serves "how many groups are there" and the whole-grouping wipe that starts
   // each sweep; both filter on model with no photo_id bound, so without this
   // they scan the table.
