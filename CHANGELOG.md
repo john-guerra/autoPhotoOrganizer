@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.39
+
+- **Find the faces in your photos** (#166). Machine learning → Find faces
+  downloads a small face model (16 MB) and looks through your library for
+  people — about 14 minutes for 32,000 photos. Faces stay in this app's local
+  index and never leave your machine, and one button forgets all of them.
+  Naming people and filtering by person come next (#167).
+
 ## 2.18.38
 
 - **Work is now validated on a `testing` branch before it reaches `main`.**

@@ -73,10 +73,17 @@ export const FACE_MODELS = [
         "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43",
     },
     dim: FACE_DIM,
-    // Measured on 60 real photos, darwin/arm64, CPU, 2026-07-27. Used ONLY to
-    // estimate a sweep before the user commits to it (#215) — an
-    // order-of-magnitude honesty aid, not a promise.
-    approxMsPerPhoto: 52,
+    // END-TO-END per photo, not the detector's share: decode + letterbox +
+    // detect + one recognition per face found. The component figures are 52 ms
+    // to detect and 52 ms per face, and a naive sum of those UNDERSTATES the
+    // real cost, because a photo also has to be decoded first and this
+    // library averages ~1.9 faces per photo that has any.
+    //
+    // This number is rendered as "about N minutes" before the user commits to
+    // a sweep (#215), so an optimistic one is not a harmless rounding — it is
+    // the panel telling them something untrue about a decision they are
+    // making. Measured on the real 31,976-photo library, darwin/arm64, CPU.
+    approxMsPerPhoto: 170,
     approxMsPerFace: 52,
     // bytes / 1e6, DECIMAL MB not MiB — this is rendered before the user
     // starts the download, and decimal is what the OS shows while it runs.
@@ -111,7 +118,13 @@ export const FACE_MODELS = [
         "9cc6e4a75f0e2bf0b1aed94578f144d15175f357bdc05e815e5c4a02b319eb4f",
     },
     dim: FACE_DIM,
-    approxMsPerPhoto: 17,
+    // END-TO-END, and MEASURED LIVE rather than summed: a real sweep did 947
+    // photos in 25 s on the full library, i.e. 26 ms each. The component
+    // figures (17 ms detect, 3 ms per face) would have predicted 9 minutes
+    // for the library where the truth is 14 — the panel said "about 9
+    // minutes" with these before the live run corrected them. Summing
+    // component costs omits the decode, which dominates.
+    approxMsPerPhoto: 26,
     approxMsPerFace: 3,
     approxDownloadMB: 16,
     // Same pack policy, same repo, same November 2025 update — buffalo_s is

@@ -851,6 +851,11 @@
    * Find-duplicates result until #211 moved it here. Twice now, so: an
    * explanation that outlives a feed reload belongs in `notice`. */
   let tagNotice = $state("");
+  /** #166. The PERSISTENT channel again, and by now the default rather than
+   *  the special case: a face scan starting reloads nothing, but a purge
+   *  does, and `status` is overwritten by "N photos loaded" a beat later.
+   *  Same trap as scanNotice, dupeNotice and tagNotice above. */
+  let faceNotice = $state("");
 
   async function refreshSemanticTags() {
     // A failure here must not surface: the picker is additive, and a library
@@ -6339,7 +6344,7 @@
     {selectedCount}
     {status}
     {error}
-    notice={[scanNotice, dupeNotice, tagNotice, missingNotice]
+    notice={[scanNotice, dupeNotice, tagNotice, faceNotice, missingNotice]
       .filter(Boolean)
       .join(" · ")}
     {thumbProgress}
@@ -6496,6 +6501,7 @@
     selectedIds={[...selectedIds]}
     visibleIds={items.map((it) => it.id)}
     onrefinechange={(v) => (unrelatedBelow = v)}
+    onnotice={(m) => (faceNotice = m)}
     onsemanticapply={(ids) => {
       // Straight into the ONE id-scope seam the rest of the app uses (#42's
       // rule: never a seventh hand-rolled copy of the feed-window guard).
