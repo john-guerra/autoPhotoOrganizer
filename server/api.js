@@ -90,7 +90,11 @@ import {
   isNearDupeSweepInFlight,
   nearDupeProgress,
 } from "./ml/nearDupeSweep.js";
-import { nearDupeCounts, clearNearDupeGroups } from "./db/nearDupes.js";
+import {
+  nearDupeCounts,
+  nearDupeCountsForIds,
+  clearNearDupeGroups,
+} from "./db/nearDupes.js";
 import { interactiveRoute } from "./lib/interactive.js";
 import { whyTranscode, playbackPlan } from "./lib/videoPlayback.js";
 import {
@@ -1332,6 +1336,34 @@ export function registerApi(app, { ml } = {}) {
     }
     const jobId = kickNearDupeSweep(getDb());
     res.json({ started: true, jobId });
+  });
+
+  // POST -> how much of the stored grouping the caller's photos account for
+  // (#211). READ-ONLY: it recomputes nothing and writes nothing, so it is safe
+  // to call after any sweep, or on its own to re-read a selection's answer.
+  //
+  // Scoping the ANSWER rather than the sweep is the whole design — see
+  // db/nearDupes.js's nearDupeCountsForIds for the measurement that made the
+  // issue's merge-vs-replace choice unnecessary.
+  //
+  // POST, not GET, for the same reason /api/ml/embed is: the id list is the
+  // user's selection and routinely runs to tens of thousands, which no query
+  // string should carry.
+  app.post("/api/ml/near-dupes/counts", (req, res) => {
+    const db = getDb();
+    const { modelId } = readMlSettings();
+    const ids = Array.isArray(req.body?.ids)
+      ? [...new Set(req.body.ids.filter((n) => Number.isInteger(n)))]
+      : null;
+    if (!ids) {
+      return res
+        .status(400)
+        .json({ error: "ids must be an array of photo ids" });
+    }
+    res.json({
+      scoped: nearDupeCountsForIds(db, modelId, ids),
+      library: nearDupeCounts(db, modelId),
+    });
   });
 
   // --- Lazy metadata enrichment --------------------------------------------

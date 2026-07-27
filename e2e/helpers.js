@@ -208,6 +208,12 @@ export const statusBar = {
   /** The transient line, but only when it is carrying a FAILURE (`.err`) — so a
    *  spec can't accidentally pass on an ordinary "loading…" status. */
   error: (page) => page.locator(".statusbar .status.err"),
+  /** The PERSISTENT line — a confirmation that has to outlive the next
+   *  background fetch (a scan result, a Find-duplicates answer). Deliberately
+   *  distinct from `.status`, which every feed load overwrites. */
+  notice: (page) => page.locator(".statusbar .notice"),
+  /** The transient line, whatever it currently says. */
+  status: (page) => page.locator(".statusbar .status"),
   clear: (page) => page.locator(".statusbar .sel-btn", { hasText: /^Clear$/ }),
   keepOnly: (page) =>
     page.locator(".statusbar .sel-btn", { hasText: /^Keep only$/ }),

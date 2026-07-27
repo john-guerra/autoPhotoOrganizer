@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.36
+
+- **Find duplicates now answers about your selection** (#211). Select some
+  photos, run it, and it tells you what it found among _those_ photos — "12
+  groups among your 200 selected photos (43 library-wide)" — instead of only
+  ever reporting a library-wide number you had no way to connect to what you
+  were looking at.
+- When a duplicate group reaches photos outside your selection, it says so
+  rather than quietly counting them as yours.
+- With photos selected, the first-time "read your photos" step now reads only
+  the selection, not everything on screen.
+
 ## 2.18.35
 
 - **Photo similarity now makes bursts better, not just bigger** (#216). Photos
