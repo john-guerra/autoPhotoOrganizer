@@ -618,14 +618,30 @@ describe("saveClusters is scoped and deliberate", () => {
         .all(m)
         .map((r) => r.id);
 
+    const ownerOf = (m) =>
+      db
+        .prepare(
+          `SELECT DISTINCT person_id FROM photo_faces WHERE model = ? ORDER BY 1`
+        )
+        .all(m)
+        .map((r) => r.person_id);
+
     saveClusters(db, [idsOf("buffalo_s")], { model: "buffalo_s" });
-    const small = listPersons(db)[0];
-    expect(small.faces).toBe(2);
+    expect(listPersons(db)[0].faces).toBe(2);
 
     // Now group the OTHER pack. buffalo_s's person must be untouched.
     saveClusters(db, [idsOf(MODEL)], { model: MODEL });
-    const after = listPersons(db).find((p) => p.id === small.id);
-    expect(after.faces).toBe(2);
+
+    // Asserted on WHO OWNS THE FACES, not on a person id surviving. `persons`
+    // has no AUTOINCREMENT, so the rowid of a person cleared and then deleted
+    // is handed straight back to the next insert -- and an id-based assertion
+    // therefore passes against the very bug it exists to catch. Mine did.
+    const [sOwner] = ownerOf("buffalo_s");
+    const [lOwner] = ownerOf(MODEL);
+    expect(sOwner).not.toBe(null);
+    expect(lOwner).not.toBe(null);
+    expect(lOwner).not.toBe(sOwner); // two packs, two separate people
+    expect(listPersons(db)).toHaveLength(2);
   });
 
   it("refuses to run without a model rather than clearing everything", () => {
