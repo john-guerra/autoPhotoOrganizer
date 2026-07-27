@@ -86,7 +86,15 @@ import {
 import { checkFaceModel, downloadFaceModel } from "./ml/faceDownload.js";
 import { sweepFaces, isFaceSweepInFlight } from "./ml/faceSweep.js";
 import { createFaceEngine } from "./ml/faceEngine.js";
-import { faceCounts, purgeFaces } from "./db/faces.js";
+import {
+  faceCounts,
+  purgeFaces,
+  faceVectors,
+  saveClusters,
+  listPersons,
+  renamePerson,
+} from "./db/faces.js";
+import { clusterFaces } from "./ml/faceClusters.js";
 import sharp from "sharp";
 
 /**
@@ -1668,6 +1676,65 @@ export function registerApi(app, { ml } = {}) {
     } finally {
       // ~200 MB of resident session must not outlive the sweep.
       await engine.close();
+    }
+  });
+
+  /** Group the faces found so far into people (#167).
+   *
+   *  Separate from the scan for the same reason regrouping near-duplicates is
+   *  separate from embedding: the costs differ by orders of magnitude.
+   *  Detecting faces is ~14 minutes of inference; clustering the vectors
+   *  already on disk is arithmetic. Someone adjusting the threshold needs the
+   *  cheap one on its own. */
+  app.post("/api/ml/faces/cluster", (req, res) => {
+    if (isFaceSweepInFlight()) {
+      return res.status(409).json({
+        error:
+          "A face scan is still running. Wait for it to finish so every face is grouped, or stop it from the jobs panel.",
+      });
+    }
+    const modelId = faceModelIdOf(req.body?.model);
+    const vectors = faceVectors(getDb(), modelId);
+    if (!vectors.ids.length) {
+      return res.status(409).json({
+        error:
+          "No faces have been found yet. Run “Find faces” first, then group them into people.",
+      });
+    }
+    const threshold = Number(req.body?.threshold);
+    const { clusters } = clusterFaces(
+      vectors,
+      Number.isFinite(threshold) ? { threshold } : {}
+    );
+    const r = saveClusters(getDb(), clusters);
+    res.json({ ...r, faces: vectors.ids.length });
+  });
+
+  /** Everyone found so far, largest first — the order naming wants. */
+  app.get("/api/ml/people", (req, res) =>
+    res.json({ people: listPersons(getDb()) })
+  );
+
+  /** Name a person (or clear the name with an empty string). */
+  app.put("/api/ml/people/:id", (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res
+        .status(400)
+        .json({ error: "person id must be a positive integer" });
+    }
+    const name = req.body?.name;
+    if (name !== null && typeof name !== "string") {
+      return res.status(400).json({ error: "name must be a string or null" });
+    }
+    try {
+      res.json(renamePerson(getDb(), id, name));
+    } catch (e) {
+      // The person was deleted underneath the panel — a re-cluster can do
+      // that to an unnamed one. Say so rather than 500ing.
+      res.status(404).json({
+        error: `That person no longer exists — the faces may have been regrouped. Reload the list.`,
+      });
     }
   });
 

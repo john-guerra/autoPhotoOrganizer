@@ -24,11 +24,15 @@
     downloadFaceModel,
     startFaceScan,
     purgeFaces,
+    clusterPeople,
+    fetchPeople,
+    renamePerson,
   } from "./api.js";
 
   let { onnotice } = $props();
 
   let status = $state(null);
+  let people = $state([]);
   let modelId = $state("");
   let busy = $state("");
   let error = $state("");
@@ -43,6 +47,9 @@
       const s = await fetchFaceStatus(modelId || undefined);
       status = s;
       if (!modelId) modelId = s.modelId;
+      people = await fetchPeople()
+        .then((r) => r.people ?? [])
+        .catch(() => []);
       clearTimeout(timer);
       if (s.running) timer = setTimeout(refresh, 2000);
     } catch (e) {
@@ -201,6 +208,59 @@
         {/if}
       </div>
 
+      {#if status.counts.faces > 0}
+        <div class="people">
+          <button
+            disabled={!!busy || status.running}
+            onclick={() =>
+              act("cluster", async () => {
+                const r = await clusterPeople(modelId);
+                onnotice?.(
+                  `Grouped ${n(r.assigned)} faces into ${n(r.people)} people` +
+                    (r.keptManual
+                      ? `, keeping ${n(r.keptManual)} you set by hand`
+                      : "")
+                );
+              })}
+            data-testid="face-cluster"
+          >
+            {busy === "cluster" ? "Grouping…" : "Group faces into people"}
+          </button>
+
+          {#if people.length}
+            <!-- Largest first, because ten minutes spent naming the biggest
+                 clusters covers most of a library. An unnamed person is still
+                 listed and still browsable — #167 is explicit about that. -->
+            <ul data-testid="people-list">
+              {#each people.slice(0, 40) as p (p.id)}
+                <li>
+                  {#if p.coverFaceId}
+                    <span class="dot" aria-hidden="true"></span>
+                  {/if}
+                  <input
+                    type="text"
+                    value={p.name ?? ""}
+                    placeholder={`Unnamed · ${n(p.faces)} face${p.faces === 1 ? "" : "s"}`}
+                    onchange={(e) =>
+                      act("name", async () => {
+                        await renamePerson(p.id, e.currentTarget.value);
+                      })}
+                    aria-label={`Name for the person in ${p.photos} photos`}
+                  />
+                  <span class="count">{n(p.photos)}</span>
+                </li>
+              {/each}
+            </ul>
+            {#if people.length > 40}
+              <p class="lede">…and {n(people.length - 40)} more.</p>
+            {/if}
+            <p class="lede">
+              Name someone and they appear in the Person filter in the toolbar.
+            </p>
+          {/if}
+        </div>
+      {/if}
+
       <!-- Face data is personal data about people who did not install this
            app. Saying plainly where it lives, and that it can be removed in
            one click, belongs next to the button that creates it. -->
@@ -281,6 +341,50 @@
     font-size: 0.78rem;
     color: #fbbf24;
     line-height: 1.45;
+  }
+  .people {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .people ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 13rem;
+    overflow-y: auto;
+  }
+  .people li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .people input {
+    flex: 1;
+    min-width: 0;
+    background: #1c1c1c;
+    color: inherit;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 0.2rem 0.35rem;
+    font-size: 0.78rem;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4c9aff;
+    flex: none;
+  }
+  .count {
+    font-size: 0.72rem;
+    opacity: 0.6;
+    min-width: 2.5rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
   .err {
     margin: 0;

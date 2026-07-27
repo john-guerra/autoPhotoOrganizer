@@ -1207,3 +1207,39 @@ export async function purgeFaces(model) {
   }
   return res.json();
 }
+
+/** Group the faces found so far into people (#167). Cheap — arithmetic over
+ *  vectors already on disk, unlike the scan that produced them. */
+export async function clusterPeople(model, threshold) {
+  const res = await fetch("/api/ml/faces/cluster", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, threshold }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `grouping failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Everyone found, largest first. */
+export async function fetchPeople() {
+  const res = await fetch("/api/ml/people");
+  if (!res.ok) throw new Error(`people failed (${res.status})`);
+  return res.json();
+}
+
+/** Name a person, or clear it with "". */
+export async function renamePerson(id, name) {
+  const res = await fetch(`/api/ml/people/${id}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `rename failed (${res.status})`);
+  }
+  return res.json();
+}

@@ -38,13 +38,38 @@
 import { dot } from "./quantize.js";
 
 /**
- * ArcFace's same-identity operating point, as a cosine over L2-normalized
- * embeddings. Deliberately conservative: a missed match leaves two clusters
- * the user can merge in one click, while a false match puts a stranger in
- * someone's photo set and is far harder to notice and undo. Those costs are
- * not symmetric, and the asymmetry is why this is not tuned to the midpoint.
+ * The same-identity bar, as a cosine over L2-normalized embeddings.
+ *
+ * ## This number is NOT validated, and the measurement says why that matters
+ *
+ * Measured on 316 real faces from the library (buffalo_s, 2026-07-27), the
+ * outcome is extremely threshold-sensitive and the low end is degenerate:
+ *
+ *   threshold   people   largest cluster   singletons
+ *      0.40       77          171              52
+ *      0.50       95          167              65
+ *      0.60      106          159              71
+ *      0.70      121          139              81
+ *      0.75      135          127              92
+ *      0.80      153           59              97
+ *      0.85      172           30             102
+ *
+ * At 0.5 — the value this constant originally held, asserted from ArcFace's
+ * published operating point rather than measured here — ONE cluster holds
+ * 53% of every face found. That is either a partner photographed constantly
+ * on a phone camera roll (entirely plausible: 167 of 939 photos is 18%) or
+ * the transitivity chaining described above swallowing a family. Telling
+ * those apart requires knowing who these people actually are, which is a
+ * judgement about the user's own family and not one to make on their behalf.
+ *
+ * 0.8 is chosen as the default because it is where the giant component first
+ * breaks up (171 → 59) rather than because it is known correct. It errs
+ * toward SPLITTING, which is the recoverable direction: two clusters of one
+ * person are one merge away, while a stranger inside someone's photo set is
+ * hard to notice and harder to undo. The route accepts a `threshold` so this
+ * can be tuned against a real answer once someone can supply one.
  */
-export const SAME_PERSON_COSINE = 0.5;
+export const SAME_PERSON_COSINE = 0.8;
 
 /** How many neighbours one face may link through. See the transitivity note
  *  in the module doc — this is the cap that stops one promiscuous vector from

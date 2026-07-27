@@ -80,6 +80,7 @@
     startNearDupes,
     fetchNearDupeCounts,
     fetchSemanticTags,
+    fetchPeople,
     startEmbed,
     fetchMlSettings,
     fetchMlStats,
@@ -845,6 +846,10 @@
    * because FilterControls is presentational; it is re-read after the ML panel
    * closes, since that is the only place a tag can be created or deleted. */
   let semanticTags = $state([]);
+  /** #167. Same shape as semanticTags: App owns the list, the picker is
+   *  presentational, and PersonFilter renders nothing at all while it is
+   *  empty (this toolbar folds by width). */
+  let people = $state([]);
   /** Why the tag filter just cleared itself (#164). NOT `status`: clearing the
    * filter rebuilds the feed, and the rebuild's "N photos loaded" overwrites
    * that line about a second later — the same way it swallowed the
@@ -874,6 +879,23 @@
       delete next.tag;
       onFilterChange(next);
       tagNotice = `The tag “${gone}” no longer exists — showing everything again`;
+    }
+  }
+
+  /** #167. Same shape and the same two reasons as refreshSemanticTags above:
+   *  a failure stays silent because the picker is additive, and an ACTIVE
+   *  person can vanish underneath the filter — a re-cluster deletes unnamed
+   *  people — which would leave an empty feed and a picker naming nobody. */
+  async function refreshPeople() {
+    people = await fetchPeople()
+      .then((r) => r.people ?? [])
+      .catch(() => []);
+    if (filter.personId && !people.some((p) => p.id === filter.personId)) {
+      const next = { ...filter };
+      delete next.personId;
+      onFilterChange(next);
+      faceNotice =
+        "That person was regrouped and no longer exists — showing everyone again";
     }
   }
   // Scope to the folder once it's in? (The old "Open a folder…" entry, now an
@@ -1081,6 +1103,7 @@
     refreshCounts();
     refreshMissingCount();
     refreshSemanticTags();
+    refreshPeople();
   });
 
   /** THE one guarded feed-window-replace transaction (issue #42). Every
@@ -5850,6 +5873,7 @@
     {filter}
     {filterMode}
     {semanticTags}
+    {people}
     {groupBy}
     bind:sidebarMode
     {cyclingAll}
@@ -6495,8 +6519,10 @@
     onclose={() => {
       mlPanelOpen = false;
       // The panel is the only place a tag is created or deleted, so closing it
-      // is exactly when the picker's list can be stale.
+      // is exactly when the picker's list can be stale. The same is true of
+      // people: grouping happens in there (#167).
       refreshSemanticTags();
+      refreshPeople();
     }}
     selectedIds={[...selectedIds]}
     visibleIds={items.map((it) => it.id)}

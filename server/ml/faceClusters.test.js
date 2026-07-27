@@ -8,6 +8,12 @@ import {
 
 const DIM = 64;
 
+/** These fixtures exercise MECHANISM (linkage, the degree cap, mean scoring),
+ *  not the tuned default. Pinning the threshold here keeps them from breaking
+ *  every time SAME_PERSON_COSINE is retuned against real faces — which it was,
+ *  from 0.5 to 0.8, and which broke three of them. */
+const T = 0.5;
+
 /** A vector pointing in a named direction, with `noise` pulling it off-axis.
  *  Same axis + small noise = the same person photographed twice. */
 function vec(axis, noise = 0, seed = 0) {
@@ -117,11 +123,11 @@ describe("clustering faces into people", () => {
     ]);
 
     // Uncapped, the bridge swallows everybody into one "person".
-    expect(clusterFaces(v, { maxDegree: 1000 }).clusters).toEqual([
-      [1, 2, 3, 4, 5, 6, 7],
-    ]);
+    expect(clusterFaces(v, { maxDegree: 1000, threshold: T }).clusters).toEqual(
+      [[1, 2, 3, 4, 5, 6, 7]]
+    );
     // Capped, the two people survive as two.
-    expect(clusterFaces(v, { maxDegree: 3 }).clusters).toEqual([
+    expect(clusterFaces(v, { maxDegree: 3, threshold: T }).clusters).toEqual([
       [1, 2, 3, 4],
       [5, 6, 7],
     ]);
@@ -145,11 +151,11 @@ describe("clustering faces into people", () => {
       halfway, // last
     ]);
 
-    expect(clusterFaces(v, { maxDegree: 1000 }).clusters).toEqual([
-      [1, 2, 3, 4, 5, 6, 7],
-    ]);
+    expect(clusterFaces(v, { maxDegree: 1000, threshold: T }).clusters).toEqual(
+      [[1, 2, 3, 4, 5, 6, 7]]
+    );
     // The bridge joins ONE person and stops. Both people survive.
-    expect(clusterFaces(v, { maxDegree: 3 }).clusters).toEqual([
+    expect(clusterFaces(v, { maxDegree: 3, threshold: T }).clusters).toEqual([
       [1, 2, 3, 7],
       [4, 5, 6],
     ]);
@@ -218,7 +224,7 @@ describe("assigning a new face as photos arrive", () => {
     const moderate = person(2, [vec(0, 0.5, 9)]);
     const face = quantize(vec(0, 0.01, 7));
 
-    const r = assignToPerson(face, [noisyFirst, moderate]);
+    const r = assignToPerson(face, [noisyFirst, moderate], T);
     expect(r).toMatchObject({ personId: 1 });
   });
 
