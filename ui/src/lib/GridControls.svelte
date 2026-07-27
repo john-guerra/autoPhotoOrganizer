@@ -30,6 +30,33 @@
     onfinddupes,
     onburstselection,
   } = $props();
+
+  // #211. A selection changes what this button ANSWERS, so it has to change
+  // what the button says — the ⛓ beside it already names its selection, and
+  // two neighbouring controls where only one admits the selection reads as one
+  // of them ignoring it.
+  //
+  // Worded to promise only what is delivered: the search is library-wide (a
+  // full pass is ~3s, so scoping it would trade a consistent grouping for
+  // nothing) and the SELECTION scopes the answer. "Find duplicates in my
+  // selection" would be the natural short label and would also be a lie.
+  // Unlike ⛓ above, this button is live at a selection of ONE (a single photo
+  // is a perfectly good question to ask about), so it needs the singular —
+  // "your 1 selected photos" is a sentence ⛓ can never produce and this one
+  // can.
+  let selectedPhotos = $derived(
+    `${selectedCount.toLocaleString()} selected photo${selectedCount === 1 ? "" : "s"}`
+  );
+  let dupeScopeLabel = $derived(
+    selectedCount
+      ? `Find near-duplicate photos, reporting the ${selectedPhotos}`
+      : "Find near-duplicate photos and stack them"
+  );
+  let dupeScopeTip = $derived(
+    selectedCount
+      ? `Find duplicates — searches the whole library, then tells you what it found among your ${selectedPhotos}`
+      : "Find duplicates — stack photos of the same shot, using photo similarity"
+  );
 </script>
 
 <div class="grid-controls">
@@ -85,17 +112,15 @@
   {#if mlEnabled}
     <span
       class="tip"
-      data-tip={dupesRunning
-        ? "Looking for near-duplicates…"
-        : "Find duplicates — stack photos of the same shot, using photo similarity"}
+      data-tip={dupesRunning ? "Looking for near-duplicates…" : dupeScopeTip}
     >
       <button
         class="grid-action icon"
         class:working={dupesRunning}
         data-testid="find-dupes"
         disabled={dupesRunning}
-        aria-label="Find near-duplicate photos and stack them"
-        title="Find photos of the same shot and stack them, using photo similarity"
+        aria-label={dupeScopeLabel}
+        title={dupeScopeTip}
         onclick={() => onfinddupes?.()}
       >
         {dupesRunning ? "◴" : "⧉"}

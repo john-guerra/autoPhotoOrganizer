@@ -1055,6 +1055,32 @@ export async function startNearDupes() {
   return res.json();
 }
 
+/**
+ * How much of the stored near-duplicate grouping `ids` account for (#211).
+ *
+ * Read-only, and deliberately separate from starting a sweep: the sweep stays
+ * whole-library (3.2s over 16.8k embedded photos — scoping it would trade
+ * consistency for nothing), so what a selection scopes is the ANSWER.
+ *
+ * @param {Array<number>} ids
+ * @returns {Promise<{scoped: {photos: number, groups: number, spillGroups: number},
+ *   library: {photos: number, groups: number}}>}
+ */
+export async function fetchNearDupeCounts(ids) {
+  const res = await fetch("/api/ml/near-dupes/counts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      body.error || `couldn't read near-duplicate counts (${res.status})`
+    );
+  }
+  return res.json();
+}
+
 /** Carry a vanished copy's rating/albums/tags/stack onto an unrated survivor. */
 export async function carryMissing(fromId, toId) {
   const res = await fetch("/api/missing/carry", {

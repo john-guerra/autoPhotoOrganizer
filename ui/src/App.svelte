@@ -14,6 +14,7 @@
   } from "./lib/layouts/windowing.js";
   import { ZOOM_LEVELS, resolveZoom, gapFor } from "./lib/zoom.js";
   import { detectBurstsByGroup } from "./lib/bursts.js";
+  import { nearDupeReportMessage } from "./lib/nearDupeReport.js";
   import {
     applyStackOverrides,
     canCreateManualStack,
@@ -77,6 +78,7 @@
     fetchMissing,
     thumbUrl,
     startNearDupes,
+    fetchNearDupeCounts,
     startEmbed,
     fetchMlSettings,
     fetchMlStats,
@@ -830,6 +832,14 @@
    * doing nothing at all. A confirmation has to outlive the next background
    * fetch, so it lives in the persistent `notice` channel instead. */
   let scanNotice = $state("");
+  /** What the last "Find duplicates" found, kept on screen after it finishes
+   * (#211) — for exactly the reason `scanNotice` above exists, and verified the
+   * same way: the run ends with `loadInitialFeed()`, whose thumbnail loading
+   * writes "N photos loaded" to `status` a beat later and erased the answer
+   * before it could be read. That is the whole complaint in #213 ("I have no
+   * way of validating what was completed") reappearing in a new place, so the
+   * result goes to the persistent channel rather than the transient one. */
+  let dupeNotice = $state("");
   // Scope to the folder once it's in? (The old "Open a folder…" entry, now an
   // option on the one Add panel rather than a second door to the same room.)
   let focusAfterAdd = $state(false);
@@ -2019,6 +2029,10 @@
    * indistinguishable from one that did nothing.
    */
   async function findDuplicates() {
+    // Drop the previous answer up front: it describes a grouping this run is
+    // about to replace, and leaving it up while the new one computes is worse
+    // than showing nothing — it reads as the result of the click just made.
+    dupeNotice = "";
     try {
       // RECOMMENDATION 1 of docs/ML-UX-REVIEW-2026-07-26.md: embedding is a
       // PRECONDITION, never a goal. Before this, a user who had not embedded
@@ -2032,22 +2046,29 @@
             .then((s) => s.models?.find((m) => m.id === stats.model))
             .catch(() => null)
         : null;
+      // #211: a selection scopes the ANSWER, not the sweep. It also scopes the
+      // precondition — reading photos the user did not select, to answer a
+      // question they asked about the ones they did, is work they did not ask
+      // for and time they did not agree to spend.
+      const scopeIds = selectedIds.size ? [...selectedIds] : null;
+      const readTargets = scopeIds ?? items.map((it) => it.id);
       const needsRead =
-        stats && stats.counts.embedded === 0 && items.length > 0;
+        stats && stats.counts.embedded === 0 && readTargets.length > 0;
 
       if (needsRead) {
         const ms = model?.approxMsPerPhoto ?? 38;
-        const secs = Math.max(1, Math.round((items.length * ms) / 1000));
+        const secs = Math.max(1, Math.round((readTargets.length * ms) / 1000));
         const how = secs < 60 ? `${secs}s` : `${Math.round(secs / 60)} min`;
+        const which = scopeIds ? "selected photos" : "photos";
         if (
           !confirm(
-            `To find duplicates, AutoGallery has to read these ${items.length.toLocaleString()} photos first — about ${how}. Read them now?`
+            `To find duplicates, AutoGallery has to read these ${readTargets.length.toLocaleString()} ${which} first — about ${how}. Read them now?`
           )
         ) {
           return;
         }
-        status = `Reading ${items.length.toLocaleString()} photos…`;
-        const e = await startEmbed(items.map((it) => it.id));
+        status = `Reading ${readTargets.length.toLocaleString()} photos…`;
+        const e = await startEmbed(readTargets);
         if (e.started) {
           // The embed sweep kicks the grouping pass itself on success, so
           // waiting on the embed job covers both steps.
@@ -2074,11 +2095,22 @@
       // user's photos, and it is the only way to tell a successful run that
       // found nothing from one that silently failed.
       const after = await fetchMlStats().catch(() => null);
-      const groups = after?.nearDupes?.groups ?? 0;
-      const photos = after?.nearDupes?.photos ?? 0;
-      status = groups
-        ? `Found ${groups.toLocaleString()} group${groups === 1 ? "" : "s"} of near-identical photos (${photos.toLocaleString()} photos stacked)`
-        : "No near-identical photos found — nothing was stacked";
+      // With a selection, ask what the grouping says about THOSE photos (#211).
+      // A failure here must not turn a successful sweep into an error: fall
+      // back to the library-wide sentence rather than reporting nothing.
+      const scoped = scopeIds
+        ? await fetchNearDupeCounts(scopeIds)
+            .then((r) => r.scoped)
+            .catch(() => null)
+        : null;
+      dupeNotice = nearDupeReportMessage({
+        scoped,
+        library: after?.nearDupes ?? { groups: 0, photos: 0 },
+        selectionCount: scoped ? scopeIds.length : null,
+      });
+      // The transient line has served its purpose ("Looking for…") and would
+      // otherwise sit there contradicting the result that just replaced it.
+      status = "";
     } catch (e) {
       // Carries the server's own words, including the 409 that names photo
       // similarity as off and says where to turn it on.
@@ -6274,7 +6306,7 @@
     {selectedCount}
     {status}
     {error}
-    notice={[scanNotice, missingNotice].filter(Boolean).join(" · ")}
+    notice={[scanNotice, dupeNotice, missingNotice].filter(Boolean).join(" · ")}
     {thumbProgress}
     {thumbCounts}
   >

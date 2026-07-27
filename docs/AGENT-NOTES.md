@@ -59,6 +59,26 @@ Keep this current: when one of these facts changes, update it in the same commit
 - **`pkill -f scripts/dev.mjs` kills every worktree's dev server**, including the
   main checkout's. Stop a specific one by its listening-port PID
   (`lsof -ti :4321 | xargs kill`), not by process-name match.
+- **Abandoned dev servers pile up, and an old one will happily serve you stale
+  code.** Vite auto-increments its port, so several sessions leave listeners on
+  5173, 5174, 5175… all rooted in the same worktree. They answer 200, and they
+  even serve files added minutes ago — but each one baked `__APP_VERSION__` at
+  ITS config load, and holds its own module graph. Opening "the app" on 5173
+  after bumping the version therefore shows the OLD version in the title bar and
+  can run pre-edit code, with nothing anywhere reporting an error.
+
+  **Read the version in the title bar before trusting anything you see**, and
+  treat a mismatch with `package.json` as "wrong server", not a caching hiccup.
+  The reliable move is to start your own on an explicit port
+  (`npx vite ui --port 5199 --strictPort`) and verify that port's title. Check
+  age with `lsof -nP -iTCP:<port> -sTCP:LISTEN` plus `ps -o etime= -p <pid>`
+  before killing: a listener may belong to another agent's worktree, or to a
+  packaged Electron the user is actually using.
+
+- **Never background `npm run dev` through a pipe** (`npm run dev | head -60`).
+  `head` exits after its lines and SIGPIPEs the pipeline — which killed the Vite
+  half while Express kept running on 4321, leaving a half-dead dev server whose
+  log was empty. Redirect to a file instead.
 
 ## Release process
 

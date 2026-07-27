@@ -119,6 +119,94 @@ export function nearDupeCounts(db, model) {
 }
 
 /**
+ * Ids per `IN (...)` clause.
+ *
+ * Not defensive padding: measured on this build, a prepared statement accepts
+ * 32,766 parameters and throws "too many SQL variables" at 32,767. A selection
+ * is user-sized — select-all on the library this was built against is 34,812
+ * photos — so an unchunked query is not a theoretical risk, it is the
+ * select-all path failing outright. 900 is the conventional safe floor across
+ * SQLite builds, well under the measured ceiling.
+ */
+const ID_CHUNK = 900;
+
+function* chunked(list, size) {
+  for (let i = 0; i < list.length; i += size) yield list.slice(i, i + size);
+}
+
+/**
+ * The same counts as `nearDupeCounts`, restricted to a set of photos (#211).
+ *
+ * ## Why this exists instead of a scoped SWEEP
+ *
+ * #211 asked to run duplicate detection over just a selection, and framed it as
+ * a choice between splicing the selection's groups into the stored grouping
+ * (inconsistent — a photo just outside the selection can be a real duplicate of
+ * one inside it and would never say so) and replacing the grouping wholesale
+ * (destroys the rest of the library's grouping from a button that claims to act
+ * on a selection).
+ *
+ * Measured, the premise does not hold: a whole-library pass over this library's
+ * 16,797 embedded photos is 3.2s at the default 60s window (server/ml/
+ * nearDupeSweep.js is SQLite plus arithmetic — it never touches a file, and it
+ * retires groups past the window so cost tracks window DENSITY, not library
+ * size). Scoping the computation would buy nothing and cost consistency, so the
+ * sweep stays whole-library and only the ANSWER is scoped. Both horns of the
+ * dilemma disappear.
+ *
+ * `spillGroups` is the honest part of the report. A group counted here is one
+ * the selection TOUCHES; it may have members outside the selection, and saying
+ * "12 groups in your 200 photos" while some of those groups reach photos the
+ * user did not select would overstate what was found. The caller surfaces it.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @param {number[]} ids
+ * @returns {{photos: number, groups: number, spillGroups: number}}
+ */
+export function nearDupeCountsForIds(db, model, ids) {
+  if (!ids?.length) return { photos: 0, groups: 0, spillGroups: 0 };
+
+  // Pass 1: how many of the SELECTED photos each touched group contributes.
+  /** @type {Map<number, number>} */
+  const selectedPerGroup = new Map();
+  let photos = 0;
+  for (const chunk of chunked(ids, ID_CHUNK)) {
+    const rows = db
+      .prepare(
+        `SELECT group_id FROM near_dupe_groups
+          WHERE model = ? AND photo_id IN (${chunk.map(() => "?").join(",")})`
+      )
+      .all(model, ...chunk);
+    photos += rows.length;
+    for (const r of rows)
+      selectedPerGroup.set(
+        r.group_id,
+        (selectedPerGroup.get(r.group_id) ?? 0) + 1
+      );
+  }
+
+  // Pass 2: each touched group's TOTAL size, so a group reaching beyond the
+  // selection can be reported as such rather than silently counted as if it
+  // were contained.
+  let spillGroups = 0;
+  const groupIds = [...selectedPerGroup.keys()];
+  for (const chunk of chunked(groupIds, ID_CHUNK)) {
+    const rows = db
+      .prepare(
+        `SELECT group_id, COUNT(*) AS total FROM near_dupe_groups
+          WHERE model = ? AND group_id IN (${chunk.map(() => "?").join(",")})
+          GROUP BY group_id`
+      )
+      .all(model, ...chunk);
+    for (const r of rows)
+      if (r.total > (selectedPerGroup.get(r.group_id) ?? 0)) spillGroups++;
+  }
+
+  return { photos, groups: selectedPerGroup.size, spillGroups };
+}
+
+/**
  * Drop every grouping, for every model. Called when the setting that PRODUCED
  * the grouping changes (threshold, window, model): the rows on disk describe a
  * decision the user has just revoked, and leaving them until the next sweep
