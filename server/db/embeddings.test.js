@@ -12,7 +12,7 @@ import {
   pendingEmbedRows,
   embedCounts,
   markEmbedFailed,
-  clearEmbeddingsFor,
+  clearMlArtifactsFor,
   clearEmbedFailures,
   modelStorage,
   purgeModel,
@@ -404,7 +404,7 @@ describe("putEmbeddings (batch)", () => {
   });
 });
 
-describe("clearEmbeddingsFor", () => {
+describe("clearMlArtifactsFor", () => {
   it("removes vectors AND sentinels for the given photos, across models", () => {
     const db = getDb();
     const ids = seed(db, 2);
@@ -428,7 +428,7 @@ describe("clearEmbeddingsFor", () => {
       ...quantize(vec(3)),
     });
 
-    clearEmbeddingsFor(db, [ids[0]]);
+    clearMlArtifactsFor(db, [ids[0]]);
 
     expect(getEmbedding(db, ids[0], SIGLIP)).toBeNull();
     expect(getEmbedding(db, ids[0], CLIP)).toBeNull();
@@ -445,7 +445,7 @@ describe("clearEmbeddingsFor", () => {
       dim: 8,
       ...quantize(vec(1)),
     });
-    clearEmbeddingsFor(db, []);
+    clearMlArtifactsFor(db, []);
     expect(getEmbedding(db, id, SIGLIP)).not.toBeNull();
   });
 });

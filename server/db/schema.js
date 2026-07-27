@@ -308,7 +308,7 @@ export function applySchema(db) {
   // `DELETE FROM photos` path (resetLibrary, deleteFolder(Subtree),
   // deletePhotosByIds, missing.js relocateMissing) throws once a photo has a
   // vector, unless the child row disappears with its parent automatically.
-  // Deriving that from a CASCADE here — rather than adding a clearEmbeddingsFor
+  // Deriving that from a CASCADE here — rather than adding a clearMlArtifactsFor
   // call at each of today's five delete sites — means a SIXTH delete site added
   // later can't silently reintroduce the same throw.
   db.exec(`
@@ -464,6 +464,81 @@ export function applySchema(db) {
     `CREATE INDEX idx_photos_pending_meta
        ON photos (id) WHERE ${PENDING_CONDITION}`
   );
+  // --- Faces (#166) ---------------------------------------------------------
+  // A person, which is #167's subject. Created here because photo_faces has to
+  // reference something, and a nullable person_id with no target table is a
+  // migration waiting to be forgotten.
+  //
+  // `name` is NULLABLE on purpose: a cluster the user has not named yet must
+  // still be browsable ("this face, whoever they are"). Requiring a name would
+  // leave every unnamed cluster unreachable until someone does ten minutes of
+  // data entry, which is how a face feature becomes a chore.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS persons (
+      id            INTEGER PRIMARY KEY,
+      name          TEXT,
+      cover_face_id INTEGER,
+      created_at    INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+
+  // One row PER FACE, not per photo — which is the whole reason this cannot be
+  // columns on `photos`, and why person is a filter facet rather than a group
+  // dimension (feed.js:53-77: the keyset seek assumes one value per photo per
+  // dimension).
+  //
+  // The box is in SOURCE-IMAGE pixels after EXIF rotation, not in the 640
+  // letterbox the detector saw. Storing detector-space coordinates would make
+  // every consumer re-derive the scale from the photo's dimensions, and the
+  // one that got it wrong would crop a stranger.
+  //
+  // `vec` follows photo_embeddings' int8 contract exactly (dim + scale + bytes,
+  // see server/ml/quantize.js) so one cosine implementation serves both. Keyed
+  // by `model` for the same reason embeddings are: a buffalo_l vector and a
+  // buffalo_s vector are different spaces, and comparing them yields confident
+  // nonsense rather than an error.
+  //
+  // ON DELETE CASCADE on photo_id but SET NULL on person_id, and the asymmetry
+  // is deliberate. Deleting a photo must take its faces with it — a face cannot
+  // outlive the pixels it describes, and without CASCADE every `DELETE FROM
+  // photos` path throws, which was #161's Critical 1. Deleting a PERSON must
+  // not delete faces: unnaming someone corrects the clustering, it does not
+  // assert the faces were never there.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS photo_faces (
+      id         INTEGER PRIMARY KEY,
+      photo_id   INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+      model      TEXT    NOT NULL,
+      box_x      REAL    NOT NULL,
+      box_y      REAL    NOT NULL,
+      box_w      REAL    NOT NULL,
+      box_h      REAL    NOT NULL,
+      det_score  REAL    NOT NULL,
+      dim        INTEGER NOT NULL,
+      scale      REAL    NOT NULL,
+      vec        BLOB    NOT NULL,
+      person_id  INTEGER REFERENCES persons(id) ON DELETE SET NULL,
+      created_at INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  // (model, photo_id) rather than (photo_id): it serves BOTH "the faces in this
+  // photo under the active model" and the sweep's anti-join for "photos with no
+  // faces yet under this model", which filters on model with no photo_id bound.
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_photo_faces_model_photo
+       ON photo_faces(model, photo_id)`
+  );
+  // #167's person filter is phrased `photos.id IN (SELECT photo_id FROM
+  // photo_faces WHERE person_id = ?)` — required rather than stylistic, since
+  // the feed-seek and tree queries do not JOIN extra tables. Without this index
+  // that subquery scans every face in the library on every feed page. Partial,
+  // because the overwhelming majority of rows are unassigned until #167 runs
+  // and an index over those NULLs answers no query anyone asks.
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_photo_faces_person
+       ON photo_faces(person_id) WHERE person_id IS NOT NULL`
+  );
+
   ensureFeedIndexes(db);
 }
 

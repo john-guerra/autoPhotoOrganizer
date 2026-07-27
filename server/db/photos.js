@@ -1,7 +1,7 @@
 import { join, dirname, basename, sep } from "node:path";
 import { volumeRootForPath, upsertVolume } from "./volumes.js";
 import { normalizeFolderPath } from "../lib/normalizeFolderPath.js";
-import { clearEmbeddingsFor } from "./embeddings.js";
+import { clearMlArtifactsFor } from "./embeddings.js";
 
 /**
  * @param {import("better-sqlite3").Database} db
@@ -98,7 +98,7 @@ export function upsertScan(db, folderAbsPath, volumeId, files) {
     // only asks whether a vector exists, never whether it still describes the
     // current bytes. Same reasoning as content_hash above; different table, so
     // it cannot ride the ON CONFLICT CASE.
-    clearEmbeddingsFor(db, changedIds);
+    clearMlArtifactsFor(db, changedIds);
   });
   tx(files);
 

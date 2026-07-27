@@ -1,0 +1,334 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { getDb, _resetDbForTest } from "./connection.js";
+import { upsertScan } from "./photos.js";
+import { EMBED_STAGE, putEmbedding } from "./embeddings.js";
+import { quantize } from "../ml/quantize.js";
+import {
+  FACES_STAGE,
+  putFaces,
+  facesFor,
+  pendingFaceRows,
+  faceCounts,
+  faceVectors,
+  purgeFaces,
+} from "./faces.js";
+
+const MODEL = "buffalo_l";
+let cacheDir;
+
+beforeEach(async () => {
+  cacheDir = await mkdtemp(join(tmpdir(), "ag-faces-"));
+  process.env.AUTOGALLERY_HOME = cacheDir;
+  _resetDbForTest();
+  getDb()
+    .prepare(
+      `INSERT INTO volumes (id, label, uuid, last_mount_path, last_seen_at)
+       VALUES (1, 'test-volume', 'test-uuid-1', '/test', ?)`
+    )
+    .run(Date.now());
+});
+
+afterEach(async () => {
+  _resetDbForTest();
+  await rm(cacheDir, { recursive: true, force: true });
+  delete process.env.AUTOGALLERY_HOME;
+});
+
+function seed(db, n, folder = "/vol/Trip") {
+  const files = Array.from({ length: n }, (_, i) => ({
+    name: `IMG_${i}.jpg`,
+    size: 1000 + i,
+    mtimeMs: 1700000000000 + i,
+    kind: "image",
+  }));
+  return upsertScan(db, folder, 1, files).map((r) => r.id);
+}
+
+/** A face whose vector is a distinct direction, so cosines are meaningful. */
+function face(box, seedVal, score = 0.9) {
+  const v = new Float32Array(512);
+  for (let i = 0; i < 512; i++) v[i] = Math.sin(i * 0.1 + seedVal);
+  const { scale, bytes } = quantize(v);
+  return { box, score, dim: 512, scale, bytes };
+}
+
+describe("face storage (#166)", () => {
+  it("stores boxes as x/y/w/h and hands them back as corners", () => {
+    const db = getDb();
+    const [id] = seed(db, 1);
+    putFaces(db, {
+      photoId: id,
+      model: MODEL,
+      faces: [face([10, 20, 60, 90], 1)],
+    });
+
+    const [f] = facesFor(db, id, MODEL);
+    expect(f.box).toEqual([10, 20, 60, 90]);
+    expect(f.score).toBe(0.9);
+    expect(f.dim).toBe(512);
+    expect(f.personId).toBe(null);
+    expect(f.bytes).toBeInstanceOf(Int8Array);
+    expect(f.bytes.length).toBe(512);
+  });
+
+  it("REPLACES a photo's faces on re-run instead of appending", () => {
+    // Detection returns "the faces in this photo" as one complete answer. An
+    // append would double every face on the second run -- and a duplicated
+    // face is invisible: it clusters perfectly with itself and quietly
+    // inflates whoever it belongs to.
+    const db = getDb();
+    const [id] = seed(db, 1);
+    putFaces(db, {
+      photoId: id,
+      model: MODEL,
+      faces: [face([0, 0, 10, 10], 1), face([20, 20, 30, 30], 2)],
+    });
+    putFaces(db, {
+      photoId: id,
+      model: MODEL,
+      faces: [face([5, 5, 15, 15], 3)],
+    });
+
+    const all = facesFor(db, id, MODEL);
+    expect(all).toHaveLength(1);
+    expect(all[0].box).toEqual([5, 5, 15, 15]);
+  });
+
+  it("keeps another model's faces when one model re-runs", () => {
+    const db = getDb();
+    const [id] = seed(db, 1);
+    putFaces(db, {
+      photoId: id,
+      model: "buffalo_l",
+      faces: [face([0, 0, 9, 9], 1)],
+    });
+    putFaces(db, {
+      photoId: id,
+      model: "buffalo_s",
+      faces: [face([1, 1, 8, 8], 2)],
+    });
+    putFaces(db, { photoId: id, model: "buffalo_l", faces: [] });
+
+    expect(facesFor(db, id, "buffalo_l")).toHaveLength(0);
+    expect(facesFor(db, id, "buffalo_s")).toHaveLength(1);
+  });
+
+  it("returns the strongest detection first", () => {
+    const db = getDb();
+    const [id] = seed(db, 1);
+    putFaces(db, {
+      photoId: id,
+      model: MODEL,
+      faces: [face([0, 0, 9, 9], 1, 0.6), face([9, 9, 18, 18], 2, 0.95)],
+    });
+    expect(facesFor(db, id, MODEL).map((f) => f.score)).toEqual([0.95, 0.6]);
+  });
+});
+
+describe("the zero-face sentinel", () => {
+  it("takes a faceless photo out of the worklist", () => {
+    // Most of a real archive is landscapes and screenshots. Without a marker
+    // for "looked, found nobody", every one of them is pending forever and
+    // each sweep re-detects half the library -- the shape of #169.
+    const db = getDb();
+    const ids = seed(db, 3);
+    expect(pendingFaceRows(db, MODEL, 10).map((r) => r.id)).toEqual(ids);
+
+    putFaces(db, { photoId: ids[0], model: MODEL, faces: [] });
+
+    expect(pendingFaceRows(db, MODEL, 10).map((r) => r.id)).toEqual([
+      ids[1],
+      ids[2],
+    ]);
+    expect(facesFor(db, ids[0], MODEL)).toEqual([]);
+  });
+
+  it("counts a scanned-but-empty photo as scanned, not as having a face", () => {
+    const db = getDb();
+    const ids = seed(db, 4);
+    putFaces(db, { photoId: ids[0], model: MODEL, faces: [] });
+    putFaces(db, {
+      photoId: ids[1],
+      model: MODEL,
+      faces: [face([0, 0, 9, 9], 1)],
+    });
+
+    const c = faceCounts(db, MODEL);
+    expect(c.total).toBe(4);
+    expect(c.scanned).toBe(2); // both were LOOKED AT
+    expect(c.withFaces).toBe(1); // only one held anyone
+    expect(c.faces).toBe(1);
+    expect(c.total - c.scanned - c.failed).toBe(2); // genuinely pending
+  });
+
+  it("does not share ml_status rows with the embed stage", () => {
+    // The two stages key the same table by (photo_id, stage, model). If the
+    // names ever collided, embedding a photo would mark it face-scanned and
+    // vice versa -- both sweeps silently marking each other complete, with
+    // nothing missing from either table to notice.
+    expect(FACES_STAGE).not.toBe(EMBED_STAGE);
+
+    const db = getDb();
+    const [id] = seed(db, 1);
+    const { scale, bytes } = quantize(new Float32Array(512).fill(0.5));
+    putEmbedding(db, { photoId: id, model: MODEL, dim: 512, scale, bytes });
+
+    // Embedded, but nobody has looked for faces yet.
+    expect(pendingFaceRows(db, MODEL, 10).map((r) => r.id)).toEqual([id]);
+  });
+});
+
+describe("invalidation when the bytes change", () => {
+  it("drops a photo's faces on rescan, so an edit cannot keep the old ones", () => {
+    // The worklist only asks whether a photo was LOOKED AT, never whether the
+    // answer still describes the current bytes -- so nothing downstream would
+    // ever notice a stale face. Same reasoning as the vector, different table.
+    const db = getDb();
+    const [id] = seed(db, 1);
+    putFaces(db, {
+      photoId: id,
+      model: MODEL,
+      faces: [face([0, 0, 40, 40], 1)],
+    });
+    expect(facesFor(db, id, MODEL)).toHaveLength(1);
+
+    // Rescan the same filename with different bytes.
+    upsertScan(db, "/vol/Trip", 1, [
+      {
+        name: "IMG_0.jpg",
+        size: 999999,
+        mtimeMs: 1800000000000,
+        kind: "image",
+      },
+    ]);
+
+    expect(facesFor(db, id, MODEL)).toHaveLength(0);
+    // ...and it is pending again, rather than silently marked done with none.
+    expect(pendingFaceRows(db, MODEL, 10).map((r) => r.id)).toEqual([id]);
+  });
+
+  it("keeps faces when a rescan finds the file unchanged", () => {
+    const db = getDb();
+    const [id] = seed(db, 1);
+    putFaces(db, {
+      photoId: id,
+      model: MODEL,
+      faces: [face([0, 0, 40, 40], 1)],
+    });
+
+    upsertScan(db, "/vol/Trip", 1, [
+      { name: "IMG_0.jpg", size: 1000, mtimeMs: 1700000000000, kind: "image" },
+    ]);
+
+    expect(facesFor(db, id, MODEL)).toHaveLength(1);
+    expect(pendingFaceRows(db, MODEL, 10)).toEqual([]);
+  });
+
+  it("lets a photo be deleted rather than throwing on the foreign key", () => {
+    // better-sqlite3 enables PRAGMA foreign_keys, so a plain REFERENCES here
+    // would make every DELETE FROM photos path throw the moment a photo has a
+    // face. That was #161's Critical 1, reproduced exactly.
+    const db = getDb();
+    const [id] = seed(db, 1);
+    putFaces(db, {
+      photoId: id,
+      model: MODEL,
+      faces: [face([0, 0, 40, 40], 1)],
+    });
+
+    expect(() =>
+      db.prepare(`DELETE FROM photos WHERE id = ?`).run(id)
+    ).not.toThrow();
+    expect(facesFor(db, id, MODEL)).toEqual([]);
+  });
+
+  it("keeps faces when the PERSON they were assigned to is deleted", () => {
+    // Deleting a person corrects the clustering; it does not assert the faces
+    // were never there. The asymmetry with photo_id's CASCADE is deliberate.
+    const db = getDb();
+    const [id] = seed(db, 1);
+    putFaces(db, {
+      photoId: id,
+      model: MODEL,
+      faces: [face([0, 0, 40, 40], 1)],
+    });
+    db.prepare(`INSERT INTO persons (id, name) VALUES (7, 'Ana')`).run();
+    db.prepare(`UPDATE photo_faces SET person_id = 7`).run();
+
+    db.prepare(`DELETE FROM persons WHERE id = 7`).run();
+
+    const [f] = facesFor(db, id, MODEL);
+    expect(f).toBeDefined();
+    expect(f.personId).toBe(null);
+  });
+});
+
+describe("bulk reads and purge", () => {
+  it("lays every vector out flat, tagged by face and photo", () => {
+    const db = getDb();
+    const ids = seed(db, 2);
+    putFaces(db, {
+      photoId: ids[0],
+      model: MODEL,
+      faces: [face([0, 0, 9, 9], 1), face([9, 9, 18, 18], 2)],
+    });
+    putFaces(db, {
+      photoId: ids[1],
+      model: MODEL,
+      faces: [face([0, 0, 9, 9], 3)],
+    });
+
+    const v = faceVectors(db, MODEL);
+    expect(v.dim).toBe(512);
+    expect(v.ids).toHaveLength(3);
+    expect(v.data.length).toBe(3 * 512);
+    expect([...v.photoIds]).toEqual([ids[0], ids[0], ids[1]]);
+    expect(v.scales.every((s) => s > 0)).toBe(true);
+  });
+
+  it("refuses to lay out mixed dimensions rather than truncating", () => {
+    // Two models writing under one name is a bug worth stopping for; silently
+    // truncating to the first row's width would compare garbage.
+    const db = getDb();
+    const [id] = seed(db, 1);
+    putFaces(db, { photoId: id, model: MODEL, faces: [face([0, 0, 9, 9], 1)] });
+    db.prepare(`UPDATE photo_faces SET dim = 128 WHERE id = 1`).run();
+    db.prepare(
+      `INSERT INTO photo_faces (photo_id, model, box_x, box_y, box_w, box_h,
+                                det_score, dim, scale, vec, created_at)
+       VALUES (?, ?, 0, 0, 1, 1, 0.5, 512, 0.01, x'00', 0)`
+    ).run(id, MODEL);
+
+    expect(() => faceVectors(db, MODEL)).toThrow(/mixed dimensions/);
+  });
+
+  it("is empty, not broken, before anything has been detected", () => {
+    const db = getDb();
+    seed(db, 2);
+    const v = faceVectors(db, MODEL);
+    expect(v.ids).toHaveLength(0);
+    expect(v.dim).toBe(0);
+    expect(faceCounts(db, MODEL)).toMatchObject({ scanned: 0, faces: 0 });
+  });
+
+  it("purges the markers alongside the rows", () => {
+    // Dropping rows but keeping the `done` markers leaves a library that
+    // reports itself fully scanned and finds nobody -- with no way back short
+    // of deleting index.db, which also destroys ratings and album names.
+    const db = getDb();
+    const ids = seed(db, 2);
+    putFaces(db, {
+      photoId: ids[0],
+      model: MODEL,
+      faces: [face([0, 0, 9, 9], 1)],
+    });
+    putFaces(db, { photoId: ids[1], model: MODEL, faces: [] });
+
+    expect(purgeFaces(db, MODEL)).toEqual({ faces: 1, markers: 2 });
+    expect(faceCounts(db, MODEL)).toMatchObject({ scanned: 0, faces: 0 });
+    expect(pendingFaceRows(db, MODEL, 10)).toHaveLength(2);
+  });
+});

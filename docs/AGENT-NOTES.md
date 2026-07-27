@@ -10,6 +10,14 @@ Keep this current: when one of these facts changes, update it in the same commit
 
 ## Testing gotchas
 
+- **Run `npm ci` in a new worktree BEFORE trusting a test result.** A fresh
+  `git worktree add` gives you an empty `node_modules/`, and Node's resolution
+  then walks up and finds the parent checkout's — so every import works and the
+  suite looks fine. The one test that notices is
+  `server/ml/asarPackaging.test.js`, which asserts
+  `existsSync(cwd/node_modules/onnxruntime-node)` and correctly reports false.
+  It reads like a real regression in the ML layer and is not one. (Cost ~15
+  minutes chasing a rename that had nothing to do with it, 2026-07-27.)
 - **Isolate destructive index tests.** Anything that removes folders, resets, or
   materialize-moves must run against a **temp `AUTOGALLERY_HOME`**, never the real
   `~/.autogallery/`. Playwright already points `AUTOGALLERY_HOME` at `e2e/.tmp/home`

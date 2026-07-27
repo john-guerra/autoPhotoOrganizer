@@ -248,7 +248,7 @@ export function markEmbedFailed(db, photoId, model, error) {
  *
  * THE ONLY CONTROL IN THE APP THAT CAN TAKE A SENTINEL BACK when no vector
  * exists (#161 final review, Critical 1). The three other things that clear
- * one all need something else to be true first: clearEmbeddingsFor needs the
+ * one all need something else to be true first: clearMlArtifactsFor needs the
  * file's bytes to change, ON DELETE CASCADE needs the photo deleted, and
  * purgeModel is only reachable from the settings panel's Purge button, which
  * is rendered per row of `modelStorage` — a GROUP BY over photo_embeddings.
@@ -274,6 +274,26 @@ export function clearEmbedFailures(db, model) {
 }
 
 /**
+ * EVERY per-photo ML artifact table, in one list.
+ *
+ * It is a list rather than three inlined DELETEs so that adding a fourth
+ * artifact is one obvious line in one obvious place. The alternative — a
+ * caller remembering to clear each table — is the shape that produced six
+ * hand-copied feed guards and two shipped bugs (#35, #36, #39). A forgotten
+ * entry here fails the same way: silently, and only for photos whose bytes
+ * changed, which is the case nobody tests by hand.
+ */
+export const ML_ARTIFACT_TABLES = Object.freeze([
+  "photo_embeddings",
+  "ml_status",
+  // #166. Faces are per-face rows rather than one per photo, but the
+  // invalidation question is identical: an edited photo that keeps its old
+  // faces keeps them forever, because the worklist only asks whether faces
+  // EXIST for a photo, never whether they still describe the current bytes.
+  "photo_faces",
+]);
+
+/**
  * Drop every ML artifact for these photos, across ALL models.
  *
  * Called from upsertScan when a file's size or mtime changed. Without it an
@@ -281,10 +301,16 @@ export function clearEmbedFailures(db, model) {
  * because the worklist only asks whether a vector EXISTS, not whether it still
  * describes the current bytes.
  *
+ * Named for artifacts rather than embeddings because it has cleared more than
+ * embeddings since it was written — `ml_status` from the start, and faces since
+ * #166. The old name said "embeddings" while the doc directly above it said
+ * "every ML artifact", and a name that disagrees with its own docstring is how
+ * the next person adds a table and clears nothing.
+ *
  * @param {import("better-sqlite3").Database} db
  * @param {number[]} photoIds
  */
-export function clearEmbeddingsFor(db, photoIds) {
+export function clearMlArtifactsFor(db, photoIds) {
   if (!photoIds.length) return;
   // Chunked: SQLite's default SQLITE_MAX_VARIABLE_NUMBER is 32766, and a rescan
   // of a large folder where every file changed would blow straight past it.
@@ -292,12 +318,11 @@ export function clearEmbeddingsFor(db, photoIds) {
   for (let i = 0; i < photoIds.length; i += CHUNK) {
     const chunk = photoIds.slice(i, i + CHUNK);
     const holes = chunk.map(() => "?").join(",");
-    db.prepare(`DELETE FROM photo_embeddings WHERE photo_id IN (${holes})`).run(
-      ...chunk
-    );
-    db.prepare(`DELETE FROM ml_status WHERE photo_id IN (${holes})`).run(
-      ...chunk
-    );
+    for (const table of ML_ARTIFACT_TABLES) {
+      db.prepare(`DELETE FROM ${table} WHERE photo_id IN (${holes})`).run(
+        ...chunk
+      );
+    }
   }
 }
 
