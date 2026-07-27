@@ -30,6 +30,17 @@
   } from "./api.js";
   import { jobs } from "./jobs.js";
 
+  /**
+   * The ids the grid can offer as a scope (#215). Both default to empty so the
+   * panel still works standalone (Manage library renders it with no grid
+   * context) — the scope selector simply offers fewer choices there.
+   */
+  let { selectedIds = [], visibleIds = [] } = $props();
+
+  /** What "Embed now" will act on. Defaults to the whole library, matching the
+   *  behaviour this control had before a choice existed. */
+  let scopeChoice = $state("all");
+
   /** @type {{enabled:boolean, modelId:string, threads:number, maxThreads:number, models:Array<object>}|null} */
   let settings = $state(null);
   /**
@@ -129,6 +140,53 @@
   const pending = $derived(
     counts ? Math.max(0, counts.total - counts.embedded - counts.failed) : 0
   );
+
+  /**
+   * The scope choices, with how many photos each covers (#215).
+   *
+   * "All" reports PENDING, not the library total: re-embedding what is already
+   * done is not work the sweep will do, so quoting 34,807 when only 200 remain
+   * would overstate the cost by two orders of magnitude. Selected and Visible
+   * report their raw counts — the sweep skips already-embedded rows inside
+   * them too, so those are upper bounds, and the estimate says "up to".
+   */
+  const scopes = $derived([
+    { key: "selected", label: "Selected", n: selectedIds.length },
+    { key: "visible", label: "Visible", n: visibleIds.length },
+    { key: "all", label: "All", n: pending },
+  ]);
+  const activeScope = $derived(
+    scopes.find((s) => s.key === scopeChoice) ?? scopes[2]
+  );
+  const scopeIds = $derived(
+    scopeChoice === "selected"
+      ? selectedIds
+      : scopeChoice === "visible"
+        ? visibleIds
+        : null // null = the whole pending library, the unscoped sweep
+  );
+
+  /**
+   * Roughly how long that will take, from the model's measured per-photo cost.
+   *
+   * Stated because "Embed now" otherwise reads 34,807 photos — about twenty
+   * minutes — with nothing on screen saying so beforehand. The panel is
+   * scrupulous about the 94 MB download and was silent about the far larger
+   * cost, which is the one place it broke its own contract.
+   *
+   * Rounded hard and prefixed "about": this is an order-of-magnitude honesty
+   * aid measured on one machine, not a promise.
+   */
+  const estimate = $derived.by(() => {
+    const ms = activeModel?.approxMsPerPhoto;
+    if (!ms || !activeScope?.n) return null;
+    const secs = Math.round((activeScope.n * ms) / 1000);
+    if (secs < 60) return `about ${Math.max(1, secs)}s`;
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `about ${mins} min`;
+    const hours = (mins / 60).toFixed(1);
+    return `about ${hours} h`;
+  });
 
   function say(text, kind = "info") {
     message = text;
@@ -238,6 +296,33 @@
         if (err) say(`Couldn't refresh the embedding counts: ${err}`, "err");
       });
     }
+  });
+
+  /**
+   * Keep the read-outs live DURING a sweep (#214).
+   *
+   * The effect below this one only fires when a job DISAPPEARS, which meant
+   * "Running on" and the embedded count sat frozen for the entire run and
+   * corrected themselves the moment you pressed Stop — the one window where
+   * the answer actually matters is the one window it was stale.
+   *
+   * A slow interval rather than reacting to the jobs stream: progress frames
+   * arrive per batch (thousands over a full sweep) and each one would trigger
+   * a fetch. The dependency is the job ID, a PRIMITIVE — never a DOM node, per
+   * CLAUDE.md's first reactivity trap.
+   */
+  $effect(() => {
+    const id = runningJob?.id ?? dupeJob?.id ?? null;
+    if (!id) return;
+    const timer = setInterval(() => {
+      refreshStats().then((err) => {
+        // Deliberately silent: this is a background refresh the user did not
+        // ask for, and turning a transient blip into a red banner over a
+        // running sweep would be worse than a slightly stale number.
+        if (err) clearInterval(timer);
+      });
+    }, 4000);
+    return () => clearInterval(timer);
   });
 
   // The grouping pass, same shape. Kept as its own effect rather than folded
@@ -410,9 +495,11 @@
     }
     busy = true;
     try {
-      const r = await startEmbed();
+      const r = await startEmbed(scopeIds);
       if (r.started) {
-        say("Embedding started — watch it in the jobs panel.");
+        say(
+          `Embedding ${activeScope.n.toLocaleString()} photo(s) — ${estimate}. Watch it in the jobs panel.`
+        );
       } else if (r.alreadyRunning) {
         // The single-flight latch is not keyed by model, so this is exactly
         // what a user who just switched models gets. Unrendered, the button
@@ -705,13 +792,45 @@
       Running on <code data-testid="ml-provider">{stats.provider}</code>
     </p>
 
+    <!-- WHAT to embed, and what that will cost, before the button is pressed
+         (#215). A scope with no photos is offered but disabled rather than
+         hidden, so the set of choices does not shift under the cursor as a
+         selection changes. -->
+    <fieldset class="scope" data-testid="ml-scope">
+      <legend>Embed</legend>
+      {#each scopes as s (s.key)}
+        <label class="scope-opt" class:empty={!s.n}>
+          <input
+            type="radio"
+            name="ml-scope"
+            value={s.key}
+            checked={scopeChoice === s.key}
+            disabled={busy || !s.n}
+            onchange={() => (scopeChoice = s.key)}
+          />
+          <span>{s.label}</span>
+          <span class="scope-n">{s.n.toLocaleString()}</span>
+        </label>
+      {/each}
+    </fieldset>
+    <p class="hint" data-testid="ml-estimate">
+      {#if !activeScope?.n}
+        Nothing to embed in this scope.
+      {:else}
+        Up to {activeScope.n.toLocaleString()} photos ·
+        <strong>{estimate}</strong>
+        at ~{activeModel?.approxMsPerPhoto}ms each on this model. Already-read
+        photos are skipped, so it is often faster.
+      {/if}
+    </p>
+
     <div class="ml-actions">
       <button
         data-testid="ml-embed-now"
-        disabled={busy || !!runningJob}
+        disabled={busy || !!runningJob || !activeScope?.n}
         onclick={embedNow}
       >
-        {runningJob ? "Embedding…" : "Embed now"}
+        {runningJob ? "Embedding…" : `Embed ${activeScope?.label ?? "all"}`}
       </button>
       {#if runningJob}
         <button disabled={stopping} onclick={stopSweep}>
@@ -860,6 +979,35 @@
 </section>
 
 <style>
+  .scope {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 0.35rem 0.6rem;
+    margin: 0.7rem 0 0;
+  }
+  .scope legend {
+    padding: 0 0.3rem;
+    font-size: 0.78rem;
+    color: #ccc;
+  }
+  .scope-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .scope-opt.empty {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .scope-n {
+    color: #888;
+    font-variant-numeric: tabular-nums;
+  }
   h3 {
     margin: 0.75rem 0 0.4rem;
     font-size: 0.95rem;

@@ -72,6 +72,11 @@ export const MODELS = [
     // Sits below the measured re-framed pair (0.9326) and far above the
     // shared-genre band (0.61). See the module doc for the full table.
     nearDupeThreshold: 0.93,
+    // Measured on darwin/arm64 at batch 16 (#161). Used ONLY to estimate how
+    // long a sweep will take before the user commits to it (#215) — an
+    // order-of-magnitude honesty aid, not a promise. Real machines vary by a
+    // lot; the panel says "about" and rounds hard.
+    approxMsPerPhoto: 38,
     // Measured, not guessed: a real from_pretrained() download of the int8
     // ONNX export (vision_model_int8.onnx + config + preprocessor config)
     // came to 94,099,141 bytes on 2026-07-25 — confirmed against Hugging
@@ -103,6 +108,9 @@ export const MODELS = [
     // here would silently miss every re-framed duplicate under this model —
     // which is how a shared constant fails, invisibly.
     nearDupeThreshold: 0.88,
+    // 49 patches instead of 196 — roughly a third of SigLIP's cost per photo,
+    // measured the same way (batch 4, darwin/arm64).
+    approxMsPerPhoto: 13,
     // Measured the same way as SigLIP above: 88,653,921 bytes for the int8
     // vision_model_int8.onnx + config + preprocessor config, 2026-07-25 —
     // confirmed against Hugging Face's reported 88,648,877 bytes for

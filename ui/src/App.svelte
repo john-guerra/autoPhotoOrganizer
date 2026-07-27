@@ -79,6 +79,7 @@
     startNearDupes,
     startEmbed,
     fetchMlSettings,
+    fetchMlStats,
   } from "./lib/api.js";
   import { buildTreeMenuItems } from "./lib/treeMenu.js";
   import Modal from "./lib/Modal.svelte";
@@ -1995,6 +1996,43 @@
    */
   async function findDuplicates() {
     try {
+      // RECOMMENDATION 1 of docs/ML-UX-REVIEW-2026-07-26.md: embedding is a
+      // PRECONDITION, never a goal. Before this, a user who had not embedded
+      // anything pressed Find duplicates and got zero groups with no
+      // explanation — the app knew exactly why and said nothing. Now it
+      // handles the prerequisite the way a scan does: states the cost, asks,
+      // then does both steps as one action.
+      const stats = await fetchMlStats().catch(() => null);
+      const model = stats?.model
+        ? await fetchMlSettings()
+            .then((s) => s.models?.find((m) => m.id === stats.model))
+            .catch(() => null)
+        : null;
+      const needsRead =
+        stats && stats.counts.embedded === 0 && items.length > 0;
+
+      if (needsRead) {
+        const ms = model?.approxMsPerPhoto ?? 38;
+        const secs = Math.max(1, Math.round((items.length * ms) / 1000));
+        const how = secs < 60 ? `${secs}s` : `${Math.round(secs / 60)} min`;
+        if (
+          !confirm(
+            `To find duplicates, AutoGallery has to read these ${items.length.toLocaleString()} photos first — about ${how}. Read them now?`
+          )
+        ) {
+          return;
+        }
+        status = `Reading ${items.length.toLocaleString()} photos…`;
+        const e = await startEmbed(items.map((it) => it.id));
+        if (e.started) {
+          // The embed sweep kicks the grouping pass itself on success, so
+          // waiting on the embed job covers both steps.
+          const embedJob = $jobs.find(
+            (j) => j.type === "embed" && j.status === "running"
+          );
+          if (embedJob) await waitForJob(embedJob.id);
+        }
+      }
       const r = await startNearDupes();
       if (r.alreadyRunning) {
         status = "Already looking for near-duplicates.";
@@ -2007,7 +2045,16 @@
       // grid cannot show the new grouping until the window is replaced, and
       // CLAUDE.md's "no 7th copy" rule owns how that is done.
       await loadInitialFeed();
-      status = "Near-duplicate stacks updated";
+      // Report the RESULT, not the mechanism. "Near-duplicate stacks updated"
+      // is a sentence about the app; "Found 18 groups" is a sentence about the
+      // user's photos, and it is the only way to tell a successful run that
+      // found nothing from one that silently failed.
+      const after = await fetchMlStats().catch(() => null);
+      const groups = after?.nearDupes?.groups ?? 0;
+      const photos = after?.nearDupes?.photos ?? 0;
+      status = groups
+        ? `Found ${groups.toLocaleString()} group${groups === 1 ? "" : "s"} of near-identical photos (${photos.toLocaleString()} photos stacked)`
+        : "No near-identical photos found — nothing was stacked";
     } catch (e) {
       // Carries the server's own words, including the 409 that names photo
       // similarity as off and says where to turn it on.
@@ -6347,7 +6394,11 @@
 {/if}
 
 {#if mlPanelOpen}
-  <MlPanel onclose={() => (mlPanelOpen = false)} />
+  <MlPanel
+    onclose={() => (mlPanelOpen = false)}
+    selectedIds={[...selectedIds]}
+    visibleIds={items.map((it) => it.id)}
+  />
 {/if}
 
 <style>

@@ -18,7 +18,9 @@
   import Modal from "./Modal.svelte";
   import MlSettings from "./MlSettings.svelte";
 
-  let { onclose } = $props();
+  /** Passed straight through to MlSettings so its scope selector can offer
+   *  "Selected" and "Visible" (#215) — the panel itself owns no grid state. */
+  let { onclose, selectedIds = [], visibleIds = [] } = $props();
 </script>
 
 <Modal
@@ -28,7 +30,7 @@
   onclose={() => onclose?.()}
 >
   <div class="ml-panel">
-    <MlSettings />
+    <MlSettings {selectedIds} {visibleIds} />
   </div>
 </Modal>
 

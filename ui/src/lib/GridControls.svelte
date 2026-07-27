@@ -60,15 +60,20 @@
        inside it. Hidden rather than disabled with nothing selected — a control
        that can never apply is noise in a toolbar this dense. -->
   {#if selectedCount >= 2}
-    <button
-      class="grid-action icon"
-      data-testid="burst-selection"
-      aria-label={`Stack the ${selectedCount} selected photos into bursts`}
-      title={`Stack the ${selectedCount} selected photos into bursts, splitting them wherever the gap exceeds ${(burstGapMs / 1000).toFixed(1)}s`}
-      onclick={() => onburstselection?.()}
+    <span
+      class="tip"
+      data-tip={`Stack the ${selectedCount} selected photos into bursts, splitting wherever the gap exceeds ${(burstGapMs / 1000).toFixed(1)}s`}
     >
-      ⛓
-    </button>
+      <button
+        class="grid-action icon"
+        data-testid="burst-selection"
+        aria-label={`Stack the ${selectedCount} selected photos into bursts`}
+        title={`Stack the ${selectedCount} selected photos into bursts, splitting them wherever the gap exceeds ${(burstGapMs / 1000).toFixed(1)}s`}
+        onclick={() => onburstselection?.()}
+      >
+        ⛓
+      </button>
+    </span>
   {/if}
 
   <!-- Only when photo similarity is actually switched on. Not merely to avoid
@@ -78,21 +83,72 @@
        window sizes. That is a real regression e2e caught and no unit test
        could — so a control that can do nothing must not spend width either. -->
   {#if mlEnabled}
-    <button
-      class="grid-action icon"
-      class:working={dupesRunning}
-      data-testid="find-dupes"
-      disabled={dupesRunning}
-      aria-label="Find near-duplicate photos and stack them"
-      title="Find photos of the same shot and stack them, using photo similarity"
-      onclick={() => onfinddupes?.()}
+    <span
+      class="tip"
+      data-tip={dupesRunning
+        ? "Looking for near-duplicates…"
+        : "Find duplicates — stack photos of the same shot, using photo similarity"}
     >
-      ⧉
-    </button>
+      <button
+        class="grid-action icon"
+        class:working={dupesRunning}
+        data-testid="find-dupes"
+        disabled={dupesRunning}
+        aria-label="Find near-duplicate photos and stack them"
+        title="Find photos of the same shot and stack them, using photo similarity"
+        onclick={() => onfinddupes?.()}
+      >
+        {dupesRunning ? "◴" : "⧉"}
+      </button>
+    </span>
   {/if}
 </div>
 
 <style>
+  /* A REAL tooltip, not the native `title` attribute.
+
+     `title` needs a deliberate hover-and-wait of about a second, never appears
+     for keyboard users, and cannot be styled — which is why an icon button
+     carrying only a `title` reads as unlabelled in practice, however correct
+     the markup is. This shows instantly on hover AND on keyboard focus, so the
+     icon is self-describing by the time you have finished pointing at it.
+
+     aria-label stays on the button regardless: this is a visual affordance,
+     not an accessibility mechanism, and the two must not be confused. */
+  .tip {
+    position: relative;
+    display: inline-flex;
+  }
+  .tip::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0d0d0d;
+    color: #e8e8e8;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    white-space: normal;
+    width: max-content;
+    max-width: 15rem;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 40;
+    transition: opacity 90ms ease-out;
+  }
+  .tip:hover::after,
+  .tip:focus-within::after {
+    opacity: 1;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tip::after {
+      transition: none;
+    }
+  }
   .grid-action {
     background: #2c2c2c;
     color: inherit;
