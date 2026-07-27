@@ -59,6 +59,23 @@ Keep this current: when one of these facts changes, update it in the same commit
   test skips **loudly** (a console warning), because a silent skip on the only
   check that the vectors mean anything is indistinguishable from a pass.
 
+  Faces (#166) work the same way, and additionally need the weights present
+  under `~/.autogallery/models/insightface/<pack>/`:
+
+  ```bash
+  AUTOGALLERY_FACE_FIXTURES=/path/to/photos/with/people ML_INTEGRATION=1 \
+    npx vitest run server/ml/faceIntegration.test.js
+  # AUTOGALLERY_FACE_PACK=buffalo_l to check the other pack (default buffalo_s)
+  ```
+
+  Point it at a folder with **dozens** of photos, not three — the first
+  assertion needs enough images to distinguish "finds faces sometimes" from
+  "fires on everything", which is what a wrong anchor stride looks like.
+  `faceDetect.test.js` drives the same pipeline against fake sessions and runs
+  in `npm test`, but a fake detector emitting the layout the decoder expects
+  cannot catch a decoder that agrees with it and disagrees with the real
+  graph. Only this file can.
+
 ## Dev-server & process gotchas
 
 - **Never pipe a long-running server into `head`/`tail`.** `npm run dev 2>&1 |
