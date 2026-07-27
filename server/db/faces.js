@@ -259,3 +259,55 @@ export function purgeFaces(db, model) {
     return { faces, markers };
   })();
 }
+
+/**
+ * Record that this photo could not be face-scanned, permanently.
+ *
+ * "Permanently" is the whole weight of this function, and why runSweep
+ * classifies before calling it: a sentinel written for a TRANSIENT failure —
+ * an unmounted drive, a model that would not download — is a false statement
+ * about the user's library that outlives the condition that caused it. That
+ * was #169, which excluded a whole unplugged drive from hashing forever, and
+ * #161's final Critical 1. Sentinels only clear when the file's bytes change,
+ * so the wrong one is close to unrecoverable.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {number} photoId
+ * @param {string} model
+ * @param {string} error
+ */
+export function markFaceFailed(db, photoId, model, error) {
+  db.prepare(
+    `INSERT INTO ml_status (photo_id, stage, model, state, attempts, error, updated_at)
+     VALUES (?, ?, ?, 'failed', 1, ?, ?)
+     ON CONFLICT(photo_id, stage, model) DO UPDATE SET
+       state = 'failed',
+       attempts = ml_status.attempts + 1,
+       error = excluded.error,
+       updated_at = excluded.updated_at`
+  ).run(photoId, FACES_STAGE, model, String(error).slice(0, 500), Date.now());
+}
+
+/**
+ * Forget every "cannot be scanned" verdict for this model, so the next sweep
+ * tries again.
+ *
+ * Exists for the same reason clearEmbedFailures does: without it, a sweep that
+ * failed EVERYTHING (a bad model file, a since-fixed bug) leaves sentinels
+ * that only clear when a file's bytes change — i.e. never — and there is no
+ * way back short of deleting index.db, which also destroys ratings, keep-scope
+ * and album names. Deliberately does NOT touch `done` rows: re-scanning
+ * photos that were successfully found to contain nobody is pure waste.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @returns {{cleared: number}}
+ */
+export function clearFaceFailures(db, model) {
+  const { changes } = db
+    .prepare(
+      `DELETE FROM ml_status WHERE stage = ? AND model = ? AND state = 'failed'`
+    )
+    .run(FACES_STAGE, model);
+  return { cleared: changes };
+}
