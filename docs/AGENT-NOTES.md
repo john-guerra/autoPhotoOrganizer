@@ -61,6 +61,21 @@ Keep this current: when one of these facts changes, update it in the same commit
 
 ## Dev-server & process gotchas
 
+- **Never pipe a long-running server into `head`/`tail`.** `npm run dev 2>&1 |
+tail -6` never terminates (the server never closes the pipe), so the Bash tool
+  times out and kills the WRAPPER shell — while `npm → concurrently → vite/node`
+  is orphaned and reparented, holding its port. One session accumulated 29 of
+  these across 24 hours, on ports 5173–5182, and a stale one silently serves the
+  version it was started with (see the `__APP_VERSION__` note below). Use
+  `run_in_background` instead, which the harness can actually stop.
+- **`kill $PIDS` DOES NOTHING in zsh, and reports success.** This shell is zsh,
+  which — unlike bash — does **not** word-split unquoted parameter expansions.
+  A space-separated PID string is passed as ONE argument, so `kill` sees an
+  illegal pid; with stderr suppressed it looks exactly like a permissions
+  problem, and `for p in $PIDS` fails the same way. Pipe to `xargs -n1 kill`
+  (shell-agnostic) or use `${=PIDS}` / an array. Cost two failed cleanup
+  attempts that were misread as sandbox restrictions, 2026-07-27.
+
 - **The dev server has no watch for `server/` changes.** Edits under `server/`
   need a manual `npm run dev` restart; verify a server fix with `curl` against a
   throwaway server on another port rather than assuming hot-reload.
