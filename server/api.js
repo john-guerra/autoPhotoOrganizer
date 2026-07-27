@@ -93,6 +93,8 @@ import {
   saveClusters,
   listPersons,
   renamePerson,
+  mergePersons,
+  detachFace,
 } from "./db/faces.js";
 import { clusterFaces } from "./ml/faceClusters.js";
 import sharp from "sharp";
@@ -1735,6 +1737,43 @@ export function registerApi(app, { ml } = {}) {
       res.status(404).json({
         error: `That person no longer exists — the faces may have been regrouped. Reload the list.`,
       });
+    }
+  });
+
+  /** Merge two people into one (#167). Durable: a re-grouping will not undo
+   *  it, because every affected face is marked as a human's decision. */
+  app.post("/api/ml/people/merge", (req, res) => {
+    const into = Number(req.body?.into);
+    const from = Number(req.body?.from);
+    if (![into, from].every((v) => Number.isSafeInteger(v) && v > 0)) {
+      return res
+        .status(400)
+        .json({ error: "into and from must be positive person ids" });
+    }
+    try {
+      res.json(mergePersons(getDb(), into, from));
+    } catch (e) {
+      res.status(400).json({
+        error:
+          e.message === "no such person"
+            ? "One of those people no longer exists — the faces may have been regrouped. Reload the list."
+            : e.message,
+      });
+    }
+  });
+
+  /** Take one face out of the person it was put in (#167). */
+  app.post("/api/ml/faces/:id/detach", (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res
+        .status(400)
+        .json({ error: "face id must be a positive integer" });
+    }
+    try {
+      res.json(detachFace(getDb(), id));
+    } catch {
+      res.status(404).json({ error: "That face no longer exists." });
     }
   });
 

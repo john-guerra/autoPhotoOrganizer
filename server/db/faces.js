@@ -424,3 +424,85 @@ export function renamePerson(db, personId, name) {
   if (!changes) throw new Error(`no such person: ${personId}`);
   return { id: personId, name: trimmed || null };
 }
+
+/**
+ * Merge two people into one, DURABLY.
+ *
+ * Every moved face is marked `person_source = 'manual'`, which is what makes
+ * the correction survive — `saveClusters` only clears what the model owns.
+ * Without that mark the next grouping pass would undo the merge and the user
+ * would do it again, and again, which is worse than not offering it.
+ *
+ * The name is kept from whichever side has one; if both do, `into` wins,
+ * because that is the row the user pointed AT.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {number} intoId the person to keep
+ * @param {number} fromId the person to absorb
+ * @returns {{id:number, moved:number, name:string|null}}
+ */
+export function mergePersons(db, intoId, fromId) {
+  if (intoId === fromId)
+    throw new Error("cannot merge a person into themselves");
+  return db.transaction(() => {
+    const into = db
+      .prepare(`SELECT id, name FROM persons WHERE id = ?`)
+      .get(intoId);
+    const from = db
+      .prepare(`SELECT id, name FROM persons WHERE id = ?`)
+      .get(fromId);
+    if (!into || !from) throw new Error("no such person");
+
+    const { changes } = db
+      .prepare(
+        `UPDATE photo_faces SET person_id = ?, person_source = 'manual'
+          WHERE person_id = ?`
+      )
+      .run(intoId, fromId);
+    // BOTH sides, not just the absorbed one. The user's assertion is "these
+    // are all one person", which is as much a claim about the faces already
+    // on `into` as about the ones arriving. Marking only the movers leaves
+    // the target's own faces model-owned, so the next grouping pass clears
+    // them and the merged person silently loses half its photos — which is
+    // exactly what the test for this caught.
+    db.prepare(
+      `UPDATE photo_faces SET person_source = 'manual' WHERE person_id = ?`
+    ).run(intoId);
+
+    // Inherit a name rather than lose it: merging an unnamed cluster into a
+    // named one is the common direction, but the reverse happens too and
+    // silently dropping the only name would be a data loss the user cannot
+    // see until much later.
+    const name = into.name || from.name || null;
+    db.prepare(`UPDATE persons SET name = ? WHERE id = ?`).run(name, intoId);
+    db.prepare(`DELETE FROM persons WHERE id = ?`).run(fromId);
+    return { id: intoId, moved: changes, name };
+  })();
+}
+
+/**
+ * Take one face out of the person it was put in.
+ *
+ * The other half of the correction #167 requires, and the one that matters
+ * when clustering over-merges: a stranger inside someone's photo set. Marked
+ * manual for the same durability reason as the merge — the model must not put
+ * them back on the next pass.
+ *
+ * The face becomes unassigned rather than a new person. Its own cluster would
+ * be a person of one, and a wall of those is exactly the chore #167 warns
+ * about; a later pass can pick it up, or the user can merge it somewhere.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {number} faceId
+ * @returns {{id:number, personId:null}}
+ */
+export function detachFace(db, faceId) {
+  const { changes } = db
+    .prepare(
+      `UPDATE photo_faces SET person_id = NULL, person_source = 'manual'
+        WHERE id = ?`
+    )
+    .run(faceId);
+  if (!changes) throw new Error(`no such face: ${faceId}`);
+  return { id: faceId, personId: null };
+}

@@ -18,6 +18,8 @@ import {
   saveClusters,
   listPersons,
   renamePerson,
+  mergePersons,
+  detachFace,
 } from "./faces.js";
 
 const MODEL = "buffalo_l";
@@ -438,5 +440,96 @@ describe("people (#167)", () => {
     const { sql } = buildFilter({ personId: 1 });
     expect(sql).toMatch(/photos\.id IN \(SELECT photo_id FROM photo_faces/);
     expect(sql).not.toMatch(/\bJOIN\b/);
+  });
+});
+
+describe("correcting the clustering, durably (#167)", () => {
+  const face = (seedVal) => {
+    const v = new Float32Array(512);
+    for (let i = 0; i < 512; i++) v[i] = Math.sin(i * 0.1 + seedVal);
+    const { scale, bytes } = quantize(v);
+    return { box: [0, 0, 50, 50], score: 0.9, dim: 512, scale, bytes };
+  };
+  function seedFaces(db, n) {
+    const ids = seed(db, n);
+    ids.forEach((id, i) =>
+      putFaces(db, { photoId: id, model: MODEL, faces: [face(i)] })
+    );
+    return db
+      .prepare(`SELECT id FROM photo_faces ORDER BY id`)
+      .all()
+      .map((r) => r.id);
+  }
+
+  it("merges two people and SURVIVES the next grouping pass", () => {
+    // The whole point. Without the manual mark the next pass undoes the
+    // merge and the user does it again, and again -- worse than not
+    // offering it at all.
+    const db = getDb();
+    const f = seedFaces(db, 4);
+    saveClusters(db, [
+      [f[0], f[1]],
+      [f[2], f[3]],
+    ]);
+    const [a, b] = listPersons(db);
+
+    const r = mergePersons(db, a.id, b.id);
+    expect(r.moved).toBe(2);
+    expect(listPersons(db)).toHaveLength(1);
+    expect(listPersons(db)[0].faces).toBe(4);
+
+    // The model changes its mind and proposes the ORIGINAL split again.
+    saveClusters(db, [
+      [f[0], f[1]],
+      [f[2], f[3]],
+    ]);
+    expect(listPersons(db).some((p) => p.faces === 4)).toBe(true);
+  });
+
+  it("keeps a name when merging an unnamed person into a named one, and vice versa", () => {
+    const db = getDb();
+    const f = seedFaces(db, 4);
+    saveClusters(db, [
+      [f[0], f[1]],
+      [f[2], f[3]],
+    ]);
+    const [a, b] = listPersons(db);
+    renamePerson(db, b.id, "Ana");
+
+    // Merge the NAMED one into the unnamed one: the name must not vanish.
+    const r = mergePersons(db, a.id, b.id);
+    expect(r.name).toBe("Ana");
+    expect(listPersons(db)[0].name).toBe("Ana");
+  });
+
+  it("refuses to merge a person into themselves, or a stranger", () => {
+    const db = getDb();
+    const f = seedFaces(db, 2);
+    saveClusters(db, [[f[0], f[1]]]);
+    const [a] = listPersons(db);
+    expect(() => mergePersons(db, a.id, a.id)).toThrow(/into themselves/);
+    expect(() => mergePersons(db, a.id, 9999)).toThrow(/no such person/);
+  });
+
+  it("detaches a face and the next pass does not put it back", () => {
+    // The correction that matters when clustering OVER-merges: a stranger
+    // inside someone's photo set.
+    const db = getDb();
+    const f = seedFaces(db, 3);
+    saveClusters(db, [[f[0], f[1], f[2]]]);
+    expect(listPersons(db)[0].faces).toBe(3);
+
+    detachFace(db, f[2]);
+    expect(listPersons(db)[0].faces).toBe(2);
+
+    saveClusters(db, [[f[0], f[1], f[2]]]);
+    const still = db
+      .prepare(`SELECT person_id FROM photo_faces WHERE id = ?`)
+      .get(f[2]);
+    expect(still.person_id).toBe(null);
+  });
+
+  it("refuses to detach a face that does not exist", () => {
+    expect(() => detachFace(getDb(), 9999)).toThrow(/no such face/);
   });
 });

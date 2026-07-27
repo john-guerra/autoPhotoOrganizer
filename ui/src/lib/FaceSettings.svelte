@@ -27,6 +27,7 @@
     clusterPeople,
     fetchPeople,
     renamePerson,
+    mergePeople,
   } from "./api.js";
 
   let { onnotice } = $props();
@@ -247,6 +248,34 @@
                       })}
                     aria-label={`Name for the person in ${p.photos} photos`}
                   />
+                  <!-- Merging is the correction #167 requires, and it has to
+                       be durable: the server marks every affected face as a
+                       human's decision so the next grouping pass keeps it. -->
+                  <select
+                    class="merge"
+                    value=""
+                    aria-label={`Merge someone into ${p.name || "this person"}`}
+                    onchange={(e) => {
+                      const from = Number(e.currentTarget.value);
+                      e.currentTarget.value = "";
+                      if (!from) return;
+                      act("merge", async () => {
+                        const r = await mergePeople(p.id, from);
+                        onnotice?.(
+                          `Merged ${n(r.moved)} faces into ${r.name || "one person"}. It will survive the next grouping.`
+                        );
+                      });
+                    }}
+                  >
+                    <option value="">Merge…</option>
+                    {#each people
+                      .filter((o) => o.id !== p.id)
+                      .slice(0, 40) as o (o.id)}
+                      <option value={o.id}>
+                        {o.name || `Unnamed (${n(o.faces)})`}
+                      </option>
+                    {/each}
+                  </select>
                   <span class="count">{n(p.photos)}</span>
                 </li>
               {/each}
@@ -377,6 +406,16 @@
     height: 8px;
     border-radius: 50%;
     background: #4c9aff;
+    flex: none;
+  }
+  .merge {
+    background: #1c1c1c;
+    color: #9a9a9a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    padding: 0.15rem 0.2rem;
+    max-width: 6rem;
     flex: none;
   }
   .count {

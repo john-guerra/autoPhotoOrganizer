@@ -1243,3 +1243,17 @@ export async function renamePerson(id, name) {
   }
   return res.json();
 }
+
+/** Merge two people (#167). Durable — a re-grouping will not undo it. */
+export async function mergePeople(into, from) {
+  const res = await fetch("/api/ml/people/merge", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ into, from }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `merge failed (${res.status})`);
+  }
+  return res.json();
+}
