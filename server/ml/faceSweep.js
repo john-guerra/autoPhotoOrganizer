@@ -32,6 +32,32 @@ import { join } from "node:path";
 export const FACE_BATCH = 8;
 
 /**
+ * Whether a face pass is running right now.
+ *
+ * Checked by the route BEFORE it creates a job row, not after: a second job
+ * that immediately self-clears as `alreadyRunning` is a flicker in the
+ * JobsPanel the user cannot act on — #161 round 1's I2, and the reason
+ * isEmbedInFlight and isNearDupeSweepInFlight both exist.
+ *
+ * Two concurrent sweeps would also fight over the worklist. Both read the same
+ * pending rows, both detect them, and the second putFaces replaces the first's
+ * rows for the same photo. Not corrupting — but exactly twice the cost of the
+ * slowest thing this app does.
+ */
+let inFlight = false;
+
+/** @returns {boolean} */
+export function isFaceSweepInFlight() {
+  return inFlight;
+}
+
+/** Tests only. `finally` already clears the flag on any exit path, but a test
+ *  that deliberately explodes mid-sweep needs a way back to a known state. */
+export function _resetFaceSweepForTest() {
+  inFlight = false;
+}
+
+/**
  * Sweep the library (or a scope) for faces.
  *
  * @param {object} args
@@ -44,41 +70,67 @@ export const FACE_BATCH = 8;
  * @returns {Promise<{done: number, failed: number, faces: number, paused: boolean, pauseReason?: string}>}
  */
 export async function sweepFaces({ db, modelId, engine, job, onProgress }) {
+  if (inFlight)
+    return {
+      done: 0,
+      failed: 0,
+      faces: 0,
+      paused: false,
+      alreadyRunning: true,
+    };
   const model = faceModelById(modelId);
   let faces = 0;
+  inFlight = true;
+  try {
+    return await drain();
+  } finally {
+    // `finally`, not a line after the await: a throw, a cancel, or a pause
+    // must all release the flag. Leaving it set makes every later sweep a
+    // silent no-op for the rest of the process's life, and the only symptom
+    // is a button that does nothing.
+    inFlight = false;
+  }
 
-  const result = await runSweep(job, {
-    nextBatch: (limit) => pendingFaceRows(db, modelId, limit ?? FACE_BATCH),
-    folderOf: (row) => row.folder_abs_path,
-    onProgress,
-    isTransient,
-    process: async (rows) => {
-      for (const row of rows) {
-        const path = join(row.folder_abs_path, row.filename);
-        const found = await engine.detect({ ...row, path });
-        // Written even when EMPTY. "No faces" is a result, and the worklist
-        // can only ask whether a marker exists — without this, every
-        // landscape is pending forever. See db/faces.js.
-        putFaces(db, {
-          photoId: row.id,
-          model: modelId,
-          faces: found.faces.map((f) => {
-            const { scale, bytes } = quantize(f.vector);
-            return { box: f.box, score: f.score, dim: model.dim, scale, bytes };
-          }),
-        });
-        faces += found.faces.length;
-      }
-      // runSweep does `done += await process(batch)`, so this MUST return a
-      // count. Returning undefined makes `done` NaN, every comparison against
-      // it false, and the drain never terminates — silently, at full CPU.
-      return rows.length;
-    },
-    markFailed: (row, err) =>
-      markFaceFailed(db, row.id, modelId, err?.message ?? String(err)),
-  });
+  async function drain() {
+    const result = await runSweep(job, {
+      nextBatch: (limit) => pendingFaceRows(db, modelId, limit ?? FACE_BATCH),
+      folderOf: (row) => row.folder_abs_path,
+      onProgress,
+      isTransient,
+      process: async (rows) => {
+        for (const row of rows) {
+          const path = join(row.folder_abs_path, row.filename);
+          const found = await engine.detect({ ...row, path });
+          // Written even when EMPTY. "No faces" is a result, and the worklist
+          // can only ask whether a marker exists — without this, every
+          // landscape is pending forever. See db/faces.js.
+          putFaces(db, {
+            photoId: row.id,
+            model: modelId,
+            faces: found.faces.map((f) => {
+              const { scale, bytes } = quantize(f.vector);
+              return {
+                box: f.box,
+                score: f.score,
+                dim: model.dim,
+                scale,
+                bytes,
+              };
+            }),
+          });
+          faces += found.faces.length;
+        }
+        // runSweep does `done += await process(batch)`, so this MUST return a
+        // count. Returning undefined makes `done` NaN, every comparison against
+        // it false, and the drain never terminates — silently, at full CPU.
+        return rows.length;
+      },
+      markFailed: (row, err) =>
+        markFaceFailed(db, row.id, modelId, err?.message ?? String(err)),
+    });
 
-  return { ...result, faces };
+    return { ...result, faces };
+  }
 }
 
 /**

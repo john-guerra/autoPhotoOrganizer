@@ -30,6 +30,7 @@ import {
   thumbsDir,
   cacheRoot,
   videoProxiesDir,
+  modelsDir,
 } from "./lib/cachePaths.js";
 import {
   getCacheStats,
@@ -77,6 +78,64 @@ import {
   DEVICES,
 } from "./ml/settings.js";
 import { MODELS } from "./ml/models.js";
+import {
+  FACE_MODELS,
+  DEFAULT_FACE_MODEL_ID,
+  faceModelById,
+} from "./ml/faceModels.js";
+import { checkFaceModel, downloadFaceModel } from "./ml/faceDownload.js";
+import { sweepFaces, isFaceSweepInFlight } from "./ml/faceSweep.js";
+import { createFaceEngine } from "./ml/faceEngine.js";
+import { faceCounts, purgeFaces } from "./db/faces.js";
+import sharp from "sharp";
+
+/**
+ * Face-model plumbing (#166), kept together so the routes below read as
+ * intent rather than as path arithmetic.
+ *
+ * `loadOrt` is DYNAMIC on purpose. onnxruntime-node pulls a native addon and
+ * ~100 MB of runtime into the process; importing it at module scope would pay
+ * that on every server start, including for a user who never turns faces on.
+ * Cached after the first call, so a sweep pays it once.
+ */
+let ortPromise = null;
+function loadOrt() {
+  ortPromise ??= import("onnxruntime-node").then((m) => m.default ?? m);
+  return ortPromise;
+}
+
+/** Where one pack's graphs live. NOT under cache/thumbs/ —
+ *  pruneOrphanedCache deletes anything there outside its expected key set,
+ *  regardless of extension, and would eat a 174 MB model on the next prune. */
+function faceModelDir(modelId) {
+  return join(modelsDir(), "insightface", modelId);
+}
+
+/** An id from a request is untrusted input. faceModelById throws on anything
+ *  off the allowlist, and this normalizes an absent/blank value to the default
+ *  rather than letting `undefined` reach it — an arbitrary id would be an
+ *  arbitrary path AND an arbitrary download. */
+function faceModelIdOf(raw) {
+  const id =
+    typeof raw === "string" && raw.trim() ? raw.trim() : DEFAULT_FACE_MODEL_ID;
+  faceModelById(id); // throws for anything not on the list
+  return id;
+}
+
+/** The io surface faceDownload expects, bound to one pack's directory. */
+function faceIo(modelId) {
+  const dir = faceModelDir(modelId);
+  return {
+    pathFor: (file) => join(dir, file),
+    readFile: (path) => fsp.readFile(path),
+    writeFile: async (path, bytes) => {
+      await fsp.mkdir(dir, { recursive: true });
+      await fsp.writeFile(path, bytes);
+    },
+    unlink: (path) => fsp.unlink(path),
+    fetchImpl: (url) => fetch(url),
+  };
+}
 import {
   embedCounts,
   pendingEmbedRows,
@@ -1463,6 +1522,155 @@ export function registerApi(app, { ml } = {}) {
   // POST, not GET, for the same reason /api/ml/embed is: the id list is the
   // user's selection and routinely runs to tens of thousands, which no query
   // string should carry.
+  // ---- Faces (#166) -------------------------------------------------------
+  //
+  // Three endpoints because there are three distinct states the user can be
+  // in, and collapsing them would make the panel lie: the weights are not
+  // here yet (a ~200 MB decision), the weights are here but nothing has been
+  // scanned, or a scan is running. A single "Find faces" button that silently
+  // triggered a 191 MB download would be the worst version of this.
+
+  /** What the panel needs to decide what to offer. Never triggers work. */
+  app.get("/api/ml/faces", async (req, res) => {
+    const modelId = faceModelIdOf(req.query.model);
+    const model = faceModelById(modelId);
+    const model_ = await checkFaceModel(modelId, faceIo(modelId));
+    res.json({
+      models: FACE_MODELS.map((m) => ({
+        id: m.id,
+        label: m.label,
+        approxDownloadMB: m.approxDownloadMB,
+        approxMsPerPhoto: m.approxMsPerPhoto,
+        licence: m.licence,
+        modelCardUrl: m.modelCardUrl,
+        note: m.note,
+      })),
+      modelId,
+      weights: model_,
+      running: isFaceSweepInFlight(),
+      counts: faceCounts(getDb(), modelId),
+      // The estimate the user is really deciding about. Rounded hard and
+      // labelled "about" in the UI — see models.js on approxMsPerPhoto.
+      approxMinutes: Math.round(
+        (faceCounts(getDb(), modelId).total * model.approxMsPerPhoto) / 60000
+      ),
+    });
+  });
+
+  /** Fetch the weights. Separate from the sweep so the user consents to the
+   *  download — and to the LICENCE — as its own act. */
+  app.post("/api/ml/faces/download", async (req, res) => {
+    const modelId = faceModelIdOf(req.body?.model);
+    const model = faceModelById(modelId);
+    const job = registry.create("face-download", {
+      label: `Downloading ${model.label}`,
+    });
+    res.json({
+      started: true,
+      jobId: job.id,
+      approxDownloadMB: model.approxDownloadMB,
+    });
+    try {
+      const r = await downloadFaceModel(modelId, faceIo(modelId), {
+        onProgress: ({ done, total, file, phase }) =>
+          registry.update(job.id, {
+            done,
+            total,
+            label: `${phase === "cached" ? "Checking" : "Downloading"} ${file}`,
+          }),
+      });
+      registry.finish(job.id, r);
+    } catch (e) {
+      // downloadFaceModel's messages already say which file, why, and that
+      // nothing was changed — pass them through rather than flattening them.
+      registry.fail(job.id, e);
+    }
+  });
+
+  /** Start (or report) a face pass. */
+  app.post("/api/ml/faces", async (req, res) => {
+    if (isFaceSweepInFlight()) {
+      return res.json({ started: false, alreadyRunning: true });
+    }
+    const modelId = faceModelIdOf(req.body?.model);
+    const model = faceModelById(modelId);
+    const weights = await checkFaceModel(modelId, faceIo(modelId));
+    if (!weights.ready) {
+      // Specific over generic, and the two cases need different fixes: absent
+      // means "press download", corrupt means "what you have is wrong".
+      const why = weights.corrupt.length
+        ? `the ${weights.corrupt.join(" and ")} on disk ${weights.corrupt.length > 1 ? "do" : "does"} not match ${model.label}'s checksum`
+        : `the ${weights.missing.join(" and ")} ${weights.missing.length > 1 ? "have" : "has"} not been downloaded yet`;
+      return res.status(409).json({
+        error: `Can't look for faces yet — ${why}. Download ${model.label} (about ${model.approxDownloadMB} MB) first.`,
+        weights,
+      });
+    }
+    const job = registry.create("faces", {
+      label: `Finding faces (${model.label})`,
+    });
+    res.json({ started: true, jobId: job.id });
+
+    const engine = createFaceEngine({
+      modelId,
+      pathFor: (file) => join(faceModelDir(modelId), file),
+      runtime: { ort: await loadOrt(), sharp },
+      readFile: (p) => fsp.readFile(p),
+    });
+    try {
+      const r = await sweepFaces({
+        db: getDb(),
+        modelId,
+        engine,
+        job,
+        onProgress: ({ done, failed }) =>
+          registry.update(job.id, {
+            done,
+            total: faceCounts(getDb(), modelId).total,
+            label: `Finding faces — ${done.toLocaleString()} scanned${failed ? `, ${failed} unreadable` : ""}`,
+          }),
+      });
+      // A PAUSE is not a success and must not be reported as one. The sweep
+      // stands down on a host failure precisely so it does not blame photos —
+      // saying "done" here would hide that from the user entirely.
+      if (r.paused) {
+        registry.fail(
+          job.id,
+          new Error(
+            `Face detection stopped: ${r.pauseReason}. ` +
+              `${r.done.toLocaleString()} photos were scanned; the rest are untouched and will resume.`
+          )
+        );
+      } else {
+        registry.finish(job.id, {
+          scanned: r.done,
+          faces: r.faces,
+          failed: r.failed,
+        });
+      }
+    } catch (e) {
+      registry.fail(
+        job.id,
+        new Error(
+          `Face detection stopped: ${e.message}. No photos were changed.`
+        )
+      );
+    } finally {
+      // ~200 MB of resident session must not outlive the sweep.
+      await engine.close();
+    }
+  });
+
+  /** Forget every face this model found. */
+  app.post("/api/ml/faces/purge", (req, res) => {
+    if (isFaceSweepInFlight()) {
+      return res.status(409).json({
+        error: "A face scan is running. Stop it from the jobs panel first.",
+      });
+    }
+    res.json(purgeFaces(getDb(), faceModelIdOf(req.body?.model)));
+  });
+
   app.post("/api/ml/near-dupes/counts", (req, res) => {
     const db = getDb();
     const { modelId } = readMlSettings();
