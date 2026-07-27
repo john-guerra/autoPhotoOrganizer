@@ -178,6 +178,96 @@ const UNLOAD_AFTER_MS = 120_000;
  *   a COLD load (loaded === null); a warm call ignores it, so passing it
  *   costs nothing once a model is resident.
  */
+/**
+ * Import transformers.js once and point it at the app's model cache.
+ *
+ * Extracted from ensureModel when the text tower (#164) became a second
+ * caller. It must stay ONE place: the `AUTOGALLERY_MODELS_DIR` guard below is
+ * the only thing standing between a 94 MB download and transformers' own
+ * default cache ('./.cache', relative to CWD — i.e. into the repo or the
+ * user's home, invisible to cacheStats). A second copy of this block is a
+ * second chance to omit that guard.
+ */
+async function ensureTransformers() {
+  if (transformers) return transformers;
+  transformers = await import("@huggingface/transformers");
+  // Models are a rebuildable cache on the INTERNAL disk, like every other
+  // derived artifact this app writes. NOT under cache/thumbs/ —
+  // pruneOrphanedCache deletes anything there that isn't a known thumb
+  // key, regardless of extension, and would eat the model on the next
+  // prune. Refuse to guess: an unset/empty var would otherwise fall back
+  // to transformers' own default ('./.cache', relative to CWD) — an
+  // invisible-to-cacheStats download into the repo or the user's home.
+  const modelsDir = process.env.AUTOGALLERY_MODELS_DIR;
+  if (!modelsDir) {
+    throw new Error(
+      "AUTOGALLERY_MODELS_DIR is not set — refusing to let transformers.js " +
+        "fall back to its default cache location"
+    );
+  }
+  transformers.env.cacheDir = modelsDir;
+  // Cap the intra-op pool. A separate PROCESS is not a separate CPU: left
+  // uncapped, ORT grabs every core and starves the libvips pool that
+  // server/index.js:19 reserves for thumbnails — measured at 15ms -> 90ms
+  // with tiles abandoned mid-scroll (lib/interactive.js).
+  transformers.env.backends.onnx.wasm.numThreads = config.threads;
+  return transformers;
+}
+
+/**
+ * The TEXT tower (#164), loaded on first query and kept beside the vision
+ * model rather than replacing it — a text search runs WHILE a backfill is
+ * embedding images, and evicting the vision model to answer a search would
+ * turn a 10 ms query into a multi-second reload of the thing the sweep is
+ * using.
+ *
+ * Always CPU, deliberately, and not for lack of ambition: encoding a handful
+ * of prompts measured 29 ms on CPU (2026-07-26), so the entire
+ * candidate-device dance loadWithBestDevice performs for images — build a
+ * session per EP, run a real forward pass, keep the winner — would cost more
+ * than every text query this feature will ever run. The image path earns that
+ * machinery across 16,797 photos; this one never would.
+ */
+let loadedText = null;
+let textLoadingPromise = null;
+
+async function ensureTextModel(modelId) {
+  if (loadedText?.id === modelId) return loadedText;
+  if (textLoadingPromise) return textLoadingPromise;
+
+  textLoadingPromise = (async () => {
+    const spec = modelById(modelId);
+    if (!spec.text) {
+      throw new Error(`model ${modelId} has no text encoder registered`);
+    }
+    const t = await ensureTransformers();
+    const progress_callback = (p) => reply({ type: "progress", modelId, ...p });
+    const tokenizer = await t.AutoTokenizer.from_pretrained(spec.id, {
+      progress_callback,
+    });
+    const model = await t[spec.text.loader].from_pretrained(spec.id, {
+      dtype: spec.dtype,
+      device: "cpu",
+      progress_callback,
+    });
+    loadedText = {
+      id: modelId,
+      model,
+      tokenizer,
+      outputKey: spec.text.outputKey,
+      tokenize: spec.text.tokenize,
+      dim: spec.dim,
+    };
+    return loadedText;
+  })();
+
+  try {
+    return await textLoadingPromise;
+  } finally {
+    textLoadingPromise = null;
+  }
+}
+
 async function ensureModel(modelId, imagesB64) {
   if (loaded?.id === modelId) return loaded;
   if (loadingPromise && loadingModelId === modelId) return loadingPromise;
@@ -186,29 +276,7 @@ async function ensureModel(modelId, imagesB64) {
   loadingPromise = (async () => {
     const spec = modelById(modelId);
 
-    if (!transformers) {
-      transformers = await import("@huggingface/transformers");
-      // Models are a rebuildable cache on the INTERNAL disk, like every other
-      // derived artifact this app writes. NOT under cache/thumbs/ —
-      // pruneOrphanedCache deletes anything there that isn't a known thumb
-      // key, regardless of extension, and would eat the model on the next
-      // prune. Refuse to guess: an unset/empty var would otherwise fall back
-      // to transformers' own default ('./.cache', relative to CWD) — an
-      // invisible-to-cacheStats download into the repo or the user's home.
-      const modelsDir = process.env.AUTOGALLERY_MODELS_DIR;
-      if (!modelsDir) {
-        throw new Error(
-          "AUTOGALLERY_MODELS_DIR is not set — refusing to let transformers.js " +
-            "fall back to its default cache location"
-        );
-      }
-      transformers.env.cacheDir = modelsDir;
-      // Cap the intra-op pool. A separate PROCESS is not a separate CPU: left
-      // uncapped, ORT grabs every core and starves the libvips pool that
-      // server/index.js:19 reserves for thumbnails — measured at 15ms -> 90ms
-      // with tiles abandoned mid-scroll (lib/interactive.js).
-      transformers.env.backends.onnx.wasm.numThreads = config.threads;
-    }
+    await ensureTransformers();
 
     // Unsolicited progress frames — no `id`, so the parent's #onData routes
     // them to its "progress" event instead of a pending-request waiter.
@@ -364,6 +432,29 @@ async function handle(line) {
       // the parent (OnnxMLService) records it so describeProvider() reports
       // the truth instead of a hardcoded "cpu".
       return reply({ id: req.id, vectors, dim, device });
+    }
+
+    if (req.op === "embedText") {
+      const { model, tokenizer, outputKey, tokenize, dim } =
+        await ensureTextModel(req.modelId);
+      // `tokenize` comes from the registry, per model. SigLIP needs every
+      // caption padded to a fixed 64 tokens because its export has that
+      // length baked in, and getting it wrong returns a DIFFERENT vector
+      // rather than an error — see models.js.
+      const inputs = tokenizer(req.texts, tokenize);
+      const out = await model(inputs);
+      // Same validator the image path uses, for the same reason: a wrong
+      // outputKey (say a bare CLIPTextModel's pooler_output where the joint
+      // space needs text_embeds) yields plausible numbers of the right width
+      // and a meaningless cosine. Checking batch size too catches
+      // mis-attribution a width check alone would miss.
+      const vectors = extractVectors(out[outputKey], {
+        modelId: req.modelId,
+        outputKey,
+        dim,
+        batchSize: req.texts.length,
+      });
+      return reply({ id: req.id, vectors, dim });
     }
 
     reply({ id: req.id, error: `unknown op: ${req.op}` });

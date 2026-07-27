@@ -114,3 +114,26 @@ describe("toggleOrientation", () => {
     ).toBe(3);
   });
 });
+
+describe("saved semantic tag facet (#164)", () => {
+  it("counts as an active filter", () => {
+    // Otherwise the toolbar reports "no filters" while the feed is narrowed to
+    // 40 photos — the same lie as any other missing facet.
+    expect(isActive({ ...DEFAULT_FILTER, tag: "sunset" })).toBe(true);
+    expect(isActive({ ...DEFAULT_FILTER })).toBe(false);
+  });
+
+  it("travels in the query param", () => {
+    // The third of the three layers a facet needs. Correct SQL and correct UI
+    // still reach nothing if the key never leaves the client.
+    const q = JSON.parse(toQueryParam({ ...DEFAULT_FILTER, tag: "sunset" }));
+    expect(q.tag).toBe("sunset");
+  });
+
+  it("is absent, not empty, when off", () => {
+    // `tag: ""` would still travel and would still have to be special-cased
+    // server-side; the key simply should not be there.
+    const q = toQueryParam({ ...DEFAULT_FILTER, tag: "" });
+    expect(q).toBeNull();
+  });
+});

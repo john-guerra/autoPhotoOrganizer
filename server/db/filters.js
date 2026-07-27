@@ -70,6 +70,26 @@ export function buildFilter(spec = {}) {
     clauses.push(`photos.id IN (SELECT photo_id FROM keep_scope)`);
   }
 
+  // A saved semantic tag (#164): "show me the photos I saved as sunset".
+  //
+  // Phrased `photos.id IN (SELECT …)` and NOT as a JOIN, for the same reason
+  // keepScope above is: this filter is spliced into the feed-seek and tree
+  // queries too, and those do not JOIN photo_tags. A JOIN works in
+  // getFeedPage and silently breaks getTreeNode and countGroupPath — which is
+  // the failure this phrasing exists to prevent, not a style preference.
+  //
+  // Matched by VALUE rather than tag id: the id is an internal row number the
+  // client never sees, and the value is what the user typed and what the URL
+  // can carry legibly.
+  if (typeof spec?.tag === "string" && spec.tag.length) {
+    clauses.push(
+      `photos.id IN (SELECT pt.photo_id FROM photo_tags pt
+                       JOIN tags t ON t.id = pt.tag_id
+                      WHERE t.dimension_name = 'semantic' AND t.value = ?)`
+    );
+    params.push(spec.tag);
+  }
+
   // Folder-focus scope ("open a folder"): restrict to the chosen folder plus
   // everything nested under it. abs_path is stored with no trailing separator
   // (see upsertScan), so the subtree is the exact path OR any path beginning

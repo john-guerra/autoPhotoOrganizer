@@ -6,6 +6,19 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.37
+
+- **Search your photos by what is in them** (#164). Type "sunset", "whiteboard",
+  "my dog on a sofa" — anything, there is no fixed list of words — and
+  AutoGallery ranks your whole library against it in a fraction of a second. It
+  reads nothing new: it compares your words against photos the model has
+  already looked at.
+- Results are **ranked, never thresholded**. You drag a slider to keep as many
+  as you want, because only you can see where the results stop being your dog.
+- **Save what you keep as a tag**, and it becomes a normal filter you can
+  combine with ratings, folders and dates. Photos you add to a tag by hand are
+  never thrown away when the search is re-run.
+
 ## 2.18.36
 
 - **Find duplicates now answers about your selection** (#211). Select some

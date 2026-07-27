@@ -69,6 +69,30 @@ export const MODELS = [
     outputKey: "pooler_output",
     dim: 768,
     dtype: "int8",
+    // #164. The TEXT tower of the same model, downloaded only when a text
+    // query is first made. It shares the image tower's vector space, so a
+    // caption's vector can be cosined directly against vectors already
+    // computed for #161 — which is what makes open-vocabulary tagging cost
+    // no per-photo inference at all.
+    //
+    // VERIFIED, not assumed (2026-07-26, against the real 16,797-photo
+    // library): "a photo of a dog" returned a golden retriever, "a photo of
+    // a city street" a San Francisco street, "a photo of a beach" the pier
+    // at Santa Monica. The shared space is a claim about SigLIP's
+    // architecture — get_image_features is the vision pooler_output and
+    // get_text_features the text pooler_output, with no projection on either
+    // side — and a claim like that is worth ten minutes to confirm rather
+    // than discover wrong later.
+    text: {
+      loader: "SiglipTextModel",
+      outputKey: "pooler_output",
+      // SigLIP was trained with every caption padded to a fixed 64 tokens,
+      // and its ONNX export has that length baked in. Tokenizing with the
+      // default dynamic padding does not error — it silently returns a
+      // DIFFERENT vector, which is the failure mode this whole file exists
+      // to prevent.
+      tokenize: { padding: "max_length", max_length: 64, truncation: true },
+    },
     // Sits below the measured re-framed pair (0.9326) and far above the
     // shared-genre band (0.61). See the module doc for the full table.
     nearDupeThreshold: 0.93,
@@ -103,6 +127,19 @@ export const MODELS = [
     outputKey: "image_embeds",
     dim: 512,
     dtype: "int8",
+    // #164. Note this pairs WithProjection against WithProjection: CLIP's
+    // joint space is behind a projection head on BOTH towers, so pairing
+    // `image_embeds` with a bare CLIPTextModel's `pooler_output` would
+    // compare a projected vector against an unprojected one — same width,
+    // plausible numbers, meaningless cosine. SigLIP above is the opposite
+    // case (no projection on either side), which is exactly why this is a
+    // per-model field and not one shared constant.
+    text: {
+      loader: "CLIPTextModelWithProjection",
+      outputKey: "text_embeds",
+      // CLIP's export takes dynamic-length input; it needs no fixed pad.
+      tokenize: { padding: true, truncation: true },
+    },
     // Lower than SigLIP's, and not by preference: CLIP scored the same
     // re-framed pair at 0.8854 where SigLIP gave 0.9326. Using SigLIP's 0.93
     // here would silently miss every re-framed duplicate under this model —

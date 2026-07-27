@@ -95,6 +95,13 @@ import {
   nearDupeCountsForIds,
   clearNearDupeGroups,
 } from "./db/nearDupes.js";
+import {
+  embeddedVectors,
+  normalize,
+  rankByVector,
+  scoreQuantiles,
+} from "./ml/textSearch.js";
+import { saveTag, listTags, deleteTag } from "./db/tags.js";
 import { interactiveRoute } from "./lib/interactive.js";
 import { whyTranscode, playbackPlan } from "./lib/videoPlayback.js";
 import {
@@ -705,6 +712,16 @@ function parseFilterParam(req) {
   // "Keep only" working set, referenced by flag; the ids live in the keep_scope
   // table (set via POST /api/scope), so there is no size cap here.
   if (raw.keepScope) spec.keepScope = true;
+  // A saved semantic tag (#164), matched by the value the user typed. This
+  // allowlist entry is load-bearing in the quiet way this file warns about
+  // above: correct SQL in filters.js and correct UI in filterSpec.js still
+  // produce a filter that does NOTHING if the key never gets past here.
+  if (raw.tag !== undefined && raw.tag !== null) {
+    if (typeof raw.tag !== "string" || !raw.tag.length) {
+      return { spec: {}, error: "tag must be a non-empty string" };
+    }
+    spec.tag = raw.tag;
+  }
   // Folder-focus scope ("open a folder"): the abs_path of the focused subtree
   // root. Only ever compared against the indexed folders.abs_path column (never
   // resolved to a file), so no safeResolve is needed here.
@@ -1336,6 +1353,103 @@ export function registerApi(app, { ml } = {}) {
     }
     const jobId = kickNearDupeSweep(getDb());
     res.json({ started: true, jobId });
+  });
+
+  // POST -> rank the library against a phrase (#164).
+  //
+  // Nothing is thresholded and nothing is stored: the phrase is encoded, every
+  // stored vector is scored against it, and the ranked list comes back with
+  // the distribution's own quantiles so the client can show WHERE results stop
+  // being good. server/ml/textSearch.js carries the measurements behind that
+  // decision — the short version is that this model's cosine is uncalibrated,
+  // so no fixed cutoff means "this is a dog".
+  //
+  // Costs no per-photo inference. The text tower shares the image tower's
+  // vector space, so a query is one small text encode plus arithmetic over
+  // vectors #161 already computed — measured at 12ms to load 16,797 vectors
+  // and 8-17ms to score them.
+  app.post("/api/ml/search", async (req, res) => {
+    const q = typeof req.body?.q === "string" ? req.body.q.trim() : "";
+    if (!q) return res.status(400).json({ error: "q must be a phrase" });
+
+    const settings = readMlSettings();
+    if (!settings.enabled) {
+      return res.status(409).json({
+        error:
+          "Photo similarity is off. Turn it on in Manage library to search by what is in a photo.",
+      });
+    }
+    const db = getDb();
+    const { modelId } = settings;
+    const rows = embeddedVectors(db, modelId);
+    if (!rows.length) {
+      // Specific over generic (CLAUDE.md): the search is not broken, it has
+      // nothing to search. Saying so — and what to do — is the difference
+      // between a dead box and an actionable one.
+      return res.status(409).json({
+        error:
+          "No photos have been read by the vision model yet. Compute embeddings in Manage library first.",
+      });
+    }
+
+    try {
+      const ml = getMl();
+      await ml.configure({
+        modelId,
+        threads: settings.threads,
+        // "auto" is the ABSENCE of a pin, not a device name — see embedSweep.
+        device: settings.device === "auto" ? null : settings.device,
+      });
+      const [raw] = await ml.embedTexts([q]);
+      const ranked = rankByVector(rows, normalize(raw));
+      const limit = Math.min(1000, Math.max(1, Number(req.body?.limit) || 300));
+      res.json({
+        query: q,
+        model: modelId,
+        scored: ranked.length,
+        // Quantiles come from the FULL ranking, never the returned page: the
+        // top 300 of this library is already its top 2%, so a distribution
+        // taken from the page would describe only the good end.
+        quantiles: scoreQuantiles(ranked),
+        results: ranked.slice(0, limit),
+      });
+    } catch (e) {
+      // The first search downloads the text tower, so this is also where a
+      // failed download surfaces. Carry the host's own words.
+      res
+        .status(500)
+        .json({ error: `Couldn't search by phrase: ${e?.message ?? e}` });
+    }
+  });
+
+  // The saved half of #164. Searching is disposable and costs ~10ms; what is
+  // worth storing is the user's DECISION about where a ranked list stopped
+  // being dogs, which no threshold can reproduce.
+  app.get("/api/ml/tags", (req, res) => res.json({ tags: listTags(getDb()) }));
+
+  app.post("/api/ml/tags", (req, res) => {
+    const value = typeof req.body?.value === "string" ? req.body.value : "";
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+    if (!value.trim())
+      return res.status(400).json({ error: "tag needs a name" });
+    if (!ids) {
+      return res
+        .status(400)
+        .json({ error: "ids must be an array of photo ids" });
+    }
+    try {
+      res.json(saveTag(getDb(), value, ids));
+    } catch (e) {
+      res
+        .status(500)
+        .json({ error: `Couldn't save the tag: ${e?.message ?? e}` });
+    }
+  });
+
+  app.delete("/api/ml/tags/:value", (req, res) => {
+    const { removed } = deleteTag(getDb(), req.params.value);
+    if (!removed) return res.status(404).json({ error: "no such tag" });
+    res.json({ removed });
   });
 
   // POST -> how much of the stored grouping the caller's photos account for

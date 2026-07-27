@@ -29,8 +29,13 @@ export function isActive(spec) {
     typeof spec?.folderPath === "string" && spec.folderPath.length > 0;
   const timed = spec?.dateFrom != null || spec?.dateTo != null;
   const searched = typeof spec?.text === "string" && spec.text.trim() !== "";
+  // A saved semantic tag (#164). Counted as active so the toolbar reports the
+  // feed as filtered — a tag that silently narrows the library while the UI
+  // says "no filters" is the same lie as any other missing facet.
+  const tagged = typeof spec?.tag === "string" && spec.tag.length > 0;
   return (
     searched ||
+    tagged ||
     minRating > 0 ||
     (o.length > 0 && o.length < ORIENTATIONS.length) ||
     (k.length > 0 && k.length < KINDS.length) ||
@@ -59,6 +64,9 @@ export function toQueryParam(spec) {
     out.scopeIds = spec.scopeIds;
   }
   if (spec?.keepScope) out.keepScope = true;
+  // Third of the three layers a facet needs (SQL -> server allowlist -> here).
+  // Miss this one and the filter is correct everywhere and reaches nothing.
+  if (typeof spec?.tag === "string" && spec.tag) out.tag = spec.tag;
   if (typeof spec?.folderPath === "string" && spec.folderPath) {
     out.folderPath = spec.folderPath;
   }

@@ -52,6 +52,9 @@
     mlEnabled = false,
     onfinddupes,
     onburstselection,
+    // Saved semantic tags (#164), passed through to the filter group. Empty
+    // until the user saves a search, and TagFilter renders nothing while it is.
+    semanticTags = [],
 
     // Library (the ＋ menu + the add-folder popover).
     scanning = false,
@@ -154,6 +157,7 @@
       {onfiltermodechange}
       {onfilterchange}
       {timeline}
+      {semanticTags}
     />
 
     <button

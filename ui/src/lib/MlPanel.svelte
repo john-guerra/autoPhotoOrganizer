@@ -17,10 +17,17 @@
    */
   import Modal from "./Modal.svelte";
   import MlSettings from "./MlSettings.svelte";
+  import SemanticSearch from "./SemanticSearch.svelte";
 
   /** Passed straight through to MlSettings so its scope selector can offer
    *  "Selected" and "Visible" (#215) — the panel itself owns no grid state. */
-  let { onclose, selectedIds = [], visibleIds = [], onrefinechange } = $props();
+  let {
+    onclose,
+    selectedIds = [],
+    visibleIds = [],
+    onrefinechange,
+    onsemanticapply,
+  } = $props();
 </script>
 
 <Modal
@@ -30,11 +37,28 @@
   onclose={() => onclose?.()}
 >
   <div class="ml-panel">
+    <!-- Search sits ABOVE the settings deliberately: it is the thing the model
+         is FOR, and the model/threads/threshold controls below are the
+         machinery that makes it possible. The UX review (#213) found the
+         feature reading as "a button that computes something" precisely
+         because the payoff was never on screen. -->
+    <SemanticSearch
+      onapply={(ids) => {
+        onsemanticapply?.(ids);
+        onclose?.();
+      }}
+    />
+    <hr />
     <MlSettings {selectedIds} {visibleIds} {onrefinechange} />
   </div>
 </Modal>
 
 <style>
+  hr {
+    border: none;
+    border-top: 1px solid #333;
+    margin: 1rem 0;
+  }
   .ml-panel {
     /* The section renders its own <h3>, which would otherwise sit oddly close
        under the modal's title bar. */

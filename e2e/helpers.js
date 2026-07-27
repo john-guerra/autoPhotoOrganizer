@@ -633,6 +633,21 @@ export async function openManageLibrary(page) {
   ).toBeVisible();
 }
 
+/** The standalone Machine learning panel (#205) — reached from the toolbar's
+ *  gear, and the only home of the semantic search (#164). Distinct from
+ *  `mlSettings` above, which is the section embedded in Manage library. */
+export const mlPanel = {
+  /** The toolbar gear. Scoped to the toolbar: the dialogs it opens carry their
+   *  own accessible names, and an unscoped "Settings" matches more than one. */
+  open: async (page) => {
+    await page.locator(".topbar button[aria-label='Settings']").click();
+    await page.getByRole("button", { name: /Machine learning/ }).click();
+  },
+  /** Modal is a native <dialog>, so Esc is the real close path users take. */
+  close: (page) => page.keyboard.press("Escape"),
+  search: (page) => page.getByTestId("semantic-search"),
+};
+
 export const mlSettings = {
   root: (page) => page.getByTestId("ml-settings"),
   /** "N of M embedded · F failed · P not computed yet" — pending and failed
