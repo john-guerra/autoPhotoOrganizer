@@ -344,6 +344,30 @@ export class OnnxMLService extends MLService {
     return vectors.map((v) => Float32Array.from(v));
   }
 
+  /**
+   * Encode search phrases into the SAME space as the image vectors (#164).
+   *
+   * The whole point of the feature: because the text tower shares the image
+   * tower's space, a query costs one small text encode and then arithmetic
+   * over vectors #161 already computed — no per-photo inference, ever, and a
+   * new word costs one encode rather than a re-read of the library.
+   *
+   * Given the cold timeout: the first call downloads the text tower, which
+   * the image path's warm/cold split has no knowledge of.
+   *
+   * @param {string[]} strings
+   * @returns {Promise<Float32Array[]>} raw (un-normalized) model vectors
+   */
+  async embedTexts(strings) {
+    if (!this.#modelId)
+      throw markHostFailure(new Error("OnnxMLService: configure() first"));
+    const { vectors } = await this.#request(
+      { op: "embedText", modelId: this.#modelId, texts: strings },
+      EMBED_COLD_TIMEOUT_MS
+    );
+    return vectors.map((v) => Float32Array.from(v));
+  }
+
   /** The execution provider actually running, per candidateDevices()
    * (worker/devices.js) and loadWithBestDevice() (worker/index.js) — a per-
    * platform candidate list (DirectML on win32, CUDA on linux/x64, WebGPU,

@@ -95,6 +95,12 @@ import {
   nearDupeCountsForIds,
   clearNearDupeGroups,
 } from "./db/nearDupes.js";
+import {
+  embeddedVectors,
+  normalize,
+  rankByVector,
+  scoreQuantiles,
+} from "./ml/textSearch.js";
 import { interactiveRoute } from "./lib/interactive.js";
 import { whyTranscode, playbackPlan } from "./lib/videoPlayback.js";
 import {
@@ -1336,6 +1342,73 @@ export function registerApi(app, { ml } = {}) {
     }
     const jobId = kickNearDupeSweep(getDb());
     res.json({ started: true, jobId });
+  });
+
+  // POST -> rank the library against a phrase (#164).
+  //
+  // Nothing is thresholded and nothing is stored: the phrase is encoded, every
+  // stored vector is scored against it, and the ranked list comes back with
+  // the distribution's own quantiles so the client can show WHERE results stop
+  // being good. server/ml/textSearch.js carries the measurements behind that
+  // decision — the short version is that this model's cosine is uncalibrated,
+  // so no fixed cutoff means "this is a dog".
+  //
+  // Costs no per-photo inference. The text tower shares the image tower's
+  // vector space, so a query is one small text encode plus arithmetic over
+  // vectors #161 already computed — measured at 12ms to load 16,797 vectors
+  // and 8-17ms to score them.
+  app.post("/api/ml/search", async (req, res) => {
+    const q = typeof req.body?.q === "string" ? req.body.q.trim() : "";
+    if (!q) return res.status(400).json({ error: "q must be a phrase" });
+
+    const settings = readMlSettings();
+    if (!settings.enabled) {
+      return res.status(409).json({
+        error:
+          "Photo similarity is off. Turn it on in Manage library to search by what is in a photo.",
+      });
+    }
+    const db = getDb();
+    const { modelId } = settings;
+    const rows = embeddedVectors(db, modelId);
+    if (!rows.length) {
+      // Specific over generic (CLAUDE.md): the search is not broken, it has
+      // nothing to search. Saying so — and what to do — is the difference
+      // between a dead box and an actionable one.
+      return res.status(409).json({
+        error:
+          "No photos have been read by the vision model yet. Compute embeddings in Manage library first.",
+      });
+    }
+
+    try {
+      const ml = getMl();
+      await ml.configure({
+        modelId,
+        threads: settings.threads,
+        // "auto" is the ABSENCE of a pin, not a device name — see embedSweep.
+        device: settings.device === "auto" ? null : settings.device,
+      });
+      const [raw] = await ml.embedTexts([q]);
+      const ranked = rankByVector(rows, normalize(raw));
+      const limit = Math.min(1000, Math.max(1, Number(req.body?.limit) || 300));
+      res.json({
+        query: q,
+        model: modelId,
+        scored: ranked.length,
+        // Quantiles come from the FULL ranking, never the returned page: the
+        // top 300 of this library is already its top 2%, so a distribution
+        // taken from the page would describe only the good end.
+        quantiles: scoreQuantiles(ranked),
+        results: ranked.slice(0, limit),
+      });
+    } catch (e) {
+      // The first search downloads the text tower, so this is also where a
+      // failed download surfaces. Carry the host's own words.
+      res
+        .status(500)
+        .json({ error: `Couldn't search by phrase: ${e?.message ?? e}` });
+    }
   });
 
   // POST -> how much of the stored grouping the caller's photos account for
