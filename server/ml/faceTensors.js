@@ -9,14 +9,23 @@
  * embeddings of nothing. Feeding HWC where the graph wants CHW does not throw
  * either; it produces a tensor of exactly the right length.
  *
- * ## The normalization is (x - 127.5) / 128, not /255
+ * ## The normalization is (x - 127.5) / std, not /255
  *
- * Both InsightFace models were trained that way, so the input distribution is
- * centred on zero. A [0,1] input is a different distribution entirely and the
- * network has no idea; it returns 512 plausible floats regardless. This is the
- * single easiest thing to get wrong in a face pipeline and the hardest to
- * notice, because everything downstream keeps working — clusters just stop
- * corresponding to people.
+ * Both InsightFace models were trained centred on zero. A [0,1] input is a
+ * different distribution entirely and the network has no idea; it returns 512
+ * plausible floats regardless. This is the single easiest thing to get wrong
+ * in a face pipeline and the hardest to notice, because everything downstream
+ * keeps working — clusters just stop corresponding to people.
+ *
+ * ## The two models do NOT share a std, and a review caught this
+ *
+ * InsightFace's own code uses **128** for the detector (`scrfd.py`) and
+ * **127.5** for the recognizer (`arcface_onnx.py`). It reads like a typo
+ * upstream and it is tempting to "tidy" — don't. ArcFace's training
+ * normalization is what defines the space its cosines live in, and running it
+ * at 128 shifts every embedding consistently: invisible per face, and visible
+ * only as a clustering threshold that will not sit anywhere sensible. This
+ * file originally shared one STD between the two, which is exactly that bug.
  */
 import {
   DET_SIZE,
@@ -29,9 +38,14 @@ import {
 /** ArcFace's crop is square and fixed by the recognizer's input shape. */
 export const CROP_SIZE = 112;
 
-/** Both models' input normalization. See the module doc — this is not a knob. */
+/** Shared by both models. See the module doc — this is not a knob. */
 const MEAN = 127.5;
-const STD = 128;
+/** SCRFD's `input_std` (scrfd.py). */
+export const DET_STD = 128;
+/** ArcFace's `input_std` (arcface_onnx.py) — deliberately NOT the detector's.
+ *  Exported so a test can assert the two differ; collapsing them back into one
+ *  constant is the regression this pair exists to prevent. */
+export const REC_STD = 127.5;
 
 /**
  * Pack an already-letterboxed RGB buffer into the detector's NCHW tensor.
@@ -56,9 +70,9 @@ export function packDetectorInput(rgb) {
   }
   const out = new Float32Array(plane * 3);
   for (let i = 0; i < plane; i++) {
-    out[i] = (rgb[i * 3] - MEAN) / STD;
-    out[plane + i] = (rgb[i * 3 + 1] - MEAN) / STD;
-    out[2 * plane + i] = (rgb[i * 3 + 2] - MEAN) / STD;
+    out[i] = (rgb[i * 3] - MEAN) / DET_STD;
+    out[plane + i] = (rgb[i * 3 + 1] - MEAN) / DET_STD;
+    out[2 * plane + i] = (rgb[i * 3 + 2] - MEAN) / DET_STD;
   }
   return out;
 }
@@ -130,7 +144,7 @@ export function packAlignedCrop(rgb, width, height, kps) {
           rgb[i10 + c] * w10 +
           rgb[i01 + c] * w01 +
           rgb[i11 + c] * w11;
-        out[c * plane + o] = (s - MEAN) / STD;
+        out[c * plane + o] = (s - MEAN) / REC_STD;
       }
     }
   }

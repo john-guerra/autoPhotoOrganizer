@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   CROP_SIZE,
+  DET_STD,
+  REC_STD,
   packDetectorInput,
   packAlignedCrop,
   detectorResizePlan,
@@ -63,6 +65,33 @@ describe("detector input packing", () => {
   });
 });
 
+describe("the two models' input_std", () => {
+  it("uses ArcFace's 127.5 for the crop and SCRFD's 128 for the detector", () => {
+    // Upstream really does differ between the two (arcface_onnx.py vs
+    // scrfd.py), and sharing one constant is the tidy-looking bug this pair
+    // exists to prevent. Asserted on the OUTPUT, not just the constants, so
+    // collapsing them back inside either function is caught.
+    expect(DET_STD).not.toBe(REC_STD);
+
+    const det = packDetectorInput(
+      rgbBuffer(DET_SIZE, DET_SIZE, () => [200, 200, 200])
+    );
+    expect(det[0]).toBeCloseTo((200 - 127.5) / 128, 6);
+
+    // A crop of a uniform image is that same uniform value, whatever the
+    // alignment does -- so this isolates the normalization alone.
+    const W = 64;
+    const H = 64;
+    const flat = rgbBuffer(W, H, () => [200, 200, 200]);
+    const kps = ARCFACE_TEMPLATE.map(([x, y]) => [x * 0.4 + 8, y * 0.4 + 8]);
+    const crop = packAlignedCrop(flat, W, H, kps);
+    expect(crop[0]).toBeCloseTo((200 - 127.5) / 127.5, 6);
+    // ...and NOT the detector's, which is what it was before the fix. The two
+    // differ by 0.0043 here, well outside the 6-digit tolerance above.
+    expect(crop[0]).not.toBeCloseTo((200 - 127.5) / 128, 6);
+  });
+});
+
 describe("the aligned crop", () => {
   it("puts the eyes where ArcFace expects them", () => {
     // The contract is: a face whose keypoints are at `kps` in the source ends
@@ -105,7 +134,7 @@ describe("the aligned crop", () => {
     const kps = ARCFACE_TEMPLATE.map(([x, y]) => [x * 0.4 - 8, y * 0.4 - 8]);
 
     const crop = packAlignedCrop(buf, W, H, kps);
-    const expected = (200 - 127.5) / 128;
+    const expected = (200 - 127.5) / REC_STD;
     // If off-frame samples were zero-filled the minimum would be ~-1; if they
     // were left unclamped the read would be out of bounds and NaN.
     let min = Infinity;
@@ -138,7 +167,7 @@ describe("the aligned crop", () => {
     expect(Number.isNaN(min)).toBe(false);
     // Everything this crop touches lives in the bright half of the gradient.
     // Wrapping an off-frame sample to index 0 would drag in the black corner.
-    const halfway = (128 - 127.5) / 128;
+    const halfway = (128 - 127.5) / REC_STD;
     expect(min).toBeGreaterThan(halfway);
   });
 
@@ -158,7 +187,7 @@ describe("the aligned crop", () => {
     const crop = packAlignedCrop(buf, W, H, kps);
 
     const levels = new Set(
-      [...crop].map((v) => Math.round((v * 128 + 127.5) * 1000))
+      [...crop].map((v) => Math.round((v * REC_STD + 127.5) * 1000))
     );
     // With nearest-neighbour every sample is an exact multiple of 4.
     const offGrid = [...levels].filter((l) => Math.abs((l / 1000) % 4) > 0.01);
