@@ -171,6 +171,24 @@ describe("scoping the worklist (#221)", () => {
     ]);
   });
 
+  it("survives a scope at the route's 50,000-id cap", () => {
+    // The routes ACCEPT up to 50,000 ids, and nothing exercised that until
+    // now: at the cap `pendingFaceRows` builds a ~400 KB SQL string and
+    // re-prepares it once per 8-photo batch. If SQLite refused a literal list
+    // that long, the failure would land on the user's largest and slowest
+    // operation — the one where a hard error costs the most. It doesn't (a
+    // flat `IN` list is an ExprList, so SQLITE_MAX_EXPR_DEPTH doesn't apply),
+    // and this pins that rather than leaving it as a belief.
+    const db = getDb();
+    const ids = seed(db, 3);
+    const scope = [
+      ...ids,
+      ...Array.from({ length: 50_000 }, (_, i) => i + 10_000),
+    ];
+
+    expect(pendingFaceRows(db, MODEL, 10, scope).map((r) => r.id)).toEqual(ids);
+  });
+
   it("ignores ids that are not photos rather than failing the sweep", () => {
     const db = getDb();
     const ids = seed(db, 2);

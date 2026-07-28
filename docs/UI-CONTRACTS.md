@@ -42,10 +42,18 @@ Wiring a third takes four things:
 3. Send `scopeIdsFor(choice, …)` — `null` for the sweep, `[]` for an empty
    selection. The server keeps those distinct all the way into the SQL
    (`server/db/scopeIds.js`); collapsing them is how an empty selection becomes
-   an hour of inference.
+   an hour of inference. On the wire, **`null` and an omitted key both mean
+   "no scope"** — only an actual empty array is refused.
 4. The route validates `ids` the way `POST /api/ml/embed` and
-   `POST /api/ml/faces` do — empty is a specific 400, oversized a 413 — and the
-   job's `total` is the SCOPE's size, or the progress bar lies.
+   `POST /api/ml/faces` do — empty is a specific 400, oversized a 413.
+5. The job's `total` is the scope's **pending count** — the worklist query run
+   once up front (`pendingFaceRows(db, model, MAX_SAFE_INTEGER, ids).length`)
+   — **not `ids.length`**, and it is set at `registry.create`, not on the first
+   progress tick. Both halves matter: the scope includes photos already done,
+   so `ids.length` makes the bar finish at 25% and stop; and a total that
+   arrives one batch late is an indeterminate bar at exactly the moment the
+   user is deciding whether it hung (#208). If the pending count is zero, say
+   so and start no job at all.
 
 ### The rules
 

@@ -1,3 +1,7 @@
+// Shared with the embed worklist (#206/#221) — see scopeIds.js on why this
+// validator has its own module rather than a copy per stage.
+import { normalizeScope, scopeClauseFor } from "./scopeIds.js";
+
 /**
  * The faces data layer (#166).
  *
@@ -35,10 +39,6 @@
  * from either table to notice. A test asserts they are distinct, because
  * nothing else would.
  */
-// Shared with the embed worklist (#206/#221) — see scopeIds.js on why this
-// validator has its own module rather than a copy per stage.
-import { normalizeScope, scopeClauseFor } from "./scopeIds.js";
-
 export const FACES_STAGE = "faces";
 
 /**

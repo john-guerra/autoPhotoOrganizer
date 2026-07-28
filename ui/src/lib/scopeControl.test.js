@@ -4,7 +4,6 @@ import {
   activeScope,
   scopeIdsFor,
   formatEstimate,
-  SCOPE_KEYS,
   DEFAULT_SCOPE,
 } from "./scopeControl.js";
 
@@ -99,11 +98,20 @@ describe("formatEstimate", () => {
   });
 });
 
-describe("the module's own contract", () => {
-  it("defaults to the whole library", () => {
-    // Not "selected": the panel is often opened with nothing selected, and a
-    // default that is empty makes the primary button start out disabled.
-    expect(DEFAULT_SCOPE).toBe("all");
-    expect(SCOPE_KEYS).toContain(DEFAULT_SCOPE);
+describe("the default scope", () => {
+  it("is a scope that buildScopes actually offers, and is never the empty one", () => {
+    // Not decoration: this fails if DEFAULT_SCOPE is ever pointed at a key
+    // buildScopes doesn't emit (the panel would open on nothing), and it
+    // encodes WHY the default isn't "selected" — the panel is usually opened
+    // with an empty selection, and a default that is empty starts the primary
+    // button out disabled.
+    const scopes = buildScopes({
+      selectedIds: [],
+      visibleIds: [],
+      allCount: 9,
+    });
+    const chosen = activeScope(scopes, DEFAULT_SCOPE);
+    expect(scopes.map((s) => s.key)).toContain(DEFAULT_SCOPE);
+    expect(chosen.n).toBe(9);
   });
 });

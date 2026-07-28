@@ -24,6 +24,7 @@
     activeScope as activeScopeOf,
     scopeIdsFor,
     formatEstimate,
+    DEFAULT_SCOPE,
   } from "./scopeControl.js";
   import {
     fetchMlSettings,
@@ -45,7 +46,7 @@
 
   /** What "Embed now" will act on. Defaults to the whole library, matching the
    *  behaviour this control had before a choice existed. */
-  let scopeChoice = $state("all");
+  let scopeChoice = $state(DEFAULT_SCOPE);
 
   /** @type {{enabled:boolean, modelId:string, threads:number, maxThreads:number, models:Array<object>}|null} */
   let settings = $state(null);
@@ -798,7 +799,7 @@
       {visibleIds}
       allCount={pending}
       msPerPhoto={activeModel?.approxMsPerPhoto}
-      estimateSuffix={` at ~${activeModel?.approxMsPerPhoto}ms each on this model. Already-read photos are skipped, so it is often faster.`}
+      estimateSuffix={` at ~${activeModel?.approxMsPerPhoto ?? "?"}ms each on this model. Already-read photos are skipped, so it is often faster.`}
       emptyMessage="Nothing to embed in this scope."
       disabled={busy}
       bind:choice={scopeChoice}
@@ -996,35 +997,8 @@
 </section>
 
 <style>
-  .scope {
-    display: flex;
-    align-items: center;
-    gap: 0.9rem;
-    border: 1px solid #333;
-    border-radius: 4px;
-    padding: 0.35rem 0.6rem;
-    margin: 0.7rem 0 0;
-  }
-  .scope legend {
-    padding: 0 0.3rem;
-    font-size: 0.78rem;
-    color: #ccc;
-  }
-  .scope-opt {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-size: 0.82rem;
-    cursor: pointer;
-  }
-  .scope-opt.empty {
-    opacity: 0.45;
-    cursor: default;
-  }
-  .scope-n {
-    color: #888;
-    font-variant-numeric: tabular-nums;
-  }
+  /* NOTE: .scope/.scope-opt/.scope-n moved to ScopeControl.svelte with the
+     markup that uses them — Svelte scopes styles per component. */
   h3 {
     margin: 0.75rem 0 0.4rem;
     font-size: 0.95rem;

@@ -14,8 +14,10 @@ user-facing — what you can now do, not how it's built.
   cost you a library-wide scan (#221).
 - An empty selection is refused with a message that says so, instead of quietly
   scanning everything (#221).
-- Progress for a scoped scan is measured against the photos you picked, so the
-  bar means something (#221).
+- Progress for a scoped scan counts the photos that still need looking at, so
+  the bar reaches the end instead of stopping partway (#221).
+- Picking a scope where everything has already been scanned says so, instead of
+  starting a scan that immediately reports nothing (#221).
 
 ## 2.18.40
 

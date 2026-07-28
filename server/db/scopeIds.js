@@ -47,5 +47,22 @@ export function scopeClauseFor(ids, column = "photos.id") {
       "scopeClauseFor: an empty scope must short-circuit to no rows, not build a clause"
     );
   }
+  // Re-check here rather than trusting the caller ran normalizeScope. This is
+  // the one line in the codebase that concatenates request-derived values into
+  // SQL, so "a future caller forgets to validate" must be a loud throw and not
+  // an injection. Cheap: an integer test over a list already bounded at 50,000
+  // by the routes.
+  if (!ids.every(Number.isSafeInteger)) {
+    throw new Error(
+      "scopeClauseFor: ids must be safe integers — run normalizeScope first"
+    );
+  }
+  // `column` is interpolated raw and is NEVER caller-supplied — both call
+  // sites pass a literal. Allowlisted so it cannot become one by accident.
+  if (!/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(column)) {
+    throw new Error(
+      `scopeClauseFor: unsafe column name ${JSON.stringify(column)}`
+    );
+  }
   return `AND ${column} IN (${ids.join(",")})`;
 }

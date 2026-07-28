@@ -224,10 +224,17 @@
           onclick={() =>
             act("scan", async () => {
               const r = await startFaceScan(modelId, scopeIds);
+              // `r.pending` — how many of the chosen photos are actually still
+              // to be looked at — comes from the SERVER, because only the
+              // worklist query knows. Saying `activeScope.n` here would
+              // announce "20 photos" and then have the jobs panel count to 5,
+              // which reads as the scan having given up.
               onnotice?.(
                 r.alreadyRunning
                   ? "A face scan is already running."
-                  : `Looking for faces in ${n(activeScope.n)} photo${activeScope.n === 1 ? "" : "s"} — progress is in the jobs panel.`
+                  : r.nothingToDo
+                    ? r.message
+                    : `Looking for faces in ${n(r.pending)} photo${r.pending === 1 ? "" : "s"} — progress is in the jobs panel.`
               );
             })}
           data-testid="face-scan"

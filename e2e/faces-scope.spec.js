@@ -29,8 +29,23 @@ test.describe("faces scope @p1", () => {
    * console.error, which `trackPageErrors` would then fail on — see
    * docs/AGENT-NOTES.md.
    */
+  // The panel POLLS /api/ml/faces, so a request is often still in flight when
+  // a test ends — `route.fetch()` then rejects with "Test ended", and
+  // Playwright attributes the error to whichever spec runs NEXT. It surfaced
+  // as a failure in feed.spec.js, which touches none of this. Tear the routes
+  // down before the page closes.
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  });
+
   test.beforeEach(async ({ page }) => {
-    await page.route("**/api/ml/faces?**", async (route, request) => {
+    // `**/api/ml/faces*`, NOT `...faces?**`: in a Playwright URL glob `?` is a
+    // LITERAL, not a wildcard, so that pattern matched only the query-string
+    // form. The panel's FIRST fetch has no query string at all (modelId is ""
+    // until the first response), so the stub missed it and the spec passed
+    // only because a second, model-qualified fetch followed — load-bearing on
+    // an implementation detail nobody wrote down.
+    await page.route("**/api/ml/faces*", async (route, request) => {
       if (request.method() !== "GET") return route.continue();
       const real = await route.fetch();
       const body = await real.json();
@@ -102,20 +117,52 @@ test.describe("faces scope @p1", () => {
     expect(errors).toEqual([]);
   });
 
-  test("the estimate tracks the scope", async ({ page }) => {
+  test("the cost line is recomputed from the chosen scope", async ({
+    page,
+  }) => {
     const errors = trackPageErrors(page);
     await openApp(page);
     await grid.selectCircle(page, 0).click();
     await mlPanel.open(page);
 
-    // An estimate that does not move with the scope is worse than none — the
-    // user plans around it.
-    const before = await faceSettings.estimate(page).innerText();
-    await faceSettings.scopeOption(page, "selected").check();
-    const after = await faceSettings.estimate(page).innerText();
+    // WHAT THIS CAN AND CANNOT PROVE — worth stating, because the obvious
+    // version of this test is a lie.
+    //
+    // The contract is that the count and the "about N" move TOGETHER. But on
+    // a 19-photo fixture both scopes round to the SAME string: 19 x ~52ms is
+    // 0.99s and 1 x ~52ms is 0.05s, and formatEstimate clamps anything
+    // sub-second to "about 1s". So asserting the time string changed here
+    // asserts something this fixture cannot show, and it fails for a reason
+    // that has nothing to do with the feature.
+    //
+    // The SCALING is therefore proved where it is genuinely testable —
+    // ui/src/lib/scopeControl.test.js, which pins 10 -> "about 5s",
+    // 600 -> "about 5 min", 60000 -> "about 8.3 h". This asserts the half a
+    // browser is needed for: the line is rebuilt from the chosen scope rather
+    // than frozen at whatever the default rendered.
+    // The "All" count is read from the control rather than hard-coded. It is
+    // NOT the fixture's photo count: faces only looks at `kind = 'image'`, so
+    // the fixture's videos are excluded and the number is 17, not 19. Pinning
+    // a literal here would be pinning an unrelated fixture detail, and it
+    // would break the day a video is added.
+    const allCount = await faceSettings
+      .scope(page)
+      .locator("label", { hasText: "All remaining" })
+      .locator(".scope-n")
+      .innerText();
 
-    expect(after).not.toBe(before);
-    expect(after).toContain("1");
+    await expect(faceSettings.estimate(page)).toContainText(
+      `Up to ${allCount} photos`
+    );
+    await expect(faceSettings.estimate(page)).toContainText(/about\s/);
+
+    await faceSettings.scopeOption(page, "selected").check();
+
+    await expect(faceSettings.estimate(page)).toContainText("Up to 1 photos");
+    await expect(faceSettings.estimate(page)).toContainText(/about\s/);
+    // ...and it really did move, rather than the two scopes happening to hold
+    // the same number.
+    expect(allCount).not.toBe("1");
     expect(errors).toEqual([]);
   });
 

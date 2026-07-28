@@ -16,12 +16,6 @@
 
 /** @typedef {"selected"|"visible"|"all"} ScopeKey */
 
-export const SCOPE_KEYS = /** @type {ScopeKey[]} */ ([
-  "selected",
-  "visible",
-  "all",
-]);
-
 export const DEFAULT_SCOPE = "all";
 
 /**

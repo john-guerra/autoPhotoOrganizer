@@ -10,7 +10,7 @@
 // The id-scope validator is SHARED with the faces sweep (#221) rather than
 // living here: it is what makes inlining ids into SQL safe, and a second copy
 // of that is how one copy drifts.
-import { normalizeScope } from "./scopeIds.js";
+import { normalizeScope, scopeClauseFor } from "./scopeIds.js";
 
 /** The sweep stage name recorded in ml_status. Faces (#166) will add its own. */
 export const EMBED_STAGE = "embed";
@@ -125,7 +125,7 @@ export function pendingEmbedRows(db, model, limit, scopeIds = null) {
   // selection into a full-library sweep — the most expensive possible way to
   // misread an empty array.
   if (ids !== null && ids.length === 0) return [];
-  const scopeClause = ids ? `AND photos.id IN (${ids.join(",")})` : "";
+  const scopeClause = scopeClauseFor(ids);
   return db
     .prepare(
       `SELECT photos.id, photos.filename, photos.mtime, photos.size, photos.kind,
