@@ -67,9 +67,20 @@ export function _resetFaceSweepForTest() {
  *   Injected so this is testable without ONNX — the real one calls the worker.
  * @param {object} [args.job] cancellation handle, as runSweep expects
  * @param {(p: {done: number, failed: number}) => void} [args.onProgress]
+ * @param {number[]|null} [args.scopeIds] #221 — restrict the worklist to these
+ *   photo ids (the user's selection, or what is on screen). `null` sweeps the
+ *   library. An explicitly EMPTY array means "no photos" and is honoured as
+ *   such by pendingFaceRows, never widened.
  * @returns {Promise<{done: number, failed: number, faces: number, paused: boolean, pauseReason?: string}>}
  */
-export async function sweepFaces({ db, modelId, engine, job, onProgress }) {
+export async function sweepFaces({
+  db,
+  modelId,
+  engine,
+  job,
+  onProgress,
+  scopeIds = null,
+}) {
   if (inFlight)
     return {
       done: 0,
@@ -93,7 +104,8 @@ export async function sweepFaces({ db, modelId, engine, job, onProgress }) {
 
   async function drain() {
     const result = await runSweep(job, {
-      nextBatch: (limit) => pendingFaceRows(db, modelId, limit ?? FACE_BATCH),
+      nextBatch: (limit) =>
+        pendingFaceRows(db, modelId, limit ?? FACE_BATCH, scopeIds),
       folderOf: (row) => row.folder_abs_path,
       onProgress,
       isTransient,

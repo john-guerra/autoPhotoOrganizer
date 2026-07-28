@@ -146,6 +146,74 @@ describe("draining the face backlog", () => {
   });
 });
 
+describe("scoping the sweep (#221)", () => {
+  // THE SEAM. Every other scope test in this repo checks one end of the wire:
+  // `scopeIds.test.js` validates ids, `faces.test.js` calls pendingFaceRows
+  // directly, `faceRoutes.test.js` stops at validation (ort is mocked to
+  // reject), and the e2e spec never presses the button. Delete `scopeIds` from
+  // the nextBatch closure in faceSweep.js and every one of those still passes
+  // while the user gets the full-library sweep #221 exists to prevent. This
+  // file is the only place that can notice. Mirrors embedSweep.test.js's
+  // "embeds only the scoped photos" (#206).
+
+  it("looks at ONLY the scoped photos", async () => {
+    const db = getDb();
+    const ids = seed(db, 5);
+    const engine = engineOf({});
+
+    await sweepFaces({
+      db,
+      modelId: MODEL,
+      engine,
+      scopeIds: [ids[1], ids[3]],
+    });
+
+    // Asserting on what the ENGINE was asked to look at, not just on counts:
+    // that is the thing the user pays for in wall-clock and CPU.
+    expect(engine.seen.sort()).toEqual(["IMG_1.jpg", "IMG_3.jpg"]);
+    expect(faceCounts(db, MODEL).scanned).toBe(2);
+  }, 10_000);
+
+  it("looks at NOTHING for an empty scope, rather than the whole library", async () => {
+    // The expensive misreading, at the layer that actually spends the CPU.
+    const db = getDb();
+    seed(db, 5);
+    const engine = engineOf({});
+
+    const r = await sweepFaces({ db, modelId: MODEL, engine, scopeIds: [] });
+
+    expect(engine.seen).toEqual([]);
+    expect(r.done).toBe(0);
+    expect(faceCounts(db, MODEL).scanned).toBe(0);
+  }, 10_000);
+
+  it("sweeps everything when no scope is passed", async () => {
+    const db = getDb();
+    seed(db, 3);
+    const engine = engineOf({});
+
+    await sweepFaces({ db, modelId: MODEL, engine });
+
+    expect(engine.seen).toHaveLength(3);
+  }, 10_000);
+
+  it("terminates on a scope whose photos are already scanned", async () => {
+    // TIMEOUT IS PART OF THE ASSERTION, as in the landscape test above: a
+    // scoped worklist that never empties would spin at full CPU rather than
+    // fail. Scanned rows leave the worklist via ml_status regardless of the
+    // scope clause, so this must return immediately.
+    const db = getDb();
+    const ids = seed(db, 3);
+    await sweepFaces({ db, modelId: MODEL, engine: engineOf({}) });
+
+    const engine = engineOf({});
+    const r = await sweepFaces({ db, modelId: MODEL, engine, scopeIds: ids });
+
+    expect(engine.seen).toEqual([]);
+    expect(r.done).toBe(0);
+  }, 10_000);
+});
+
 describe("classifying a failure", () => {
   it("marks a genuinely unreadable photo failed, and moves on", async () => {
     const db = getDb();

@@ -1,0 +1,190 @@
+import { test, expect } from "@playwright/test";
+import {
+  trackPageErrors,
+  openApp,
+  grid,
+  mlPanel,
+  faceSettings,
+} from "./helpers.js";
+
+/**
+ * FINDING FACES IN A SCOPE (#221).
+ *
+ * The panel used to offer exactly one thing: scan the whole library. Select
+ * twenty photos and it proposed ~14 minutes of inference to answer a question
+ * about twenty — the violation `docs/UI-CONTRACTS.md` § Scope names by number.
+ *
+ * Nothing here downloads a model or starts real inference. Everything asserted
+ * is readable with faces switched off, which is also what every new user sees.
+ */
+test.describe("faces scope @p1", () => {
+  /**
+   * The scope control only renders once the weights are present — offering a
+   * scope for an operation you cannot run would be noise. The real weights are
+   * 191 MB, and a suite that downloads them is a suite that fails on a plane
+   * (the same rule `ml-settings.spec.js` follows for embedding), so the STATUS
+   * is stubbed and nothing is ever downloaded or inferred.
+   *
+   * The stub answers 200, deliberately: Chromium logs any non-2xx as its own
+   * console.error, which `trackPageErrors` would then fail on — see
+   * docs/AGENT-NOTES.md.
+   */
+  // The panel POLLS /api/ml/faces, so a request is often still in flight when
+  // a test ends — `route.fetch()` then rejects with "Test ended", and
+  // Playwright attributes the error to whichever spec runs NEXT. It surfaced
+  // as a failure in feed.spec.js, which touches none of this. Tear the routes
+  // down before the page closes.
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  });
+
+  test.beforeEach(async ({ page }) => {
+    // `**/api/ml/faces*`, NOT `...faces?**`: in a Playwright URL glob `?` is a
+    // LITERAL, not a wildcard, so that pattern matched only the query-string
+    // form. The panel's FIRST fetch has no query string at all (modelId is ""
+    // until the first response), so the stub missed it and the spec passed
+    // only because a second, model-qualified fetch followed — load-bearing on
+    // an implementation detail nobody wrote down.
+    await page.route("**/api/ml/faces*", async (route, request) => {
+      if (request.method() !== "GET") return route.continue();
+      const real = await route.fetch();
+      const body = await real.json();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...body,
+          // Everything else — counts, models, running — stays REAL, so the
+          // numbers under test are the fixture's own.
+          weights: { ready: true, missing: [], corrupt: [] },
+        }),
+      });
+    });
+  });
+
+  test("offers All / Visible / Selected with live counts", async ({ page }) => {
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await mlPanel.open(page);
+
+    await expect(faceSettings.scope(page)).toBeVisible();
+    for (const key of ["selected", "visible", "all"]) {
+      await expect(faceSettings.scopeOption(page, key)).toHaveCount(1);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test("an empty scope is offered but DISABLED, never silently widened", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await mlPanel.open(page);
+
+    // Nothing is selected, so "Selected" reads 0 — and is disabled rather than
+    // hidden. Hiding it makes the set of choices shift under the cursor as a
+    // selection changes; falling back to the library is the expensive bug.
+    const selected = faceSettings.scopeOption(page, "selected");
+    await expect(selected).toBeDisabled();
+    await expect(faceSettings.scope(page)).toContainText("Selected");
+
+    // The default stays "All", so the primary button is still usable.
+    await expect(faceSettings.scopeOption(page, "all")).toBeChecked();
+    expect(errors).toEqual([]);
+  });
+
+  test("selecting photos enables Selected, and the button says how many", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    // Select two photos in the grid.
+    await grid.selectCircle(page, 0).click();
+    await grid.selectCircle(page, 1).click();
+
+    await mlPanel.open(page);
+    const selected = faceSettings.scopeOption(page, "selected");
+    await expect(selected).toBeEnabled();
+    await expect(faceSettings.scope(page)).toContainText("2");
+
+    await selected.check();
+
+    // The button names the scope it will actually run on — not the library.
+    // This is the whole issue in one assertion.
+    await expect(faceSettings.scan(page)).toContainText("2");
+    await expect(faceSettings.scan(page)).not.toContainText(/all photos/i);
+    expect(errors).toEqual([]);
+  });
+
+  test("the cost line is recomputed from the chosen scope", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await grid.selectCircle(page, 0).click();
+    await mlPanel.open(page);
+
+    // WHAT THIS CAN AND CANNOT PROVE — worth stating, because the obvious
+    // version of this test is a lie.
+    //
+    // The contract is that the count and the "about N" move TOGETHER. But on
+    // a 19-photo fixture both scopes round to the SAME string: 19 x ~52ms is
+    // 0.99s and 1 x ~52ms is 0.05s, and formatEstimate clamps anything
+    // sub-second to "about 1s". So asserting the time string changed here
+    // asserts something this fixture cannot show, and it fails for a reason
+    // that has nothing to do with the feature.
+    //
+    // The SCALING is therefore proved where it is genuinely testable —
+    // ui/src/lib/scopeControl.test.js, which pins 10 -> "about 5s",
+    // 600 -> "about 5 min", 60000 -> "about 8.3 h". This asserts the half a
+    // browser is needed for: the line is rebuilt from the chosen scope rather
+    // than frozen at whatever the default rendered.
+    // The "All" count is read from the control rather than hard-coded. It is
+    // NOT the fixture's photo count: faces only looks at `kind = 'image'`, so
+    // the fixture's videos are excluded and the number is 17, not 19. Pinning
+    // a literal here would be pinning an unrelated fixture detail, and it
+    // would break the day a video is added.
+    const allCount = await faceSettings
+      .scope(page)
+      .locator("label", { hasText: "All remaining" })
+      .locator(".scope-n")
+      .innerText();
+
+    await expect(faceSettings.estimate(page)).toContainText(
+      `Up to ${allCount} photos`
+    );
+    await expect(faceSettings.estimate(page)).toContainText(/about\s/);
+
+    await faceSettings.scopeOption(page, "selected").check();
+
+    await expect(faceSettings.estimate(page)).toContainText("Up to 1 photos");
+    await expect(faceSettings.estimate(page)).toContainText(/about\s/);
+    // ...and it really did move, rather than the two scopes happening to hold
+    // the same number.
+    expect(allCount).not.toBe("1");
+    expect(errors).toEqual([]);
+  });
+
+  test("faces and embedding use the SAME control, and their choices are independent", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await grid.selectCircle(page, 0).click();
+    await mlPanel.open(page);
+
+    // Both panels render a scope fieldset — one component, two instances.
+    await expect(faceSettings.scope(page)).toBeVisible();
+    await expect(page.getByTestId("ml-scope")).toBeVisible();
+
+    // The radio GROUPS must not share a name. Two groups with one name are a
+    // single group to the browser, so choosing a scope for faces would
+    // silently clear embedding's — a bug you only find by doing both.
+    await faceSettings.scopeOption(page, "selected").check();
+    await expect(
+      page.getByTestId("ml-scope").locator('input[value="all"]')
+    ).toBeChecked();
+    expect(errors).toEqual([]);
+  });
+});

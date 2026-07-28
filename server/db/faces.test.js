@@ -134,6 +134,70 @@ describe("face storage (#166)", () => {
   });
 });
 
+describe("scoping the worklist (#221)", () => {
+  it("restricts the sweep to the given photos", () => {
+    const db = getDb();
+    const ids = seed(db, 4);
+    expect(
+      pendingFaceRows(db, MODEL, 10, [ids[1], ids[3]]).map((r) => r.id)
+    ).toEqual([ids[1], ids[3]]);
+  });
+
+  it("treats an EMPTY scope as no photos, never as the whole library", () => {
+    // The expensive misreading. `[]` reaching the unscoped query is an hour of
+    // inference the user did not ask for, and it looks exactly like the button
+    // misfiring — the failure UI-CONTRACTS § Scope names.
+    const db = getDb();
+    seed(db, 3);
+    expect(pendingFaceRows(db, MODEL, 10, [])).toEqual([]);
+  });
+
+  it("sweeps the library when no scope is given at all", () => {
+    const db = getDb();
+    const ids = seed(db, 3);
+    expect(pendingFaceRows(db, MODEL, 10, null).map((r) => r.id)).toEqual(ids);
+    expect(pendingFaceRows(db, MODEL, 10).map((r) => r.id)).toEqual(ids);
+  });
+
+  it("still skips already-scanned photos inside a scope", () => {
+    // The scope is an EXTRA clause on the same query, not a second query, so
+    // "pending" cannot mean one thing scoped and another unscoped.
+    const db = getDb();
+    const ids = seed(db, 3);
+    putFaces(db, { photoId: ids[0], model: MODEL, faces: [] });
+    expect(pendingFaceRows(db, MODEL, 10, ids).map((r) => r.id)).toEqual([
+      ids[1],
+      ids[2],
+    ]);
+  });
+
+  it("survives a scope at the route's 50,000-id cap", () => {
+    // The routes ACCEPT up to 50,000 ids, and nothing exercised that until
+    // now: at the cap `pendingFaceRows` builds a ~400 KB SQL string and
+    // re-prepares it once per 8-photo batch. If SQLite refused a literal list
+    // that long, the failure would land on the user's largest and slowest
+    // operation — the one where a hard error costs the most. It doesn't (a
+    // flat `IN` list is an ExprList, so SQLITE_MAX_EXPR_DEPTH doesn't apply),
+    // and this pins that rather than leaving it as a belief.
+    const db = getDb();
+    const ids = seed(db, 3);
+    const scope = [
+      ...ids,
+      ...Array.from({ length: 50_000 }, (_, i) => i + 10_000),
+    ];
+
+    expect(pendingFaceRows(db, MODEL, 10, scope).map((r) => r.id)).toEqual(ids);
+  });
+
+  it("ignores ids that are not photos rather than failing the sweep", () => {
+    const db = getDb();
+    const ids = seed(db, 2);
+    expect(
+      pendingFaceRows(db, MODEL, 10, [ids[0], 999999]).map((r) => r.id)
+    ).toEqual([ids[0]]);
+  });
+});
+
 describe("the zero-face sentinel", () => {
   it("takes a faceless photo out of the worklist", () => {
     // Most of a real archive is landscapes and screenshots. Without a marker

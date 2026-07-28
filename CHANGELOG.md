@@ -6,6 +6,19 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.42
+
+- **Find faces in what you selected, or just what's on screen** — not only in
+  the whole library. The panel now offers All / Visible / Selected with live
+  counts, and the time estimate follows your choice, so twenty photos no longer
+  cost you a library-wide scan (#221).
+- An empty selection is refused with a message that says so, instead of quietly
+  scanning everything (#221).
+- Progress for a scoped scan counts the photos that still need looking at, so
+  the bar reaches the end instead of stopping partway (#221).
+- Picking a scope where everything has already been scanned says so, instead of
+  starting a scan that immediately reports nothing (#221).
+
 ## 2.18.41
 
 - **Rating or selecting during the Auto Albums review no longer hits the wrong

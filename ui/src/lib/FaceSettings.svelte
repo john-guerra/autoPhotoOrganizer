@@ -30,8 +30,23 @@
     renamePerson,
     mergePeople,
   } from "./api.js";
+  import ScopeControl from "./ScopeControl.svelte";
+  import {
+    buildScopes,
+    activeScope as activeScopeOf,
+    scopeIdsFor,
+    DEFAULT_SCOPE,
+  } from "./scopeControl.js";
 
-  let { onnotice } = $props();
+  /** #221: the scope selector needs the same two id sets MlSettings gets.
+   *  They come down through MlPanel from App, which owns the selection and
+   *  knows what the feed is showing. */
+  let { onnotice, selectedIds = [], visibleIds = [] } = $props();
+
+  /** Which set the next scan runs over. Defaults to the whole library — the
+   *  panel is often opened with nothing selected, and a default that is empty
+   *  makes the primary button start out disabled. */
+  let scopeChoice = $state(DEFAULT_SCOPE);
 
   let status = $state(null);
   let people = $state([]);
@@ -68,6 +83,16 @@
     status
       ? status.counts.total - status.counts.scanned - status.counts.failed
       : 0
+  );
+
+  // The SAME functions ScopeControl renders from, so the button and the radio
+  // buttons can never disagree about what was picked (#221).
+  let scopes = $derived(
+    buildScopes({ selectedIds, visibleIds, allCount: pending })
+  );
+  let activeScope = $derived(activeScopeOf(scopes, scopeChoice));
+  let scopeIds = $derived(
+    scopeIdsFor(scopeChoice, { selectedIds, visibleIds })
   );
 
   async function act(label, fn) {
@@ -171,26 +196,59 @@
         {/if}
       </div>
 
+      <!-- WHERE to look, before the button is pressed (#221). The SAME control
+           embedding uses — the contract is explicit that this is one component,
+           not one per feature. Without it the only offer was the whole library:
+           you select twenty photos and the app proposes fourteen minutes of
+           inference to answer a question about twenty. -->
+      <ScopeControl
+        legend="Find faces in"
+        name="face-scope"
+        testid="face-scope"
+        {selectedIds}
+        {visibleIds}
+        allCount={pending}
+        allLabel="All remaining"
+        msPerPhoto={model?.approxMsPerPhoto}
+        emptyMessage={pending === 0 && scopeChoice === "all"
+          ? "Every photo has been looked at."
+          : "Nothing to scan in this scope."}
+        disabled={!!busy || status.running}
+        bind:choice={scopeChoice}
+      />
+
       <div class="actions">
         <button
           class="primary"
-          disabled={!!busy || status.running || pending === 0}
+          disabled={!!busy || status.running || !activeScope?.n}
           onclick={() =>
             act("scan", async () => {
-              const r = await startFaceScan(modelId);
+              const r = await startFaceScan(modelId, scopeIds);
+              // `r.pending` — how many of the chosen photos are actually still
+              // to be looked at — comes from the SERVER, because only the
+              // worklist query knows. Saying `activeScope.n` here would
+              // announce "20 photos" and then have the jobs panel count to 5,
+              // which reads as the scan having given up.
               onnotice?.(
                 r.alreadyRunning
                   ? "A face scan is already running."
-                  : "Looking for faces — progress is in the jobs panel."
+                  : r.nothingToDo
+                    ? r.message
+                    : `Looking for faces in ${n(r.pending)} photo${r.pending === 1 ? "" : "s"} — progress is in the jobs panel.`
               );
             })}
           data-testid="face-scan"
         >
-          {status.running
-            ? "Scanning…"
-            : pending === 0
-              ? "All photos scanned"
-              : `Find faces in ${n(pending)} photos`}
+          {#if status.running}
+            Scanning…
+          {:else if !activeScope?.n}
+            {pending === 0 ? "All photos scanned" : "Nothing in this scope"}
+          {:else}
+            Find faces in {n(activeScope.n)}
+            {scopeChoice === "all"
+              ? "photos"
+              : `${activeScope.label.toLowerCase()} photos`}
+          {/if}
         </button>
 
         {#if status.counts.failed > 0}

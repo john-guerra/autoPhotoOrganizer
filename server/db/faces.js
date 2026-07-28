@@ -1,3 +1,7 @@
+// Shared with the embed worklist (#206/#221) — see scopeIds.js on why this
+// validator has its own module rather than a copy per stage.
+import { normalizeScope, scopeClauseFor } from "./scopeIds.js";
+
 /**
  * The faces data layer (#166).
  *
@@ -137,7 +141,19 @@ function toFace(r) {
  * @param {number} limit
  * @returns {Array<{id: number, folder_abs_path: string, filename: string, mtime: number, size: number}>}
  */
-export function pendingFaceRows(db, model, limit) {
+export function pendingFaceRows(db, model, limit, scopeIds = null) {
+  // #221: a scope restricts the worklist to specific photos, so you can look
+  // for faces in the twenty you just selected instead of waiting out a
+  // 32,000-photo library. Built as an extra WHERE clause on the SAME query
+  // rather than a second one, so the scoped and unscoped worklists can never
+  // disagree about what "pending" means — the kind filter and the anti-join
+  // apply identically either way. Exactly how pendingEmbedRows does it (#206).
+  const ids = normalizeScope(scopeIds);
+  // An explicitly EMPTY scope means "these zero photos", never "all of them".
+  // Falling through to the unscoped query here would turn a caller's empty
+  // selection into a full-library sweep.
+  if (ids !== null && ids.length === 0) return [];
+  const scopeClause = scopeClauseFor(ids);
   return db
     .prepare(
       `SELECT photos.id, photos.filename, photos.mtime, photos.size,
@@ -146,6 +162,7 @@ export function pendingFaceRows(db, model, limit) {
          JOIN folders ON folders.id = photos.folder_id
         WHERE photos.stale = 0
           AND photos.kind = 'image'
+          ${scopeClause}
           AND NOT EXISTS (
                 SELECT 1 FROM ml_status s
                  WHERE s.photo_id = photos.id

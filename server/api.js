@@ -89,6 +89,7 @@ import { sweepFaces, isFaceSweepInFlight } from "./ml/faceSweep.js";
 import { createFaceEngine } from "./ml/faceEngine.js";
 import {
   faceCounts,
+  pendingFaceRows,
   purgeFaces,
   faceVectors,
   saveClusters,
@@ -1418,7 +1419,12 @@ export function registerApi(app, { ml } = {}) {
     // #206: an optional `ids` scope embeds just those photos — the selection,
     // the current view, or one right-clicked folder — instead of the whole
     // library. Absent, behaviour is exactly as before.
-    const ids = req.body?.ids;
+    // `?? undefined` so an explicit `ids: null` means "no scope", exactly
+    // like omitting the key. docs/UI-CONTRACTS.md tells callers null IS the
+    // whole-library sweep; rejecting it as malformed made that instruction a
+    // 400 nobody could debug, and left ui/src/lib/api.js carrying an
+    // undocumented workaround to avoid tripping it.
+    const ids = req.body?.ids ?? undefined;
     if (ids !== undefined) {
       if (!Array.isArray(ids) || ids.length === 0) {
         // Specific over generic: an empty selection is a real thing a user can
@@ -1648,6 +1654,37 @@ export function registerApi(app, { ml } = {}) {
     if (isFaceSweepInFlight()) {
       return res.json({ started: false, alreadyRunning: true });
     }
+    // #221: an optional `ids` scope looks for faces in just those photos — the
+    // selection, or what is on screen — instead of the whole library. Absent,
+    // behaviour is exactly as before. Same shape and same limits as
+    // POST /api/ml/embed (#206), deliberately: two scoped endpoints that
+    // disagree about how a scope is sent is a bug waiting for its first
+    // caller.
+    //
+    // Validated BEFORE the weights check and before any job exists, so a bad
+    // request is a plain 400 rather than a job that appears and immediately
+    // fails.
+    // `?? undefined` so an explicit `ids: null` means "no scope", exactly
+    // like omitting the key. docs/UI-CONTRACTS.md tells callers null IS the
+    // whole-library sweep; rejecting it as malformed made that instruction a
+    // 400 nobody could debug, and left ui/src/lib/api.js carrying an
+    // undocumented workaround to avoid tripping it.
+    const ids = req.body?.ids ?? undefined;
+    if (ids !== undefined) {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        // Specific over generic: an empty selection is a real thing a user can
+        // do, and saying so beats "bad request" — and beats silently sweeping
+        // the library, which is the failure this issue exists for.
+        return res
+          .status(400)
+          .json({ error: "No photos were selected to look for faces in." });
+      }
+      if (ids.length > 50_000) {
+        return res.status(413).json({
+          error: `That is ${ids.length.toLocaleString()} photos — too many to send at once. Look for faces in the whole library instead.`,
+        });
+      }
+    }
     const modelId = faceModelIdOf(req.body?.model);
     const model = faceModelById(modelId);
     const weights = await faceWeightsStatus(modelId);
@@ -1689,10 +1726,56 @@ export function registerApi(app, { ml } = {}) {
       return res.json({ started: false, alreadyRunning: true });
     }
 
+    // How many photos this sweep will ACTUALLY look at, counted once, up front
+    // — exactly as kickEmbedSweep does (#206), and for the same two reasons.
+    //
+    // `ids.length` is the wrong number and quietly ruins the bar: the scope is
+    // whatever the user selected, but the worklist excludes what is already
+    // scanned, plus videos, RAW and rows whose file vanished. Select 20 tiles
+    // of which 5 are new and the bar reaches 5/20 and stops — "done" rendered
+    // as 25%. Counting the worklist makes "3 of 5" mean what it says.
+    //
+    // And it must be known BEFORE registry.create, not first written from
+    // onProgress after batch one: a total that arrives 8 photos late is an
+    // indeterminate bar at the moment the user is deciding whether this hung,
+    // which is #208 (UI-CONTRACTS §2, "honest progress").
+    const pendingInScope = ids
+      ? pendingFaceRows(getDb(), modelId, Number.MAX_SAFE_INTEGER, ids).length
+      : (() => {
+          const c = faceCounts(getDb(), modelId);
+          return Math.max(0, c.total - c.scanned - c.failed);
+        })();
+
+    // Nothing to do is an ANSWER, not a job that starts, reports 0 and stops.
+    // Without this the panel says "Looking for faces in 20 photos", no
+    // onProgress ever fires (runSweep breaks on an empty first batch), and the
+    // summary contradicts it with "0 faces in 0 photos".
+    if (pendingInScope === 0) {
+      return res.json({
+        started: false,
+        nothingToDo: true,
+        pending: 0,
+        message: ids
+          ? `Those ${ids.length.toLocaleString()} photos have all been looked at already.`
+          : "Every photo has been looked at already.",
+      });
+    }
+
     const job = registry.create("faces", {
-      label: `Finding faces (${model.label})`,
+      label: ids
+        ? `Finding faces in ${pendingInScope.toLocaleString()} photos (${model.label})`
+        : `Finding faces (${model.label})`,
+      total: pendingInScope,
     });
-    res.json({ started: true, jobId: job.id });
+    res.json({
+      started: true,
+      jobId: job.id,
+      scoped: ids ? ids.length : null,
+      // What the CLIENT should say it is doing. It cannot compute this — only
+      // the worklist query knows how much of a selection is still pending — so
+      // sending it is what stops the notice and the jobs panel disagreeing.
+      pending: pendingInScope,
+    });
 
     const engine = createFaceEngine({
       modelId,
@@ -1706,10 +1789,15 @@ export function registerApi(app, { ml } = {}) {
         modelId,
         engine,
         job,
+        scopeIds: ids ?? null,
         onProgress: ({ done, failed }) =>
           registry.update(job.id, {
             done,
-            total: faceCounts(getDb(), modelId).total,
+            // The SCOPE's size when there is one, not the library's. A bar
+            // measuring 20 photos against 32,000 sits at 0% for the whole run
+            // and then jumps to done — an honest total is the difference
+            // between a progress bar and a decoration (UI-CONTRACTS §2).
+            total: ids ? ids.length : faceCounts(getDb(), modelId).total,
             label: `Finding faces — ${done.toLocaleString()} scanned${failed ? `, ${failed} unreadable` : ""}`,
           }),
       });

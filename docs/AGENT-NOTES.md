@@ -42,6 +42,18 @@ Keep this current: when one of these facts changes, update it in the same commit
 - **A test that never failed proves nothing.** Revert the fix, watch the test go
   red, restore. (Also in CLAUDE.md — repeated here because it's the most-skipped
   step.)
+- **`npm test` can be GREEN on code plain `node` refuses to load.** Vitest runs
+  everything through Vite's SSR transform, which rewrites `import { x } from …`
+  into `__vite_ssr_import_0__.x` — so no local binding named `x` exists, and a
+  file that _also_ declares its own `function x()` has no collision. Under real
+  Node that same file is a hard `SyntaxError: Identifier 'x' has already been
+declared` at import time. It cost a cycle in #221: 1,549 unit tests passed
+  while the API server would not boot at all, and only the e2e suite (which
+  starts the real server with `node`) caught it. Vite silently preferring the
+  _local_ declaration also means the shared import you thought you wired up may
+  never have been called. After moving a function between server modules, run
+  `node -e "import('./server/path/mod.js')"` — it takes a second and it is the
+  only cheap check that the module is loadable as shipped.
 - **ML tests are gated twice, and both gates are deliberate.** `npm test` must
   never download a model or spawn a child, so anything needing real inference
   sits behind `ML_INTEGRATION=1`. The semantic check

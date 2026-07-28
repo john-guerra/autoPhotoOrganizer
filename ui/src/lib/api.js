@@ -1176,13 +1176,19 @@ export async function downloadFaceModel(model) {
 /**
  * Start a face pass. Answers 409 when the weights are missing or corrupt,
  * with a message that names WHICH and says what to do — render it verbatim.
+ *
  * @param {string} model
+ * @param {number[]|null} [ids] #221 — look for faces in just these photos
+ *   (the selection, or what is on screen). `null`/omitted sweeps the library.
+ *   An empty ARRAY is sent as-is and refused by the server with a specific
+ *   message: it means "these zero photos", and quietly promoting it to a
+ *   full-library sweep is the failure this scope exists to prevent.
  */
-export async function startFaceScan(model) {
+export async function startFaceScan(model, ids = null) {
   const res = await fetch("/api/ml/faces", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model }),
+    body: JSON.stringify(ids === null ? { model } : { model, ids }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

@@ -685,6 +685,20 @@ export const mlSettings = {
   rawNote: (page) => page.getByTestId("ml-raw-note"),
 };
 
+// --- the faces block inside the ML panel -------------------------------------
+
+export const faceSettings = {
+  scan: (page) => page.getByTestId("face-scan"),
+  /** The shared All/Visible/Selected control — the SAME component embedding
+   *  uses, which is the point of #221. `which` is a scope key from
+   *  ui/src/lib/scopeControl.js. */
+  scope: (page) => page.getByTestId("face-scope"),
+  scopeOption: (page, which) =>
+    page.getByTestId("face-scope").locator(`input[value="${which}"]`),
+  /** The "up to N photos · about T" line under the control. */
+  estimate: (page) => page.getByTestId("face-scope-estimate"),
+};
+
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------
 
 export const menu = {

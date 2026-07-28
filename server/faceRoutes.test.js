@@ -105,6 +105,62 @@ describe("POST /api/ml/faces when the runtime will not load", () => {
   });
 });
 
+describe("POST /api/ml/faces with an `ids` scope (#221)", () => {
+  // These assertions are reachable in THIS file precisely because the scope is
+  // validated before the weights check and before loadOrt — so a malformed
+  // request is a plain 4xx, not the mocked runtime failure above. That
+  // ordering is the point: a bad request must never produce a job that
+  // appears and immediately fails.
+
+  it("refuses an EMPTY selection specifically, and never widens it", async () => {
+    // THE bug. Falling through to a library-wide sweep here is ~14 minutes of
+    // inference nobody asked for, and it looks exactly like the button
+    // misfiring. UI-CONTRACTS § Scope: "never silently widened."
+    const before = registry.list().length;
+    const res = await post("/api/ml/faces", { ids: [] });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/no photos were selected/i);
+    // Not a generic "bad request" — it names what the user actually did.
+    expect(body.error).not.toMatch(/bad request/i);
+
+    // And crucially, nothing started.
+    expect(registry.list().length).toBe(before);
+  });
+
+  it("refuses a non-array `ids` rather than treating it as no scope", async () => {
+    const res = await post("/api/ml/faces", { ids: 42 });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses a selection too large to send, and says what to do instead", async () => {
+    const res = await post("/api/ml/faces", {
+      ids: Array.from({ length: 50_001 }, (_, i) => i + 1),
+    });
+    expect(res.status).toBe(413);
+    const body = await res.json();
+    expect(body.error).toMatch(/50,001 photos/);
+    expect(body.error).toMatch(/whole library instead/i);
+  });
+
+  it("accepts a well-formed scope — it gets past validation to the runtime", async () => {
+    // The runtime is mocked to fail in this file, so 500 with the runtime
+    // message is proof the scope itself was ACCEPTED. A 400 here would mean
+    // validation wrongly rejected a legitimate selection.
+    const res = await post("/api/ml/faces", { ids: [1, 2, 3] });
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toMatch(/runtime/i);
+  });
+
+  it("still sweeps the whole library when no scope is sent at all", async () => {
+    // `undefined` must stay distinct from `[]` all the way down.
+    const res = await post("/api/ml/faces", {});
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toMatch(/runtime/i);
+  });
+});
+
 describe("POST /api/ml/faces/retry-failed", () => {
   it("clears the permanent sentinels so the next scan tries again", async () => {
     // A "cannot be read" verdict only clears when the file's BYTES change,
