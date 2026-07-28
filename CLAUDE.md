@@ -12,13 +12,28 @@ Lightroom too slow.
   app is a stable `2.17.x` release.
 - **Working agreements & decisions already made** → `docs/ROADMAP.md` (its
   "Where the project was" log is prototype history, not current status).
-- **Operational notes** (release process, test isolation, dependency landmines,
-  data-layer traps) → `docs/AGENT-NOTES.md`. Cross-agent summary → `AGENTS.md`.
 - **Filing or working a GitHub issue?** → the `working-issues` skill
   (`.claude/skills/`). Every report John makes becomes an issue with a priority;
   and since several agents work this repo at once, check an issue is unclaimed
   before starting and take your version number with `claim-version.sh` rather
   than hand-picking the next patch.
+- Cross-agent summary → `AGENTS.md`.
+
+### The three binding docs, imported rather than linked
+
+These are instructions, not background. They are `@`-imported so they are in
+context from the first token — **a doc an agent has to choose to open is a doc
+that gets skipped**, which is exactly how faces (#166/#167) shipped breaking
+three rules this repo had already settled (#221, #222, #223).
+
+@docs/UI-CONTRACTS.md
+@docs/AGENT-NOTES.md
+@docs/TESTING.md
+
+`docs/ROADMAP.md` and everything under `docs/superpowers/specs/` stay plain
+links on purpose: they are history and reasoning — the **why** — not standing
+rules, and importing them would cost every session for something you should read
+only when you need it.
 
 ## Two invariants (do not violate)
 
@@ -141,7 +156,7 @@ silently does nothing, or hangs the tab.
 
 ## A fixed bug gets a test that would have caught it
 
-Full guide: `docs/TESTING.md`. The rules that matter most:
+Full guide: `docs/TESTING.md` (imported above). The rules that matter most:
 
 - **Fix a bug → add a test at the tier that would have CAUGHT it**, in the same
   commit. If pure logic was wrong, that's a vitest test next to the source. If the
@@ -166,6 +181,36 @@ Full guide: `docs/TESTING.md`. The rules that matter most:
 - **`trackPageErrors(page)` in every spec.** It's free, and it alone would have caught
   three of the five bugs that reached a user in the 2.9.x round.
 
+## The three contracts every feature inherits
+
+Full text, with the shapes and the reference implementations → **@docs/UI-CONTRACTS.md**
+(imported above, so it is already in context). The three rules, and the one
+question that decides each:
+
+1. **Scope — _can the user run this on their selection?_** Every operation over
+   photos offers **All / Visible / Selected** with live counts, the cost
+   estimate tracking the choice, and an empty scope refused specifically rather
+   than silently widened to the whole library. One shared control, not one per
+   feature. Reference: `MlSettings.svelte`'s `data-testid="ml-scope"`.
+2. **Locus of control — _can the user walk away and stop it?_** Anything that
+   can run longer than a moment is a **job**: visible in the JobsPanel from the
+   main interface, proportional progress whenever the total is knowable,
+   genuinely cancellable, and summarized on completion (`summarize()` needs a
+   branch for the type). A cancellation is an outcome, not a failure. Turning an
+   awaited request into a job is not a wrapper — the route returns `{jobId}` and
+   the caller stops awaiting a result.
+3. **Placement — _does it show the user photos?_** Then it is a **view** in the
+   main area, not a control in a settings panel. Panels hold settings (which
+   model, download it, the licence, forget everything). Anything with a
+   selection, a rating, or a photo in it belongs where those already work. The
+   registry and its boundary are #155: **App stays the data owner** and a view
+   never touches `items`.
+
+These are not new. Each was settled once — #215/#206, #208/#161, #207/#155 —
+and then re-broken by the next feature, because the rule lived only in a closed
+issue. Breaking one is an incomplete change, the same way a feature with no
+error handling is incomplete.
+
 ## Usability (never fail silently)
 
 Every user-facing action must tell the user what is happening. A console error
@@ -181,7 +226,11 @@ is **not** user feedback.
   to send (N files) — retry from the jobs panel" beats "Error".
 - **Long or async operations show progress and completion**, not a frozen
   control — route them through the JobsPanel; never block the UI thread (heavy
-  fs/IO belongs off the main event loop — see the materialize async work).
+  fs/IO belongs off the main event loop — see the materialize async work). Heavy
+  CPU counts too: a synchronous O(n²) pass is a server that answers nothing, and
+  the user cannot tell a wedge from a crash. Yield, and check the abort signal
+  at the yield point (`clusterFaces` in `server/ml/faceClusters.js`). Full
+  contract → **contract 2 above**.
 - **Confirm or make-undoable anything destructive.** Prefer soft-delete + a
   visible undo affordance over a hard, unrecoverable action (and over a hard
   failure).

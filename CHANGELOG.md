@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.40
+
+- **No change to the app.** Three rules about how features should behave —
+  every operation runs on your selection, long work can be watched and stopped
+  from the main window, and anything that shows you photos belongs in the main
+  window rather than a settings panel — were only ever recorded in closed
+  issues, so each got broken again by the next feature. They are now written
+  down as contracts every future change inherits (#224), and the gaps in the
+  new face feature are filed as #221, #222 and #223.
+
 ## 2.18.39
 
 - **Find the faces in your photos** (#166). Machine learning → Find faces
