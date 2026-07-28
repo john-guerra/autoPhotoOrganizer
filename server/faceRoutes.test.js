@@ -40,6 +40,10 @@ const { createApp } = await import("./index.js");
 const { getDb, _resetDbForTest } = await import("./db/connection.js");
 const { markFaceFailed, faceCounts } = await import("./db/faces.js");
 const { registry } = await import("./jobs/registry.js");
+const { putFaces } = await import("./db/faces.js");
+const { quantize } = await import("./ml/quantize.js");
+const { withClusterLatch, _resetClusterForTest } =
+  await import("./ml/faceClusters.js");
 
 let home;
 let srv;
@@ -158,6 +162,93 @@ describe("POST /api/ml/faces with an `ids` scope (#221)", () => {
     const res = await post("/api/ml/faces", {});
     expect(res.status).toBe(500);
     expect((await res.json()).error).toMatch(/runtime/i);
+  });
+});
+
+describe("POST /api/ml/faces/cluster is a JOB, not an awaited result (#222)", () => {
+  /**
+   * Faces to group. Deliberately on its OWN volume/folder ids (2, not 1) with
+   * a per-call filename prefix: every test in this file shares one database,
+   * and the retry-failed test below inserts volume 1 with a plain INSERT.
+   * Claiming volume 1 here makes THAT test fail with a UNIQUE violation, in a
+   * way that reads as a bug in retry-failed rather than in this fixture.
+   */
+  let seedRun = 0;
+  function seedFaces(count) {
+    const db = getDb();
+    const run = ++seedRun;
+    db.prepare(
+      `INSERT OR IGNORE INTO volumes (id, label, uuid, last_mount_path, last_seen_at)
+       VALUES (2, 'cluster-vol', 'cluster-uuid', '/cluster', ?)`
+    ).run(Date.now());
+    db.prepare(
+      `INSERT OR IGNORE INTO folders (id, abs_path, volume_id) VALUES (2, '/vol/C', 2)`
+    ).run();
+    const ins = db.prepare(
+      `INSERT INTO photos (folder_id, filename, kind, size, mtime, stale)
+       VALUES (2, ?, 'image', 10, 10, 0)`
+    );
+    for (let i = 0; i < count; i++) {
+      const id = ins.run(`c${run}_${i}.jpg`).lastInsertRowid;
+      const v = new Float32Array(64);
+      v[i % 8] = 1;
+      const { scale, bytes } = quantize(v);
+      putFaces(db, {
+        photoId: id,
+        model: "buffalo_s",
+        faces: [{ box: [0, 0, 9, 9], score: 0.9, dim: 64, scale, bytes }],
+      });
+    }
+  }
+
+  it("answers with a jobId immediately instead of the grouping result", async () => {
+    // THE shape change. It used to compute 57 million comparisons and THEN
+    // respond, so the panel had a frozen button, no progress and no cancel —
+    // and closing the panel made the whole operation invisible.
+    seedFaces(6);
+    const res = await post("/api/ml/faces/cluster", { model: "buffalo_s" });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.jobId).toBeTruthy();
+    expect(body.started).toBe(true);
+    // The RESULT is not in the response — that is what "not a wrapper" means.
+    expect(body.people).toBeUndefined();
+    expect(body.assigned).toBeUndefined();
+
+    // And the job is real, visible, and carries a knowable total so the bar
+    // can be proportional rather than indeterminate (#208).
+    const job = registry.list().find((j) => j.id === body.jobId);
+    expect(job).toBeTruthy();
+    expect(job.type).toBe("face-cluster");
+    expect(job.total).toBeGreaterThan(0);
+  });
+
+  it("refuses a second grouping while one is in flight, and creates no job for it", async () => {
+    seedFaces(4);
+    _resetClusterForTest();
+    const before = registry.list().length;
+
+    // Hold the latch the way a real in-flight pass does.
+    let release;
+    const held = withClusterLatch(() => new Promise((r) => (release = r)));
+
+    const res = await post("/api/ml/faces/cluster", { model: "buffalo_s" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/already being grouped/i);
+    // A refusal must never leave a row that appears and immediately fails.
+    expect(registry.list().length).toBe(before);
+
+    release();
+    await held;
+  });
+
+  it("refuses with no faces yet, specifically, and creates no job", async () => {
+    const before = registry.list().length;
+    const res = await post("/api/ml/faces/cluster", { model: "buffalo_l" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/no faces have been found/i);
+    expect(registry.list().length).toBe(before);
   });
 });
 

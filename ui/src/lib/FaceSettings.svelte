@@ -26,10 +26,12 @@
     purgeFaces,
     retryFailedFaces,
     clusterPeople,
+    cancelJob,
     fetchPeople,
     renamePerson,
     mergePeople,
   } from "./api.js";
+  import { jobs, takeNewlyFinished } from "./jobs.js";
   import ScopeControl from "./ScopeControl.svelte";
   import {
     buildScopes,
@@ -111,6 +113,51 @@
   }
 
   const n = (v) => (v ?? 0).toLocaleString();
+
+  // THE GROUPING PASS IS A JOB (#222), so this panel no longer awaits a
+  // result. It reads the running row straight from the jobs SSE store — no
+  // polling, and no second source of truth about whether one is in flight —
+  // and picks the outcome up when the row reaches a terminal status.
+  const clusterJob = $derived(
+    $jobs.find((j) => j.type === "face-cluster" && j.status === "running") ??
+      null
+  );
+  /** Set by Stop; cleared automatically once that job actually stops. Plain
+   *  `let` for `handledClusterJobs` deliberately — it is bookkeeping for the
+   *  effect below, and making it reactive would make the effect depend on its
+   *  own write (the same note MlSettings carries). */
+  let stoppingCluster = $state(null);
+  const stoppingClusterNow = $derived(
+    stoppingCluster !== null && clusterJob?.id === stoppingCluster
+  );
+  const handledClusterJobs = new Set();
+
+  $effect(() => {
+    // A finished pass rewrote every person, so the list this panel shows is
+    // stale — refresh, and say what happened. Cancelled and failed are
+    // DIFFERENT outcomes and get different sentences: a cancellation is not a
+    // failure, and telling the user their grouping "failed" when they stopped
+    // it themselves is the Finding 6 mistake.
+    for (const job of takeNewlyFinished(
+      $jobs,
+      "face-cluster",
+      handledClusterJobs
+    )) {
+      if (job.id === stoppingCluster) stoppingCluster = null;
+      if (job.status === "canceled") {
+        onnotice?.("Grouping stopped — nothing was changed.");
+      } else if (job.status === "failed") {
+        error = job.error ?? "Grouping failed.";
+      } else {
+        const r = job.result ?? {};
+        onnotice?.(
+          `Grouped ${n(r.assigned)} faces into ${n(r.people)} people` +
+            (r.keptManual ? `, keeping ${n(r.keptManual)} you set by hand` : "")
+        );
+      }
+      refresh();
+    }
+  });
 </script>
 
 <section class="faces" data-testid="face-settings">
@@ -291,22 +338,40 @@
 
       {#if status.counts.faces > 0}
         <div class="people">
+          <!-- Starts a JOB and returns (#222). It does NOT await the result:
+               grouping ~10,700 faces is 57 million comparisons, and this used
+               to be a frozen button inside a panel that took the whole
+               operation with it when you closed it. Progress, cancel and the
+               outcome all live in the JobsPanel now — reachable from the main
+               interface, which is the point. -->
           <button
-            disabled={!!busy || status.running}
+            disabled={!!busy || status.running || !!clusterJob}
             onclick={() =>
               act("cluster", async () => {
-                const r = await clusterPeople(modelId);
+                await clusterPeople(modelId);
                 onnotice?.(
-                  `Grouped ${n(r.assigned)} faces into ${n(r.people)} people` +
-                    (r.keptManual
-                      ? `, keeping ${n(r.keptManual)} you set by hand`
-                      : "")
+                  "Grouping faces into people — progress is in the jobs panel, and you can stop it there."
                 );
               })}
             data-testid="face-cluster"
           >
-            {busy === "cluster" ? "Grouping…" : "Group faces into people"}
+            {clusterJob ? "Grouping…" : "Group faces into people"}
           </button>
+          {#if clusterJob}
+            <!-- A second way to stop it, right where it was started. The
+                 JobsPanel's Cancel is the canonical one; this exists because
+                 the user is looking HERE. -->
+            <button
+              disabled={stoppingClusterNow}
+              onclick={() => {
+                stoppingCluster = clusterJob.id;
+                cancelJob(clusterJob.id);
+              }}
+              data-testid="face-cluster-stop"
+            >
+              {stoppingClusterNow ? "Stopping…" : "Stop"}
+            </button>
+          {/if}
 
           {#if people.length}
             <!-- Largest first, because ten minutes spent naming the biggest

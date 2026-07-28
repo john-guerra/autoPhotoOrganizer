@@ -119,8 +119,26 @@ A job means all four of these, not three:
 
 The route stops returning the result and returns `{jobId}` instead, and the
 caller stops awaiting a result. Budget for the UI change, not just the server
-one. `POST /api/ml/faces` has the right shape; `POST /api/ml/faces/cluster` does
-not (#222).
+one. Both `POST /api/ml/faces` and `POST /api/ml/faces/cluster` now have this
+shape — the latter as of 2.18.43 (#222), and converting it took, in order:
+
+1. the route returning `{jobId}` and doing its work after `res.json()`;
+2. every refusal moving BEFORE `registry.create`, so a rejected request never
+   leaves a row that appears and immediately fails;
+3. a single-flight latch, because two passes would each compute a full
+   partition and the loser would silently overwrite the winner;
+4. the long loop taking the job's `AbortSignal` **at the point where it already
+   yields** — the only place in an O(n²) scan where the process is not
+   mid-comparison;
+5. the panel dropping its `await` and reading the outcome off the finished job
+   instead — including telling _cancelled_ and _failed_ apart, because saying
+   "grouping failed" to someone who pressed Stop is the Finding 6 mistake;
+6. a `summarize()` branch, or the finished row is a bare ✓.
+
+**Progress is measured in WORK, not in items.** The clustering loop is O(n²)
+over the upper triangle, so row _i_ does _(n − i)_ comparisons: at half the
+rows, 75% of the work is behind you. A bar driven by row index crawls and then
+leaps. Report pairs against `n(n−1)/2`.
 
 ---
 

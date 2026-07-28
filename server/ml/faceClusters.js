@@ -108,17 +108,66 @@ const breathe = () => new Promise((r) => setImmediate(r));
  *   1 by default, i.e. a face seen once is still a (singleton) person — see
  *   #167: "a person with no name should still be browsable".
  * @param {number} [opts.yieldEvery] rows between yields to the event loop.
+ * @param {AbortSignal} [opts.signal] checked at the yield point (#222). Throws
+ *   an `AbortError` there, so a cancelled pass stops within one `yieldEvery`
+ *   block having written NOTHING — the union-find is in-memory and the caller
+ *   saves in a single transaction at the end. A cancellation is an outcome,
+ *   not a failure, and it must not leave half a regrouping on disk.
+ * @param {(p: {done: number, total: number}) => void} [opts.onProgress]
+ *   Reported in PAIRS COMPARED, not rows done. The loop is O(n^2) over the
+ *   upper triangle, so row i does (n - i) comparisons: at half the rows, 75%
+ *   of the work is already behind you. A bar driven by `i / n` would crawl and
+ *   then leap, which is the "honest progress" half of UI-CONTRACTS §2.
  * @returns {Promise<{clusters: Array<number[]>, singletons: number[]}>}
  *   `clusters` are arrays of FACE ids, largest first — which is the order #167
  *   wants for naming, since ten minutes spent on the biggest clusters covers
  *   most of a library.
  */
+/**
+ * Single-flight latch for the grouping pass (#222).
+ *
+ * Two concurrent regroupings would each compute a full partition and then both
+ * call `saveClusters`, which clears and rewrites every person assignment for
+ * the model — the loser silently overwrites the winner with a partition
+ * computed from an older read. Not corrupting, but the user sees people
+ * shuffle for no reason. Mirrors `isFaceSweepInFlight`.
+ */
+let clusterInFlight = false;
+
+/** @returns {boolean} */
+export function isClusterInFlight() {
+  return clusterInFlight;
+}
+
+/** Tests only — see faceSweep's equivalent. */
+export function _resetClusterForTest() {
+  clusterInFlight = false;
+}
+
+/**
+ * Take the latch, run `fn`, release it on EVERY exit path (throw, abort, or
+ * success). `finally`, not a line after the await: leaving it set makes every
+ * later grouping a silent no-op for the life of the process, and the only
+ * symptom is a button that does nothing.
+ * @template T @param {() => Promise<T>} fn @returns {Promise<T>}
+ */
+export async function withClusterLatch(fn) {
+  clusterInFlight = true;
+  try {
+    return await fn();
+  } finally {
+    clusterInFlight = false;
+  }
+}
+
 export async function clusterFaces(vectors, opts = {}) {
   const {
     threshold = SAME_PERSON_COSINE,
     maxDegree = MAX_DEGREE,
     minSize = 1,
     yieldEvery = YIELD_EVERY,
+    signal,
+    onProgress,
   } = opts;
   const { ids, scales, dim, data } = vectors;
   const n = ids.length;
@@ -151,8 +200,25 @@ export async function clusterFaces(vectors, opts = {}) {
   //
   // It yields every `yieldEvery` rows so the server keeps answering while it
   // runs — see YIELD_EVERY. That is the only reason this function is async.
+  // Total WORK, not total rows — see onProgress. n*(n-1)/2 is the upper
+  // triangle; `maxDegree` skips make the real count lower, so this is an upper
+  // bound that the bar approaches monotonically rather than overshooting.
+  const totalPairs = (n * (n - 1)) / 2;
+  const pairsThrough = (row) => row * n - (row * (row + 1)) / 2;
+
   for (let i = 0; i < n; i++) {
-    if (i > 0 && i % yieldEvery === 0) await breathe();
+    if (i > 0 && i % yieldEvery === 0) {
+      await breathe();
+      // The abort check belongs HERE, at the yield, and nowhere else: it is
+      // the only point in an O(n^2) loop where the process is not mid-scan,
+      // and checking per-pair would cost more than the comparison it guards.
+      if (signal?.aborted) {
+        const e = new Error("canceled");
+        e.name = "AbortError";
+        throw e;
+      }
+      onProgress?.({ done: pairsThrough(i), total: totalPairs });
+    }
     if (degree[i] >= maxDegree) continue;
     const vi = data.subarray(i * dim, (i + 1) * dim);
     for (let j = i + 1; j < n; j++) {

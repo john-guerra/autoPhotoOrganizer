@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.43
+
+- **Grouping faces into people can now be watched and stopped.** It used to be
+  a frozen button inside the settings panel — no progress, nothing to cancel,
+  and the whole operation vanished the moment you closed the panel. It is now a
+  job like every other long task: a real progress bar, a working Stop, and
+  visible from the main interface whether or not the panel is open (#222).
+- Stopping a grouping changes nothing at all, and says so rather than reporting
+  a failure (#222).
+- Starting a second grouping while one is running is refused with a message
+  telling you where to watch the first (#222).
+
 ## 2.18.42
 
 - **Find faces in what you selected, or just what's on screen** — not only in
