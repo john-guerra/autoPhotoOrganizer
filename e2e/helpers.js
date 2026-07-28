@@ -188,6 +188,19 @@ export const grid = {
   },
 };
 
+// --- the view registry (#155) ------------------------------------------------
+
+export const views = {
+  /** A view's switcher button, by registry id. Every registered view except
+   *  the default gets one, rendered from the registry itself. */
+  switchBtn: (page, id) => page.locator(`[data-testid="view-switch-${id}"]`),
+  /** The grid view's root. Unchanged through the #155 extraction on purpose —
+   *  a spec needing a new selector would have meant behaviour changed. */
+  grid: (page) => page.locator("#feed-grid"),
+  /** Cycle to the next registered view with the keyboard (V). */
+  cycle: (page) => page.keyboard.press("v"),
+};
+
 // --- the status bar (counts + selection actions) -----------------------------
 
 export const statusBar = {

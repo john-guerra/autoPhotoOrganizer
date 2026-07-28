@@ -30,5 +30,32 @@ export default defineConfig({
     // issue #101.
     include: ["server/**/*.test.js", "ui/src/**/*.test.js"],
     exclude: ["e2e/**", "node_modules/**", "dist/**"],
+    server: {
+      deps: {
+        // `@john-guerra/d3-zoomable-axis` imports `reactive-widget-helper`,
+        // which ships NO `exports` map — only the legacy `main`/`module`
+        // fields, where `main` is a minified bundle with no ESM default
+        // export. Vitest externalizes bare dependencies by default, so Node
+        // resolves it directly, picks `main`, and the import throws
+        // "does not provide an export named 'default'". Vite's own resolution
+        // prefers `module` and works, which is why the app builds and runs
+        // fine — only this tier saw it.
+        //
+        // It surfaced when views/registry.js started importing AlbumsView (the
+        // registry references its components directly, exactly as
+        // groupRenderers.js does, so there is one source of truth rather than
+        // a second string→component table to drift). Inlining hands the
+        // package to Vite instead of Node.
+        //
+        // The real fix belongs upstream in reactive-widget-helper: an
+        // `exports` map with an `import` condition pointing at
+        // `dist/ReactiveWidget.es.js`. Drop this once that ships.
+        // Both: the importer AND the package that is actually broken. Inlining
+        // only the importer works today but stops covering it the moment a
+        // second dependency imports `reactive-widget-helper` — and the symptom
+        // is the same opaque "does not provide an export named 'default'".
+        inline: [/@john-guerra\/d3-zoomable-axis/, /reactive-widget-helper/],
+      },
+    },
   },
 });

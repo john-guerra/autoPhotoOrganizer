@@ -8,16 +8,27 @@
    * directly above the column it switches.
    */
   import { cycleAllLabel } from "./groupRenderers.js";
+  import { VIEWS, DEFAULT_VIEW_ID } from "./views/registry.js";
 
   let {
     cyclingAll = false,
     globalViewMode = "full",
-    albumMode = $bindable(false),
-    detectingAlbums = false,
+    /** The registered view that currently owns the main area (#155). */
+    viewId = DEFAULT_VIEW_ID,
+    /** A working-set view's entry fetch is in flight. */
+    switching = false,
     oncycleall,
     onrevealcurrent,
-    ondetectalbums,
+    onswitchview,
   } = $props();
+
+  /**
+   * One button per registered view OTHER than the default — the default is
+   * where the buttons return you, so it needs no button of its own. Driven by
+   * the registry, so a new view (People, #223) gets its switcher button
+   * without touching this file.
+   */
+  let switchable = $derived(VIEWS.filter((v) => v.id !== DEFAULT_VIEW_ID));
 </script>
 
 <div class="cluster view">
@@ -46,19 +57,32 @@
   >
     ⌖
   </button>
-  <button
-    class="reveal-btn"
-    class:active={albumMode}
-    onclick={() => (albumMode ? (albumMode = false) : ondetectalbums?.())}
-    disabled={detectingAlbums}
-    title="Group the photos you're viewing into albums by the pauses between shots — a long gap starts a new album. Preview, rename, then save them into folders (photos and videos)."
-  >
-    {detectingAlbums
-      ? "Detecting…"
-      : albumMode
-        ? "✕ Auto Albums"
-        : "▤ Auto Albums"}
-  </button>
+  <!-- The view switcher. Each button is a TOGGLE: press it to enter that view,
+       press it again to come back to the grid — so there is always a way out
+       of a view without hunting for one. -->
+  {#each switchable as view (view.id)}
+    <button
+      class="reveal-btn"
+      class:active={viewId === view.id}
+      data-testid="view-switch-{view.id}"
+      aria-pressed={viewId === view.id}
+      onclick={() =>
+        onswitchview?.(viewId === view.id ? DEFAULT_VIEW_ID : view.id)}
+      disabled={switching}
+      title={view.description}
+    >
+      {#if switching}
+        <!-- On the ACTIVE button too. Gating this on `viewId !== view.id`
+             meant a re-limit from inside Auto Albums (which re-runs the same
+             fetch) rendered "✕ Auto Albums" disabled — a dead-looking control
+             with nothing saying why. -->
+        Detecting…
+      {:else}
+        {viewId === view.id ? "✕" : view.icon}
+        {view.label}
+      {/if}
+    </button>
+  {/each}
 </div>
 
 <style>
