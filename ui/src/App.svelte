@@ -80,6 +80,8 @@
     fetchNearDupeCounts,
     fetchSemanticTags,
     fetchPeople,
+    renamePerson,
+    mergePeople,
     startEmbed,
     fetchMlSettings,
     fetchMlStats,
@@ -153,6 +155,7 @@
   import {
     GRID,
     ALBUMS,
+    PEOPLE,
     DEFAULT_VIEW_ID,
     getView,
     supports,
@@ -478,10 +481,11 @@
   let activeView = $derived(getView(viewId));
   $effect(() => saveSetting("viewId", viewId));
 
-  /** Read-only alias kept because "are we in the album review?" is asked in
-   *  several places that have nothing to do with the registry (the scan reset,
-   *  the album re-limit re-pull, the scope narrowing on entry). Derived, not
-   *  state — `viewId` is the single source of truth. */
+  /** Read-only alias for the ONE place that still asks "are we in the album
+   *  review?" outside the registry: the scope narrowing on entry, which must
+   *  not re-apply the selection on a re-limit re-pull. (An earlier version of
+   *  this comment listed three call sites; the other two now assign `viewId`
+   *  directly.) Derived, not state — `viewId` is the single source of truth. */
   let albumMode = $derived(viewId === ALBUMS.id);
   let albumPhotos = $state([]);
   let albumTruncated = $state(false);
@@ -2544,7 +2548,29 @@
    *
    * Adding a working-set view (People, #223) is one entry here.
    */
-  const WORKING_SET_LOADERS = { [ALBUMS.id]: detectAlbums };
+  const WORKING_SET_LOADERS = {
+    [ALBUMS.id]: detectAlbums,
+    // People (#223) already has its fetch — `refreshPeople` is what the
+    // toolbar's person picker has used since #167. It is BOUNDED by
+    // construction (one row per person, not per photo) and it is the same
+    // list the picker reads, so the view and the filter can never disagree
+    // about who exists.
+    [PEOPLE.id]: async () => {
+      peopleLoading = true;
+      try {
+        await refreshPeople();
+        return true;
+      } catch (e) {
+        error = `Couldn't load people: ${e.message}`;
+        return false;
+      } finally {
+        peopleLoading = false;
+      }
+    },
+  };
+
+  /** True while the People view's working set is being fetched. */
+  let peopleLoading = $state(false);
 
   /**
    * Switch the main area to another registered view.
@@ -2553,9 +2579,12 @@
    * would land on an empty view with the error posted somewhere behind it,
    * which reads as "the button did nothing".
    */
-  /** A view switch is in flight. Not derived from `detectingAlbums`: that is
-   *  one view's flag, and this must hold for any working-set view's fetch. */
-  let switchingView = $state(false);
+  /** The view whose entry fetch is in flight, or null. Not `detectingAlbums`:
+   *  that is ONE view's flag, and with two working-set views (albums and
+   *  people) it would grey out both buttons while either loads — and label the
+   *  wrong one "Detecting…". */
+  let switchingViewId = $state(null);
+  const switchingView = $derived(switchingViewId !== null);
 
   async function switchView(id) {
     const view = getView(id);
@@ -2584,19 +2613,31 @@
       // reporting an error. Owning the switch means owning it across the
       // await, not just at entry.
       const from = viewId;
-      switchingView = true;
+      switchingViewId = view.id;
       let ok = false;
       try {
         ok = await load();
       } finally {
-        switchingView = false;
+        switchingViewId = null;
       }
       if (!ok) return;
       if (viewId !== from) return; // someone switched under us; they win
     }
-    viewNotice = ""; // the refusal was about the view you just left
     viewId = view.id;
   }
+
+  // The refusal names the view you were in, so it must not outlive it — and
+  // clearing it inside switchView alone was not enough: `onAlbumsMaterialized`
+  // assigns `viewId` directly (the albums it was built from are gone). One
+  // effect keyed on viewId covers every assignment, present and future.
+  //
+  // `notice` is the PERSISTENT channel, so a stale one does not fade — it sits
+  // in the status bar reading "Rating isn't available in Auto Albums" while
+  // you are looking at the grid.
+  $effect(() => {
+    viewId;
+    viewNotice = "";
+  });
 
   /**
    * Refuse an interaction the active view has DECLARED it cannot do, and say
@@ -2634,6 +2675,31 @@
    * another `{#if}` in the markup.
    */
   let viewProps = $derived.by(() => {
+    if (activeView.id === PEOPLE.id) {
+      return {
+        people,
+        loading: peopleLoading,
+        activePersonId: filter.personId ?? null,
+        // The EXISTING personId filter (#167), not a second way to narrow the
+        // feed. App owns the filter; the view asks.
+        onpick: (id) => {
+          const next = { ...filter };
+          if (id) next.personId = id;
+          else delete next.personId;
+          onFilterChange(next);
+        },
+        onrename: async (id, name) => {
+          await renamePerson(id, name);
+          await refreshPeople();
+        },
+        onmerge: async (into, from) => {
+          const r = await mergePeople(into, from);
+          await refreshPeople();
+          faceNotice = `Merged ${r.moved} faces into ${r.name || "one person"}. It will survive the next grouping.`;
+        },
+        onnotice: (m) => (faceNotice = m),
+      };
+    }
     if (activeView.id === ALBUMS.id) {
       return {
         photos: albumPhotos,
@@ -5645,8 +5711,8 @@
       // Not while the loupe is up: it is an overlay, so the swap would happen
       // BEHIND it (and, for a working-set view, kick off a bounded fetch) with
       // nothing visible until Escape. The shortcut is documented under
-      // Navigation for the same reason — it is about the main area, and the
-      // loupe is not it.
+      // General for the same reason — it is about the main area, not the grid
+      // specifically, and the loupe is not the main area.
       if (loupeOpen) return;
       e.preventDefault();
       switchView(nextViewId(viewId));
@@ -5875,7 +5941,18 @@
     // Shift+arrow extends the selection over every photo swept (inclusive of
     // both the old and new focus), so a run of Shift+Right/Down builds a
     // contiguous selection without the mouse.
-    if (e.shiftKey && next !== selected) selectRange(selected, next);
+    //
+    // Guarded on the view for the same reason `X` and ⌘A are, and it was
+    // MISSED when they were: this branch sits further down the handler, so a
+    // view declaring `select: false` still had one way to build a selection
+    // out of the hidden feed window. Three presses of Shift+Right in the album
+    // review and the status bar counted photos the user never saw or chose.
+    // The plain arrows are left alone deliberately — moving an off-screen
+    // cursor writes nothing, and refusing navigation would be noise.
+    if (e.shiftKey && next !== selected) {
+      if (refuseUnsupported("select", "Selecting photos")) return;
+      selectRange(selected, next);
+    }
     focusEntry(next);
     await tick();
     // focus (preventScroll) suppresses the browser's native focus scroll;
@@ -6084,7 +6161,7 @@
     {cyclingAll}
     {globalViewMode}
     {viewId}
-    switching={detectingAlbums}
+    {switchingViewId}
     bind:zoom
     zoomMax={ZOOM_LEVELS.length - 1}
     bind:burstEnabled

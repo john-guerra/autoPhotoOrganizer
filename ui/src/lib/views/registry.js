@@ -1,5 +1,6 @@
 import GridView from "./GridView.svelte";
 import AlbumsView from "../AlbumsView.svelte";
+import PeopleView from "./PeopleView.svelte";
 
 /**
  * WHAT CAN OCCUPY THE MAIN AREA. One registry, so adding a view is one entry
@@ -113,8 +114,40 @@ export const ALBUMS = {
   component: AlbumsView,
 };
 
+/**
+ * People — browse and name the people the face pass found (#223).
+ *
+ * The registry's third entry, and the one that shows it works: adding it was
+ * this block, a component, a `viewProps` case and a `WORKING_SET_LOADERS`
+ * entry. No new branch in App's markup, no second way to switch, and no
+ * re-derived boundary. That is what #155 was for.
+ *
+ * Every capability is FALSE, and that is a real declaration rather than a
+ * shrug: this view shows you PEOPLE, not photos. There is no photo here to
+ * rate, and `selected` indexes a feed window it does not render — so `3` or
+ * `X` here would act on something off-screen, which is exactly the bug the
+ * capability system was built to stop. Declaring it lets App answer the
+ * keystroke by name instead of swallowing it.
+ *
+ * It narrows the feed through the EXISTING `personId` filter (shipped in #167,
+ * wired through all three facet layers) rather than inventing a second way to
+ * narrow it.
+ * @type {View}
+ */
+export const PEOPLE = {
+  id: "people",
+  label: "People",
+  icon: "☺",
+  description:
+    "Browse the people found in your photos, name them, and merge the ones that got split. Click a face to see just their photos.",
+  navigation: "scroll",
+  dataSource: "working-set",
+  capabilities: { open: false, select: false, rate: false },
+  component: PeopleView,
+};
+
 /** Every registered view, in switcher order. Append a new view here. */
-export const VIEWS = [GRID, ALBUMS];
+export const VIEWS = [GRID, ALBUMS, PEOPLE];
 
 export const DEFAULT_VIEW_ID = GRID.id;
 

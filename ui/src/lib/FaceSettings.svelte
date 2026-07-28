@@ -28,8 +28,6 @@
     clusterPeople,
     cancelJob,
     fetchPeople,
-    renamePerson,
-    mergePeople,
   } from "./api.js";
   import { jobs, takeNewlyFinished } from "./jobs.js";
   import ScopeControl from "./ScopeControl.svelte";
@@ -89,8 +87,16 @@
 
   // The SAME functions ScopeControl renders from, so the button and the radio
   // buttons can never disagree about what was picked (#221).
+  // `allLabel` must match what ScopeControl renders, or `activeScope.label`
+  // here says "All" while the control says "All remaining" — invisible today
+  // only because the button hard-codes "photos" for the all branch.
   let scopes = $derived(
-    buildScopes({ selectedIds, visibleIds, allCount: pending })
+    buildScopes({
+      selectedIds,
+      visibleIds,
+      allCount: pending,
+      allLabel: "All remaining",
+    })
   );
   let activeScope = $derived(activeScopeOf(scopes, scopeChoice));
   let scopeIds = $derived(
@@ -130,7 +136,17 @@
   const stoppingClusterNow = $derived(
     stoppingCluster !== null && clusterJob?.id === stoppingCluster
   );
+  /**
+   * Which finished grouping jobs have already been announced.
+   *
+   * Seeded on mount with every job that has ALREADY finished: `face-cluster`
+   * is not self-clearing, so its row lingers in `$jobs` until dismissed — and
+   * a fresh Set per mount meant closing and reopening this panel re-announced
+   * a grouping that finished ten minutes ago (or re-rendered the red error
+   * line for one that failed).
+   */
   const handledClusterJobs = new Set();
+  let seededHandled = false;
 
   $effect(() => {
     // A finished pass rewrote every person, so the list this panel shows is
@@ -138,6 +154,13 @@
     // DIFFERENT outcomes and get different sentences: a cancellation is not a
     // failure, and telling the user their grouping "failed" when they stopped
     // it themselves is the Finding 6 mistake.
+    if (!seededHandled) {
+      // Claim everything already terminal, WITHOUT announcing it. Must run
+      // before the first real read, or the announcement fires once on mount.
+      takeNewlyFinished($jobs, "face-cluster", handledClusterJobs);
+      seededHandled = true;
+      return;
+    }
     for (const job of takeNewlyFinished(
       $jobs,
       "face-cluster",
@@ -267,7 +290,7 @@
       <div class="actions">
         <button
           class="primary"
-          disabled={!!busy || status.running || !activeScope?.n}
+          disabled={!!busy || status.running || !!clusterJob || !activeScope?.n}
           onclick={() =>
             act("scan", async () => {
               const r = await startFaceScan(modelId, scopeIds);
@@ -286,7 +309,13 @@
             })}
           data-testid="face-scan"
         >
-          {#if status.running}
+          {#if clusterJob}
+            <!-- The server refuses this while a grouping runs (it would throw
+                 the grouping away), so the button must not offer it. A refusal
+                 the UI could have prevented is a dead button with an
+                 explanation. -->
+            Grouping faces…
+          {:else if status.running}
             Scanning…
           {:else if !activeScope?.n}
             {pending === 0 ? "All photos scanned" : "Nothing in this scope"}
@@ -374,62 +403,19 @@
           {/if}
 
           {#if people.length}
-            <!-- Largest first, because ten minutes spent naming the biggest
-                 clusters covers most of a library. An unnamed person is still
-                 listed and still browsable — #167 is explicit about that. -->
-            <ul data-testid="people-list">
-              {#each people.slice(0, 40) as p (p.id)}
-                <li>
-                  {#if p.coverFaceId}
-                    <span class="dot" aria-hidden="true"></span>
-                  {/if}
-                  <input
-                    type="text"
-                    value={p.name ?? ""}
-                    placeholder={`Unnamed · ${n(p.faces)} face${p.faces === 1 ? "" : "s"}`}
-                    onchange={(e) =>
-                      act("name", async () => {
-                        await renamePerson(p.id, e.currentTarget.value);
-                      })}
-                    aria-label={`Name for the person in ${p.photos} photos`}
-                  />
-                  <!-- Merging is the correction #167 requires, and it has to
-                       be durable: the server marks every affected face as a
-                       human's decision so the next grouping pass keeps it. -->
-                  <select
-                    class="merge"
-                    value=""
-                    aria-label={`Merge someone into ${p.name || "this person"}`}
-                    onchange={(e) => {
-                      const from = Number(e.currentTarget.value);
-                      e.currentTarget.value = "";
-                      if (!from) return;
-                      act("merge", async () => {
-                        const r = await mergePeople(p.id, from);
-                        onnotice?.(
-                          `Merged ${n(r.moved)} faces into ${r.name || "one person"}. It will survive the next grouping.`
-                        );
-                      });
-                    }}
-                  >
-                    <option value="">Merge…</option>
-                    {#each people
-                      .filter((o) => o.id !== p.id)
-                      .slice(0, 40) as o (o.id)}
-                      <option value={o.id}>
-                        {o.name || `Unnamed (${n(o.faces)})`}
-                      </option>
-                    {/each}
-                  </select>
-                  <span class="count">{n(p.photos)}</span>
-                </li>
-              {/each}
-            </ul>
-            {#if people.length > 40}
-              <p class="lede">…and {n(people.length - 40)} more.</p>
-            {/if}
-            <p class="lede">
-              Name someone and they appear in the Person filter in the toolbar.
+            <!-- Browsing and naming people MOVED to the main area (#223).
+                 A settings panel is for settings; anything that shows you your
+                 photos — or the faces in them — belongs where selection, the
+                 loupe and the keyboard already live. Naming from a list of
+                 "Unnamed · 34 faces" placeholders was guessing anyway: you
+                 need to see the face. What stays here is the SETTINGS half:
+                 which model, download it, the licence, forget everything. -->
+            <p class="lede" data-testid="face-people-moved">
+              {n(people.length)}
+              {people.length === 1 ? "person" : "people"} found. Naming and merging
+              now live in the <strong>People</strong> view — press
+              <kbd>V</kbd> to switch the main area, or use the People button in the
+              toolbar.
             </p>
           {/if}
         </div>
@@ -520,55 +506,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
-  }
-  .people ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    max-height: 13rem;
-    overflow-y: auto;
-  }
-  .people li {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-  .people input {
-    flex: 1;
-    min-width: 0;
-    background: #1c1c1c;
-    color: inherit;
-    border: 1px solid #333;
-    border-radius: 4px;
-    padding: 0.2rem 0.35rem;
-    font-size: 0.78rem;
-  }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #4c9aff;
-    flex: none;
-  }
-  .merge {
-    background: #1c1c1c;
-    color: #9a9a9a;
-    border: 1px solid #333;
-    border-radius: 4px;
-    font-size: 0.7rem;
-    padding: 0.15rem 0.2rem;
-    max-width: 6rem;
-    flex: none;
-  }
-  .count {
-    font-size: 0.72rem;
-    opacity: 0.6;
-    min-width: 2.5rem;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
   }
   .err {
     margin: 0;

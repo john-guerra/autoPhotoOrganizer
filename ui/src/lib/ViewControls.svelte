@@ -15,8 +15,10 @@
     globalViewMode = "full",
     /** The registered view that currently owns the main area (#155). */
     viewId = DEFAULT_VIEW_ID,
-    /** A working-set view's entry fetch is in flight. */
-    switching = false,
+    /** WHICH view's entry fetch is in flight, or null. Per-view rather than a
+     *  bare boolean: with two working-set views a single flag greys out both
+     *  buttons while either loads, and labels the wrong one "Detecting…". */
+    switchingViewId = null,
     oncycleall,
     onrevealcurrent,
     onswitchview,
@@ -68,10 +70,10 @@
       aria-pressed={viewId === view.id}
       onclick={() =>
         onswitchview?.(viewId === view.id ? DEFAULT_VIEW_ID : view.id)}
-      disabled={switching}
+      disabled={switchingViewId !== null}
       title={view.description}
     >
-      {#if switching}
+      {#if switchingViewId === view.id}
         <!-- On the ACTIVE button too. Gating this on `viewId !== view.id`
              meant a re-limit from inside Auto Albums (which re-runs the same
              fetch) rendered "✕ Auto Albums" disabled — a dead-looking control

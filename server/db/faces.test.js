@@ -12,6 +12,7 @@ import {
   putFaces,
   facesFor,
   pendingFaceRows,
+  faceSweepPending,
   faceCounts,
   faceVectors,
   purgeFaces,
@@ -195,6 +196,53 @@ describe("scoping the worklist (#221)", () => {
     expect(
       pendingFaceRows(db, MODEL, 10, [ids[0], 999999]).map((r) => r.id)
     ).toEqual([ids[0]]);
+  });
+});
+
+describe("what a sweep's progress bar should count (#221)", () => {
+  // The bug this exists to stop shipped TWICE: once as `ids.length` in the
+  // route, and again when a per-batch `registry.update` overwrote the correct
+  // total with `ids.length` eight photos in. Nothing could catch either,
+  // because every route test dies at a mocked `loadOrt` before reaching the
+  // arithmetic. So the arithmetic lives here now.
+
+  it("counts the worklist, not the size of the selection", () => {
+    const db = getDb();
+    const ids = seed(db, 5);
+    // Three of the five are already looked at.
+    for (const id of ids.slice(0, 3)) {
+      putFaces(db, { photoId: id, model: MODEL, faces: [] });
+    }
+    // A bar built on `ids.length` would say 5 and finish at 2 — 40%, called
+    // "done".
+    expect(faceSweepPending(db, MODEL, ids)).toBe(2);
+    expect(faceSweepPending(db, MODEL, ids)).not.toBe(ids.length);
+  });
+
+  it("counts the library's remaining work when unscoped", () => {
+    const db = getDb();
+    const ids = seed(db, 4);
+    putFaces(db, { photoId: ids[0], model: MODEL, faces: [] });
+    // total - scanned - failed, NOT `total`: quoting every image in the
+    // library leaves the bar at ~0% for a run that only has one photo to do.
+    expect(faceSweepPending(db, MODEL, null)).toBe(3);
+    expect(faceSweepPending(db, MODEL, undefined)).toBe(3);
+  });
+
+  it("is zero when a scope has nothing left to do", () => {
+    // The route answers specifically instead of starting a job that reports
+    // "0 faces in 0 photos" under a panel that said "20 photos".
+    const db = getDb();
+    const ids = seed(db, 3);
+    for (const id of ids)
+      putFaces(db, { photoId: id, model: MODEL, faces: [] });
+    expect(faceSweepPending(db, MODEL, ids)).toBe(0);
+  });
+
+  it("ignores ids outside the library rather than counting them", () => {
+    const db = getDb();
+    const ids = seed(db, 2);
+    expect(faceSweepPending(db, MODEL, [...ids, 999999])).toBe(2);
   });
 });
 

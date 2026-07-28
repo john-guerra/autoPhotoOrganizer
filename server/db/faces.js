@@ -550,6 +550,61 @@ export function listPersons(db) {
 }
 
 /**
+ * How many photos a face sweep will ACTUALLY look at (#221).
+ *
+ * The number a job's `total` must use. `ids.length` is the wrong one and
+ * quietly ruins the bar: the scope is whatever the user selected, but the
+ * worklist excludes what is already scanned, plus videos, RAW, and rows whose
+ * file has vanished. Select 20 tiles of which 5 are new and a bar built on
+ * `ids.length` reaches 5/20 and stops — "done", rendered as 25%.
+ *
+ * Extracted from the route so it is testable: every `POST /api/ml/faces` in
+ * faceRoutes.test.js fails at `loadOrt` (mocked to throw, which is what that
+ * file is FOR), so nothing could reach this arithmetic in place — and a bug in
+ * it shipped because of that.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @param {number[]|null|undefined} scopeIds null/undefined = the whole library
+ * @returns {number}
+ */
+export function faceSweepPending(db, model, scopeIds) {
+  if (scopeIds) {
+    return pendingFaceRows(db, model, Number.MAX_SAFE_INTEGER, scopeIds).length;
+  }
+  const c = faceCounts(db, model);
+  return Math.max(0, c.total - c.scanned - c.failed);
+}
+
+/**
+ * Where a face LIVES: its box plus the photo it was found in (#223).
+ *
+ * The People view draws a crop per person, and nothing could serve one — the
+ * box has always been stored, but there was no way to turn it into pixels.
+ *
+ * Box columns come back as stored (x/y/w/h in the ORIENTED original's pixel
+ * space, i.e. after EXIF rotation — see faceEngine's `orientedSize`), NOT as
+ * the corner pair `facesFor` hands out: the caller here is `sharp.extract`,
+ * whose contract is left/top/width/height, and converting to corners just to
+ * convert back is where an off-by-one gets in.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {number} faceId
+ * @returns {{photoId: number, x: number, y: number, w: number, h: number}|undefined}
+ */
+export function faceCropSource(db, faceId) {
+  const r = db
+    .prepare(
+      `SELECT photo_id, box_x, box_y, box_w, box_h
+         FROM photo_faces WHERE id = ?`
+    )
+    .get(faceId);
+  return r
+    ? { photoId: r.photo_id, x: r.box_x, y: r.box_y, w: r.box_w, h: r.box_h }
+    : undefined;
+}
+
+/**
  * Name a person, or clear the name with null/"".
  * @param {import("better-sqlite3").Database} db
  * @param {number} personId

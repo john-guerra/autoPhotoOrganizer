@@ -83,7 +83,7 @@
     cyclingAll = false,
     globalViewMode = "full",
     viewId,
-    switching = false,
+    switchingViewId = null,
 
     // Size / Sort.
     zoom = $bindable(2),
@@ -204,7 +204,7 @@
         {cyclingAll}
         {globalViewMode}
         {viewId}
-        {switching}
+        {switchingViewId}
         {oncycleall}
         {onrevealcurrent}
         {onswitchview}

@@ -97,33 +97,6 @@ export const YIELD_EVERY = 512;
 const breathe = () => new Promise((r) => setImmediate(r));
 
 /**
- * Cluster face vectors into people.
- *
- * @param {{ids: Int32Array|number[], scales: Float32Array|number[], dim: number, data: Int8Array}} vectors
- *   As returned by db/faces.js `faceVectors` — one flat int8 buffer.
- * @param {object} [opts]
- * @param {number} [opts.threshold]
- * @param {number} [opts.maxDegree]
- * @param {number} [opts.minSize] clusters smaller than this stay unassigned.
- *   1 by default, i.e. a face seen once is still a (singleton) person — see
- *   #167: "a person with no name should still be browsable".
- * @param {number} [opts.yieldEvery] rows between yields to the event loop.
- * @param {AbortSignal} [opts.signal] checked at the yield point (#222). Throws
- *   an `AbortError` there, so a cancelled pass stops within one `yieldEvery`
- *   block having written NOTHING — the union-find is in-memory and the caller
- *   saves in a single transaction at the end. A cancellation is an outcome,
- *   not a failure, and it must not leave half a regrouping on disk.
- * @param {(p: {done: number, total: number}) => void} [opts.onProgress]
- *   Reported in PAIRS COMPARED, not rows done. The loop is O(n^2) over the
- *   upper triangle, so row i does (n - i) comparisons: at half the rows, 75%
- *   of the work is already behind you. A bar driven by `i / n` would crawl and
- *   then leap, which is the "honest progress" half of UI-CONTRACTS §2.
- * @returns {Promise<{clusters: Array<number[]>, singletons: number[]}>}
- *   `clusters` are arrays of FACE ids, largest first — which is the order #167
- *   wants for naming, since ten minutes spent on the biggest clusters covers
- *   most of a library.
- */
-/**
  * Single-flight latch for the grouping pass (#222).
  *
  * Two concurrent regroupings would each compute a full partition and then both
@@ -160,6 +133,33 @@ export async function withClusterLatch(fn) {
   }
 }
 
+/**
+ * Cluster face vectors into people.
+ *
+ * @param {{ids: Int32Array|number[], scales: Float32Array|number[], dim: number, data: Int8Array}} vectors
+ *   As returned by db/faces.js `faceVectors` — one flat int8 buffer.
+ * @param {object} [opts]
+ * @param {number} [opts.threshold]
+ * @param {number} [opts.maxDegree]
+ * @param {number} [opts.minSize] clusters smaller than this stay unassigned.
+ *   1 by default, i.e. a face seen once is still a (singleton) person — see
+ *   #167: "a person with no name should still be browsable".
+ * @param {number} [opts.yieldEvery] rows between yields to the event loop.
+ * @param {AbortSignal} [opts.signal] checked at the yield point (#222). Throws
+ *   an `AbortError` there, so a cancelled pass stops within one `yieldEvery`
+ *   block having written NOTHING — the union-find is in-memory and the caller
+ *   saves in a single transaction at the end. A cancellation is an outcome,
+ *   not a failure, and it must not leave half a regrouping on disk.
+ * @param {(p: {done: number, total: number}) => void} [opts.onProgress]
+ *   Reported in PAIRS COMPARED, not rows done. The loop is O(n^2) over the
+ *   upper triangle, so row i does (n - i) comparisons: at half the rows, 75%
+ *   of the work is already behind you. A bar driven by `i / n` would crawl and
+ *   then leap, which is the "honest progress" half of UI-CONTRACTS §2.
+ * @returns {Promise<{clusters: Array<number[]>, singletons: number[]}>}
+ *   `clusters` are arrays of FACE ids, largest first — which is the order #167
+ *   wants for naming, since ten minutes spent on the biggest clusters covers
+ *   most of a library.
+ */
 export async function clusterFaces(vectors, opts = {}) {
   const {
     threshold = SAME_PERSON_COSINE,

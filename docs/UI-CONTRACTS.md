@@ -33,7 +33,7 @@ The three scopes, always in this order, always with a live count:
 did they pick?" without reaching inside a component, and so it is testable
 without a DOM. Embedding (#215/#206) and faces (#221) are its two clients.
 
-Wiring a third takes four things:
+Wiring a third takes five things:
 
 1. `<ScopeControl legend name testid allCount … bind:choice />` — **`name` must
    be unique per instance.** Two radio groups sharing a name are ONE group to
@@ -153,7 +153,7 @@ to select, rate, or open a photo from here?"** If yes, it is a view.
 
 | Belongs in the main area                    | Belongs in a settings panel        |
 | ------------------------------------------- | ---------------------------------- |
-| Browsing and naming people                  | Which face model, and download it  |
+| Browsing and naming people ✅ 2.18.44       | Which face model, and download it  |
 | Semantic search results you can act on      | The licence notice                 |
 | Near-duplicate and burst controls (#207)    | "Forget all face data"             |
 | Anything with a selection or a rating in it | Cache size, device, opt-in toggles |
@@ -202,9 +202,22 @@ new name. A view needing whole-library data declares
 
 ### The rules
 
-- **Every view gets the same callbacks** — `onOpen`, `onSelect`, `onRate` — so
-  rating, selection and the loupe keep working everywhere. A view that cannot
-  support one **declares** it rather than silently swallowing the keystroke.
+- **A view that cannot support an interaction DECLARES it** rather than
+  silently swallowing the keystroke — `capabilities: { open, select, rate }`,
+  all three explicit booleans, read by `refuseUnsupported()` before any rating
+  or selection key acts.
+
+  #155 originally specified this as a uniform `onOpen`/`onSelect`/`onRate`
+  callback trio. That is **not** what shipped and the difference is worth
+  stating: views get their own props from `viewProps` in `App.svelte` (the grid
+  takes `ontileclick`/`ontoggleselect`/…, albums takes `onopenphoto`, People
+  takes `onpick`/`onrename`/`onmerge`), because the three views act on
+  genuinely different things — photos, albums, and people. What is uniform is
+  the DECLARATION, which is the part that had to be, since it is what lets App
+  answer a keystroke honestly. `navigation` and `capabilities.open` are
+  declared but not yet read by anything; they are forward-declarations, not
+  live contracts.
+
 - **Do the registry first and alone**, with the grid extracted as its first
   client and no user-visible change. A bespoke second view guarantees the third
   re-derives all of it (#156, #157, #165, #223). ✅ The registry exists, so a
@@ -217,9 +230,33 @@ new name. A view needing whole-library data declares
 - **A view switcher is a keyboard affordance** and goes in
   `ui/src/lib/ShortcutsOverlay.svelte` in the same commit — see CLAUDE.md.
 
+### What adding the third view actually cost (#223)
+
+The registry's claim was that a new view is an entry plus a component. People
+was the first real test of it, and the bill was:
+
+|                           |                                                      |
+| ------------------------- | ---------------------------------------------------- |
+| `views/registry.js`       | one `PEOPLE` descriptor                              |
+| `views/PeopleView.svelte` | the component                                        |
+| `App.svelte`              | a `viewProps` case and a `WORKING_SET_LOADERS` entry |
+| `ShortcutsOverlay.svelte` | one word in the `V` label                            |
+
+**No new branch in App's markup, no second switcher, no re-derived boundary**,
+and the conformance test covered the new view without being edited (it iterates
+`VIEWS`). The one genuinely new thing was a _server_ capability the view needed
+and nothing had: `GET /api/ml/faces/:id/crop`. The box had been stored since
+faces shipped, with nothing able to turn it into pixels.
+
+Its capabilities are `open/select/rate: false` — all three — and that is a real
+declaration, not a shrug: People shows you PEOPLE, and `selected` indexes a
+feed window it does not render, so a `3` here would rate a photo you cannot
+see. That is the same bug the capability system was built for, now caught by a
+third view rather than argued about.
+
 ### Three scales of pluggability
 
-Only the middle one exists. Naming them separately keeps the work from
+Two of the three exist. Naming them separately keeps the work from
 colliding (`docs/superpowers/specs/2026-07-24-ml-signals-design.md` §7):
 
 | Scale          | What swaps                  | Registry            | Status    |

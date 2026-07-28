@@ -199,6 +199,24 @@ export const views = {
   grid: (page) => page.locator("#feed-grid"),
   /** Cycle to the next registered view with the keyboard (V). */
   cycle: (page) => page.keyboard.press("v"),
+  /** Switch to a specific view by clicking its registry-rendered button. */
+  show: (page, id) => views.switchBtn(page, id).click(),
+  /**
+   * Return to the grid, whatever view you are in and however many views exist.
+   *
+   * NOT "press V until it comes back": every switcher button is a toggle back
+   * to the default, so clicking the pressed one is a single deterministic
+   * step. Specs used to press V twice, which silently assumed a TWO-view
+   * world and broke the moment People landed as the third — the exact latent
+   * assumption a reviewer flagged when there were only two.
+   */
+  toGrid: async (page) => {
+    const pressed = page.locator(
+      '[data-testid^="view-switch-"][aria-pressed="true"]'
+    );
+    if (await pressed.count()) await pressed.first().click();
+    await page.locator("#feed-grid").waitFor();
+  },
 };
 
 // --- the status bar (counts + selection actions) -----------------------------
@@ -705,6 +723,23 @@ export const faceSettings = {
   clusterStop: (page) => page.getByTestId("face-cluster-stop"),
   /** The panel's inline failure line. */
   error: (page) => page.getByTestId("face-error"),
+};
+
+// --- the People view (#223) --------------------------------------------------
+
+export const peopleView = {
+  root: (page) => page.getByTestId("people-view"),
+  grid: (page) => page.getByTestId("people-grid"),
+  tiles: (page) => page.getByTestId("people-grid").locator("li.person"),
+  /** The circular face crop — the primary action (show me their photos). */
+  face: (page, i = 0) =>
+    page.getByTestId("people-grid").locator("li.person .face").nth(i),
+  name: (page, i = 0) =>
+    page.getByTestId("people-grid").locator("li.person .name").nth(i),
+  nameInput: (page) => page.locator(".people-view .name-edit"),
+  clearFilter: (page) => page.locator(".people-view .clear"),
+  /** The line in the ML panel saying browsing moved out of it. */
+  movedNotice: (page) => page.getByTestId("face-people-moved"),
 };
 
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------
