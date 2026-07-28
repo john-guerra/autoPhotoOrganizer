@@ -84,6 +84,38 @@ export function thumbCacheKey(photo, size) {
     .digest("hex");
 }
 
+/**
+ * Face crops for the People view (#223).
+ *
+ * Deliberately NOT under cache/thumbs/, for the same reason modelsDir isn't:
+ * `pruneOrphanedCache` deletes anything in that directory outside its expected
+ * key set, and a face crop's key is derived from a FACE id, not a photo+size —
+ * so every crop would be swept away on the next prune and silently recomputed.
+ * @returns {string} Absolute path to the face-crop cache dir (created if missing).
+ */
+export function faceCropsDir() {
+  const dir = join(cacheRoot(), "cache", "faces");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * The face-crop cache key. Keyed on the PHOTO's identity as well as the face
+ * id: face rows are re-created wholesale by `putFaces` on every re-scan, so an
+ * id alone would serve a stale crop from a photo that has since changed on
+ * disk — the same reason thumbCacheKey folds in mtime and size.
+ *
+ * @param {{id: number, path: string, mtime: number, size: number}} photo
+ * @param {number} faceId
+ * @param {number} px
+ * @returns {string} bare 40-char SHA1 hex digest
+ */
+export function faceCropKey(photo, faceId, px) {
+  return createHash("sha1")
+    .update(`face:${faceId}:${photo.path}:${photo.mtime}:${photo.size}:${px}`)
+    .digest("hex");
+}
+
 /** Downloaded ML model weights. Deliberately NOT under cache/thumbs/ —
  *  pruneOrphanedCache deletes anything there outside its expected key set,
  *  regardless of extension.

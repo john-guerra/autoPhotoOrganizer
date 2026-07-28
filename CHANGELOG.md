@@ -6,6 +6,20 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.44
+
+- **People moved out of the settings panel and into the main area.** Press `V`
+  (or the People button) and you get a face for every person the grouping
+  found — name them, merge the ones that got split, and click a face to see
+  just their photos. Naming from a list of "Unnamed · 34 faces" placeholders
+  was guessing; now you can see who you're naming (#223).
+- Faces are shown as real crops from your photos for the first time — the app
+  had been storing where every face is since faces shipped, but had no way to
+  draw one (#223).
+- The Machine learning panel keeps the face **settings** (model, download,
+  licence, forget everything) and points you at the People view for browsing
+  (#223).
+
 ## 2.18.43
 
 - **Grouping faces into people can now be watched and stopped.** It used to be
@@ -39,8 +53,7 @@ user-facing — what you can now do, not how it's built.
   hadn't chosen. Each now tells you the action isn't available in that view,
   and how to get back (#155).
 - **Press `V` to switch what fills the main area** — grid → Auto Albums → back.
-  The Auto Albums button is now a toggle you can press again to leave, and your
-  choice is remembered between sessions (#155).
+  The Auto Albums button is now a toggle you can press again to leave (#155).
 - Holding `V` no longer fires one album scan per key-repeat, or drops you back
   into a view you'd just left (#155).
 - Groundwork: the main area is now pluggable, so upcoming views (People, #223)

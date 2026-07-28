@@ -8,27 +8,37 @@
    * directly above the column it switches.
    */
   import { cycleAllLabel } from "./groupRenderers.js";
-  import { VIEWS, DEFAULT_VIEW_ID } from "./views/registry.js";
+  import { offerableViews, DEFAULT_VIEW_ID } from "./views/registry.js";
 
   let {
     cyclingAll = false,
     globalViewMode = "full",
     /** The registered view that currently owns the main area (#155). */
     viewId = DEFAULT_VIEW_ID,
-    /** A working-set view's entry fetch is in flight. */
-    switching = false,
+    /** Feeds the registry's `offerable` predicates — see `switchable`. */
+    peopleCount = 0,
+    /** WHICH view's entry fetch is in flight, or null. Per-view rather than a
+     *  bare boolean: with two working-set views a single flag greys out both
+     *  buttons while either loads, and labels the wrong one "Detecting…". */
+    switchingViewId = null,
     oncycleall,
     onrevealcurrent,
     onswitchview,
   } = $props();
 
   /**
-   * One button per registered view OTHER than the default — the default is
-   * where the buttons return you, so it needs no button of its own. Driven by
-   * the registry, so a new view (People, #223) gets its switcher button
-   * without touching this file.
+   * One button per OFFERED view other than the default — the default is where
+   * the buttons return you, so it needs no button of its own.
+   *
+   * Driven by the registry both ways: which views exist, AND which are worth a
+   * permanent toolbar slot right now (`offerable`). That second question is
+   * not cosmetic — this toolbar folds by width, and a third always-on button
+   * pushed Group-by into the overflow popover at 1280px. A new view still gets
+   * its button without touching this file.
    */
-  let switchable = $derived(VIEWS.filter((v) => v.id !== DEFAULT_VIEW_ID));
+  let switchable = $derived(
+    offerableViews({ peopleCount }).filter((v) => v.id !== DEFAULT_VIEW_ID)
+  );
 </script>
 
 <div class="cluster view">
@@ -68,10 +78,10 @@
       aria-pressed={viewId === view.id}
       onclick={() =>
         onswitchview?.(viewId === view.id ? DEFAULT_VIEW_ID : view.id)}
-      disabled={switching}
+      disabled={switchingViewId !== null}
       title={view.description}
     >
-      {#if switching}
+      {#if switchingViewId === view.id}
         <!-- On the ACTIVE button too. Gating this on `viewId !== view.id`
              meant a re-limit from inside Auto Albums (which re-runs the same
              fetch) rendered "✕ Auto Albums" disabled — a dead-looking control

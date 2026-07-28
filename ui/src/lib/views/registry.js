@@ -1,5 +1,6 @@
 import GridView from "./GridView.svelte";
 import AlbumsView from "../AlbumsView.svelte";
+import PeopleView from "./PeopleView.svelte";
 
 /**
  * WHAT CAN OCCUPY THE MAIN AREA. One registry, so adding a view is one entry
@@ -51,6 +52,22 @@ import AlbumsView from "../AlbumsView.svelte";
  *   `truncated` FLAG — App performs it on entry (see `switchView` in
  *   App.svelte). A working-set view must never widen `items` to get it.
  * @property {ViewCapabilities} capabilities
+ * @property {(ctx: {peopleCount: number}) => boolean} [offerable]
+ *   Should the SWITCHER show a button for this view right now? Default: yes.
+ *
+ *   This exists because the toolbar folds by WIDTH. `PersonFilter.svelte`
+ *   already learned this the expensive way — it renders nothing until someone
+ *   has been found, because "two extra controls in GridControls once pushed
+ *   the whole Group group into an overflow popover at ordinary window sizes".
+ *   Adding People as a third always-on button did exactly that again: CI was
+ *   green with two buttons and red with three, with Group-by folded away at
+ *   1280px.
+ *
+ *   So it is declarative rather than a special case in ViewControls: a view
+ *   says when it is worth a permanent slot, and the treemap/time/scatter views
+ *   coming next inherit the question instead of re-discovering the fold.
+ *   `V` still cycles EVERY registered view — an un-offered view is reachable,
+ *   just not advertised, and its empty state explains how to fill it.
  * @property {import("svelte").Component} component
  */
 
@@ -113,8 +130,56 @@ export const ALBUMS = {
   component: AlbumsView,
 };
 
+/**
+ * People — browse and name the people the face pass found (#223).
+ *
+ * The registry's third entry, and the one that shows it works: adding it was
+ * this block, a component, a `viewProps` case and a `WORKING_SET_LOADERS`
+ * entry. No new branch in App's markup, no second way to switch, and no
+ * re-derived boundary. That is what #155 was for.
+ *
+ * Every capability is FALSE, and that is a real declaration rather than a
+ * shrug: this view shows you PEOPLE, not photos. There is no photo here to
+ * rate, and `selected` indexes a feed window it does not render — so `3` or
+ * `X` here would act on something off-screen, which is exactly the bug the
+ * capability system was built to stop. Declaring it lets App answer the
+ * keystroke by name instead of swallowing it.
+ *
+ * It narrows the feed through the EXISTING `personId` filter (shipped in #167,
+ * wired through all three facet layers) rather than inventing a second way to
+ * narrow it.
+ * @type {View}
+ */
+export const PEOPLE = {
+  id: "people",
+  label: "People",
+  icon: "☺",
+  description:
+    "Browse the people found in your photos, name them, and merge the ones that got split. Click a face to see just their photos.",
+  navigation: "scroll",
+  dataSource: "working-set",
+  capabilities: { open: false, select: false, rate: false },
+  // A People button with nobody in it is as useless as a person filter with
+  // nobody in it, and it costs the same toolbar width either way.
+  offerable: ({ peopleCount }) => peopleCount > 0,
+  component: PeopleView,
+};
+
+/**
+ * The views the SWITCHER should offer right now — every registered view whose
+ * `offerable` predicate passes (a view without one is always offered).
+ *
+ * Deliberately NOT the same as `VIEWS`: `nextViewId` cycles everything, so an
+ * un-offered view is still reachable by keyboard. Hiding a button is about
+ * toolbar width, not about taking a view away.
+ * @param {{peopleCount: number}} ctx
+ */
+export function offerableViews(ctx) {
+  return VIEWS.filter((v) => v.offerable?.(ctx) ?? true);
+}
+
 /** Every registered view, in switcher order. Append a new view here. */
-export const VIEWS = [GRID, ALBUMS];
+export const VIEWS = [GRID, ALBUMS, PEOPLE];
 
 export const DEFAULT_VIEW_ID = GRID.id;
 

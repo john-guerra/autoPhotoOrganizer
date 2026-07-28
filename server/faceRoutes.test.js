@@ -243,6 +243,27 @@ describe("POST /api/ml/faces/cluster is a JOB, not an awaited result (#222)", ()
     await held;
   });
 
+  it("refuses a face SCAN while a grouping is running, rather than dooming it", async () => {
+    // The two features did not know about each other. A grouping reads every
+    // vector and writes the partition in one transaction at the end; a scan
+    // started underneath it makes that final write refuse — after the
+    // grouping's bar reached 100%. The user loses the whole pass for an action
+    // the app offered them.
+    _resetClusterForTest();
+    let release;
+    const held = withClusterLatch(() => new Promise((r) => (release = r)));
+
+    const res = await post("/api/ml/faces", {});
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toMatch(/being grouped into people/i);
+    // Specific over generic: it says what to do and what the cost would be.
+    expect(body.error).toMatch(/throw the grouping away/i);
+
+    release();
+    await held;
+  });
+
   it("refuses with no faces yet, specifically, and creates no job", async () => {
     const before = registry.list().length;
     const res = await post("/api/ml/faces/cluster", { model: "buffalo_l" });

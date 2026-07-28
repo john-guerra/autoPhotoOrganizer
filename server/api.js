@@ -26,6 +26,8 @@ import { revealCommand, revealManyCommand } from "./lib/revealCommand.js";
 import { NodeProcessingService } from "./processing/NodeProcessingService.js";
 import {
   thumbCachePath,
+  faceCropsDir,
+  faceCropKey,
   tmpCachePath,
   thumbsDir,
   cacheRoot,
@@ -89,6 +91,8 @@ import { sweepFaces, isFaceSweepInFlight } from "./ml/faceSweep.js";
 import { createFaceEngine } from "./ml/faceEngine.js";
 import {
   faceCounts,
+  faceCropSource,
+  faceSweepPending,
   pendingFaceRows,
   purgeFaces,
   faceVectors,
@@ -105,6 +109,8 @@ import {
   isClusterInFlight,
   withClusterLatch,
 } from "./ml/faceClusters.js";
+import { squareCrop } from "./ml/faceCrop.js";
+import { orientedSize } from "./ml/faceEngine.js";
 import sharp from "sharp";
 
 /**
@@ -1658,6 +1664,18 @@ export function registerApi(app, { ml } = {}) {
     if (isFaceSweepInFlight()) {
       return res.json({ started: false, alreadyRunning: true });
     }
+    // #222 landed a grouping job that reads every face vector and writes the
+    // whole partition in ONE transaction at the end. Starting a scan
+    // underneath it dooms it: it runs its full O(n²) pass, reaches the save,
+    // finds the sweep flag set, and fails — after its bar reached 100%.
+    // Refusing here costs the user a wait; not refusing costs them the entire
+    // grouping, for an action the app itself offered.
+    if (isClusterInFlight()) {
+      return res.status(409).json({
+        error:
+          "Faces are being grouped into people right now. Wait for that to finish, or stop it in the jobs panel — starting a scan would throw the grouping away.",
+      });
+    }
     // #221: an optional `ids` scope looks for faces in just those photos — the
     // selection, or what is on screen — instead of the whole library. Absent,
     // behaviour is exactly as before. Same shape and same limits as
@@ -1743,12 +1761,7 @@ export function registerApi(app, { ml } = {}) {
     // onProgress after batch one: a total that arrives 8 photos late is an
     // indeterminate bar at the moment the user is deciding whether this hung,
     // which is #208 (UI-CONTRACTS §2, "honest progress").
-    const pendingInScope = ids
-      ? pendingFaceRows(getDb(), modelId, Number.MAX_SAFE_INTEGER, ids).length
-      : (() => {
-          const c = faceCounts(getDb(), modelId);
-          return Math.max(0, c.total - c.scanned - c.failed);
-        })();
+    const pendingInScope = faceSweepPending(getDb(), modelId, ids);
 
     // Nothing to do is an ANSWER, not a job that starts, reports 0 and stops.
     // Without this the panel says "Looking for faces in 20 photos", no
@@ -1794,15 +1807,27 @@ export function registerApi(app, { ml } = {}) {
         engine,
         job,
         scopeIds: ids ?? null,
+        // NOTE WHAT IS *NOT* PATCHED HERE: `total`.
+        //
+        // It is already correct on the job — `pendingInScope`, counted once
+        // above — and `registry.update` is an Object.assign, so re-sending it
+        // per batch overwrote the honest number with the wrong one after the
+        // first eight photos. Select 20 of which 15 are done and the bar was
+        // created 0/5, rewritten to 8/20, and finished at 5/20: "done"
+        // rendered as 25%, which is the exact failure the count above exists
+        // to prevent. kickEmbedSweep threads its up-front total through every
+        // tick for the same reason.
         onProgress: ({ done, failed }) =>
           registry.update(job.id, {
             done,
-            // The SCOPE's size when there is one, not the library's. A bar
-            // measuring 20 photos against 32,000 sits at 0% for the whole run
-            // and then jumps to done — an honest total is the difference
-            // between a progress bar and a decoration (UI-CONTRACTS §2).
-            total: ids ? ids.length : faceCounts(getDb(), modelId).total,
-            label: `Finding faces — ${done.toLocaleString()} scanned${failed ? `, ${failed} unreadable` : ""}`,
+            // Keep the scope in the label too — replacing it with a bare
+            // "Finding faces" dropped the one word that said this was a
+            // scoped run.
+            label:
+              (ids
+                ? `Finding faces in ${pendingInScope.toLocaleString()} photos`
+                : "Finding faces") +
+              ` — ${done.toLocaleString()} scanned${failed ? `, ${failed} unreadable` : ""}`,
           }),
       });
       // A PAUSE is not a success and must not be reported as one. The sweep
@@ -1925,6 +1950,83 @@ export function registerApi(app, { ml } = {}) {
       // transaction at the end, which a cancelled pass never reaches.
       registry.fail(job.id, e);
     });
+  });
+
+  /**
+   * A square face crop, for the People view's tiles (#223).
+   *
+   * The box has been stored since #166 and nothing could turn it into pixels,
+   * so people were browsable only as a list of text inputs. A face you can SEE
+   * is the whole difference between naming twenty people and giving up.
+   *
+   * Cropped from the ORIGINAL rather than the cached thumbnail: a face is a
+   * small part of the frame, so a 320px thumb leaves ~30px of face, which is
+   * unrecognisable at tile size. libvips decodes with shrink-on-load, so this
+   * is far cheaper than it sounds — and the result is cached, because a crop
+   * for a given face never changes.
+   *
+   * `interactiveRoute` for the same reason /api/thumb has it: these are drawn
+   * a screenful at a time and must not queue behind a sweep.
+   */
+  app.get("/api/ml/faces/:id/crop", interactiveRoute, async (req, res) => {
+    const db = getDb();
+    const faceId = Number(req.params.id);
+    if (!Number.isSafeInteger(faceId) || faceId <= 0) {
+      return res
+        .status(400)
+        .json({ error: "face id must be a positive integer" });
+    }
+    const face = faceCropSource(db, faceId);
+    if (!face) return res.status(404).end();
+    const photo = getPhotoById(db, face.photoId);
+    // The face outlived its photo (removed folder, rescan). A 404 is the
+    // honest answer; the tile renders its fallback rather than a broken image.
+    if (!photo) return res.status(404).end();
+
+    const px = Math.min(512, Math.max(48, Number(req.query.size) || 128));
+    const cachePath = join(
+      faceCropsDir(),
+      `${faceCropKey(photo, faceId, px)}.jpg`
+    );
+
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
+    res.type("image/jpeg");
+    if (existsSync(cachePath)) {
+      res.set("X-Cache", "hit");
+      return createReadStream(cachePath).pipe(res);
+    }
+
+    try {
+      // safeResolve, like every other file-serving endpoint (CLAUDE.md): the
+      // id came from a request, and `photo.path` is only trustworthy because
+      // this proves it is still inside a folder this library owns.
+      const abs = safeResolve(photo.folder_abs_path, photo.filename);
+      const img = sharp(abs, { failOn: "none" }).rotate();
+      // `orientedSize` — the box was measured AFTER EXIF rotation (see
+      // faceEngine), so clamping against the raw metadata would be wrong for
+      // exactly the portrait photos where faces are most likely.
+      const size = orientedSize(await sharp(abs).metadata());
+      const region = squareCrop(face, size);
+
+      const data = await img
+        .extract(region)
+        .resize(px, px, { fit: "cover" })
+        .jpeg({ quality: 82 })
+        .toBuffer();
+
+      const tmp = tmpCachePath(cachePath);
+      await writeFile(tmp, data);
+      await rename(tmp, cachePath);
+      res.set("X-Cache", "miss");
+      res.send(data);
+    } catch (err) {
+      // Never a broken <img> with nothing said: the view renders initials when
+      // a crop 404s/500s, and the message names the face so a bad row is
+      // findable.
+      res.status(500).json({
+        error: `Couldn't crop face ${faceId}: ${err.message}`,
+      });
+    }
   });
 
   /** Everyone found so far, largest first — the order naming wants. */

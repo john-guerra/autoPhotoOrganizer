@@ -8,6 +8,7 @@ import {
   views,
   albums,
   statusBar,
+  peopleView,
 } from "./helpers.js";
 
 /**
@@ -25,6 +26,15 @@ import {
 test.describe("view registry @p1", () => {
   test.beforeEach(async ({ page }) => {
     await resetRatings(page);
+  });
+
+  // The race test below registers a `page.route`. An in-flight handler at
+  // teardown rejects with "Test ended" and Playwright attributes it to
+  // whichever spec runs NEXT — it has already surfaced once as a phantom
+  // failure in feed.spec.js. Both faces specs carry this guard; this one was
+  // one file short.
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
   });
 
   test("the grid is the default view, and the extraction kept its DOM", async ({
@@ -61,7 +71,14 @@ test.describe("view registry @p1", () => {
     await modal.locator("button", { hasText: "Cancel" }).click();
     await expect(modal).toBeHidden();
 
-    // ...and back. Two views, so one more press wraps to the grid.
+    // ...and onward. V advances through the REGISTRY and wraps after the last
+    // one, so with three views registered the next press is People, not the
+    // grid. Asserting "one more press returns you" encoded a two-view world
+    // and broke the moment People landed — assert the cycle instead.
+    await views.cycle(page);
+    await expect(peopleView.root(page)).toBeVisible();
+
+    // Wrapping: from the last view, V comes back to the grid.
     await views.cycle(page);
     await expect(views.grid(page)).toBeVisible();
     expect(errors).toEqual([]);
@@ -116,8 +133,7 @@ test.describe("view registry @p1", () => {
     );
 
     // And crucially: nothing was rated behind your back.
-    await views.cycle(page);
-    await expect(views.grid(page)).toBeVisible();
+    await views.toGrid(page);
     await expect(grid.ratingBadge(page, 0)).toHaveCount(0);
     expect(errors).toEqual([]);
   });
@@ -136,8 +152,7 @@ test.describe("view registry @p1", () => {
       /Selecting photos isn't available/
     );
 
-    await views.cycle(page);
-    await expect(views.grid(page)).toBeVisible();
+    await views.toGrid(page);
     expect(await statusBar.selectedCount(page)).toBe(0);
     expect(errors).toEqual([]);
   });
@@ -163,8 +178,7 @@ test.describe("view registry @p1", () => {
       /Selecting photos isn't available/
     );
 
-    await views.cycle(page);
-    await expect(views.grid(page)).toBeVisible();
+    await views.toGrid(page);
     expect(await statusBar.selectedCount(page)).toBe(0);
     expect(errors).toEqual([]);
   });
@@ -215,8 +229,7 @@ test.describe("view registry @p1", () => {
     await modal.locator("button", { hasText: "Cancel" }).click();
     await expect(modal).toBeHidden();
 
-    await views.cycle(page);
-    await expect(views.grid(page)).toBeVisible();
+    await views.toGrid(page);
     await page.waitForLoadState("networkidle");
     await expect(views.grid(page)).toBeVisible();
     await expect(page.locator(".albums-view")).toHaveCount(0);

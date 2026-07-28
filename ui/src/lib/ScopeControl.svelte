@@ -19,7 +19,12 @@
    *  - The estimate **tracks the choice**. An estimate that does not move with
    *    the scope is worse than none, because the user plans around it.
    */
-  import { buildScopes, activeScope, formatEstimate } from "./scopeControl.js";
+  import {
+    buildScopes,
+    activeScope,
+    formatEstimate,
+    DEFAULT_SCOPE,
+  } from "./scopeControl.js";
 
   let {
     /** The fieldset's legend — the VERB, e.g. "Embed" or "Find faces in". */
@@ -46,7 +51,7 @@
     /** What is skipped inside any scope, so "up to" is explained. */
     emptyMessage = "Nothing to do in this scope.",
     disabled = false,
-    choice = $bindable("all"),
+    choice = $bindable(DEFAULT_SCOPE),
   } = $props();
 
   const scopes = $derived(
