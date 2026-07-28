@@ -6162,6 +6162,7 @@
     {globalViewMode}
     {viewId}
     {switchingViewId}
+    peopleCount={people.length}
     bind:zoom
     zoomMax={ZOOM_LEVELS.length - 1}
     bind:burstEnabled

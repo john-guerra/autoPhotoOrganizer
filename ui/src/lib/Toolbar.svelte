@@ -84,6 +84,7 @@
     globalViewMode = "full",
     viewId,
     switchingViewId = null,
+    peopleCount = 0,
 
     // Size / Sort.
     zoom = $bindable(2),
@@ -205,6 +206,7 @@
         {globalViewMode}
         {viewId}
         {switchingViewId}
+        {peopleCount}
         {oncycleall}
         {onrevealcurrent}
         {onswitchview}

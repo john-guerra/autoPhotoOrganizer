@@ -59,6 +59,40 @@ test.describe("People view @p1", () => {
     });
   });
 
+  test("the switcher offers People only once there ARE people", async ({
+    page,
+  }) => {
+    // The toolbar folds by WIDTH — a third always-on button pushed Group-by
+    // into the overflow popover at 1280px, which is how CI caught this. So the
+    // button is earned, not permanent. Same rule PersonFilter follows.
+    const errors = trackPageErrors(page);
+    await page.route("**/api/ml/people", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ people: [] }),
+      });
+    });
+    await openApp(page);
+
+    await expect(views.switchBtn(page, "people")).toHaveCount(0);
+    // ...and the controls it would have displaced are still on the toolbar.
+    await expect(page.locator(".group-by").first()).toBeVisible();
+
+    // But V still REACHES it: hiding a button is about width, not about
+    // taking the view away, and its empty state explains how to fill it.
+    await views.cycle(page); // albums
+    const modal = page.locator('dialog.modal[aria-label="Auto Albums"]');
+    await modal.locator("button", { hasText: "Cancel" }).click();
+    await expect(modal).toBeHidden();
+    await views.cycle(page); // people
+    await expect(peopleView.root(page)).toBeVisible();
+    await expect(peopleView.root(page)).toContainText(
+      /Nobody has been grouped/
+    );
+    expect(errors).toEqual([]);
+  });
+
   test("is reachable from the main interface with the keyboard alone", async ({
     page,
   }) => {

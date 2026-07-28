@@ -11,6 +11,7 @@ import {
   supports,
   nextViewId,
   restorableViewId,
+  offerableViews,
 } from "./registry.js";
 
 /**
@@ -142,6 +143,41 @@ describe("what a fresh load restores", () => {
     // App already has.
     for (const id of [...VIEWS.map((v) => v.id), "nope", undefined]) {
       expect(getView(restorableViewId(id)).dataSource).toBe("feed");
+    }
+  });
+});
+
+describe("which views the switcher offers (#223)", () => {
+  it("always offers the grid and albums", () => {
+    const ids = offerableViews({ peopleCount: 0 }).map((v) => v.id);
+    expect(ids).toContain("grid");
+    expect(ids).toContain("albums");
+  });
+
+  it("does NOT offer People until there are people", () => {
+    // The toolbar folds by WIDTH: a third always-on button pushed Group-by
+    // into the overflow popover at 1280px (CI was green with two buttons and
+    // red with three). PersonFilter learned the same lesson and renders
+    // nothing until someone has been found. A People button with nobody in it
+    // buys nothing and costs the same width either way.
+    expect(offerableViews({ peopleCount: 0 }).map((v) => v.id)).not.toContain(
+      "people"
+    );
+    expect(offerableViews({ peopleCount: 3 }).map((v) => v.id)).toContain(
+      "people"
+    );
+  });
+
+  it("still CYCLES every view, offered or not", () => {
+    // Hiding a button is about toolbar width, not about taking a view away —
+    // V must still reach People so its empty state can explain how to fill it.
+    expect(nextViewId("albums")).toBe("people");
+    expect(VIEWS.map((v) => v.id)).toContain("people");
+  });
+
+  it("treats a view with no predicate as always offered", () => {
+    for (const v of VIEWS.filter((x) => !x.offerable)) {
+      expect(offerableViews({ peopleCount: 0 })).toContain(v);
     }
   });
 });
