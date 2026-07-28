@@ -46,6 +46,11 @@
     {
       heading: "Grid",
       rows: [
+        {
+          keys: ["V"],
+          label:
+            "Switch the main area to the next view (grid → Auto Albums → …)",
+        },
         { keys: ["+"], label: "Zoom in (larger thumbnails)" },
         { keys: ["−"], label: "Zoom out (smaller thumbnails)" },
         { keys: ["←", "→", "↑", "↓"], label: "Move selection" },

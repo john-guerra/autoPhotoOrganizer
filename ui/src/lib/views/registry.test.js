@@ -41,9 +41,13 @@ describe("view registry conformance", () => {
 
   for (const view of VIEWS) {
     describe(`${view.id}`, () => {
-      it("declares a label, an icon and a component", () => {
+      it("declares a label, an icon, a description and a component", () => {
         expect(view.label).toBeTruthy();
         expect(view.icon).toBeTruthy();
+        // The switcher button's tooltip. On the descriptor so a new view
+        // arrives with its own explanation rather than a parallel string
+        // table in the toolbar — and so it cannot ship without one.
+        expect(view.description?.length).toBeGreaterThan(20);
         // A registry entry pointing at nothing is a blank main area with no
         // error anywhere — the failure mode the fallback in getView() cannot
         // help with, because the id resolves fine.

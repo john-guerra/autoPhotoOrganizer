@@ -30,6 +30,11 @@ import AlbumsView from "../AlbumsView.svelte";
  * @property {string} id                     stable; persisted, so never rename
  * @property {string} label                  human name (button, tooltip, a11y)
  * @property {string} icon                   glyph for the switcher
+ * @property {string} description
+ *   What this view is FOR, in the user's terms — the switcher button's tooltip
+ *   and its accessible description. It lives on the descriptor so a new view
+ *   arrives with its own explanation instead of inheriting a generic one, or
+ *   forcing a parallel string table in the toolbar.
  * @property {"scroll"|"zoom"} navigation
  *   Who owns the viewport. `scroll` rides the existing virtualized scroller in
  *   App's `.main-column`; `zoom` owns its own pan/zoom model and must not
@@ -63,6 +68,8 @@ export const GRID = {
   id: "grid",
   label: "Grid",
   icon: "▦",
+  description:
+    "The photo grid — everything the current filters and grouping leave you, newest work first.",
   navigation: "scroll",
   dataSource: "feed",
   capabilities: { open: true, select: true, rate: true },
@@ -90,6 +97,10 @@ export const ALBUMS = {
   id: "albums",
   label: "Auto Albums",
   icon: "▤",
+  // Verbatim from the button this replaced — the wording was tuned once and
+  // there is no reason for the registry to restate it differently.
+  description:
+    "Group the photos you're viewing into albums by the pauses between shots — a long gap starts a new album. Preview, rename, then save them into folders (photos and videos).",
   navigation: "scroll",
   dataSource: "working-set",
   capabilities: { open: true, select: false, rate: false },

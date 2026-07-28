@@ -1,6 +1,5 @@
 <script>
   import { onMount, tick, untrack } from "svelte";
-  import { scale } from "svelte/transition";
   import { sectionedJustifiedLayout } from "./lib/layouts/sectionedJustified.js";
   import {
     visibleRange,
@@ -110,8 +109,6 @@
   } from "./lib/prefetchPolicy.js";
   import { loadSetting, saveSetting } from "./lib/settings.js";
   import JobsPanel from "./lib/JobsPanel.svelte";
-  import GroupStateIcon from "./lib/GroupStateIcon.svelte";
-  import FolderIcon from "./lib/FolderIcon.svelte";
   import {
     getRenderer,
     isServerCollapsed,
@@ -147,7 +144,20 @@
   import Toolbar from "./lib/Toolbar.svelte";
   import ManageLibrary from "./lib/ManageLibrary.svelte";
   import MissingReview from "./lib/MissingReview.svelte";
-  import AlbumsView from "./lib/AlbumsView.svelte";
+  // The view registry (#155): which views exist, what each declares it can do,
+  // and where its data comes from. GridView is imported directly as well
+  // because it is the ONE view whose layout App computes, so it is mounted with
+  // `bind:` — see the note at the mount site.
+  import GridView from "./lib/views/GridView.svelte";
+  import {
+    VIEWS,
+    GRID,
+    ALBUMS,
+    DEFAULT_VIEW_ID,
+    getView,
+    supports,
+    nextViewId,
+  } from "./lib/views/registry.js";
   import { loadAlbumPrefs, saveAlbumPrefs } from "./lib/albumPrefs.js";
   import SnapshotStrip from "./lib/SnapshotStrip.svelte";
   import {
@@ -180,7 +190,6 @@
   import { combo } from "./lib/platform.js";
   import TimelineFilter from "./lib/TimelineFilter.svelte";
   import SelectionBar from "./lib/SelectionBar.svelte";
-  import GroupLabelActions from "./lib/GroupLabelActions.svelte";
   import {
     selectState,
     intersectionCount,
@@ -201,6 +210,8 @@
   const APP_VERSION = __APP_VERSION__;
 
   const LS_KEY = "autogallery.lastDir";
+  /** Which registered view owns the main area (#155). */
+  const LS_VIEW_ID = "autogallery.viewId";
   const LS_ZOOM = "autogallery.zoom"; // legacy: an index, migrated by zoomLevel()
   const LS_ZOOM_PX = "autogallery.zoomPx";
   const LS_BURST_GAP = "autogallery.burstGapMs";
@@ -434,9 +445,38 @@
   let focusPath = $derived(scope?.kind === "folder" ? scope.path : null);
   let keepIds = $derived(scope?.kind === "ids" ? scope.ids : null);
 
-  // Auto-albums review mode: replaces the grid with a time-gap-clustered view
-  // of the working set (see AlbumsView).
-  let albumMode = $state(false);
+  // WHICH VIEW OWNS THE MAIN AREA (#155). One id resolved through
+  // ui/src/lib/views/registry.js, replacing what used to be a boolean
+  // (`albumMode`) with branches in the markup, the toolbar and the keyboard
+  // handler — a third view would have been a second boolean.
+  //
+  // Persisted, so the app reopens where you left it — with one exception,
+  // below. `getView` falls back to the grid for an id a later build no longer
+  // registers, so a returning user is never stranded on a blank main area.
+  let viewId = $state(initialViewId());
+
+  /**
+   * Which view a fresh load opens on.
+   *
+   * A `working-set` view's DATA does not survive a reload: only App can fetch
+   * it, and doing that during boot would hold up first paint for a view you
+   * may not even want. Restoring the id alone would drop you into an empty
+   * shell — the album review with no albums in it — which reads as the app
+   * having lost your work. So only `feed` views are restored; anything else
+   * reopens on the grid, one keypress away from where you were.
+   */
+  function initialViewId() {
+    const stored = getView(localStorage.getItem(LS_VIEW_ID) ?? undefined);
+    return stored.dataSource === "feed" ? stored.id : DEFAULT_VIEW_ID;
+  }
+  let activeView = $derived(getView(viewId));
+  $effect(() => localStorage.setItem(LS_VIEW_ID, viewId));
+
+  /** Read-only alias kept because "are we in the album review?" is asked in
+   *  several places that have nothing to do with the registry (the scan reset,
+   *  the album re-limit re-pull, the scope narrowing on entry). Derived, not
+   *  state — `viewId` is the single source of truth. */
+  let albumMode = $derived(viewId === ALBUMS.id);
   let albumPhotos = $state([]);
   let albumTruncated = $state(false);
   let detectingAlbums = $state(false);
@@ -2473,13 +2513,101 @@
       // (explains how it works); later entries go straight to the review.
       albumAutoOpenSetup = localStorage.getItem(LS_ALBUM_SETUP_SEEN) !== "true";
       localStorage.setItem(LS_ALBUM_SETUP_SEEN, "true");
-      albumMode = true;
+      return true;
     } catch (e) {
       error = e.message;
+      return false;
     } finally {
       detectingAlbums = false;
     }
   }
+
+  /**
+   * How App satisfies each `dataSource: "working-set"` view's bounded fetch
+   * (#155). The registry declares the NEED; App owns the data, so App owns the
+   * fetch — that is the boundary that keeps a view from widening `items` to
+   * get whole-library data (the seventh copy of the feed-window guard, #35/
+   * #36/#39). A loader returns true once its data is in hand.
+   *
+   * Adding a working-set view (People, #223) is one entry here.
+   */
+  const WORKING_SET_LOADERS = { [ALBUMS.id]: detectAlbums };
+
+  /**
+   * Switch the main area to another registered view.
+   *
+   * A working-set view is only entered if its fetch SUCCEEDS — otherwise you
+   * would land on an empty view with the error posted somewhere behind it,
+   * which reads as "the button did nothing".
+   */
+  async function switchView(id) {
+    const view = getView(id);
+    if (view.id === viewId) return;
+    if (view.dataSource === "working-set") {
+      const load = WORKING_SET_LOADERS[view.id];
+      if (!load) {
+        // Registered as needing a working set with no way to fetch one. A
+        // registry/App mismatch, but the user still gets told rather than
+        // pressing a dead button.
+        error = `Can't open ${view.label} — it needs data this build doesn't know how to load.`;
+        return;
+      }
+      if (!(await load())) return;
+    }
+    viewId = view.id;
+  }
+
+  /**
+   * Refuse an interaction the active view has DECLARED it cannot do, and say
+   * so (#155).
+   *
+   * This closes a real bug rather than adding a nicety. Nothing used to guard
+   * these keys on the view at all, so pressing `3` during the Auto Albums
+   * review rated `displayEntries[selected]` — a photo from the FEED window,
+   * which is not on screen and not what you were looking at. A rating landed
+   * on an invisible photo with no indication anywhere. `X` did the same to the
+   * selection.
+   *
+   * Answering instead of swallowing is the contract (UI-CONTRACTS §3: "a view
+   * that cannot support one DECLARES it rather than silently swallowing the
+   * keystroke") and the house usability rule — a keystroke that vanishes reads
+   * as a broken keyboard, so it names the view and the way out.
+   *
+   * @returns {boolean} true if the keystroke was refused and handled here
+   */
+  function refuseUnsupported(capability, whatTheUserTried) {
+    if (supports(viewId, capability)) return false;
+    status = `${whatTheUserTried} isn't available in ${activeView.label} — press V (or the ✕ on its button) to go back to the grid.`;
+    return true;
+  }
+
+  /**
+   * Props for the generically-mounted views — every registered view except the
+   * grid, which App mounts explicitly (see the note at the mount site).
+   *
+   * One case per view, so adding People (#223) is one entry rather than
+   * another `{#if}` in the markup.
+   */
+  let viewProps = $derived.by(() => {
+    if (activeView.id === ALBUMS.id) {
+      return {
+        photos: albumPhotos,
+        truncated: albumTruncated,
+        limit: albumLimit,
+        defaultDest: currentFolder || "",
+        currentFolderName,
+        hasNativePicker,
+        prefs: albumPrefs,
+        autoOpenSetup: albumAutoOpenSetup,
+        onrelimit: (v) => onAlbumRelimit(v),
+        onclose: () => switchView(DEFAULT_VIEW_ID),
+        onopenphoto: (d) => openPhotoById(d.id),
+        onprefschange: (p) => (albumPrefs = saveAlbumPrefs(p)),
+        onmaterialized: (d) => onAlbumsMaterialized(d),
+      };
+    }
+    return {};
+  });
 
   /** AlbumsView asked for a different max — persist it and re-pull the timeline
    * (staying in album mode; detectAlbums keeps albumMode true). */
@@ -4321,7 +4449,9 @@
       error = e.message;
       status = "";
     } finally {
-      albumMode = false;
+      // The albums the review was built from are gone (materialized into
+      // folders on disk), so its working set is stale — return to the feed.
+      viewId = DEFAULT_VIEW_ID;
     }
   }
 
@@ -5468,6 +5598,15 @@
       return;
     }
 
+    // V — cycle the main area through the registered views (#155). A view you
+    // can only reach with the mouse is one you won't use mid-cull, and the
+    // switcher is a keyboard affordance by contract (UI-CONTRACTS §3).
+    if (e.key === "v" || e.key === "V") {
+      e.preventDefault();
+      switchView(nextViewId(viewId));
+      return;
+    }
+
     // '/' jumps to the search box — the convention everywhere from Gmail to
     // GitHub, and this is a keyboard-first app: a search you have to reach for
     // with the mouse is a search you don't use mid-cull. (The guard above means
@@ -5532,6 +5671,11 @@
     // Star rating: 1-5 set stars, 0 clears. Works in both grid and loupe.
     if (/^[0-5]$/.test(key)) {
       e.preventDefault();
+      // ...but NOT in a view that has no rating affordance: `selected` indexes
+      // the feed window, which such a view isn't showing you (see
+      // refuseUnsupported). The loupe is an overlay and rates what it displays,
+      // so it keeps working on top of any view.
+      if (!loupeOpen && refuseUnsupported("rate", "Rating")) return;
       rate(selected, Number(key));
       // Auto-advance, but never onto a placeholder (see nextSelectable).
       if (loupeOpen) {
@@ -5584,6 +5728,7 @@
     // loupe it auto-advances (like rating) to keep the "look, pick, next" flow.
     if (key.toLowerCase() === "x") {
       e.preventDefault();
+      if (!loupeOpen && refuseUnsupported("select", "Selecting photos")) return;
       const p = resolvedPhotos[selected];
       if (p && typeof p.id === "number") toggleSelect(p.id);
       if (loupeOpen) {
@@ -5878,8 +6023,8 @@
     bind:sidebarMode
     {cyclingAll}
     {globalViewMode}
-    bind:albumMode
-    {detectingAlbums}
+    {viewId}
+    switching={detectingAlbums}
     bind:zoom
     zoomMax={ZOOM_LEVELS.length - 1}
     bind:burstEnabled
@@ -5907,7 +6052,7 @@
     ongroupbychange={onGroupByChange}
     oncycleall={cycleAllGroups}
     onrevealcurrent={revealCurrentLocation}
-    ondetectalbums={detectAlbums}
+    onswitchview={(id) => switchView(id)}
     onsortchange={onSortChange}
     onhelp={() => (shortcutsHelpOpen = true)}
     {selectedCount}
@@ -6023,270 +6168,79 @@
       onwheel={releaseJumpPins}
       style="--reveal-margin:{revealMargin}px"
     >
-      {#if albumMode}
-        <AlbumsView
-          photos={albumPhotos}
-          truncated={albumTruncated}
-          limit={albumLimit}
-          defaultDest={currentFolder || ""}
-          {currentFolderName}
-          {hasNativePicker}
-          prefs={albumPrefs}
-          autoOpenSetup={albumAutoOpenSetup}
-          onrelimit={(v) => onAlbumRelimit(v)}
-          onclose={() => (albumMode = false)}
-          onopenphoto={(d) => openPhotoById(d.id)}
-          onprefschange={(p) => (albumPrefs = saveAlbumPrefs(p))}
-          onmaterialized={(d) => onAlbumsMaterialized(d)}
-        />
-      {:else if items.length}
-        <div
-          class="grid"
-          id="feed-grid"
-          bind:this={gridEl}
-          bind:clientWidth={gridWidth}
-          style={boxes ? `height:${gridHeight}px;` : ""}
-          role="listbox"
-          tabindex="-1"
-        >
-          {#if boxes}
-            <!-- Headers render unconditionally for the whole loaded window, unlike
-                 photos — there are only dozens/hundreds of them (vs. tens of
-                 thousands of photos), so they don't need windowing, and a header
-                 whose triggering index falls outside the virtualized photo range
-                 must still survive (it may be sticky-stuck mid-section while the
-                 viewer has scrolled well past its origin index). -->
-            {#each layoutResult.headers as header (header.dimension + header.value + header.index)}
-              <div
-                class="section-wrapper"
-                class:nested={header.depth > 0}
-                data-group-key={header.path ? pathKey(header.path) : undefined}
-                style="--depth:{header.depth}; --ind:{GROUP_INDENT}px; top:{header.y}px; height:{header.endY -
-                  header.y}px;"
-              >
-                <!-- Right-click opens the group menu; the header's own buttons
-                     already carry every action for keyboard/pointer, so this is a
-                     supplementary affordance (same as the tree row). -->
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div
-                  class="section-header"
-                  style="top:{header.depth *
-                    HEADER_HEIGHT}px; z-index:{Z_HEADER_BASE - header.depth};"
-                  oncontextmenu={(e) => openHeaderMenu(e, header)}
-                >
-                  <button
-                    class="section-toggle-icon"
-                    class:not-grid={rendererIdFor(
-                      header.path,
-                      collapsedKeys,
-                      snapshotGroupKeys,
-                      aggregateKeys,
-                      aggregateSnapshotKeys
-                    ) !== DEFAULT_RENDERER_ID}
-                    title={groupToggleTitle(
-                      rendererIdFor(
-                        header.path,
-                        collapsedKeys,
-                        snapshotGroupKeys,
-                        aggregateKeys,
-                        aggregateSnapshotKeys
-                      ),
-                      (header.groupPaths?.length ?? 0) > 1
-                    )}
-                    aria-label={(header.groupPaths?.length ?? 0) > 1
-                      ? "Cycle this folder's whole subtree: full grid → aggregate snapshot → aggregate collapsed (Shift-click to fold each group beneath it instead)"
-                      : "Cycle this group: full grid → snapshot strip → collapsed"}
-                    onclick={(e) =>
-                      onGroupToggle(header.path, e, header.groupPaths)}
-                  >
-                    <GroupStateIcon
-                      state={getRenderer(
-                        rendererIdFor(
-                          header.path,
-                          collapsedKeys,
-                          snapshotGroupKeys,
-                          aggregateKeys,
-                          aggregateSnapshotKeys
-                        )
-                      ).icon}
-                    />
-                  </button>
-                  <!-- OUTSIDE .section-label, which is `direction: rtl` so it can
-                       clip the HEAD of a long path — that flips the visual order
-                       of its inline children, and an icon placed inside it lands
-                       to the RIGHT of the name. Says "this group is a real folder"
-                       (so reveal / rescan / rename / remove all apply); hollow
-                       means a virtual ancestor, which has no row in the index and
-                       therefore cannot be renamed or removed. -->
-                  {#if isFolderDim(header)}
-                    <FolderIcon virtual={header.isVirtual} />
-                  {/if}
-                  {#if header.path && renamingKey === pathKey(header.path)}
-                    <!-- svelte-ignore a11y_autofocus -->
-                    <input
-                      class="section-rename"
-                      bind:value={renameDraft}
-                      onclick={(e) => e.stopPropagation()}
-                      onkeydown={(e) => {
-                        if (e.key === "Enter") commitRename(header.path);
-                        else if (e.key === "Escape") cancelRename();
-                      }}
-                      onblur={() => commitRename(header.path)}
-                      autofocus
-                    />
-                  {:else}
-                    <button
-                      class="section-label"
-                      title={`${header.value ?? header.label}${
-                        header.path?.at(-1)?.dimension === "folder" &&
-                        !header.isVirtual
-                          ? " — double-click to rename this folder on disk"
-                          : ""
-                      }`}
-                      ondblclick={() =>
-                        !header.isVirtual && startRename(header.path)}
-                    >
-                      <span
-                        class="section-label-text"
-                        use:tailClip={headerParts(
-                          header,
-                          tokenStats,
-                          libraryRoots
-                        )}
-                        >{#each headerParts(header, tokenStats, libraryRoots) as part}<span
-                            class="part-{part.kind}">{part.text}</span
-                          >{/each}</span
-                      >
-                    </button>
-                  {/if}
-                  <!-- A virtual ancestor has no `folders` row, so no query can
-                       count it — its number comes from the trie's roll-up, the
-                       same one the sidebar shows. -->
-                  {#if header.count ?? headerCounts[pathKey(header.path)]}
-                    <span class="section-count">
-                      {(
-                        header.count ?? headerCounts[pathKey(header.path)]
-                      ).toLocaleString()} items
-                    </span>
-                  {/if}
-                  {#if header.path}
-                    <GroupLabelActions
-                      selectState={groupSelectState(
-                        header.path,
-                        header.groupPaths,
-                        selectedIds,
-                        groupIdCacheVersion,
-                        groupSelSig
-                      )}
-                      canRemove={true}
-                      removeArmed={removeArmedKey === pathKey(header.path)}
-                      ontoggleselect={(e) =>
-                        toggleGroupSelectAll(header.path, header.groupPaths, e)}
-                      onkeeponly={() =>
-                        keepOnlyGroup(header.path, header.groupPaths)}
-                      onjumpprev={() => jumpFromGroup(header.path, "prev")}
-                      onjumpnext={() => jumpFromGroup(header.path, "next")}
-                      onremove={() =>
-                        removeGroup(header.path, header.groupPaths)}
-                    />
-                  {/if}
-                </div>
-              </div>
-            {/each}
-            {#each visibleItems as { i, entry } (entryDomId(entry))}
-              {#if entry.kind === "placeholder"}
-                <!-- The group's own section header (above) owns the label, icon,
-                     count and actions. This band is ONLY the renderer's photo
-                     widget, drawn inside the layout's content rect — which is why
-                     it inherits the group's nesting indent. A renderer with no
-                     component (e.g. "collapsed") reserves no band at all: the
-                     header alone represents the group. See
-                     docs/superpowers/specs/2026-07-12-group-photo-renderers.md -->
-                {@const renderer = getRenderer(
-                  rendererIdFor(
-                    entry.item.path,
-                    collapsedKeys,
-                    snapshotGroupKeys,
-                    aggregateKeys,
-                    aggregateSnapshotKeys
-                  )
-                )}
-                {#if renderer.component && boxes[i].height > 0}
-                  {@const Renderer = renderer.component}
-                  <!-- + PAD on BOTH axes, exactly as Thumb does (`box.x + pad`).
-                       Absolutely-positioned children ignore the grid's CSS
-                       padding, so every box has to add the frame inset itself —
-                       and the band wasn't. That put every snapshot strip 12px
-                       left of, and 12px above, where the same group's photos sit
-                       in full view, so a group visibly JUMPED as you toggled it. -->
-                  <!-- The strip UNFURLS in place: it opens from the exact spot,
-                       and at the exact photo size, that the group's first row of
-                       photos occupied, while the photos below it glide up. `foldMs`
-                       is 0 unless a fold is actually landing — the feed is
-                       virtualized, so without that guard every scroll past a
-                       snapshot group would re-mount the band and replay the
-                       animation (and prefers-reduced-motion zeroes it too).
+      <!-- THE MAIN AREA, dispatched through the view registry (#155).
 
-                       |global is load-bearing: a bare `in:` is LOCAL, and a local
-                       transition is suppressed when an ancestor block is created in
-                       the same update — which is exactly what a feed refresh does,
-                       so the animation silently never ran at all. -->
-                  <div
-                    class="group-band"
-                    data-group-key={pathKey(entry.item.path)}
-                    in:scale|global={{
-                      duration: foldMs,
-                      start: 0.92,
-                      opacity: 0,
-                    }}
-                    style="top:{boxes[i].y + PAD}px; left:{boxes[i].x +
-                      PAD}px; width:{boxes[i].width}px; height:{boxes[i]
-                      .height}px;"
-                  >
-                    <Renderer
-                      groupPath={entry.item.path}
-                      count={entry.item.count}
-                      filter={displayFilter}
-                      {sort}
-                      {groupBy}
-                      thumbPx={boxes[i].height}
-                      gapPx={gridGap}
-                      size={snapshotThumbSize}
-                      onselect={(d) => openPhotoById(d.id, entry.item.path)}
-                    />
-                  </div>
-                {/if}
-              {:else}
-                <Thumb
-                  item={resolvePhoto(entry)}
-                  box={boxes[i]}
-                  pad={PAD}
-                  size={thumbSize}
-                  warm={thumbStatus.get(resolvePhoto(entry).id) === "ok"}
-                  selected={i === selected}
-                  inSelection={selectedIds.has(resolvePhoto(entry).id)}
-                  showSize={sort.by === "size"}
-                  stackCount={entry.kind === "stack"
-                    ? entry.stack.count
-                    : undefined}
-                  stackPeekItems={entry.kind === "stack" ? entry.peekItems : []}
-                  stackMarginPx={stackMarginPx(entry)}
-                  inExpandedStack={entry.kind === "photo" &&
-                    entry.stackId !== null}
-                  isCurrentCover={entry.kind === "photo" &&
-                    entry.stackId !== null &&
-                    stacks.find((s) => s.id === entry.stackId)?.coverId ===
-                      entry.item.id}
-                  onclick={(e) => onTileClick(e, entry, i)}
-                  ontoggleselect={() => toggleSelect(resolvePhoto(entry)?.id)}
-                  oncontextmenu={(e) => onTileContextMenu(e, entry, i)}
-                  onattempt={handleThumbAttempt}
-                  onsettled={handleThumbSettled}
-                />
-              {/if}
-            {/each}
-          {/if}
-        </div>
+           Every registered view EXCEPT the grid mounts generically from its
+           descriptor, so adding one (People, #223) is a registry entry, a
+           component, and a `viewProps` case — no new branch here.
+
+           The grid is mounted explicitly, and the reason is concrete rather
+           than an omission: it is the one view whose layout App computes, so
+           App needs its element and its measured width, and `bind:` cannot be
+           passed through a spread. Removing this asymmetry means having the
+           grid report its viewport by callback instead — worth doing, but on
+           its own, not folded into a behaviour-preserving extraction. -->
+      {#if activeView.id !== GRID.id}
+        {@const ActiveView = activeView.component}
+        <ActiveView {...viewProps} />
+      {:else if items.length}
+        <GridView
+          bind:gridEl
+          bind:gridWidth
+          bind:renameDraft
+          {layoutResult}
+          {boxes}
+          {gridHeight}
+          {visibleItems}
+          {collapsedKeys}
+          {snapshotGroupKeys}
+          {aggregateKeys}
+          {aggregateSnapshotKeys}
+          {headerCounts}
+          {renamingKey}
+          {removeArmedKey}
+          {tokenStats}
+          {libraryRoots}
+          {displayFilter}
+          {sort}
+          {groupBy}
+          {selected}
+          {selectedIds}
+          {groupIdCacheVersion}
+          {groupSelSig}
+          {stacks}
+          {thumbStatus}
+          {thumbSize}
+          {snapshotThumbSize}
+          {gridGap}
+          {PAD}
+          {GROUP_INDENT}
+          {HEADER_HEIGHT}
+          {Z_HEADER_BASE}
+          {foldMs}
+          {rendererIdFor}
+          {groupToggleTitle}
+          {isFolderDim}
+          {headerParts}
+          {groupSelectState}
+          {stackMarginPx}
+          onheadermenu={(e, header) => openHeaderMenu(e, header)}
+          ongrouptoggle={(path, e, paths) => onGroupToggle(path, e, paths)}
+          onstartrename={(path) => startRename(path)}
+          oncommitrename={(path) => commitRename(path)}
+          oncancelrename={() => cancelRename()}
+          ontoggleselectgroup={(path, paths, e) =>
+            toggleGroupSelectAll(path, paths, e)}
+          onkeeponlygroup={(path, paths) => keepOnlyGroup(path, paths)}
+          onjumpfromgroup={(path, dir) => jumpFromGroup(path, dir)}
+          onremovegroup={(path, paths) => removeGroup(path, paths)}
+          onopenphoto={(id, path) => openPhotoById(id, path)}
+          ontileclick={(e, entry, i) => onTileClick(e, entry, i)}
+          ontoggleselect={(id) => toggleSelect(id)}
+          ontilecontextmenu={(e, entry, i) => onTileContextMenu(e, entry, i)}
+          onthumbattempt={handleThumbAttempt}
+          onthumbsettled={handleThumbSettled}
+        />
       {:else if !scanning && status !== "loading…"}
         {#if libraryTotal === 0}
           <div class="empty">
@@ -6703,206 +6657,12 @@
   .scope-chip:hover {
     background: #263562;
   }
-  .grid {
-    /* Justified layout: children are absolutely positioned by computed boxes;
-       height is set inline from the layout result. */
-    position: relative;
-    width: 100%;
-    /* Its own stacking context. Without this the grid is `position:relative;
-       z-index:auto`, which is NOT one — so the headers (z 15), the dendrogram
-       trunk (16) and the thumbnails (10) all resolved against .topbar's z 20 in
-       the shared root context. That capped the header scale at 20 (folder
-       nesting can go deeper than that) and, separately, meant a thumbnail was
-       only ever one z-index bump away from painting over the toolbar. Isolating
-       frees the internal scale and closes that hazard; the topbar and the loupe
-       both live OUTSIDE .grid, so nothing that must sit above it is affected. */
-    isolation: isolate;
-  }
-  .grid:focus {
-    outline: none;
-  }
-  /* Nesting is drawn as a dendrogram: each level is indented, a dotted trunk runs
-     down the sub-group's spine, and a dotted elbow joins each child header to it
-     — so a sub-group visibly belongs to the group above instead of floating as
-     just another header. `--depth` is set on the wrapper; custom properties
-     inherit, so the header reads it from there. */
-  /* The renderer's band: just a positioned rect. The group's label/icon/actions
-     live in its section header above — a renderer never draws chrome. */
-  .group-band {
-    position: absolute;
-    box-sizing: border-box;
-    overflow: hidden;
-    /* The strip unrolls from its left edge — which, since the band now starts at
-       exactly the same x as the group's first photo in full view, means it appears
-       to grow out of that photo rather than swelling out of thin air. */
-    transform-origin: 0 50%;
-  }
-
-  /* NOTE the transition that ISN'T here: `.thumb-wrap` already carries a
-     permanent top/left/width/height transition of its own (Thumb.svelte), so the
-     photos below a folding group have always glided to their new places. The
-     piece that was missing is the strip itself — see the `in:scale` on the band,
-     and `folding` in the script, which is what keeps a virtualized re-mount from
-     replaying that unfurl every time you scroll past. */
-
-  .section-wrapper {
-    /* --ind is set inline from GROUP_INDENT (the same constant the LAYOUT uses to
-       inset a nested group's photos) so the dendrogram and the photos can never
-       drift apart. The fallback only matters if the attr is ever dropped. */
-    --ind: 18px;
-    --trunk: calc(15px + (var(--depth, 0) - 1) * var(--ind));
-    position: absolute;
-    left: 0;
-    width: 100%;
-    pointer-events: none;
-  }
-  /* Vertical trunk spanning this sub-group's whole extent — consecutive siblings
-     stack their segments into one continuous line. */
-  .section-wrapper.nested::before {
-    content: "";
-    position: absolute;
-    left: var(--trunk);
-    top: 0;
-    bottom: 0;
-    /* Must beat EVERY section header: they are sticky with an OPAQUE background,
-       so at 'auto' the trunk was painted over wherever a header sat and the
-       elbows looked like floating stubs. Headers run Z_HEADER_BASE - depth, so
-       one above the base clears all of them at any nesting depth. It runs up the
-       header's left padding gutter, which the per-depth padding reserves. */
-    z-index: 1001;
-    border-left: 1px dotted #6a6a6a;
-    pointer-events: none;
-  }
-  .section-header {
-    position: sticky;
-    z-index: 15;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px 4px calc(8px + var(--depth, 0) * var(--ind));
-    background: #141414;
-    pointer-events: auto;
-  }
-  /* The elbow from the trunk into this header. */
-  .section-wrapper.nested > .section-header::before {
-    content: "";
-    position: absolute;
-    left: var(--trunk);
-    width: calc(var(--ind) - 4px);
-    top: 50%;
-    z-index: 1001;
-    border-top: 1px dotted #6a6a6a;
-    pointer-events: none;
-  }
-  /* Same tri-state icon (and same colour language) as the tree sidebar's
-     feed-visibility control, so one group state always reads the same way:
-     grid = full, strip = snapshot, bar = collapsed (amber once it's not full). */
-  .section-toggle-icon {
-    background: none;
-    border: none;
-    color: #8a8a8a;
-    font: inherit;
-    cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 4px;
-    display: inline-flex;
-    align-items: center;
-  }
-  .section-toggle-icon:hover {
-    color: #e8e8e8;
-  }
-  /* Amber whenever the group isn't showing its photos in full. One modifier —
-     NEVER interpolate a renderer id into the class list: "grid" collides with
-     the photo-grid container's own .grid rule. */
-  .section-toggle-icon.not-grid {
-    color: #ffd24c;
-  }
-  .section-toggle-icon:hover {
-    background: #2a2a2a;
-  }
-  .section-label {
-    background: none;
-    border: none;
-    color: inherit;
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 4px;
-    text-align: left;
-    /* A long group name used to WRAP, growing the sticky header band and letting
-       it cover the rows beneath it. Keep it to one line; the full value is on the
-       button's title attribute (see the markup).
-
-       Clip the HEAD, not the tail — same rule as the tree rows. A folder path
-       ends with the folder's own name, so a normal ellipsis drops exactly the
-       part that identifies the group: two sibling folders under one long parent
-       both render as ".../2025_11Nov_08 Canon 1/2…" and become indistinguishable.
-       direction:rtl on the clipper flips which end overflows; the inner span
-       stays ltr, so the text itself is unchanged. */
-    direction: rtl;
-    white-space: nowrap;
-    overflow: hidden;
-    min-width: 0;
-    max-width: 78ch;
-  }
-  /* Only fade the left edge when there IS something clipped behind it. */
-  .section-label.clipped {
-    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
-    mask-image: linear-gradient(to right, transparent 0, #000 16px);
-  }
-  .section-label-text {
-    display: inline-block;
-    direction: ltr;
-    white-space: nowrap;
-  }
-  .section-header {
-    min-width: 0;
-  }
-  /* Layering: the folder's own name is what identifies the section, so it gets
-     the emphasis; the path above it is context and recedes. Nothing the eye needs
-     is deleted — it just stops competing for attention. */
-  .section-label .part-keep {
-    color: inherit;
-  }
-  .section-label .part-dim,
-  .section-label .part-ellipsis {
-    color: #8a8a8a;
-    font-weight: 400;
-  }
-  .section-label:hover {
-    background: #2a2a2a;
-  }
-  .section-rename {
-    font: inherit;
-    font-weight: 600;
-    color: #fff;
-    background: #0d0d0d;
-    border: 1px solid #4c9aff;
-    border-radius: 4px;
-    padding: 2px 6px;
-    min-width: 12ch;
-  }
-  .section-rename:focus {
-    outline: none;
-  }
-  .section-count {
-    color: #888;
-    font-size: 0.85em;
-    font-weight: 400;
-    /* Matches the collapsed-section placeholder's own count (.placeholder-count)
-       so a section reads the same expanded or collapsed. */
-  }
-  /* The group actions (jump / Keep only / Remove) live in GroupLabelActions
-     (issue #88); its select icon is always visible, but its action buttons
-     (.gla-buttons) reveal only on hover of the header row. The reveal target
-     crosses the component boundary, so it's a :global rule. There is now ONE
-     header per group (see the group-renderers contract), so this is one rule —
-     it used to be repeated for the snapshot head and the collapsed pill. */
-  .section-header:hover :global(.gla-buttons),
-  .section-header:focus-within :global(.gla-buttons) {
-    opacity: 1;
-  }
+  /* NOTE: the grid's own CSS (.grid, .section-*, .group-band) moved with its
+     markup into lib/views/GridView.svelte — Svelte scopes styles per
+     component, so leaving it here would have silently unstyled the grid.
+     What remains below is the main column's own chrome and the empty states,
+     which belong to App: they are what the main area shows when there is no
+     data for ANY view to draw. */
   .empty {
     padding: 4rem 1rem;
     text-align: center;

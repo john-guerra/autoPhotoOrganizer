@@ -43,8 +43,13 @@
     visibleItems = [],
 
     // --- Two-way: App measures and scrolls through these ---------------------
-    /** App needs the node for scroll math and reveal offsets. */
-    gridEl = $bindable(null),
+    /** App needs the node for scroll math and reveal offsets.
+     *  NO fallback value on purpose: App declares it as `$state()`, i.e.
+     *  undefined until the element mounts, and Svelte 5 refuses
+     *  `bind:x={undefined}` against a prop that has a fallback
+     *  (`props_invalid_value`). The binding's owner supplies the initial
+     *  value; a default here would be a second, competing one. */
+    gridEl = $bindable(),
     /** The measured content width — the input to the layout App computes. */
     gridWidth = $bindable(0),
     /** The in-place folder rename draft. */
