@@ -1137,3 +1137,146 @@ export async function carryMissing(fromId, toId) {
   }
   return res.json();
 }
+
+/**
+ * Faces (#166) — what the panel needs to decide what to offer.
+ *
+ * Never triggers work. Four states are distinguishable from one call: the
+ * weights are absent, the weights are corrupt, a scan is running, or there
+ * are counts to show. Collapsing any of them would make the panel lie.
+ * @param {string} [model]
+ */
+export async function fetchFaceStatus(model) {
+  const q = model ? `?model=${encodeURIComponent(model)}` : "";
+  const res = await fetch(`/api/ml/faces${q}`);
+  if (!res.ok) throw new Error(`face status failed (${res.status})`);
+  return res.json();
+}
+
+/**
+ * Fetch the weights. Deliberately its own call rather than a step inside the
+ * scan: this is where the user consents to ~200 MB AND to a non-commercial
+ * research licence, and a button that silently did both would be the worst
+ * version of this feature.
+ * @param {string} model
+ */
+export async function downloadFaceModel(model) {
+  const res = await fetch("/api/ml/faces/download", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `download failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Start a face pass. Answers 409 when the weights are missing or corrupt,
+ * with a message that names WHICH and says what to do — render it verbatim.
+ * @param {string} model
+ */
+export async function startFaceScan(model) {
+  const res = await fetch("/api/ml/faces", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `could not start (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Forget every face this model found. Answers 409 while a scan is running.
+ * @param {string} model
+ */
+export async function purgeFaces(model) {
+  const res = await fetch("/api/ml/faces/purge", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `purge failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Clear the "could not be read" verdicts so the next scan tries them again.
+ *
+ * The escape hatch a permanent sentinel needs: "permanent" means "until the
+ * file's bytes change", i.e. never, so a bad model file or a since-fixed bug
+ * could otherwise mark photos unscannable with no way back short of deleting
+ * the whole index — which also destroys ratings and album names.
+ *
+ * @param {string} model
+ */
+export async function retryFailedFaces(model) {
+  const res = await fetch("/api/ml/faces/retry-failed", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `could not reset (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Group the faces found so far into people (#167). Cheap — arithmetic over
+ *  vectors already on disk, unlike the scan that produced them. */
+export async function clusterPeople(model, threshold) {
+  const res = await fetch("/api/ml/faces/cluster", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, threshold }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `grouping failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Everyone found, largest first. */
+export async function fetchPeople() {
+  const res = await fetch("/api/ml/people");
+  if (!res.ok) throw new Error(`people failed (${res.status})`);
+  return res.json();
+}
+
+/** Name a person, or clear it with "". */
+export async function renamePerson(id, name) {
+  const res = await fetch(`/api/ml/people/${id}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `rename failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Merge two people (#167). Durable — a re-grouping will not undo it. */
+export async function mergePeople(into, from) {
+  const res = await fetch("/api/ml/people/merge", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ into, from }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `merge failed (${res.status})`);
+  }
+  return res.json();
+}

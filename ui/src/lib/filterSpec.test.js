@@ -137,3 +137,32 @@ describe("saved semantic tag facet (#164)", () => {
     expect(q).toBeNull();
   });
 });
+
+describe("the person facet (#167)", () => {
+  it("travels in the query spec", () => {
+    // Layer three of three. A facet missing here is silently dropped however
+    // correct the SQL and the allowlist are — and it looks like nothing at
+    // all from the client side.
+    expect(JSON.parse(toQueryParam({ personId: 7 })).personId).toBe(7);
+  });
+
+  it("counts as an active filter", () => {
+    // Filtering to one person narrows the library hard. An unreported
+    // narrowing is how "where did my photos go" happens.
+    expect(isActive({ personId: 7 })).toBe(true);
+    expect(isActive({})).toBe(false);
+  });
+
+  it("ignores a non-id rather than sending it", () => {
+    // toQueryParam returns null for a spec with nothing active, which is the
+    // stronger outcome: an invalid personId produces no query param at all
+    // rather than one the server then has to reject.
+    const q = (v) => {
+      const raw = toQueryParam({ personId: v });
+      return raw ? JSON.parse(raw).personId : undefined;
+    };
+    expect(q(0)).toBeUndefined();
+    expect(q("7")).toBeUndefined();
+    expect(q(null)).toBeUndefined();
+  });
+});

@@ -136,7 +136,7 @@ export async function runSweep(
   //     the model; the route and the settings panel's Purge button both
   //     refuse while a sweep is in flight for exactly this reason, and the
   //     new POST /api/ml/retry-failed refuses for the same one.
-  //   - clearEmbeddingsFor() from upsertScan (server/db/photos.js) — a
+  //   - clearMlArtifactsFor() from upsertScan (server/db/photos.js) — a
   //     CONCURRENT SCAN of a folder whose files changed clears their
   //     sentinels. Nothing gates that, and nothing should: the scan is
   //     right, the vector really is stale.

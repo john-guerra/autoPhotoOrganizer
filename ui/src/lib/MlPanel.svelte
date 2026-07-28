@@ -18,6 +18,7 @@
   import Modal from "./Modal.svelte";
   import MlSettings from "./MlSettings.svelte";
   import SemanticSearch from "./SemanticSearch.svelte";
+  import FaceSettings from "./FaceSettings.svelte";
 
   /** Passed straight through to MlSettings so its scope selector can offer
    *  "Selected" and "Visible" (#215) — the panel itself owns no grid state. */
@@ -27,6 +28,7 @@
     visibleIds = [],
     onrefinechange,
     onsemanticapply,
+    onnotice,
   } = $props();
 </script>
 
@@ -48,6 +50,12 @@
         onclose?.();
       }}
     />
+
+    <!-- Faces (#166) sit between the search and the machinery for the same
+         reason search sits above both: they are a thing the models are FOR.
+         The download button here is the only place in the app that asks the
+         user to accept someone else's licence, so it must not be buried. -->
+    <FaceSettings onnotice={(m) => onnotice?.(m)} />
     <hr />
     <MlSettings {selectedIds} {visibleIds} {onrefinechange} />
   </div>

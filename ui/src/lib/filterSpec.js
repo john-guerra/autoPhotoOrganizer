@@ -33,9 +33,14 @@ export function isActive(spec) {
   // feed as filtered — a tag that silently narrows the library while the UI
   // says "no filters" is the same lie as any other missing facet.
   const tagged = typeof spec?.tag === "string" && spec.tag.length > 0;
+  // Filtering to one person narrows the library hard, so the toolbar must
+  // report the feed as filtered — an unreported narrowing is how "where did
+  // my photos go" happens (#167).
+  const byPerson = Number.isSafeInteger(spec?.personId) && spec.personId > 0;
   return (
     searched ||
     tagged ||
+    byPerson ||
     minRating > 0 ||
     (o.length > 0 && o.length < ORIENTATIONS.length) ||
     (k.length > 0 && k.length < KINDS.length) ||
@@ -67,6 +72,8 @@ export function toQueryParam(spec) {
   // Third of the three layers a facet needs (SQL -> server allowlist -> here).
   // Miss this one and the filter is correct everywhere and reaches nothing.
   if (typeof spec?.tag === "string" && spec.tag) out.tag = spec.tag;
+  if (Number.isSafeInteger(spec?.personId) && spec.personId > 0)
+    out.personId = spec.personId;
   if (typeof spec?.folderPath === "string" && spec.folderPath) {
     out.folderPath = spec.folderPath;
   }

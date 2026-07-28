@@ -90,6 +90,22 @@ export function buildFilter(spec = {}) {
     params.push(spec.tag);
   }
 
+  // Person (#167). A photo can hold many people, so per the feed's
+  // one-value-per-photo-per-dimension invariant (feed.js:53-77) this is a
+  // FILTER FACET, never a group dimension.
+  //
+  // Phrased as a subquery and NOT as a JOIN, which is required rather than
+  // stylistic: keepScope and folderPath are written this way because the
+  // feed-seek and tree queries do not JOIN extra tables. A facet written as a
+  // JOIN works in getFeedPage and silently breaks getTreeNode,
+  // countGroupPath, and every other buildFilter consumer.
+  if (Number.isSafeInteger(spec?.personId)) {
+    clauses.push(
+      `photos.id IN (SELECT photo_id FROM photo_faces WHERE person_id = ?)`
+    );
+    params.push(spec.personId);
+  }
+
   // Folder-focus scope ("open a folder"): restrict to the chosen folder plus
   // everything nested under it. abs_path is stored with no trailing separator
   // (see upsertScan), so the subtree is the exact path OR any path beginning

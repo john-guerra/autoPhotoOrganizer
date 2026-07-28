@@ -28,6 +28,7 @@
   import OrientationFilter from "./OrientationFilter.svelte";
   import KindFilter from "./KindFilter.svelte";
   import TagFilter from "./TagFilter.svelte";
+  import PersonFilter from "./PersonFilter.svelte";
   import { DEFAULT_FILTER, isActive as filterIsActive } from "./filterSpec.js";
   import ToolGroup from "./ToolGroup.svelte";
 
@@ -40,6 +41,7 @@
     // Saved semantic tags (#164). App owns the list — this component is
     // presentational, and TagFilter renders nothing at all while it is empty.
     semanticTags = [],
+    people = [],
   } = $props();
 </script>
 
@@ -130,6 +132,7 @@
     tags={semanticTags}
     onchange={(v) => onfilterchange?.(v)}
   />
+  <PersonFilter {filter} {people} onchange={(v) => onfilterchange?.(v)} />
 
   <!-- The timeline: a filter like the rest, and the one that can use the width. -->
   {@render timeline?.()}

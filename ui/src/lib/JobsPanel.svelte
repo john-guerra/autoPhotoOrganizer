@@ -183,6 +183,28 @@
     if (job.type === "transcode") {
       return r.url ? "ready to play" : "done";
     }
+    if (job.type === "faces") {
+      // Faces found is the answer the user asked for; how many photos were
+      // looked through is the context that makes it mean something. `people`
+      // appears only when new faces joined someone already named — the quiet
+      // part worth surfacing, because it happens without being asked for.
+      const parts = [
+        `${(r.faces ?? 0).toLocaleString()} face${r.faces === 1 ? "" : "s"}`,
+        `in ${(r.scanned ?? 0).toLocaleString()} photo${r.scanned === 1 ? "" : "s"}`,
+      ];
+      if (r.assigned)
+        parts.push(
+          `${r.assigned} added to ${r.people} ${r.people === 1 ? "person" : "people"}`
+        );
+      if (r.failed) parts.push(`${r.failed} unreadable`);
+      return parts.join(" · ");
+    }
+    if (job.type === "face-download") {
+      const got = r.downloaded?.length ?? 0;
+      return got
+        ? `downloaded ${got} file${got === 1 ? "" : "s"}`
+        : "already on disk";
+    }
     // Self-clears on success like enrich, so a row reaches here only when the
     // sweep was CANCELED or paused — which still leaves a result worth reading.
     if (job.type === "hash") {
