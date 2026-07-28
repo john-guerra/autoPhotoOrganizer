@@ -674,6 +674,19 @@ export const mlSettings = {
 
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------
 
+/** The faces block inside the ML panel (#166), and its scope control (#221). */
+export const faceSettings = {
+  scan: (page) => page.getByTestId("face-scan"),
+  counts: (page) => page.getByTestId("face-counts"),
+  /** The shared All/Visible/Selected control — the SAME component embedding
+   *  uses, which is the point of #221. `which` is a registry scope key. */
+  scope: (page) => page.getByTestId("face-scope"),
+  scopeOption: (page, which) =>
+    page.getByTestId("face-scope").locator(`input[value="${which}"]`),
+  /** The "up to N photos · about T" line under the control. */
+  estimate: (page) => page.getByTestId("face-scope-estimate"),
+};
+
 export const menu = {
   root: (page) => page.locator(".context-menu"),
   /** An item by its visible label.

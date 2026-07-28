@@ -18,6 +18,13 @@
    * Runes, matching ManageLibrary.svelte (its host): a component is all-runes
    * or all-legacy, never half.
    */
+  import ScopeControl from "./ScopeControl.svelte";
+  import {
+    buildScopes,
+    activeScope as activeScopeOf,
+    scopeIdsFor,
+    formatEstimate,
+  } from "./scopeControl.js";
   import {
     fetchMlSettings,
     saveMlSettings,
@@ -141,52 +148,17 @@
     counts ? Math.max(0, counts.total - counts.embedded - counts.failed) : 0
   );
 
-  /**
-   * The scope choices, with how many photos each covers (#215).
-   *
-   * "All" reports PENDING, not the library total: re-embedding what is already
-   * done is not work the sweep will do, so quoting 34,807 when only 200 remain
-   * would overstate the cost by two orders of magnitude. Selected and Visible
-   * report their raw counts — the sweep skips already-embedded rows inside
-   * them too, so those are upper bounds, and the estimate says "up to".
-   */
-  const scopes = $derived([
-    { key: "selected", label: "Selected", n: selectedIds.length },
-    { key: "visible", label: "Visible", n: visibleIds.length },
-    { key: "all", label: "All", n: pending },
-  ]);
-  const activeScope = $derived(
-    scopes.find((s) => s.key === scopeChoice) ?? scopes[2]
+  // The scope choices and the ids they resolve to now come from the SHARED
+  // module (#221) — ScopeControl.svelte renders them, and this component asks
+  // the same functions for what to send. Two copies of "which ids did they
+  // pick?" is how the button and the radio buttons come to disagree.
+  const scopes = $derived(
+    buildScopes({ selectedIds, visibleIds, allCount: pending })
   );
+  const activeScope = $derived(activeScopeOf(scopes, scopeChoice));
   const scopeIds = $derived(
-    scopeChoice === "selected"
-      ? selectedIds
-      : scopeChoice === "visible"
-        ? visibleIds
-        : null // null = the whole pending library, the unscoped sweep
+    scopeIdsFor(scopeChoice, { selectedIds, visibleIds })
   );
-
-  /**
-   * Roughly how long that will take, from the model's measured per-photo cost.
-   *
-   * Stated because "Embed now" otherwise reads 34,807 photos — about twenty
-   * minutes — with nothing on screen saying so beforehand. The panel is
-   * scrupulous about the 94 MB download and was silent about the far larger
-   * cost, which is the one place it broke its own contract.
-   *
-   * Rounded hard and prefixed "about": this is an order-of-magnitude honesty
-   * aid measured on one machine, not a promise.
-   */
-  const estimate = $derived.by(() => {
-    const ms = activeModel?.approxMsPerPhoto;
-    if (!ms || !activeScope?.n) return null;
-    const secs = Math.round((activeScope.n * ms) / 1000);
-    if (secs < 60) return `about ${Math.max(1, secs)}s`;
-    const mins = Math.round(secs / 60);
-    if (mins < 60) return `about ${mins} min`;
-    const hours = (mins / 60).toFixed(1);
-    return `about ${hours} h`;
-  });
 
   /**
    * "3 minutes ago", or "unknown" for a grouping that predates the timestamp
@@ -521,7 +493,7 @@
       const r = await startEmbed(scopeIds);
       if (r.started) {
         say(
-          `Embedding ${activeScope.n.toLocaleString()} photo(s) — ${estimate}. Watch it in the jobs panel.`
+          `Embedding ${activeScope.n.toLocaleString()} photo(s) — ${formatEstimate(activeScope.n, activeModel?.approxMsPerPhoto)}. Watch it in the jobs panel.`
         );
       } else if (r.alreadyRunning) {
         // The single-flight latch is not keyed by model, so this is exactly
@@ -816,36 +788,21 @@
     </p>
 
     <!-- WHAT to embed, and what that will cost, before the button is pressed
-         (#215). A scope with no photos is offered but disabled rather than
-         hidden, so the set of choices does not shift under the cursor as a
-         selection changes. -->
-    <fieldset class="scope" data-testid="ml-scope">
-      <legend>Embed</legend>
-      {#each scopes as s (s.key)}
-        <label class="scope-opt" class:empty={!s.n}>
-          <input
-            type="radio"
-            name="ml-scope"
-            value={s.key}
-            checked={scopeChoice === s.key}
-            disabled={busy || !s.n}
-            onchange={() => (scopeChoice = s.key)}
-          />
-          <span>{s.label}</span>
-          <span class="scope-n">{s.n.toLocaleString()}</span>
-        </label>
-      {/each}
-    </fieldset>
-    <p class="hint" data-testid="ml-estimate">
-      {#if !activeScope?.n}
-        Nothing to embed in this scope.
-      {:else}
-        Up to {activeScope.n.toLocaleString()} photos ·
-        <strong>{estimate}</strong>
-        at ~{activeModel?.approxMsPerPhoto}ms each on this model. Already-read
-        photos are skipped, so it is often faster.
-      {/if}
-    </p>
+         (#215). The shared control (#221) — faces uses the same one, per
+         UI-CONTRACTS § Scope: "extract and reuse; do not copy." -->
+    <ScopeControl
+      legend="Embed"
+      name="ml-scope"
+      testid="ml-scope"
+      {selectedIds}
+      {visibleIds}
+      allCount={pending}
+      msPerPhoto={activeModel?.approxMsPerPhoto}
+      estimateSuffix={` at ~${activeModel?.approxMsPerPhoto}ms each on this model. Already-read photos are skipped, so it is often faster.`}
+      emptyMessage="Nothing to embed in this scope."
+      disabled={busy}
+      bind:choice={scopeChoice}
+    />
 
     <div class="ml-actions">
       <button

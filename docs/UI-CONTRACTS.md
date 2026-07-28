@@ -26,9 +26,26 @@ The three scopes, always in this order, always with a live count:
 | **Visible**  | what the current filter/view is showing  | `ids: visibleIds`    |
 | **Selected** | the user's selection                     | `ids: selectedIds`   |
 
-The reference implementation is `ui/src/lib/MlSettings.svelte` (`scopes`,
-`scopeIds`, and the `data-testid="ml-scope"` fieldset), shipped as #215/#206.
-Read it before writing a second one.
+**There is now ONE component — use it, do not write a second.**
+`ui/src/lib/ScopeControl.svelte` renders the fieldset and the estimate;
+`ui/src/lib/scopeControl.js` holds the arithmetic (`buildScopes`,
+`activeScope`, `scopeIdsFor`, `formatEstimate`) so a caller can ask "which ids
+did they pick?" without reaching inside a component, and so it is testable
+without a DOM. Embedding (#215/#206) and faces (#221) are its two clients.
+
+Wiring a third takes four things:
+
+1. `<ScopeControl legend name testid allCount … bind:choice />` — **`name` must
+   be unique per instance.** Two radio groups sharing a name are ONE group to
+   the browser, so choosing a scope in one panel silently clears the other's.
+2. `allCount` is the operation's own REMAINING work, not the library total.
+3. Send `scopeIdsFor(choice, …)` — `null` for the sweep, `[]` for an empty
+   selection. The server keeps those distinct all the way into the SQL
+   (`server/db/scopeIds.js`); collapsing them is how an empty selection becomes
+   an hour of inference.
+4. The route validates `ids` the way `POST /api/ml/embed` and
+   `POST /api/ml/faces` do — empty is a specific 400, oversized a 413 — and the
+   job's `total` is the SCOPE's size, or the progress bar lies.
 
 ### The rules
 
@@ -51,7 +68,9 @@ Read it before writing a second one.
 ```
 
 You selected twenty photos and the app offers fourteen minutes of inference over
-the library. That is #221.
+the library. That was #221 — **fixed in 2.18.42**, and the fix is why the shared
+component above exists: the rule had been settled once already for embedding,
+and faces re-broke it because there was nothing to reuse.
 
 ---
 

@@ -1648,6 +1648,32 @@ export function registerApi(app, { ml } = {}) {
     if (isFaceSweepInFlight()) {
       return res.json({ started: false, alreadyRunning: true });
     }
+    // #221: an optional `ids` scope looks for faces in just those photos — the
+    // selection, or what is on screen — instead of the whole library. Absent,
+    // behaviour is exactly as before. Same shape and same limits as
+    // POST /api/ml/embed (#206), deliberately: two scoped endpoints that
+    // disagree about how a scope is sent is a bug waiting for its first
+    // caller.
+    //
+    // Validated BEFORE the weights check and before any job exists, so a bad
+    // request is a plain 400 rather than a job that appears and immediately
+    // fails.
+    const ids = req.body?.ids;
+    if (ids !== undefined) {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        // Specific over generic: an empty selection is a real thing a user can
+        // do, and saying so beats "bad request" — and beats silently sweeping
+        // the library, which is the failure this issue exists for.
+        return res
+          .status(400)
+          .json({ error: "No photos were selected to look for faces in." });
+      }
+      if (ids.length > 50_000) {
+        return res.status(413).json({
+          error: `That is ${ids.length.toLocaleString()} photos — too many to send at once. Look for faces in the whole library instead.`,
+        });
+      }
+    }
     const modelId = faceModelIdOf(req.body?.model);
     const model = faceModelById(modelId);
     const weights = await faceWeightsStatus(modelId);
@@ -1690,9 +1716,11 @@ export function registerApi(app, { ml } = {}) {
     }
 
     const job = registry.create("faces", {
-      label: `Finding faces (${model.label})`,
+      label: ids
+        ? `Finding faces in ${ids.length.toLocaleString()} photos (${model.label})`
+        : `Finding faces (${model.label})`,
     });
-    res.json({ started: true, jobId: job.id });
+    res.json({ started: true, jobId: job.id, scoped: ids ? ids.length : null });
 
     const engine = createFaceEngine({
       modelId,
@@ -1706,10 +1734,15 @@ export function registerApi(app, { ml } = {}) {
         modelId,
         engine,
         job,
+        scopeIds: ids ?? null,
         onProgress: ({ done, failed }) =>
           registry.update(job.id, {
             done,
-            total: faceCounts(getDb(), modelId).total,
+            // The SCOPE's size when there is one, not the library's. A bar
+            // measuring 20 photos against 32,000 sits at 0% for the whole run
+            // and then jumps to done — an honest total is the difference
+            // between a progress bar and a decoration (UI-CONTRACTS §2).
+            total: ids ? ids.length : faceCounts(getDb(), modelId).total,
             label: `Finding faces — ${done.toLocaleString()} scanned${failed ? `, ${failed} unreadable` : ""}`,
           }),
       });

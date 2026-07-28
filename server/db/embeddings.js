@@ -7,6 +7,11 @@
  * them in a similarity scan would produce confident nonsense.
  */
 
+// The id-scope validator is SHARED with the faces sweep (#221) rather than
+// living here: it is what makes inlining ids into SQL safe, and a second copy
+// of that is how one copy drifts.
+import { normalizeScope } from "./scopeIds.js";
+
 /** The sweep stage name recorded in ml_status. Faces (#166) will add its own. */
 export const EMBED_STAGE = "embed";
 
@@ -141,19 +146,6 @@ export function pendingEmbedRows(db, model, limit, scopeIds = null) {
         LIMIT @limit`
     )
     .all({ model, stage: EMBED_STAGE, limit });
-}
-
-/**
- * @param {Array<number|string>|null|undefined} scopeIds
- * @returns {number[]|null} `null` when no scope was given at all (sweep the
- *   library). Otherwise the ids that survived validation — possibly EMPTY,
- *   which the caller must treat as "no photos", not as "no scope". Keeping
- *   those two cases distinct is the whole job of this function.
- */
-function normalizeScope(scopeIds) {
-  if (scopeIds === null || scopeIds === undefined) return null;
-  if (!Array.isArray(scopeIds)) return [];
-  return scopeIds.map((v) => Number(v)).filter((n) => Number.isSafeInteger(n));
 }
 
 /**
