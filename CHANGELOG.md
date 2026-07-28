@@ -6,6 +6,21 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.41
+
+- **Rating or selecting during the Auto Albums review no longer hits the wrong
+  photo.** Pressing `1`–`5`, `X`, `⌘A`, `C` or `G` there used to quietly rate,
+  select or re-stack a photo from the grid behind it — one you couldn't see and
+  hadn't chosen. Each now tells you the action isn't available in that view,
+  and how to get back (#155).
+- **Press `V` to switch what fills the main area** — grid → Auto Albums → back.
+  The Auto Albums button is now a toggle you can press again to leave, and your
+  choice is remembered between sessions (#155).
+- Holding `V` no longer fires one album scan per key-repeat, or drops you back
+  into a view you'd just left (#155).
+- Groundwork: the main area is now pluggable, so upcoming views (People, #223)
+  arrive as their own screen rather than another panel (#155).
+
 ## 2.18.40
 
 - **No change to the app.** Three rules about how features should behave —

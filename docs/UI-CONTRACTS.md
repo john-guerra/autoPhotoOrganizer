@@ -115,15 +115,31 @@ to select, rate, or open a photo from here?"** If yes, it is a view.
 
 ### The contract
 
-Specified in **#155**, and the registry is the deliverable — not any one view:
+Specified in **#155**, and the registry is the deliverable — not any one view.
+**It exists**, as of 2.18.41, with the grid and Auto Albums as its two clients:
 
 ```js
 // ui/src/lib/views/registry.js
-{ id, label, icon,
+{ id, label, icon, description,
   navigation: "scroll" | "zoom",     // who owns the viewport
   dataSource: "feed" | "working-set",
-  component }                        // { items, viewport, selection, callbacks }
+  capabilities: { open, select, rate },   // all three REQUIRED, explicit booleans
+  component }
 ```
+
+`capabilities` is the part that does work at runtime rather than documenting
+intent. `App.svelte`'s `refuseUnsupported()` reads it before a rating or
+selection keystroke and answers the user by name — because nothing used to,
+and pressing `3` during the album review silently rated a photo in the feed
+window that was not on screen.
+
+Two things a new view needs beyond its entry here: a `viewProps` case in
+`App.svelte` (its props, in one place, rather than another `{#if}` in the
+markup), and — if it declares `dataSource: "working-set"` — an entry in
+`WORKING_SET_LOADERS`, because **App performs the bounded fetch**, not the
+view. The grid is the one view mounted explicitly rather than generically:
+App computes its layout, so App needs its element and measured width, and
+`bind:` cannot be passed through a spread.
 
 **The boundary is what makes this safe. App stays the data owner.**
 
@@ -146,7 +162,13 @@ new name. A view needing whole-library data declares
   support one **declares** it rather than silently swallowing the keystroke.
 - **Do the registry first and alone**, with the grid extracted as its first
   client and no user-visible change. A bespoke second view guarantees the third
-  re-derives all of it (#156, #157, #165, #223).
+  re-derives all of it (#156, #157, #165, #223). ✅ The registry exists, so a
+  new view is a registry entry plus a component and re-deriving any of this is
+  a review comment rather than a judgement call. Note the "and alone" half held
+  for the extraction COMMIT but not for the PR: #155 also shipped the switcher,
+  the `V` key and the capability refusal, because a registry with no way to
+  switch cannot be exercised as a user feature. A deliberate call, not an
+  oversight — but do not cite this as precedent for bundling.
 - **A view switcher is a keyboard affordance** and goes in
   `ui/src/lib/ShortcutsOverlay.svelte` in the same commit — see CLAUDE.md.
 
@@ -157,7 +179,7 @@ colliding (`docs/superpowers/specs/2026-07-24-ml-signals-design.md` §7):
 
 | Scale          | What swaps                  | Registry            | Status    |
 | -------------- | --------------------------- | ------------------- | --------- |
-| **View**       | the entire main area        | `views/registry.js` | missing   |
+| **View**       | the entire main area        | `views/registry.js` | exists ✅ |
 | **Group band** | how one group's photos draw | `groupRenderers.js` | exists ✅ |
 | **Tile**       | how one photo draws         | `tileRenderers.js`  | missing   |
 

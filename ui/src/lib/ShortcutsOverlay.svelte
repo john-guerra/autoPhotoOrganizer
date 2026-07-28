@@ -80,6 +80,11 @@
     {
       heading: "General",
       rows: [
+        {
+          keys: ["V"],
+          label:
+            "Switch the main area to the next view (grid → Auto Albums → …); not while the loupe is open",
+        },
         { keys: [","], label: "Open scrolling & prefetch settings" },
         { keys: ["?"], label: "Toggle this shortcuts list" },
       ],
