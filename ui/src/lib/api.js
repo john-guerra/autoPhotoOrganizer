@@ -1237,8 +1237,20 @@ export async function retryFailedFaces(model) {
   return res.json();
 }
 
-/** Group the faces found so far into people (#167). Cheap — arithmetic over
- *  vectors already on disk, unlike the scan that produced them. */
+/**
+ * Start grouping every face into people (#222).
+ *
+ * Returns `{jobId}` and NOTHING ELSE — this is a job, not an awaited
+ * computation. On ~10,700 faces the pass is 57 million comparisons; the caller
+ * watches the JobsPanel row for progress, cancels there, and reads the result
+ * off the finished job. Answers 409 (with a specific message to render
+ * verbatim) when a scan is running, when a grouping is already in flight, or
+ * when there are no faces yet.
+ *
+ * @param {string} model
+ * @param {number} [threshold]
+ * @returns {Promise<{started: boolean, jobId: string, faces: number}>}
+ */
 export async function clusterPeople(model, threshold) {
   const res = await fetch("/api/ml/faces/cluster", {
     method: "POST",

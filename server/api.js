@@ -100,7 +100,11 @@ import {
   clearFaceFailures,
 } from "./db/faces.js";
 import { assignNewFaces } from "./ml/faceAssign.js";
-import { clusterFaces } from "./ml/faceClusters.js";
+import {
+  clusterFaces,
+  isClusterInFlight,
+  withClusterLatch,
+} from "./ml/faceClusters.js";
 import sharp from "sharp";
 
 /**
@@ -1851,11 +1855,27 @@ export function registerApi(app, { ml } = {}) {
    *  Detecting faces is ~14 minutes of inference; clustering the vectors
    *  already on disk is arithmetic. Someone adjusting the threshold needs the
    *  cheap one on its own. */
+  // Grouping every face into people is a JOB, not an awaited request (#222).
+  //
+  // It used to compute and then respond with the result, so on ~10,700 faces —
+  // 57 million comparisons — the panel showed a frozen "Grouping…" button with
+  // no progress, nothing to cancel, and no trace of the work anywhere once you
+  // closed the panel. Every other long operation in this app (scan, embed,
+  // hash, enrich, near-dupes, export, materialize) goes through the registry.
+  //
+  // UI-CONTRACTS §2 is explicit that this is not a wrapper: the route now
+  // returns {jobId} and the CALLER STOPS AWAITING A RESULT.
   app.post("/api/ml/faces/cluster", async (req, res) => {
     if (isFaceSweepInFlight()) {
       return res.status(409).json({
         error:
           "A face scan is still running. Wait for it to finish so every face is grouped, or stop it from the jobs panel.",
+      });
+    }
+    if (isClusterInFlight()) {
+      return res.status(409).json({
+        error:
+          "These faces are already being grouped — watch it, or stop it, in the jobs panel.",
       });
     }
     const modelId = faceModelIdOf(req.body?.model);
@@ -1867,22 +1887,44 @@ export function registerApi(app, { ml } = {}) {
       });
     }
     const threshold = Number(req.body?.threshold);
-    // Yields to the event loop as it goes, so the server keeps serving
-    // thumbnails and the feed through a ~10,000-face pass.
-    const { clusters } = await clusterFaces(
-      vectors,
-      Number.isFinite(threshold) ? { threshold } : {}
-    );
-    // A second scan may have started while that ran; writing now would clear
-    // person assignments for faces it is still producing.
-    if (isFaceSweepInFlight()) {
-      return res.status(409).json({
-        error:
-          "A face scan started while these were being grouped, so nothing was saved. Try again once it finishes.",
+    const n = vectors.ids.length;
+
+    // Every refusal above is a synchronous 4xx, BEFORE any job exists — a
+    // rejected request must never leave a row that appears and immediately
+    // fails (the #166 zombie-job shape).
+    const job = registry.create("face-cluster", {
+      label: `Grouping ${n.toLocaleString()} faces into people`,
+      // Pairs, not faces: the work is the upper triangle. See clusterFaces.
+      total: (n * (n - 1)) / 2,
+    });
+    res.json({ started: true, jobId: job.id, faces: n });
+
+    // From here the response is already sent: everything else reaches the user
+    // through the job.
+    withClusterLatch(async () => {
+      const { clusters } = await clusterFaces(vectors, {
+        ...(Number.isFinite(threshold) ? { threshold } : {}),
+        signal: job.controller.signal,
+        onProgress: ({ done, total }) =>
+          registry.update(job.id, { done, total }),
       });
-    }
-    const r = saveClusters(getDb(), clusters, { model: modelId });
-    res.json({ ...r, faces: vectors.ids.length });
+      // A second scan may have started while that ran; writing now would clear
+      // person assignments for faces it is still producing.
+      if (isFaceSweepInFlight()) {
+        throw new Error(
+          "A face scan started while these were being grouped, so nothing was saved. Try again once it finishes."
+        );
+      }
+      const r = saveClusters(getDb(), clusters, { model: modelId });
+      registry.finish(job.id, { ...r, faces: n });
+    }).catch((e) => {
+      // `registry.fail` reads the abort signal and records a cancellation as
+      // "canceled" rather than "failed" — a cancellation is an outcome, not a
+      // failure (Finding 6, ML-UX-REVIEW-2026-07-26.md). Nothing was written
+      // either way: the union-find is in memory and saveClusters is the single
+      // transaction at the end, which a cancelled pass never reaches.
+      registry.fail(job.id, e);
+    });
   });
 
   /** Everyone found so far, largest first — the order naming wants. */

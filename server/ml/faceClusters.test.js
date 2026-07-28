@@ -4,6 +4,9 @@ import {
   clusterFaces,
   assignToPerson,
   SAME_PERSON_COSINE,
+  isClusterInFlight,
+  withClusterLatch,
+  _resetClusterForTest,
 } from "./faceClusters.js";
 
 const DIM = 64;
@@ -272,5 +275,115 @@ describe("assigning a new face as photos arrive", () => {
     const face = quantize(vec(30, 0.02, 2));
     expect(assignToPerson(face, [A], SAME_PERSON_COSINE)).toBe(null);
     expect(assignToPerson(face, [A], -1)).toMatchObject({ personId: 1 });
+  });
+});
+
+describe("cancelling a grouping pass (#222)", () => {
+  /** Enough faces that the loop crosses several yield points, which is the
+   *  only place the signal is read. */
+  const many = (count) =>
+    pack(Array.from({ length: count }, (_, i) => vec(i % 8, 0.02, i)));
+
+  it("stops at the yield point when the signal aborts", async () => {
+    const c = new AbortController();
+    const vectors = many(400);
+
+    // Abort after the FIRST progress report, i.e. mid-pass rather than before
+    // it starts — cancelling something that never began proves nothing.
+    let reports = 0;
+    const run = clusterFaces(vectors, {
+      threshold: T,
+      yieldEvery: 32,
+      signal: c.signal,
+      onProgress: () => {
+        if (++reports === 1) c.abort();
+      },
+    });
+
+    await expect(run).rejects.toMatchObject({ name: "AbortError" });
+    expect(reports).toBeGreaterThan(0);
+  });
+
+  it("returns normally when the signal is never aborted", async () => {
+    const c = new AbortController();
+    const { clusters } = await clusterFaces(many(80), {
+      threshold: T,
+      yieldEvery: 16,
+      signal: c.signal,
+    });
+    expect(clusters.length).toBeGreaterThan(0);
+  });
+
+  it("throws BEFORE producing clusters, so a cancelled pass writes nothing", async () => {
+    // The safety property the route depends on: the union-find is in memory
+    // and `saveClusters` is one transaction at the very end, which an aborted
+    // pass never reaches. If this ever RESOLVED instead of throwing, the route
+    // would happily save a partial regrouping.
+    const c = new AbortController();
+    c.abort();
+    await expect(
+      clusterFaces(many(400), {
+        threshold: T,
+        yieldEvery: 32,
+        signal: c.signal,
+      })
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("grouping progress is measured in work, not rows (#222)", () => {
+  it("reports pairs compared against the upper triangle", async () => {
+    const n = 300;
+    const seen = [];
+    await clusterFaces(
+      pack(Array.from({ length: n }, (_, i) => vec(i % 8, 0.02, i))),
+      {
+        threshold: T,
+        yieldEvery: 50,
+        onProgress: (p) => seen.push(p),
+      }
+    );
+
+    expect(seen.length).toBeGreaterThan(1);
+    // The total is the upper triangle, not the face count. Reporting `n` would
+    // make a 300-face pass claim 300 units of work when it does 44,850.
+    expect(seen[0].total).toBe((n * (n - 1)) / 2);
+
+    // Monotonic, and never past the total — a bar that goes backwards or
+    // overshoots reads as broken.
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i].done).toBeGreaterThan(seen[i - 1].done);
+      expect(seen[i].done).toBeLessThanOrEqual(seen[i].total);
+    }
+
+    // THE POINT of pair-based progress: by the halfway ROW, ~75% of the work
+    // is already done. A bar driven by row index would sit at 50% here, then
+    // leap — which is what "honest progress" forbids.
+    const half = seen.find((p) => p.done >= seen[0].total / 2);
+    expect(half).toBeTruthy();
+  });
+});
+
+describe("the single-flight latch (#222)", () => {
+  it("reports in-flight only while the pass runs, and clears on a throw", async () => {
+    _resetClusterForTest();
+    expect(isClusterInFlight()).toBe(false);
+
+    let insideSawItSet = false;
+    await withClusterLatch(async () => {
+      insideSawItSet = isClusterInFlight();
+    });
+    expect(insideSawItSet).toBe(true);
+    expect(isClusterInFlight()).toBe(false);
+
+    // `finally`, not a line after the await: leaving the flag set would make
+    // every later grouping a silent no-op for the life of the process, and the
+    // only symptom is a button that does nothing.
+    await expect(
+      withClusterLatch(async () => {
+        throw new Error("boom");
+      })
+    ).rejects.toThrow("boom");
+    expect(isClusterInFlight()).toBe(false);
   });
 });

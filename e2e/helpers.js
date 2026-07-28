@@ -684,6 +684,14 @@ export const faceSettings = {
     page.getByTestId("face-scope").locator(`input[value="${which}"]`),
   /** The "up to N photos · about T" line under the control. */
   estimate: (page) => page.getByTestId("face-scope-estimate"),
+  /** "Group faces into people" — starts a JOB (#222), it does not await a
+   *  result. */
+  cluster: (page) => page.getByTestId("face-cluster"),
+  /** Stop, next to the button that started it. The JobsPanel's Cancel is the
+   *  canonical one; this exists because the user is looking here. */
+  clusterStop: (page) => page.getByTestId("face-cluster-stop"),
+  /** The panel's inline failure line. */
+  error: (page) => page.getByTestId("face-error"),
 };
 
 // --- the right-click menu (shared by the grid, the loupe and the tree) --------
