@@ -6,10 +6,16 @@ import AlbumsView from "../AlbumsView.svelte";
  * here plus one component — never another branch inside App.svelte.
  *
  * Before this, swapping the main area was a boolean (`albumMode`) with `{#if}`
- * branches in the markup, the toolbar, the keyboard handler and the loupe's
- * escape path. A third view would have been a second boolean, and the fourth
- * would have made the combinations unreadable. `App.svelte` was already ~6,900
- * lines; #155 is the seam that stops it growing by a view at a time.
+ * branches in the markup and the toolbar, plus a `$bindable` threaded from App
+ * through Toolbar into ViewControls. A third view would have been a second
+ * boolean and a second thread, and the fourth would have made the combinations
+ * unreadable. `App.svelte` was already ~6,900 lines; #155 is the seam that
+ * stops it growing by a view at a time.
+ *
+ * (For the record, since an earlier draft of this comment claimed otherwise:
+ * `albumMode` was never consulted in `onKeydown`, and `openPhotoById`
+ * deliberately does NOT touch it — the loupe opens as an overlay ON TOP of the
+ * album review so Esc returns you to your split/naming work intact.)
  *
  * Contract: `docs/UI-CONTRACTS.md` §3. The rule that makes it safe is that
  * **App stays the data owner** — a view renders and interacts, it never touches
@@ -130,6 +136,28 @@ export function getView(id) {
  */
 export function supports(id, capability) {
   return getView(id).capabilities[capability] === true;
+}
+
+/**
+ * Which view a fresh load should open on, given whatever id was persisted.
+ *
+ * A `working-set` view's DATA does not survive a reload: only App can fetch
+ * it, and doing that during boot would hold up first paint for a view you may
+ * not even want. Restoring the id alone would drop you into the album review
+ * with no albums in it — an empty shell that reads as the app having lost your
+ * work. So only `feed` views are restored; anything else reopens on the
+ * default, one keypress from where you were.
+ *
+ * Pure, and here rather than inline in App.svelte, so this rule is covered by
+ * a 2ms unit test instead of only by a 15s Playwright one (docs/TESTING.md:
+ * push logic down).
+ *
+ * @param {string|undefined} storedId
+ * @returns {string}
+ */
+export function restorableViewId(storedId) {
+  const stored = getView(storedId);
+  return stored.dataSource === "feed" ? stored.id : DEFAULT_VIEW_ID;
 }
 
 /**

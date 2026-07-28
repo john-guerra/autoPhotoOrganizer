@@ -10,6 +10,7 @@ import {
   getView,
   supports,
   nextViewId,
+  restorableViewId,
 } from "./registry.js";
 
 /**
@@ -107,11 +108,41 @@ describe("resolving a view", () => {
     expect(getView(undefined)).toBe(GRID);
   });
 
-  it("reports an unknown view as supporting nothing beyond the grid's", () => {
+  it("gives an unknown view the grid's full capability, deliberately", () => {
     // Falling back to GRID means an unknown id claims full capability. That is
     // the safe direction (the user keeps rating and selecting); pinning it
     // here so a future change to getView's fallback is a deliberate one.
     expect(supports("nope", "rate")).toBe(true);
+  });
+});
+
+describe("what a fresh load restores", () => {
+  it("restores a feed view", () => {
+    expect(restorableViewId("grid")).toBe("grid");
+  });
+
+  it("does NOT restore a working-set view — its data didn't survive", () => {
+    // Restoring the id alone drops you into the album review with no albums
+    // in it: an empty shell that reads as the app having lost your work. Only
+    // App can fetch that data, and doing it during boot would hold up first
+    // paint for a view you may not even want.
+    expect(restorableViewId("albums")).toBe(DEFAULT_VIEW_ID);
+  });
+
+  it("falls back to the default for an id no build registers any more", () => {
+    expect(restorableViewId("treemap-that-shipped-then-left")).toBe(
+      DEFAULT_VIEW_ID
+    );
+    expect(restorableViewId(undefined)).toBe(DEFAULT_VIEW_ID);
+  });
+
+  it("restores something that is always safe to open with no fetch", () => {
+    // The property that actually matters, stated as a property rather than as
+    // three examples: whatever comes back must be a registered view whose data
+    // App already has.
+    for (const id of [...VIEWS.map((v) => v.id), "nope", undefined]) {
+      expect(getView(restorableViewId(id)).dataSource).toBe("feed");
+    }
   });
 });
 

@@ -162,9 +162,13 @@ new name. A view needing whole-library data declares
   support one **declares** it rather than silently swallowing the keystroke.
 - **Do the registry first and alone**, with the grid extracted as its first
   client and no user-visible change. A bespoke second view guarantees the third
-  re-derives all of it (#156, #157, #165, #223). ✅ Done — so a new view is now
-  a registry entry plus a component, and re-deriving any of this is a review
-  comment, not a judgement call.
+  re-derives all of it (#156, #157, #165, #223). ✅ The registry exists, so a
+  new view is a registry entry plus a component and re-deriving any of this is
+  a review comment rather than a judgement call. Note the "and alone" half held
+  for the extraction COMMIT but not for the PR: #155 also shipped the switcher,
+  the `V` key and the capability refusal, because a registry with no way to
+  switch cannot be exercised as a user feature. A deliberate call, not an
+  oversight — but do not cite this as precedent for bundling.
 - **A view switcher is a keyboard affordance** and goes in
   `ui/src/lib/ShortcutsOverlay.svelte` in the same commit — see CLAUDE.md.
 

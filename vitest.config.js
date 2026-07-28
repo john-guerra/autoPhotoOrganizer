@@ -50,7 +50,11 @@ export default defineConfig({
         // The real fix belongs upstream in reactive-widget-helper: an
         // `exports` map with an `import` condition pointing at
         // `dist/ReactiveWidget.es.js`. Drop this once that ships.
-        inline: [/@john-guerra\/d3-zoomable-axis/],
+        // Both: the importer AND the package that is actually broken. Inlining
+        // only the importer works today but stops covering it the moment a
+        // second dependency imports `reactive-widget-helper` — and the symptom
+        // is the same opaque "does not provide an export named 'default'".
+        inline: [/@john-guerra\/d3-zoomable-axis/, /reactive-widget-helper/],
       },
     },
   },

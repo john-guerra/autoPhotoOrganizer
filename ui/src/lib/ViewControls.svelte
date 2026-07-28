@@ -71,7 +71,11 @@
       disabled={switching}
       title={view.description}
     >
-      {#if switching && viewId !== view.id}
+      {#if switching}
+        <!-- On the ACTIVE button too. Gating this on `viewId !== view.id`
+             meant a re-limit from inside Auto Albums (which re-runs the same
+             fetch) rendered "✕ Auto Albums" disabled — a dead-looking control
+             with nothing saying why. -->
         Detecting…
       {:else}
         {viewId === view.id ? "✕" : view.icon}

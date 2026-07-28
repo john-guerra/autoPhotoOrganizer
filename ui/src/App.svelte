@@ -93,7 +93,8 @@
     crossedStep,
   } from "./lib/jobs.js";
   import { isTypingTarget } from "./lib/focus.js";
-  import Thumb, { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
+  // Only the named exports now — <Thumb> itself moved into views/GridView.svelte.
+  import { PEEK_STEP_PX, MAX_PEEK_DEPTH } from "./lib/Thumb.svelte";
   import Loupe from "./lib/Loupe.svelte";
   import ContextMenu from "./lib/ContextMenu.svelte";
   import ShortcutsOverlay from "./lib/ShortcutsOverlay.svelte";
@@ -150,13 +151,13 @@
   // `bind:` — see the note at the mount site.
   import GridView from "./lib/views/GridView.svelte";
   import {
-    VIEWS,
     GRID,
     ALBUMS,
     DEFAULT_VIEW_ID,
     getView,
     supports,
     nextViewId,
+    restorableViewId,
   } from "./lib/views/registry.js";
   import { loadAlbumPrefs, saveAlbumPrefs } from "./lib/albumPrefs.js";
   import SnapshotStrip from "./lib/SnapshotStrip.svelte";
@@ -210,8 +211,6 @@
   const APP_VERSION = __APP_VERSION__;
 
   const LS_KEY = "autogallery.lastDir";
-  /** Which registered view owns the main area (#155). */
-  const LS_VIEW_ID = "autogallery.viewId";
   const LS_ZOOM = "autogallery.zoom"; // legacy: an index, migrated by zoomLevel()
   const LS_ZOOM_PX = "autogallery.zoomPx";
   const LS_BURST_GAP = "autogallery.burstGapMs";
@@ -447,8 +446,11 @@
 
   // WHICH VIEW OWNS THE MAIN AREA (#155). One id resolved through
   // ui/src/lib/views/registry.js, replacing what used to be a boolean
-  // (`albumMode`) with branches in the markup, the toolbar and the keyboard
-  // handler — a third view would have been a second boolean.
+  // (`albumMode`) with branches in the markup and the toolbar, plus a bindable
+  // prop threaded through Toolbar to ViewControls — a third view would have
+  // been a second boolean and a second thread. (It was never in `onKeydown`;
+  // an earlier version of this comment said it was, which is exactly the kind
+  // of claim a comment should not make without checking.)
   //
   // Persisted, so the app reopens where you left it — with one exception,
   // below. `getView` falls back to the grid for an id a later build no longer
@@ -466,11 +468,15 @@
    * reopens on the grid, one keypress away from where you were.
    */
   function initialViewId() {
-    const stored = getView(localStorage.getItem(LS_VIEW_ID) ?? undefined);
-    return stored.dataSource === "feed" ? stored.id : DEFAULT_VIEW_ID;
+    // Through the house helpers, not raw localStorage: settings.js exists
+    // because "private-mode / disabled storage must never break the grid", and
+    // this runs during App's initialisation — a throw here blanks the whole
+    // app before anything renders. The RULE (which ids may be restored) lives
+    // in the registry, where it is unit-testable.
+    return restorableViewId(loadSetting("viewId", DEFAULT_VIEW_ID));
   }
   let activeView = $derived(getView(viewId));
-  $effect(() => localStorage.setItem(LS_VIEW_ID, viewId));
+  $effect(() => saveSetting("viewId", viewId));
 
   /** Read-only alias kept because "are we in the album review?" is asked in
    *  several places that have nothing to do with the registry (the scan reset,
@@ -901,6 +907,13 @@
    *  does, and `status` is overwritten by "N photos loaded" a beat later.
    *  Same trap as scanNotice, dupeNotice and tagNotice above. */
   let faceNotice = $state("");
+  /** "That doesn't work in this view" — its own channel, not `status`.
+   *  StatusBar renders `{error || status}`, so ANY pending error makes a
+   *  status-line refusal invisible: you press 3, nothing changes, and a dead
+   *  key is the exact complaint this guard was built to answer. `notice`
+   *  renders independently and is styled as a calm heads-up rather than a
+   *  failure, which is what a refusal is. Cleared on every view change. */
+  let viewNotice = $state("");
 
   async function refreshSemanticTags() {
     // A failure here must not surface: the picker is additive, and a library
@@ -2540,9 +2553,20 @@
    * would land on an empty view with the error posted somewhere behind it,
    * which reads as "the button did nothing".
    */
+  /** A view switch is in flight. Not derived from `detectingAlbums`: that is
+   *  one view's flag, and this must hold for any working-set view's fetch. */
+  let switchingView = $state(false);
+
   async function switchView(id) {
     const view = getView(id);
     if (view.id === viewId) return;
+    // ENTRY GUARD. The toolbar button was disabled while a fetch ran, but the
+    // keyboard path has no such thing and `onKeydown` does not check
+    // `e.repeat` — so holding V fired one 20,000-photo `fetchAlbumTimeline`
+    // per auto-repeat, each also re-applying the selection scope and
+    // rebuilding the feed.
+    if (switchingView) return;
+
     if (view.dataSource === "working-set") {
       const load = WORKING_SET_LOADERS[view.id];
       if (!load) {
@@ -2552,8 +2576,25 @@
         error = `Can't open ${view.label} — it needs data this build doesn't know how to load.`;
         return;
       }
-      if (!(await load())) return;
+      // RE-CHECK AFTER THE AWAIT, the same rule `withFeedTransaction` imposes
+      // on the feed window and for the same reason. Without it: press V (load
+      // A starts), press V again (B starts, `viewId` still "grid"), A lands →
+      // albums, press V → grid, then B lands → **albums**. The user asked for
+      // the grid and is sitting in the album review, with nothing anywhere
+      // reporting an error. Owning the switch means owning it across the
+      // await, not just at entry.
+      const from = viewId;
+      switchingView = true;
+      let ok = false;
+      try {
+        ok = await load();
+      } finally {
+        switchingView = false;
+      }
+      if (!ok) return;
+      if (viewId !== from) return; // someone switched under us; they win
     }
+    viewNotice = ""; // the refusal was about the view you just left
     viewId = view.id;
   }
 
@@ -2577,7 +2618,11 @@
    */
   function refuseUnsupported(capability, whatTheUserTried) {
     if (supports(viewId, capability)) return false;
-    status = `${whatTheUserTried} isn't available in ${activeView.label} — press V (or the ✕ on its button) to go back to the grid.`;
+    // "press V to switch views", not "press V to go back to the grid": V
+    // cycles to the NEXT view, which is only the grid while there are two of
+    // them — and this lives in the file whose whole purpose is making the
+    // third one cheap.
+    viewNotice = `${whatTheUserTried} isn't available in ${activeView.label} — press V to switch views, or ✕ on the ${activeView.label} button to return to the grid.`;
     return true;
   }
 
@@ -2610,7 +2655,11 @@
   });
 
   /** AlbumsView asked for a different max — persist it and re-pull the timeline
-   * (staying in album mode; detectAlbums keeps albumMode true). */
+   * (staying in album mode: `albumMode` is derived from `viewId`, which this
+   * path never changes — detectAlbums no longer sets it, it just returns
+   * whether the pull succeeded). NB that boolean is deliberately ignored here:
+   * on failure `detectAlbums` has already surfaced the error, and the previous
+   * albums stay on screen rather than the view emptying under the user. */
   async function onAlbumRelimit(newLimit) {
     albumLimit = Math.max(1, Math.round(Number(newLimit) || 0));
     localStorage.setItem("autogallery.albumLimit", String(albumLimit));
@@ -3550,20 +3599,6 @@
     return header.path?.at(-1)?.dimension === "folder"
       ? folderHeaderParts(header.path.at(-1).value)
       : [{ text: header.label, kind: "keep" }];
-  }
-
-  /** Svelte action: fade the clipped edge only when something IS hidden behind it.
-   * The header shows the END of the path (see .section-label), so what overflows
-   * is on the left — and CSS can't measure that, hence the class. `_parts` is here
-   * so the call site names it and the action re-measures when the label changes. */
-  function tailClip(el, _parts) {
-    const mark = () =>
-      el.parentElement?.classList.toggle(
-        "clipped",
-        el.scrollWidth > el.parentElement.clientWidth
-      );
-    mark();
-    return { update: mark };
   }
 
   /** Tooltip for the group toggle, from the registry (no parallel string table:
@@ -5527,6 +5562,11 @@
     if ((e.metaKey || e.ctrlKey) && (e.key === "a" || e.key === "A")) {
       if (isTypingTarget(e.target)) return;
       e.preventDefault();
+      // Select-all is a SELECTION mutation over the feed window, which a view
+      // declaring `select: false` is not showing you. It is handled up here,
+      // above the blanket meta/ctrl bail, so it needs its own check — the one
+      // further down guards only the plain keys.
+      if (refuseUnsupported("select", "Selecting photos")) return;
       if (e.shiftKey) await bulkDeselect();
       else await bulkSelect();
       return;
@@ -5602,6 +5642,12 @@
     // can only reach with the mouse is one you won't use mid-cull, and the
     // switcher is a keyboard affordance by contract (UI-CONTRACTS §3).
     if (e.key === "v" || e.key === "V") {
+      // Not while the loupe is up: it is an overlay, so the swap would happen
+      // BEHIND it (and, for a working-set view, kick off a bounded fetch) with
+      // nothing visible until Escape. The shortcut is documented under
+      // Navigation for the same reason — it is about the main area, and the
+      // loupe is not it.
+      if (loupeOpen) return;
       e.preventDefault();
       switchView(nextViewId(viewId));
       return;
@@ -5693,6 +5739,13 @@
       const entry = displayEntries[selected];
       if (entry?.stackId) {
         e.preventDefault();
+        // A persisted mutation on `displayEntries[selected]` — a photo in the
+        // feed window, which a view without a selection model is not showing.
+        // Gated on `select` because choosing a stack's cover is an act on a
+        // photo you picked out, and a view that cannot express "this one"
+        // cannot express it either.
+        if (!loupeOpen && refuseUnsupported("select", "Choosing a stack cover"))
+          return;
         toggleCover(entry);
       }
       return;
@@ -5706,6 +5759,13 @@
     // Enablement/logic live in the stack modules.
     if (key.toLowerCase() === "g") {
       e.preventDefault();
+      // Stacking and dissolving both act on the selection (or on the photo at
+      // the feed cursor) and both WRITE. Same reasoning as C.
+      if (
+        !loupeOpen &&
+        refuseUnsupported("select", "Grouping photos into stacks")
+      )
+        return;
       if (e.shiftKey) {
         const selectedMembers = selectedStackedMemberIds(selectedIds, stacks);
         if (selectedMembers.length) {
@@ -6322,7 +6382,14 @@
     {selectedCount}
     {status}
     {error}
-    notice={[scanNotice, dupeNotice, tagNotice, faceNotice, missingNotice]
+    notice={[
+      viewNotice,
+      scanNotice,
+      dupeNotice,
+      tagNotice,
+      faceNotice,
+      missingNotice,
+    ]
       .filter(Boolean)
       .join(" · ")}
     {thumbProgress}
