@@ -82,8 +82,8 @@
     // View.
     cyclingAll = false,
     globalViewMode = "full",
-    albumMode = $bindable(false),
-    detectingAlbums = false,
+    viewId,
+    switching = false,
 
     // Size / Sort.
     zoom = $bindable(2),
@@ -107,7 +107,7 @@
     ongroupbychange,
     oncycleall,
     onrevealcurrent,
-    ondetectalbums,
+    onswitchview,
     onsortchange,
     onhelp,
     onsettings,
@@ -203,11 +203,11 @@
       <ViewControls
         {cyclingAll}
         {globalViewMode}
-        bind:albumMode
-        {detectingAlbums}
+        {viewId}
+        {switching}
         {oncycleall}
         {onrevealcurrent}
-        {ondetectalbums}
+        {onswitchview}
       />
       <GridControls
         bind:zoom
