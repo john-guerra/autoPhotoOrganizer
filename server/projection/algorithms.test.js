@@ -5,6 +5,8 @@ import {
   offerableAlgorithms,
   isOfferable,
   defaultParams,
+  allParamSpecs,
+  paramsFor,
 } from "./algorithms.js";
 
 describe("offerableAlgorithms (#232)", () => {
@@ -69,6 +71,83 @@ describe("offerableAlgorithms (#232)", () => {
     for (const n of [0, -1, NaN, undefined, null]) {
       expect(Array.isArray(offerableAlgorithms(n))).toBe(true);
     }
+  });
+});
+
+describe("per-algorithm parameters (#237)", () => {
+  it("gives each algorithm ITS OWN parameters", () => {
+    // The gear shipped with UMAP's two knobs hardcoded, so choosing t-SNE
+    // offered nothing to tune and its perplexity was frozen in the worker.
+    const keys = (id) => allParamSpecs(id).map((s) => s.key);
+    expect(keys("umap")).toContain("nNeighbors");
+    expect(keys("umap")).not.toContain("perplexity");
+    expect(keys("tsne")).toContain("perplexity");
+    expect(keys("tsne")).toContain("epsilon");
+    expect(keys("tsne")).not.toContain("nNeighbors");
+  });
+
+  it("honours a t-SNE parameter instead of ignoring it", () => {
+    // The bug: perplexity was hardcoded in worker.js, so this value never
+    // reached the projection at all.
+    expect(
+      defaultParams({ algorithm: "tsne", perplexity: 45 }).perplexity
+    ).toBe(45);
+    expect(defaultParams({ algorithm: "tsne", epsilon: 120 }).epsilon).toBe(
+      120
+    );
+  });
+
+  it("clamps every parameter from its OWN spec, not a hand-written list", () => {
+    const p = defaultParams({
+      algorithm: "tsne",
+      perplexity: 99999,
+      epsilon: -50,
+    });
+    expect(p.perplexity).toBeLessThanOrEqual(100);
+    expect(p.epsilon).toBeGreaterThanOrEqual(1);
+  });
+
+  it("drops a parameter that belongs to a DIFFERENT algorithm", () => {
+    // Otherwise a stale field from the previously-selected algorithm rides
+    // into the cache key and every request misses.
+    const p = defaultParams({ algorithm: "tsne", nNeighbors: 40 });
+    expect("nNeighbors" in p).toBe(false);
+  });
+
+  it("gives PCA no tunables, and still an nEpochs for the job's total", () => {
+    // PCA is deterministic with nothing to tune — the gear says so rather than
+    // rendering an empty panel. But the job's total is read before the worker
+    // starts, so nEpochs must exist regardless (#208).
+    expect(paramsFor("pca")).toEqual([]);
+    expect(defaultParams({ algorithm: "pca" }).nEpochs).toBeGreaterThan(0);
+  });
+
+  it("every spec is renderable: bounds, a step, a default and help text", () => {
+    // The gear renders these directly, so a spec missing a bound is a control
+    // with no limit and a spec missing help is a number nobody can interpret.
+    for (const a of ALGORITHMS) {
+      for (const s of allParamSpecs(a.id)) {
+        expect(typeof s.label).toBe("string");
+        expect(s.label.length).toBeGreaterThan(0);
+        expect(s.help.length).toBeGreaterThan(10);
+        expect(s.min).toBeLessThan(s.max);
+        expect(s.step).toBeGreaterThan(0);
+        expect(s.default).toBeGreaterThanOrEqual(s.min);
+        expect(s.default).toBeLessThanOrEqual(s.max);
+      }
+    }
+  });
+
+  it("snaps whole-number parameters but keeps fractional ones", () => {
+    // nEpochs drives the job's total; a fractional total is a bar that never
+    // reaches 100%. minDist is genuinely fractional and must not be truncated
+    // to 0.
+    expect(defaultParams({ algorithm: "umap", nEpochs: 200.7 }).nEpochs).toBe(
+      200
+    );
+    expect(defaultParams({ algorithm: "umap", minDist: 0.35 }).minDist).toBe(
+      0.35
+    );
   });
 });
 

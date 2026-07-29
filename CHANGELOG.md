@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.1
+
+- **The face map's settings can actually be changed now.** Editing a value used
+  to be silently undone the next time anything refreshed, and only UMAP's
+  settings existed at all — picking t-SNE offered nothing to adjust. Each
+  method now brings its own settings, with an explanation of what each one
+  does, and PCA says plainly that it has none (#237).
+
 ## 2.19.0
 
 Packaged build. Everything in 2.18.46 below, plus:

@@ -91,9 +91,16 @@ const ALGO = {
   tsne(rows, n, params) {
     post({ type: "phase", phase: "Measuring distances" });
     const t = new TSNE({
-      epsilon: 10,
-      // Perplexity above n/3 makes the conditional distributions degenerate.
-      perplexity: Math.max(2, Math.min(30, Math.floor(n / 3))),
+      epsilon: params.epsilon ?? 10,
+      // The user's perplexity, but never above n/3: beyond that the
+      // conditional distributions degenerate and the layout is noise. Clamped
+      // HERE rather than in `defaultParams` because it depends on the member
+      // count, which the schema does not know — and clamping it into the cache
+      // key would make two different requests collide.
+      perplexity: Math.max(
+        2,
+        Math.min(params.perplexity ?? 30, Math.floor(n / 3) || 2)
+      ),
       dim: 2,
     });
     // The ONLY source of randomness in tsnejs, and it calls Math.random.
