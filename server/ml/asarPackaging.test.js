@@ -212,6 +212,126 @@ describe("ESM actually resolves from inside an asar under ELECTRON_RUN_AS_NODE",
   );
 });
 
+/**
+ * The projection worker (#232) is a DIFFERENT asar path from the ML worker,
+ * and the difference is not cosmetic.
+ *
+ * The ML worker is a spawned `ELECTRON_RUN_AS_NODE` child — a plain Node
+ * process, verified above. The projection worker is a `worker_threads` Worker
+ * created INSIDE the process, and in a packaged build the Express server runs
+ * inside Electron's main process. So the open question is whether Electron's
+ * asar interception is installed in a fresh worker isolate's module loader,
+ * such that an ESM worker entry at `/…/app.asar/server/projection/worker.js`
+ * resolves — along with its relative and bare imports.
+ *
+ * This is the exact shape of #67 and #203: it holds in dev (plain directories,
+ * plain Node) and would fail only in the artifact. If it ever goes red, the
+ * fix is one line — add `"server/projection/**"` to `build.asarUnpack` — and
+ * the Tier-A assertion below starts pinning it. #203's own conclusion was that
+ * adding that entry PRE-EMPTIVELY would have been dead weight, so it is not
+ * there.
+ */
+describe("worker_threads resolves from inside an asar (#232)", () => {
+  const binary = electronBinary();
+
+  if (!binary) {
+    console.warn(
+      "[asarPackaging] SKIPPED the worker_threads probe — the Electron " +
+        "binary is not installed."
+    );
+  }
+
+  const live = binary ? it : it.skip;
+
+  live(
+    "starts an ESM worker from the archive and lets it resolve its imports",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "autogallery-asar-wt-"));
+      try {
+        const app = join(root, "app");
+        const proj = join(app, "server", "projection");
+        mkdirSync(proj, { recursive: true });
+        mkdirSync(join(app, "node_modules", "packed"), { recursive: true });
+
+        writeFileSync(
+          join(app, "package.json"),
+          JSON.stringify({ name: "probe", version: "1.0.0", type: "module" })
+        );
+        writeFileSync(
+          join(app, "node_modules", "packed", "package.json"),
+          JSON.stringify({
+            name: "packed",
+            version: "1.0.0",
+            type: "module",
+            main: "index.js",
+          })
+        );
+        writeFileSync(
+          join(app, "node_modules", "packed", "index.js"),
+          'export const packed = "packed-ok";\n'
+        );
+
+        // The worker: a relative import, a bare import, and a message back —
+        // the same three links runProjection depends on.
+        writeFileSync(
+          join(proj, "seeded.js"),
+          'export const rel = "relative-ok";\n'
+        );
+        writeFileSync(
+          join(proj, "worker.js"),
+          [
+            'import { parentPort, workerData } from "node:worker_threads";',
+            'import { rel } from "./seeded.js";',
+            'import { packed } from "packed";',
+            "parentPort.postMessage({ rel, packed, got: workerData.n });",
+            "",
+          ].join("\n")
+        );
+
+        // The parent: creates the Worker by URL relative to ITSELF, exactly as
+        // runProjection.js does with `new URL("./worker.js", import.meta.url)`.
+        writeFileSync(
+          join(proj, "parent.js"),
+          [
+            'import { Worker } from "node:worker_threads";',
+            'const w = new Worker(new URL("./worker.js", import.meta.url), {',
+            "  workerData: { n: 7 },",
+            "  resourceLimits: { maxOldGenerationSizeMb: 512 },",
+            "});",
+            'w.on("message", (m) => {',
+            "  process.stdout.write(JSON.stringify(m));",
+            "  w.terminate();",
+            "});",
+            'w.on("error", (e) => {',
+            "  process.stderr.write(String(e && e.stack ? e.stack : e));",
+            "  process.exit(3);",
+            "});",
+            "",
+          ].join("\n")
+        );
+
+        const archive = join(root, "app.asar");
+        const asar = await import("@electron/asar");
+        await asar.createPackageWithOptions(app, archive, {});
+
+        const { code, stdout, stderr } = await run(binary, [
+          join(archive, "server", "projection", "parent.js"),
+        ]);
+
+        expect(code, `electron exited ${code}\n${stderr}`).toBe(0);
+        expect(JSON.parse(stdout)).toEqual({
+          rel: "relative-ok",
+          packed: "packed-ok",
+          got: 7,
+        });
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    60_000
+  );
+});
+
 /** @returns {Promise<{code: number|null, stdout: string, stderr: string}>} */
 function run(binary, args) {
   return new Promise((resolve, reject) => {

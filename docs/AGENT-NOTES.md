@@ -18,6 +18,25 @@ Keep this current: when one of these facts changes, update it in the same commit
   `existsSync(cwd/node_modules/onnxruntime-node)` and correctly reports false.
   It reads like a real regression in the ML layer and is not one. (Cost ~15
   minutes chasing a rename that had nothing to do with it, 2026-07-27.)
+- **The e2e index is wiped by the WEB SERVER COMMAND, not by `buildFixture`, and
+  the ordering is load-bearing.** Playwright starts `webServer` BEFORE
+  `globalSetup`, and `buildFixture` used to `rm -rf` the whole `e2e/.tmp` —
+  including the `index.db` the server had already opened. SQLite carried on
+  through the open file descriptor, so the suite worked perfectly, but the
+  database existed at **no path at all** and nothing outside the server process
+  could read or seed it. That was invisible for a long time because nothing
+  needed to. `playwright.config.js`'s `webServer.command` now clears
+  `e2e/.tmp/home` before `npm run dev` starts, and `buildFixture` clears only
+  the photos — same freshness guarantee, real file. This is what lets
+  `seedFaces` write rows no API can create (#232).
+
+- **A spec that seeds global state must clean it up, or it breaks specs it has
+  never heard of.** `seedFaces` leaves people in the index for the rest of the
+  RUN, and enough of them make both `PersonFilter` and the Face Map's switcher
+  button render — two extra toolbar controls. The toolbar folds by WIDTH (see
+  below), so that pushed unrelated groups into the overflow popover and turned
+  `tagFilter` and `timelineKeepFilter` red. Hence `clearFaces` in `afterAll`.
+
 - **Isolate destructive index tests.** Anything that removes folders, resets, or
   materialize-moves must run against a **temp `AUTOGALLERY_HOME`**, never the real
   `~/.autogallery/`. Playwright already points `AUTOGALLERY_HOME` at `e2e/.tmp/home`
@@ -272,6 +291,24 @@ tail -6` never terminates (the server never closes the pipe), so the Bash tool
   run, and a live probe packs a miniature asar and runs an ESM entry out of it
   under the real Electron binary (skipping loudly if that binary is absent).
   Verification is **darwin/arm64 only** — see #136 for the arch matrix.
+
+- **`worker_threads` DOES resolve from inside `app.asar` — verified, and the
+  #203 verification does not cover it.** The projection worker (#232) is a
+  different path from the ML worker: that one is a spawned
+  `ELECTRON_RUN_AS_NODE` child (a plain Node process), whereas this is a Worker
+  created _inside_ the process — and in a packaged build the Express server
+  runs inside Electron's main process. So the open question was whether
+  Electron's asar interception reaches a fresh worker isolate's module loader.
+  It does: an ESM worker entry at `/…/app.asar/server/projection/worker.js`
+  starts, and its relative and bare imports both resolve. Pinned by the
+  `worker_threads resolves from inside an asar (#232)` probe in
+  `server/ml/asarPackaging.test.js`, which packs a miniature asar and runs it
+  under the real Electron binary (skipping loudly if that binary is absent).
+  Verified darwin/arm64, 2026-07-28.
+
+  **There is deliberately no `server/projection/**` entry in `asarUnpack`.**
+  #203's own conclusion was that its pre-emptive entry "would have been dead
+  weight"; if the probe ever goes red, adding that one line is the fix.
 
 - **Place names are versioned, and the version is load-bearing.**
   `photos.gps_checked = 1` is a one-way door meaning "we read this file's EXIF

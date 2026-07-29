@@ -6,6 +6,24 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.46
+
+- **New Face Map view.** See everyone laid out by how alike their faces are,
+  lasso the ones who are really the same person, and merge and name them in one
+  action — with undo. Built for the case where grouping has split one person
+  across dozens of groups (#232).
+- **The map says what it is not showing you**: how many faces have never been
+  grouped, and how many people have been added since it was built. Two
+  differently-named people in one lasso stops and asks which name to keep
+  rather than quietly dropping one.
+- **Choose how it lays out** — UMAP, t-SNE or PCA — with the minimum number of
+  faces, neighbours and other settings in the map's own gear. Each option says
+  how well it actually separates people, and how long it will take. Maps are
+  kept, so going back to one you have already built is instant.
+- A view can now bring its own keyboard shortcuts, so they show up in the help
+  overlay (**?**) automatically and the app stops answering them with a message
+  about photos.
+
 ## 2.18.45
 
 - **Grouping faces no longer makes the app say it lost the server.** The pass
