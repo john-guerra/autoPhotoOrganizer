@@ -132,6 +132,20 @@ clustering split the person in the first place. This is the real case.
 A stricter variant (≥6 faces, 15 pairs) agrees on the ranking:
 t-SNE not run, umap-js 30.0%, MDS 10.0%, PCA 6.7%, SQDMDS 0.0%.
 
+**These two-significant-figure numbers are ONE DRAW EACH — do not read them as
+stable.** Re-running the identical split later, through the parameters the app
+actually ships (a fixed seed and 200 epochs; the runs above used umap-js's own
+unseeded draw and its 300-epoch default), UMAP scored **23.6% / 41.7%** rather
+than 27.8% / 58.3%. Same data, same method, same conclusion — but 36 pairs
+means each pair is worth 2.8 points, and the seed alone moves the result by
+more than the table's precision implies.
+
+The RANKING is what survives: 0.0% and 2.8% are not 23.6% under any draw. The
+individual percentages are not numbers to tune against, which is why
+`server/projection/projectionQuality.test.js` sets its floors at 10% / 25% —
+far enough below to catch "this projection has stopped meaning anything"
+(chance is ~0.025%) without failing on ordinary variance.
+
 ### What this says
 
 - **The neighbour-graph family is the only one that works.** t-SNE and UMAP
