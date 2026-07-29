@@ -82,6 +82,20 @@ export function simplify(path, eps = 2) {
 }
 
 /**
+ * How many points the last `caught` actually tested against the polygon.
+ *
+ * Exported so the pruning can be asserted DETERMINISTICALLY. The obvious test
+ * — "a lasso over 25,000 points finishes in under a frame" — is a wall-clock
+ * assertion, and this repo already knows how those end: `queryPlan.test.js`
+ * says a timing test "would be flaky and would only fail on someone's slow
+ * laptop". It did exactly that, passing locally and failing CI at 24ms.
+ *
+ * Counting comparisons measures the thing the timing was a proxy for, and it
+ * gives the same answer on every machine.
+ */
+export const lassoStats = { tested: 0 };
+
+/**
  * Indices inside `poly`.
  *
  * Prunes with the quadtree's rectangle visit first, so the cost is
@@ -106,6 +120,7 @@ export function caught(index, poly) {
   const xs = index._xs;
   const ys = index._ys;
   const out = [];
+  lassoStats.tested = 0;
 
   index.visit((node, x0, y0, x1, y1) => {
     // Prune whole quadrants that cannot intersect the lasso's bounds.
@@ -114,6 +129,7 @@ export function caught(index, poly) {
       let leaf = node;
       do {
         const i = leaf.data;
+        lassoStats.tested++;
         if (pointInPolygon(xs[i], ys[i], poly)) out.push(i);
       } while ((leaf = leaf.next));
     }

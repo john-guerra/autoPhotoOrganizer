@@ -2581,6 +2581,7 @@
       try {
         await loadFaceMap();
         await loadMapOptions();
+        await loadMapVisible();
         return true;
       } catch (e) {
         error = `Couldn't load the face map: ${e.message}`;
@@ -2655,6 +2656,44 @@
     mapStaleness = d.staleness ?? null;
     return true;
   }
+
+  /**
+   * Which people the current filter is showing.
+   *
+   * `null` means "no filter is narrowing anything" — distinct from an empty
+   * array, which means "the filter matches nobody" and must dim the whole map
+   * rather than silently showing everyone. Same null-vs-empty discipline the
+   * scope ids use server-side.
+   */
+  let mapVisibleIds = $state(null);
+
+  async function loadMapVisible() {
+    try {
+      const q = new URLSearchParams({ filter: JSON.stringify(displayFilter) });
+      const res = await fetch(`/api/projections/visible?${q}`);
+      if (!res.ok) {
+        mapVisibleIds = null;
+        return;
+      }
+      // The SERVER decides whether this spec narrows anything. The client
+      // always holds a filter object whose keys are mostly defaults, so
+      // testing its shape made the map announce "in view" while showing
+      // everyone.
+      const body = await res.json();
+      mapVisibleIds = body.narrows ? (body.personIds ?? []) : null;
+    } catch {
+      // A failed narrowing must not silently pretend the filter is off.
+      mapNotice = "Couldn't work out who is in the photos you're viewing.";
+      mapVisibleIds = null;
+    }
+  }
+
+  // Re-derive whenever the filter changes AND the map is the active view, so a
+  // filter change while browsing the grid costs nothing.
+  $effect(() => {
+    displayFilter;
+    if (viewId === FACE_MAP.id) untrack(() => loadMapVisible());
+  });
 
   async function loadMapOptions(params = mapParams) {
     const res = await fetch(`/api/projections/options?${mapQuery(params)}`);
@@ -2818,6 +2857,7 @@
         coverage: mapCoverage,
         staleness: mapStaleness,
         options: mapOptions,
+        visiblePersonIds: mapVisibleIds,
         loading: mapLoading,
         notice: mapNotice,
         onrun: runFaceMap,

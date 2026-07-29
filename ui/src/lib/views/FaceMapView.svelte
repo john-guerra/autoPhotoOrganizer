@@ -18,6 +18,13 @@
    * the domain lives here.
    */
   import ScatterCanvas from "../scatter/ScatterCanvas.svelte";
+  import {
+    DEFAULT_MIN_RADIUS,
+    DEFAULT_MAX_RADIUS,
+    RADIUS_LIMITS,
+    clampRadius,
+  } from "../scatter/lod.js";
+  import { loadSetting, saveSetting } from "../settings.js";
 
   let {
     /** `[{personId, x, y, name, coverFaceId, faces}]` from the current run. */
@@ -33,6 +40,14 @@
     staleness = null,
     /** `{members, algorithms:[{id,label,note,enabled,reason}], params}` */
     options = null,
+    /**
+     * Person ids the current filter is showing, or `null` for "no filter".
+     *
+     * Null and empty are deliberately different: empty means the filter
+     * matches nobody, and the map must say so rather than quietly showing
+     * everyone.
+     */
+    visiblePersonIds = null,
     loading = false,
     /** Anything App wants said (an error, a confirmation). */
     notice = "",
@@ -55,15 +70,31 @@
   // Parallel typed arrays built once per `points` identity, not per render:
   // rebuilding 5,499 Float32Arrays on every hover would be the jank the canvas
   // exists to avoid.
+  /** The filter as a Set, for O(1) membership in the pack loop. */
+  const visibleSet = $derived(
+    visiblePersonIds ? new Set(visiblePersonIds) : null
+  );
+
+  /**
+   * The points the map is currently SHOWING.
+   *
+   * Filtering hides rather than re-projects, so a person keeps their place
+   * whatever you filter to — which is what makes positions comparable across
+   * filters and is the whole value of having a map rather than a list.
+   */
+  const shown = $derived(
+    visibleSet ? points.filter((p) => visibleSet.has(p.personId)) : points
+  );
+
   const packed = $derived.by(() => {
-    const n = points.length;
+    const n = shown.length;
     const x = new Float32Array(n);
     const y = new Float32Array(n);
     const ids = new Int32Array(n);
     const size = new Float32Array(n);
     const group = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
-      const p = points[i];
+      const p = shown[i];
       x[i] = p.x;
       y[i] = p.y;
       ids[i] = p.personId;
@@ -86,7 +117,7 @@
   let lastUndo = $state(null);
 
   const n = (v) => (v ?? 0).toLocaleString();
-  const chosen = $derived([...selected].map((i) => points[i]).filter(Boolean));
+  const chosen = $derived([...selected].map((i) => shown[i]).filter(Boolean));
   const chosenFaces = $derived(chosen.reduce((s, p) => s + (p.faces || 0), 0));
   const chosenNames = $derived([
     ...new Set(chosen.map((p) => p.name).filter((x) => x && x.trim())),
@@ -94,6 +125,29 @@
 
   // --- the gear ------------------------------------------------------------
   let gearOpen = $state(false);
+
+  /**
+   * Dot size range, in CSS px at base zoom.
+   *
+   * A DISPLAY setting, not a run parameter: changing it redraws instantly and
+   * must not invalidate the cached projection or start a job. Persisted,
+   * because the right range depends on how crowded your map is and nobody
+   * wants to rediscover it every session.
+   */
+  let minRadius = $state(
+    clampRadius(
+      loadSetting("faceMapMinRadius", DEFAULT_MIN_RADIUS),
+      DEFAULT_MIN_RADIUS
+    )
+  );
+  let maxRadius = $state(
+    clampRadius(
+      loadSetting("faceMapMaxRadius", DEFAULT_MAX_RADIUS),
+      DEFAULT_MAX_RADIUS
+    )
+  );
+  $effect(() => saveSetting("faceMapMinRadius", minRadius));
+  $effect(() => saveSetting("faceMapMaxRadius", maxRadius));
   let minFaces = $state(2);
   let algo = $state("umap");
   let nNeighbors = $state(15);
@@ -218,7 +272,12 @@
 
     {#if runId}
       <span class="count" data-testid="map-count">
-        {n(points.length)} people · {String(algorithm).toUpperCase()}
+        {#if visibleSet}
+          <!-- Never let a filtered map look like the whole library. -->
+          {n(shown.length)} of {n(points.length)} people · in view
+        {:else}
+          {n(points.length)} people · {String(algorithm).toUpperCase()}
+        {/if}
       </span>
       {#if staleness?.missing > 0}
         <!-- The join keeps WHO is on the map truthful; only positions age.
@@ -312,6 +371,41 @@
         {/each}
       </fieldset>
 
+      <fieldset class="sizes">
+        <legend>Dot size (px)</legend>
+        <label>
+          Smallest
+          <input
+            type="range"
+            data-testid="map-min-radius"
+            min={RADIUS_LIMITS.min}
+            max={20}
+            step="0.5"
+            bind:value={minRadius}
+          />
+          <span class="num">{minRadius}</span>
+        </label>
+        <label>
+          Largest
+          <input
+            type="range"
+            data-testid="map-max-radius"
+            min={2}
+            max={RADIUS_LIMITS.max}
+            step="1"
+            bind:value={maxRadius}
+          />
+          <span class="num">{maxRadius}</span>
+        </label>
+        <!-- Say what the size MEANS, or a slider that changes dot sizes reads
+             as decoration rather than an encoding. -->
+        <p class="hint">
+          Area is proportional to how many photos someone is in, on a
+          square-root scale. These apply straight away — they do not rebuild the
+          map.
+        </p>
+      </fieldset>
+
       <details>
         <summary>Fine tuning</summary>
         <label>
@@ -360,21 +454,32 @@
       </p>
     </div>
   {:else}
-    <div class="canvas-wrap">
+    {#if visibleSet && shown.length === 0}
+      <div class="empty" data-testid="map-filtered-empty">
+        <p class="empty-title">Nobody here.</p>
+        <p class="empty-hint">
+          None of the {n(points.length)} people on the map appear in the photos you
+          are viewing. Widen the filter, or clear it, to see everyone again.
+        </p>
+      </div>
+    {/if}
+    <div class="canvas-wrap" class:hidden={visibleSet && shown.length === 0}>
       <ScatterCanvas
         bind:this={scatter}
         points={packed}
         bind:transform
+        {minRadius}
+        {maxRadius}
         highlighted={selected}
-        imageFor={(i) => crop(points[i])}
+        imageFor={(i) => crop(shown[i])}
         labelFor={(i) =>
-          `${points[i]?.name || "Unnamed"} · ${n(points[i]?.photos)} photo${
-            points[i]?.photos === 1 ? "" : "s"
-          } · ${n(points[i]?.faces)} faces`}
+          `${shown[i]?.name || "Unnamed"} · ${n(shown[i]?.photos)} photo${
+            shown[i]?.photos === 1 ? "" : "s"
+          } · ${n(shown[i]?.faces)} faces`}
         onlasso={onLasso}
         onpick={(i, e) => {
           if (e.shiftKey || e.altKey) return;
-          onpick?.(points[i]?.personId ?? null);
+          onpick?.(shown[i]?.personId ?? null);
         }}
       />
       {#if loading}
@@ -547,6 +652,29 @@
     padding: 3px 6px;
     font: inherit;
   }
+  .sizes {
+    min-width: 20rem;
+  }
+  .sizes label {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  .sizes input[type="range"] {
+    flex: 1 1 auto;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+    color: #ddd;
+    min-width: 2.5rem;
+    text-align: right;
+  }
+  .hint {
+    margin: 6px 0 0;
+    font-size: 0.75rem;
+    color: #888;
+    line-height: 1.45;
+  }
   .members {
     font-size: 0.8rem;
     color: #888;
@@ -604,6 +732,9 @@
     position: relative;
     flex: 1 1 auto;
     min-height: 0;
+  }
+  .canvas-wrap.hidden {
+    display: none;
   }
   .overlay-note {
     position: absolute;

@@ -13,6 +13,7 @@
  * stale, which the view reports; who exists stays truthful for free.
  */
 import { createHash } from "node:crypto";
+import { buildFilter } from "./filters.js";
 
 /**
  * A stable digest of a params object.
@@ -171,6 +172,46 @@ export function pruneRuns(db, { kind, model, keep = 3 }) {
       db.prepare(`DELETE FROM projection_runs WHERE id = ?`).run(id);
     }
   })();
+}
+
+/**
+ * Which people appear in the photos the current filter is showing (#232).
+ *
+ * The map is a SNAPSHOT of everyone, and filtering it hides points rather than
+ * re-projecting. That is a deliberate departure from how `minFaces` works, and
+ * the reason is what the two filters are FOR.
+ *
+ * `minFaces` removes noise that distorts the layout — a projection of a subset
+ * is not a subset of the projection, so it has to be a run parameter. A
+ * visibility filter is the opposite: you want to see WHERE these people sit
+ * among everyone, and re-laying-out would rearrange the map you have just
+ * learned and cost several seconds on every filter change. Hiding keeps the
+ * positions comparable across filters, which is the whole value of a map.
+ *
+ * Reuses `buildFilter`, so every facet the feed supports — rating, keep-only
+ * scope, folder, text, person, tags — narrows the map identically, and a new
+ * facet works here the day it works there.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @param {object} filterSpec as produced by the API's filter parser
+ * @returns {number[]} person ids, ascending
+ */
+export function personIdsMatchingFilter(db, model, filterSpec) {
+  const { sql, params } = buildFilter(filterSpec ?? {});
+  return db
+    .prepare(
+      `SELECT DISTINCT photo_faces.person_id AS id
+         FROM photo_faces
+         JOIN photos ON photos.id = photo_faces.photo_id
+        WHERE photo_faces.model = ?
+          AND photo_faces.person_id IS NOT NULL
+          AND photos.stale = 0
+          AND (${sql})
+        ORDER BY photo_faces.person_id`
+    )
+    .all(model, ...params)
+    .map((r) => r.id);
 }
 
 /**

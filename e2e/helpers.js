@@ -251,6 +251,7 @@ export const faceMap = {
   conflict: (page) => page.locator('[data-testid="tray-conflict"]'),
   undo: (page) => page.locator('[data-testid="map-undo"]'),
   undoBtn: (page) => page.locator('[data-testid="map-undo-btn"]'),
+  filteredEmpty: (page) => page.locator('[data-testid="map-filtered-empty"]'),
 
   /**
    * Build the map and wait for the dots.
@@ -392,6 +393,25 @@ export async function clearFaces() {
       DELETE FROM projection_runs;
       DELETE FROM person_merge_undo;
     `);
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Clear every rating, straight in the index.
+ *
+ * `resetRatings` POSTs one request per photo, which is fine for the 19-photo
+ * fixture and pointless here — this runs in a beforeEach and only needs the
+ * rows zeroed. Same scratch-index-only guarantee as `seedFaces`.
+ */
+export async function clearRatings() {
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(
+    join(process.cwd(), "e2e", ".tmp", "home", "index.db")
+  );
+  try {
+    db.prepare(`UPDATE photos SET rating = 0`).run();
   } finally {
     db.close();
   }

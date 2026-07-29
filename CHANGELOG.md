@@ -6,6 +6,22 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.0
+
+Packaged build. Everything in 2.18.46 below, plus:
+
+- **The map is sized by photos, and you control the range.** A dot's area is
+  proportional to how many photos that person appears in, on a square-root
+  scale, with smallest/largest sliders in the map's gear. Faces carry the same
+  encoding as the dots now, so it survives at the zoom where you are actually
+  reading them.
+- **Filter the map to what you are viewing.** Narrow the feed — a keep-only
+  set, a rating, a folder — and the map shows only the people in those photos,
+  keeping everyone's position so you can compare across filters. It says
+  "50 of 120 people · in view" rather than quietly looking like the whole
+  library, and tells you when the filter matches nobody.
+- **Zoom in much further**, and the map no longer blinks while faces load.
+
 ## 2.18.46
 
 - **New Face Map view.** See everyone laid out by how alike their faces are,

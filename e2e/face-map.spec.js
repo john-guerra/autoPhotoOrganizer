@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { join } from "node:path";
 import {
   openApp,
   trackPageErrors,
@@ -6,6 +7,7 @@ import {
   faceMap,
   seedFaces,
   clearFaces,
+  clearRatings,
   personCount,
 } from "./helpers.js";
 
@@ -27,6 +29,62 @@ import {
  */
 const PEOPLE = 120;
 
+/** Rate every photo that the first `n` seeded people appear in. */
+async function ratePhotosOfFirstPeople(page, n) {
+  const r = await page.request.post("/api/e2e-rate-people", {
+    data: { people: n },
+    failOnStatusCode: false,
+  });
+  if (r.ok()) return (await r.json()).rated;
+  // No test-only route in the app (correctly). Do it through the index, the
+  // same way seedFaces does.
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(
+    join(process.cwd(), "e2e", ".tmp", "home", "index.db")
+  );
+  try {
+    const ids = db
+      .prepare(
+        `SELECT DISTINCT photo_id FROM photo_faces
+          WHERE person_id IS NOT NULL AND person_id <= ?`
+      )
+      .all(n)
+      .map((x) => x.photo_id);
+    if (!ids.length) return 0;
+    db.prepare(
+      `UPDATE photos SET rating = 5 WHERE id IN (${ids.join(",")})`
+    ).run();
+    return ids.length;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Seed the minimum-rating filter and reopen the map.
+ *
+ * An INIT script rather than `page.evaluate` + reload: `openApp` registers its
+ * own init script that calls `localStorage.clear()` on every navigation, so a
+ * value written into the live page is wiped by the very reload meant to apply
+ * it. Init scripts run in registration order, so this one lands after the
+ * clear.
+ *
+ * Seeding the storage key beats driving the toolbar's rating widget — a test
+ * about the MAP should not break when that widget's markup changes.
+ */
+async function applyMinRating(page, stars) {
+  await page.addInitScript((s) => {
+    window.localStorage.setItem(
+      "autogallery.filter",
+      JSON.stringify({ minRating: s })
+    );
+  }, stars);
+  await page.reload();
+  await views.show(page, "face-map");
+  await expect(faceMap.root(page)).toBeVisible();
+  await page.waitForTimeout(1000);
+}
+
 test.describe("face map @p1", () => {
   // Leave the library as we found it. Seeded people outlive this file, and
   // enough of them render two extra toolbar controls (PersonFilter + the map's
@@ -40,7 +98,14 @@ test.describe("face map @p1", () => {
     // The generated fixture has no faces in it and detection is unreachable in
     // e2e, so the rows detection would have written are seeded directly. See
     // seedFaces — it can only ever touch e2e/.tmp/home.
+    //
+    // Ratings are reset here TOO, and that is not tidiness: ratings live in
+    // SQLite and outlive a test, so the filter tests below rate photos and the
+    // next test inherits them. "Nothing is rated, so this filter matches
+    // nobody" then quietly becomes false and the test fails for a reason that
+    // has nothing to do with the map (docs/TESTING.md's rule 2).
     await seedFaces(PEOPLE, 2);
+    await clearRatings();
   });
 
   test("says what it cannot show, and builds a map on request", async ({
@@ -246,6 +311,53 @@ test.describe("face map @p1", () => {
     }
     await expect(faceMap.root(page)).toBeVisible();
     await expect(faceMap.empty(page)).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("narrows to the people in the photos you are viewing @p1", async ({
+    page,
+  }) => {
+    // "Show me only the faces of the keep-only photos." The map hides rather
+    // than re-projects, so a person keeps their place whatever you filter to —
+    // which is what makes positions comparable across filters.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await expect(faceMap.count(page)).toContainText(String(PEOPLE));
+
+    // Rate the photos of a handful of people, then filter to rated.
+    const rated = await ratePhotosOfFirstPeople(page, 3);
+    expect(rated).toBeGreaterThan(0);
+
+    await page.reload();
+    await views.show(page, "face-map");
+    await applyMinRating(page, 5);
+
+    // The count must SAY it is narrowed, not quietly look like the library.
+    await expect(faceMap.count(page)).toContainText("in view");
+    const shown = Number(
+      (await faceMap.count(page).innerText())
+        .match(/^([\d,]+)/)[1]
+        .replace(/,/g, "")
+    );
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThan(PEOPLE);
+    expect(errors).toEqual([]);
+  });
+
+  test("says so when the filter matches nobody, instead of an empty canvas", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+
+    // Nothing is rated, so a 5-star filter matches no photos at all.
+    await applyMinRating(page, 5);
+    await expect(faceMap.filteredEmpty(page)).toBeVisible();
+    await expect(faceMap.filteredEmpty(page)).toContainText(/Nobody here/i);
     expect(errors).toEqual([]);
   });
 

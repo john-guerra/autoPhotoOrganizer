@@ -15,13 +15,19 @@ import {
   simplify,
   caught,
   applyLasso,
+  lassoStats,
 } from "./lasso.js";
 import {
   shouldDrawImages,
   imageSide,
   dotRadius,
-  MIN_RADIUS,
-  MAX_RADIUS,
+  sizeAnchor,
+  zoomGain,
+  clampRadius,
+  DEFAULT_MIN_RADIUS,
+  DEFAULT_MAX_RADIUS,
+  RADIUS_LIMITS,
+  MIN_IMAGE_SIDE,
 } from "./lod.js";
 
 describe("transform", () => {
@@ -215,28 +221,46 @@ describe("lasso", () => {
     expect(s[s.length - 1]).toEqual(path[path.length - 1]);
   });
 
-  it("catches 25,000 points in under a frame", () => {
-    // The lasso runs on release with the whole map loaded. If this is not
-    // sub-frame the count lags the cursor and the drag stutters.
+  it("PRUNES: a small lasso over a big map tests only nearby points", () => {
+    // The lasso runs on release with the whole map loaded, so its cost has to
+    // track what it encloses rather than the map's size — otherwise the count
+    // lags the cursor on a real library.
+    //
+    // Asserted by COUNTING COMPARISONS, not by the clock. The obvious version
+    // ("finishes in under 16ms") passed locally and failed CI at 24ms, which
+    // is precisely what queryPlan.test.js warns about: a timing test only ever
+    // fails on someone's slower machine. Comparisons give the same answer
+    // everywhere.
     const n = 25_000;
     const xs = new Float32Array(n);
     const ys = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-      xs[i] = (i % 500) / 10;
+      xs[i] = (i % 500) / 10; // a 50 x 50 grid of points
       ys[i] = Math.floor(i / 500) / 10;
     }
     const ix = buildIndex(xs, ys);
-    const poly = [
+
+    // A lasso over roughly 1/25th of the extent.
+    const small = [
       [0, 0],
-      [25, 0],
-      [25, 3],
-      [0, 3],
+      [10, 0],
+      [10, 5],
+      [0, 5],
     ];
-    const t0 = performance.now();
-    const got = caught(ix, poly);
-    const ms = performance.now() - t0;
+    const got = caught(ix, small);
     expect(got.length).toBeGreaterThan(0);
-    expect(ms).toBeLessThan(16);
+    // Without pruning this would be all 25,000. Generous bound: the quadtree
+    // visits whole nodes, so it tests somewhat more than it returns.
+    expect(lassoStats.tested).toBeLessThan(n / 4);
+
+    // And the whole map still works — pruning must not lose points.
+    const all = caught(ix, [
+      [-1, -1],
+      [100, -1],
+      [100, 100],
+      [-1, 100],
+    ]);
+    expect(all.length).toBe(n);
   });
 });
 
@@ -271,35 +295,122 @@ describe("lod", () => {
     expect(shouldDrawImages(NaN)).toBe(false);
   });
 
-  it("keeps the drawn image between a legible floor and a sane ceiling", () => {
-    expect(imageSide(12)).toBeGreaterThanOrEqual(16);
-    expect(imageSide(10_000)).toBeLessThanOrEqual(96);
-  });
-
-  it("sizes dots on a SQRT scale, so AREA tracks the weight", () => {
-    // sqrt, not linear: a person in 3,512 faces exists in this library, and a
-    // linear radius would give them 100x the area of a 4-photo person for 100x
-    // the weight — reading as two orders of magnitude more than it is.
-    //
-    // Compared BELOW the cap on purpose. At the extremes both curves clamp, so
-    // a test there compares the cap with the cap and passes against a linear
-    // implementation — which is exactly what an earlier version of this did.
-    //
-    // Quadrupling the weight should roughly DOUBLE the radius above the floor.
-    const r = (w) => dotRadius(w, 1) - MIN_RADIUS;
+  it("sizes points on a SQRT scale, so AREA tracks the weight", () => {
+    // sqrt, not linear: a person in 400 photos should not read as 100x the
+    // presence of one in 4.
+    const anchor = { lo: 0, hi: 100 };
+    const floor = DEFAULT_MIN_RADIUS * zoomGain(100);
+    const r = (w) => dotRadius(w, 100, anchor) - floor;
+    // Quadrupling the weight doubles the radius above the floor.
     expect(r(16) / r(4)).toBeCloseTo(2, 1);
-    expect(r(100) / r(25)).toBeCloseTo(2, 1);
-    // ...which a linear scale could not do (it would be 4x).
-    expect(r(16) / r(4)).toBeLessThan(3);
+    expect(r(64) / r(16)).toBeCloseTo(2, 1);
+    expect(r(16) / r(4)).toBeLessThan(3); // a linear scale would be 4x
   });
 
-  it("anchors both ends: clickable at the tail, not a blob at the head", () => {
-    // Most points weigh 1 — they must still be hittable. And the handful of
-    // enormous ones must not swallow the neighbours you are trying to lasso.
-    expect(dotRadius(1, 1)).toBeGreaterThanOrEqual(MIN_RADIUS);
-    expect(dotRadius(0, 1)).toBeGreaterThanOrEqual(MIN_RADIUS);
-    expect(dotRadius(3512, 400)).toBeLessThanOrEqual(MAX_RADIUS);
-    expect(dotRadius(1e9, 400)).toBeLessThanOrEqual(MAX_RADIUS);
+  it("anchors to a QUANTILE, so one giant does not flatten everyone", () => {
+    // The failure this exists to stop: photo counts are extremely skewed, and
+    // anchoring to the maximum spends the whole radius range on a single
+    // 3,512-photo person, rendering the other 5,498 within a few pixels of
+    // each other. That is "they all look the same size".
+    const weights = [
+      ...Array(5000).fill(1),
+      ...Array(400).fill(5),
+      ...Array(80).fill(30),
+      3512,
+    ];
+    const anchor = sizeAnchor(weights);
+    expect(anchor.hi).toBeLessThan(100);
+    expect(anchor.hi).toBeGreaterThan(anchor.lo);
+
+    // With the quantile anchor the COMMON range is visibly separated...
+    const k = 100;
+    const spread = dotRadius(5, k, anchor) - dotRadius(1, k, anchor);
+    expect(spread).toBeGreaterThan(4);
+
+    // ...whereas anchoring to the max collapses it.
+    const flat =
+      dotRadius(5, k, { lo: 1, hi: 3512 }) -
+      dotRadius(1, k, { lo: 1, hi: 3512 });
+    expect(flat).toBeLessThan(spread / 3);
+  });
+
+  it("clamps above the anchor rather than growing without bound", () => {
+    const anchor = { lo: 0, hi: 10 };
+    expect(dotRadius(1e6, 100, anchor)).toBeCloseTo(
+      dotRadius(10, 100, anchor),
+      5
+    );
+  });
+
+  it("draws UNIFORM data at the floor, not all at the ceiling", () => {
+    // A young library — everyone in the same number of photos — has nothing to
+    // encode. Drawing every point at the maximum says "these are all
+    // enormous" and merges the map into one blob, which is what the e2e
+    // fixture actually looked like.
+    const uniform = sizeAnchor(Array(120).fill(2));
+    expect(uniform.lo).toBe(uniform.hi);
+    expect(dotRadius(2, 1, uniform)).toBeCloseTo(DEFAULT_MIN_RADIUS, 5);
+  });
+
+  it("uses the configured range at base zoom", () => {
+    // The defaults John asked for: 1.5px for the long tail, 20px at the top.
+    // Hit-testing does not use the radius, so 1.5 is still easy to click.
+    expect(DEFAULT_MIN_RADIUS).toBe(1.5);
+    expect(DEFAULT_MAX_RADIUS).toBe(20);
+    const anchor = { lo: 0, hi: 10 };
+    expect(dotRadius(anchor.lo, 1, anchor)).toBeCloseTo(1.5, 5);
+    expect(dotRadius(anchor.hi, 1, anchor)).toBeCloseTo(20, 5);
+  });
+
+  it("honours a CUSTOM range, so the gear controls actually do something", () => {
+    const anchor = { lo: 0, hi: 10 };
+    expect(dotRadius(anchor.lo, 1, anchor, 4, 40)).toBeCloseTo(4, 5);
+    expect(dotRadius(anchor.hi, 1, anchor, 4, 40)).toBeCloseTo(40, 5);
+    const r = (w) => dotRadius(w, 1, { lo: 0, hi: 100 }, 4, 40) - 4;
+    expect(r(16) / r(4)).toBeCloseTo(2, 1); // sqrt survives a custom range
+  });
+
+  it("clamps a nonsense range rather than producing an unusable map", () => {
+    expect(clampRadius(-5, 1.5)).toBe(RADIUS_LIMITS.min);
+    expect(clampRadius(1e6, 1.5)).toBe(RADIUS_LIMITS.max);
+    expect(clampRadius("x", 1.5)).toBe(1.5);
+    // An inverted range must not invert the scale.
+    expect(dotRadius(10, 1, 10, 30, 5)).toBeGreaterThanOrEqual(
+      dotRadius(0, 1, 10, 30, 5)
+    );
+  });
+
+  it("grows with zoom, so zooming in enlarges faces rather than only spreading them", () => {
+    const anchor = { lo: 0, hi: 20 };
+    expect(zoomGain(500)).toBeGreaterThan(zoomGain(20));
+    expect(dotRadius(10, 500, anchor)).toBeGreaterThan(
+      dotRadius(10, 20, anchor)
+    );
+    // The gain applies to the WHOLE range, so the ratio the user configured
+    // survives zooming — which is what stops faces flattening out at exactly
+    // the zoom where you are reading them.
+    const near = dotRadius(10, 20, anchor) / dotRadius(1, 20, anchor);
+    const far = dotRadius(10, 500, anchor) / dotRadius(1, 500, anchor);
+    expect(far).toBeCloseTo(near, 5);
+    // ...but bounded, or one face fills the viewport.
+    expect(zoomGain(1e9)).toBeLessThanOrEqual(6);
+  });
+
+  it("draws a crop at the POINT's size, so faces carry the encoding too", () => {
+    // The bug this pins: `imageSide` used to depend only on zoom, so at the
+    // very zoom where you read faces every person was drawn identically and
+    // the size encoding disappeared.
+    const anchor = { lo: 0, hi: 50 };
+    const small = imageSide(100, 1, anchor);
+    const big = imageSide(100, 50, anchor);
+    expect(big).toBeGreaterThan(small * 1.5);
+    expect(small).toBeGreaterThanOrEqual(MIN_IMAGE_SIDE);
+  });
+
+  it("sizeAnchor is total for empty or nonsense input", () => {
+    expect(sizeAnchor([])).toEqual({ lo: 0, hi: 1 });
+    expect(sizeAnchor(null)).toEqual({ lo: 0, hi: 1 });
+    expect(sizeAnchor([0, 0, 0])).toEqual({ lo: 0, hi: 0 });
   });
 });
 

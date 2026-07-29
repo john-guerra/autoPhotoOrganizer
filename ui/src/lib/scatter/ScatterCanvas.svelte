@@ -28,7 +28,11 @@
     shouldDrawImages,
     imageSide,
     dotRadius,
+    sizeAnchor,
+    maxRadiusAt,
     IMAGE_CACHE_MAX,
+    DEFAULT_MIN_RADIUS,
+    DEFAULT_MAX_RADIUS,
   } from "./lod.js";
 
   let {
@@ -49,6 +53,9 @@
     onhover,
     /** `(index, event) => void` */
     onpick,
+    /** Point size range in CSS px at base zoom — the user's own setting. */
+    minRadius = DEFAULT_MIN_RADIUS,
+    maxRadius = DEFAULT_MAX_RADIUS,
     /** `{k, tx, ty}`; the parent owns reset and zoom-to-fit. */
     transform = $bindable(),
   } = $props();
@@ -65,6 +72,14 @@
   let tip = $state(null);
 
   const n = $derived(points?.ids?.length ?? 0);
+
+  /**
+   * What the size scale tops out at, recomputed only when the data changes.
+   * A high quantile rather than the maximum — see `sizeAnchor`.
+   */
+  const anchor = $derived(
+    points?.size ? sizeAnchor(points.size) : { lo: 0, hi: 1 }
+  );
 
   /**
    * The spatial index, rebuilt only when the DATA changes — keyed on the id
@@ -197,7 +212,8 @@
     ctx.clearRect(0, 0, width, height);
     const t = transform;
     const drawImages = shouldDrawImages(t.k);
-    const side = imageSide(t.k);
+    // The largest anything can be drawn at this zoom, for culling only.
+    const maxSide = maxRadiusAt(t.k, maxRadius) * 2;
 
     // TWO PASSES, and the reason is visible the moment you zoom in: drawing a
     // dot and then its image per point means point 500's DOT lands on top of
@@ -207,12 +223,17 @@
     const drawn = [];
     for (let i = 0; i < n; i++) {
       const [px, py] = toScreen(points.x[i], points.y[i], t);
-      // Cull generously: an image is drawn centred, so allow for its half-side.
-      if (px < -side || py < -side || px > width + side || py > height + side) {
+      // Cull generously: everything is drawn centred, so allow a half-side.
+      if (
+        px < -maxSide ||
+        py < -maxSide ||
+        px > width + maxSide ||
+        py > height + maxSide
+      ) {
         continue;
       }
       const w = points.size ? points.size[i] : 1;
-      const r = dotRadius(w, t.k);
+      const r = dotRadius(w, t.k, anchor, minRadius, maxRadius);
 
       // The dot is always drawn. An unloaded crop is then a dot rather than a
       // hole, so the map never looks broken mid-load.
@@ -232,8 +253,19 @@
     for (let k = 0; k < drawn.length; k += 3) {
       const img = imageAt(imageFor(drawn[k]));
       if (!img) continue;
+      const i = drawn[k];
       const px = drawn[k + 1];
       const py = drawn[k + 2];
+      // The crop is the POINT's diameter, so a face carries the same size
+      // encoding as its dot. A fixed side here is what made every face look
+      // identical at exactly the zoom where you are reading them.
+      const side = imageSide(
+        t.k,
+        points.size ? points.size[i] : 1,
+        anchor,
+        minRadius,
+        maxRadius
+      );
       ctx.save();
       ctx.beginPath();
       ctx.arc(px, py, side / 2, 0, Math.PI * 2);
@@ -242,7 +274,7 @@
       ctx.restore();
       // A thin ring so adjacent faces read as separate people rather than a
       // collage.
-      ctx.strokeStyle = points.group?.[drawn[k]] ? "#2e8b57" : "#00000088";
+      ctx.strokeStyle = points.group?.[i] ? "#2e8b57" : "#00000088";
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(px, py, side / 2, 0, Math.PI * 2);
@@ -267,10 +299,14 @@
         const [px, py] = toScreen(points.x[i], points.y[i], t);
         if (px < -20 || py < -20 || px > width + 20 || py > height + 20)
           continue;
-        const r = Math.max(
-          5,
-          dotRadius(points.size ? points.size[i] : 1, t.k) + 3
-        );
+        const r =
+          dotRadius(
+            points.size ? points.size[i] : 1,
+            t.k,
+            anchor,
+            minRadius,
+            maxRadius
+          ) + 3;
         ctx.beginPath();
         ctx.arc(px, py, r, 0, Math.PI * 2);
         ctx.stroke();
@@ -282,7 +318,19 @@
       ctx.strokeStyle = "#fff";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(px, py, Math.max(6, imageSide(t.k) / 2 + 3), 0, Math.PI * 2);
+      ctx.arc(
+        px,
+        py,
+        dotRadius(
+          points.size ? points.size[hovered] : 1,
+          t.k,
+          anchor,
+          minRadius,
+          maxRadius
+        ) + 3,
+        0,
+        Math.PI * 2
+      );
       ctx.stroke();
     }
 
@@ -340,10 +388,20 @@
     transform;
     highlighted;
     hovered;
+    minRadius;
+    maxRadius;
     if (width > 0 && height > 0) scheduleDraw();
   });
 
   // --- interaction ---------------------------------------------------------
+
+  /** Hit radius in DATA units, from the largest thing drawn at this zoom, so
+   *  the target matches what the eye sees rather than a fixed 14px. */
+  function hitRadiusData() {
+    // A generous, size-INDEPENDENT target: a 1.5px dot must still be easy to
+    // click, so the hit radius follows the zoom rather than the drawn size.
+    return Math.max(10, maxRadiusAt(transform.k, maxRadius)) / transform.k;
+  }
 
   function localPoint(e) {
     const r = host.getBoundingClientRect();
@@ -388,7 +446,7 @@
     const [dx, dy] = toData(px, py, transform);
     // Hit radius in DATA units, derived from a constant screen radius, so the
     // target stays the same physical size at every zoom.
-    const hit = nearest(index, dx, dy, 14 / transform.k);
+    const hit = nearest(index, dx, dy, hitRadiusData());
     if (hit !== hovered) {
       hovered = hit;
       onhover?.(hit);
@@ -418,7 +476,7 @@
       ensureIndex();
       const [px, py] = localPoint(e);
       const [dx, dy] = toData(px, py, transform);
-      const hit = index ? nearest(index, dx, dy, 14 / transform.k) : -1;
+      const hit = index ? nearest(index, dx, dy, hitRadiusData()) : -1;
       if (hit >= 0) onpick?.(hit, e);
       scheduleDraw();
       return;

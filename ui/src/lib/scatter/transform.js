@@ -11,7 +11,15 @@
  */
 
 export const MIN_ZOOM = 0.05;
-export const MAX_ZOOM = 400;
+/**
+ * How far in you can go.
+ *
+ * Generous on purpose: a dense blob on a 5,499-point map is a few hundred
+ * people occupying a handful of pixels, and telling them apart means getting
+ * close enough that each face fills real estate. The cap exists only to stop
+ * a runaway wheel gesture producing a transform nothing can recover from.
+ */
+export const MAX_ZOOM = 4000;
 
 /** @param {number} k */
 export const clampZoom = (k) =>

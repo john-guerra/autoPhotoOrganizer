@@ -118,6 +118,7 @@ import {
   distinctNames,
 } from "./db/personMerge.js";
 import { personCentroids } from "./db/personCentroids.js";
+import { buildFilter } from "./db/filters.js";
 import {
   paramsKey,
   findRun,
@@ -126,6 +127,7 @@ import {
   pointsForRun,
   pruneRuns,
   runStaleness,
+  personIdsMatchingFilter,
 } from "./db/projections.js";
 import {
   offerableAlgorithms,
@@ -2115,6 +2117,30 @@ export function registerApi(app, { ml } = {}) {
       points: pointsForRun(db, run.id),
       staleness: runStaleness(db, run.id, { minFaces: params.minFaces }),
       coverage,
+    });
+  });
+
+  /**
+   * Which people are in the photos the current filter is showing (#232).
+   *
+   * Separate from `/current` because the FILTER changes far more often than
+   * the map does: narrowing to a keep-only set should be instant and must not
+   * refetch 5,499 points, let alone re-project them.
+   */
+  app.get("/api/projections/visible", (req, res) => {
+    const { spec: filterSpec, error: filterError } = parseFilterParam(req);
+    if (filterError) return res.status(400).json({ error: filterError });
+    const modelId = faceModelIdOf(req.query.model);
+    // Whether the spec NARROWS anything is the server's to answer: the client
+    // always holds a filter object, and most of its keys are defaults. Asking
+    // "does this object have keys" made the map report "in view" while showing
+    // everyone, which is a lie about the one thing this endpoint exists for.
+    const narrows = buildFilter(filterSpec).sql !== "1=1";
+    res.json({
+      narrows,
+      personIds: narrows
+        ? personIdsMatchingFilter(getDb(), modelId, filterSpec)
+        : null,
     });
   });
 

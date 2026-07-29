@@ -14,6 +14,7 @@ import {
   pointsForRun,
   pruneRuns,
   runStaleness,
+  personIdsMatchingFilter,
 } from "./projections.js";
 
 const MODEL = "buffalo_s";
@@ -312,6 +313,57 @@ describe("the run cache (#232)", () => {
     expect(db.prepare(`SELECT COUNT(*) n FROM projection_runs`).get().n).toBe(
       1
     );
+  });
+});
+
+describe("personIdsMatchingFilter (#232)", () => {
+  it("returns everyone when nothing is filtering", () => {
+    const db = getDb();
+    makePerson(db, 10);
+    makePerson(db, 11);
+    expect(personIdsMatchingFilter(db, MODEL, {})).toEqual([10, 11]);
+  });
+
+  it("narrows to the people in the photos the filter is showing", () => {
+    // The point of the feature: filter the feed to a keep-only set, and the
+    // map shows only the people who are in it.
+    const db = getDb();
+    makePerson(db, 10);
+    makePerson(db, 11);
+    // Rate one person's photos so a rating filter separates them.
+    db.prepare(
+      `UPDATE photos SET rating = 5
+        WHERE id IN (SELECT photo_id FROM photo_faces WHERE person_id = 10)`
+    ).run();
+
+    expect(personIdsMatchingFilter(db, MODEL, { minRating: 5 })).toEqual([10]);
+    expect(personIdsMatchingFilter(db, MODEL, { minRating: 1 })).toEqual([10]);
+    expect(personIdsMatchingFilter(db, MODEL, { minRating: 0 })).toEqual([
+      10, 11,
+    ]);
+  });
+
+  it("returns EMPTY rather than everyone when the filter matches nobody", () => {
+    // Empty and "no filter" must stay distinct all the way to the view: an
+    // empty result that fell back to showing everyone would silently
+    // contradict the filter the user set.
+    const db = getDb();
+    makePerson(db, 10);
+    expect(personIdsMatchingFilter(db, MODEL, { minRating: 5 })).toEqual([]);
+  });
+
+  it("ignores faces on stale photos", () => {
+    // A photo whose file vanished at the last scan is not "in view".
+    const db = getDb();
+    makePerson(db, 10);
+    db.prepare(`UPDATE photos SET stale = 1`).run();
+    expect(personIdsMatchingFilter(db, MODEL, {})).toEqual([]);
+  });
+
+  it("ignores another model's faces", () => {
+    const db = getDb();
+    makePerson(db, 10);
+    expect(personIdsMatchingFilter(db, "buffalo_l", {})).toEqual([]);
   });
 });
 
