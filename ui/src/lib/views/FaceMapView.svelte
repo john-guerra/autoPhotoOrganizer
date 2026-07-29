@@ -67,7 +67,9 @@
       x[i] = p.x;
       y[i] = p.y;
       ids[i] = p.personId;
-      size[i] = p.faces || 1;
+      // PHOTOS, not faces: a dot's area says how much of the library this
+      // person appears in, and two faces of them in one frame is one photo.
+      size[i] = p.photos || p.faces || 1;
       // Named/unnamed is real information here: 6 of 25,758 are named, so
       // "which have I already done" is most of what you want to see.
       group[i] = p.name ? 1 : 0;
@@ -366,7 +368,9 @@
         highlighted={selected}
         imageFor={(i) => crop(points[i])}
         labelFor={(i) =>
-          `${points[i]?.name || "Unnamed"} · ${n(points[i]?.faces)} faces`}
+          `${points[i]?.name || "Unnamed"} · ${n(points[i]?.photos)} photo${
+            points[i]?.photos === 1 ? "" : "s"
+          } · ${n(points[i]?.faces)} faces`}
         onlasso={onLasso}
         onpick={(i, e) => {
           if (e.shiftKey || e.altKey) return;

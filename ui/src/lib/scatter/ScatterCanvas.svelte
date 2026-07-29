@@ -92,6 +92,9 @@
   // screen at all — so this never approaches the size of the map.
   const imgCache = new Map(); // url -> HTMLImageElement
   const inFlight = new Set();
+  /** URLs that 404'd. A cover face can outlive its photo, and without this
+   *  every draw re-requests every broken crop forever. */
+  const failed = new Set();
 
   function imageAt(url) {
     if (!url) return null;
@@ -102,21 +105,29 @@
       imgCache.set(url, hit);
       return hit.complete && hit.naturalWidth > 0 ? hit : null;
     }
-    if (inFlight.has(url)) return null;
+    if (failed.has(url) || inFlight.has(url)) return null;
     inFlight.add(url);
     const img = new Image();
     img.decoding = "async";
     img.onload = () => {
       inFlight.delete(url);
       imgCache.set(url, img);
-      while (imgCache.size > IMAGE_CACHE_MAX) {
+      // Never evict below what is currently on screen. Evicting a VISIBLE
+      // crop makes the next draw request it again, whose load schedules
+      // another draw, which evicts another visible one — a treadmill of
+      // loading and repainting that looks exactly like the map blinking.
+      const floor = Math.max(IMAGE_CACHE_MAX, visibleImageCount + 32);
+      while (imgCache.size > floor) {
         imgCache.delete(imgCache.keys().next().value);
       }
-      scheduleDraw();
+      scheduleImageDraw();
     };
     // A failed load must not retry forever, and must not leave a hole: the dot
     // underneath is always drawn, so the point stays visible and clickable.
-    img.onerror = () => inFlight.delete(url);
+    img.onerror = () => {
+      inFlight.delete(url);
+      failed.add(url);
+    };
     img.src = url;
     return null;
   }
@@ -128,6 +139,9 @@
   // effect writing the same $state it reads re-fires on its own write, because
   // each assignment re-proxies to a fresh reference — effect_update_depth_-
   // exceeded, and the tab locks up hard.
+  /** How many crops the last draw actually wanted. Bounds cache eviction. */
+  let visibleImageCount = 0;
+
   let frame = 0;
   function scheduleDraw() {
     if (frame) return;
@@ -135,6 +149,30 @@
       frame = 0;
       draw();
     });
+  }
+
+  /**
+   * A redraw caused by an IMAGE finishing, coalesced hard.
+   *
+   * Each crop that arrives would otherwise schedule a full clear-and-repaint
+   * of every point — and hundreds arrive over a few seconds when you zoom into
+   * a dense region. At interactive framerates that is a canvas being wiped and
+   * rebuilt continuously, which is what "the map is blinking" looks like.
+   * Nothing is moving; it is redrawing far more often than the picture
+   * actually changes.
+   *
+   * Interaction still goes through `scheduleDraw` and stays at full frame
+   * rate. This path is only for "one more face turned up", where a tenth of a
+   * second of latency is invisible and 50 fewer repaints per second is not.
+   */
+  let imageFrame = 0;
+  const IMAGE_COALESCE_MS = 100;
+  function scheduleImageDraw() {
+    if (imageFrame) return;
+    imageFrame = setTimeout(() => {
+      imageFrame = 0;
+      scheduleDraw();
+    }, IMAGE_COALESCE_MS);
   }
 
   function sizeCanvas(c) {
@@ -190,6 +228,7 @@
       if (drawImages) drawn.push(i, px, py);
     }
 
+    visibleImageCount = drawn.length / 3;
     for (let k = 0; k < drawn.length; k += 3) {
       const img = imageAt(imageFor(drawn[k]));
       if (!img) continue;
@@ -263,24 +302,32 @@
   }
 
   /**
-   * Fit whenever the DATA changes identity.
+   * Fit when a NEW MAP arrives — not when the array object changes identity.
    *
-   * Without this the only fit is the one on first resize — which happens while
-   * the point set is still empty, so `transform` stays at k=1 with no
-   * translation and every dot renders in the top-left corner, mostly off
-   * screen. The map looked empty and the lasso caught nothing.
+   * Two failures this sits between. Without any fit, the only one is on first
+   * resize, which happens while the point set is still empty: `transform`
+   * stays at k=1 and every dot renders in the top-left corner. But keying it
+   * on `points.ids` IDENTITY is just as wrong in the other direction — the
+   * parent rebuilds those typed arrays on any re-render, and Svelte reports
+   * every object as changed even when it is the identical object (CLAUDE.md's
+   * `safe_not_equal` trap). So an unrelated prop update would silently throw
+   * away the user's zoom and pan, which reads as the map blinking.
    *
-   * Reads `points` and writes `transform`; it must NEVER read `transform`, or
-   * it re-fires on its own write forever (AlbumTimeline's
-   * effect_update_depth_exceeded). `untrack` around the write makes that
-   * explicit rather than incidental.
+   * Keyed on the point COUNT and the first/last id instead: cheap, and it
+   * changes exactly when the map's contents do — including after a merge,
+   * which is when a re-fit is genuinely wanted.
+   *
+   * Reads `points`, writes `transform`, and must NEVER read `transform` or it
+   * re-fires on its own write forever (AlbumTimeline's
+   * effect_update_depth_exceeded).
    */
-  let fittedIds = null;
+  let fittedKey = null;
   $effect(() => {
     const ids = points?.ids ?? null;
     if (!ids?.length || width <= 0 || height <= 0) return;
-    if (ids === fittedIds) return;
-    fittedIds = ids;
+    const key = `${ids.length}:${ids[0]}:${ids[ids.length - 1]}`;
+    if (key === fittedKey) return;
+    fittedKey = key;
     untrack(() => fit());
   });
 
@@ -414,6 +461,15 @@
         pending = 0;
         const box = entries[0]?.contentRect;
         if (!box) return;
+        // Sub-pixel jitter is real (a scrollbar appearing elsewhere, a
+        // fractional layout) and writing `width` on every report re-runs the
+        // draw effect for no visible change. Ignore anything under a pixel.
+        if (
+          Math.abs(box.width - width) < 1 &&
+          Math.abs(box.height - height) < 1
+        ) {
+          return;
+        }
         const first = width === 0 || height === 0;
         width = box.width;
         height = box.height;
@@ -426,6 +482,7 @@
       ro.disconnect();
       if (pending) cancelAnimationFrame(pending);
       if (frame) cancelAnimationFrame(frame);
+      if (imageFrame) clearTimeout(imageFrame);
     };
   });
 </script>

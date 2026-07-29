@@ -30,17 +30,30 @@ export function imageSide(k) {
   return Math.max(16, Math.min(96, Math.round(k * 1.6)));
 }
 
+/** The smallest dot that is still clickable, and the largest that is still a
+ *  dot rather than a blob covering its neighbours. */
+export const MIN_RADIUS = 2;
+export const MAX_RADIUS = 26;
+
 /**
- * Dot radius in CSS px, by the point's weight (face count).
+ * Dot radius in CSS px, on a SQRT scale over the point's weight.
  *
- * sqrt so AREA tracks the count: a person with 100 faces should look
- * meaningfully bigger than one with 4, not 25 times wider.
- * @param {number} weight @param {number} k
+ * sqrt so AREA is proportional to the weight, which is the only encoding a
+ * reader interprets correctly: a linear radius makes a 400-weight point 100x
+ * the area of a 4-weight one and reads as two orders of magnitude more.
+ *
+ * The scale is anchored at both ends rather than free: `MIN_RADIUS` keeps the
+ * long tail clickable (most points weigh 1), and `MAX_RADIUS` stops the
+ * handful of enormous ones — this library has a person in 3,512 faces — from
+ * swallowing the neighbours you are trying to lasso.
+ *
+ * @param {number} weight @param {number} k the current zoom
  */
 export function dotRadius(weight, k) {
   const w = Math.max(1, Number(weight) || 1);
-  const base = 1.5 + Math.sqrt(w) * 0.45;
-  // Grow a little with zoom, but nowhere near linearly — dots are a
-  // zoomed-out affordance and should not become blobs.
-  return Math.min(14, base * (1 + Math.log10(Math.max(1, k)) * 0.25));
+  const base = MIN_RADIUS + Math.sqrt(w) * 0.9;
+  // A mild response to zoom, so dots stay visible when zoomed out without
+  // becoming blobs when zoomed in. Deliberately sub-linear.
+  const zoomed = base * (1 + Math.log10(Math.max(1, k)) * 0.2);
+  return Math.min(MAX_RADIUS, zoomed);
 }

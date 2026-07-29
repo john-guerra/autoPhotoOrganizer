@@ -16,7 +16,13 @@ import {
   caught,
   applyLasso,
 } from "./lasso.js";
-import { shouldDrawImages, imageSide, dotRadius } from "./lod.js";
+import {
+  shouldDrawImages,
+  imageSide,
+  dotRadius,
+  MIN_RADIUS,
+  MAX_RADIUS,
+} from "./lod.js";
 
 describe("transform", () => {
   it("round-trips screen and data space", () => {
@@ -270,19 +276,30 @@ describe("lod", () => {
     expect(imageSide(10_000)).toBeLessThanOrEqual(96);
   });
 
-  it("sizes dots by AREA, so a big group is not absurdly wide", () => {
-    // sqrt, not linear: a 3,512-face person exists in this library, and a
-    // linear radius would draw them across the whole map.
+  it("sizes dots on a SQRT scale, so AREA tracks the weight", () => {
+    // sqrt, not linear: a person in 3,512 faces exists in this library, and a
+    // linear radius would give them 100x the area of a 4-photo person for 100x
+    // the weight — reading as two orders of magnitude more than it is.
     //
-    // Compared BELOW the 14px cap on purpose. At 3,512 both curves clamp to
-    // 14, so a test there compares 14 with 14 and passes against a linear
-    // implementation — which is exactly what an earlier version of this test
-    // did.
-    expect(dotRadius(16, 1) / dotRadius(4, 1)).toBeLessThan(2);
-    expect(dotRadius(16, 1)).toBeGreaterThan(dotRadius(4, 1));
-    // And the cap still holds for the outlier that motivated it.
-    expect(dotRadius(3512, 1)).toBeLessThanOrEqual(14);
-    expect(dotRadius(0, 1)).toBeGreaterThan(0);
+    // Compared BELOW the cap on purpose. At the extremes both curves clamp, so
+    // a test there compares the cap with the cap and passes against a linear
+    // implementation — which is exactly what an earlier version of this did.
+    //
+    // Quadrupling the weight should roughly DOUBLE the radius above the floor.
+    const r = (w) => dotRadius(w, 1) - MIN_RADIUS;
+    expect(r(16) / r(4)).toBeCloseTo(2, 1);
+    expect(r(100) / r(25)).toBeCloseTo(2, 1);
+    // ...which a linear scale could not do (it would be 4x).
+    expect(r(16) / r(4)).toBeLessThan(3);
+  });
+
+  it("anchors both ends: clickable at the tail, not a blob at the head", () => {
+    // Most points weigh 1 — they must still be hittable. And the handful of
+    // enormous ones must not swallow the neighbours you are trying to lasso.
+    expect(dotRadius(1, 1)).toBeGreaterThanOrEqual(MIN_RADIUS);
+    expect(dotRadius(0, 1)).toBeGreaterThanOrEqual(MIN_RADIUS);
+    expect(dotRadius(3512, 400)).toBeLessThanOrEqual(MAX_RADIUS);
+    expect(dotRadius(1e9, 400)).toBeLessThanOrEqual(MAX_RADIUS);
   });
 });
 

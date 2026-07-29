@@ -117,6 +117,7 @@ describe("the run cache (#232)", () => {
         // map must draw a dot rather than a broken image.
         coverFaceId: null,
         faces: 2,
+        photos: 2,
       },
       {
         personId: 11,
@@ -125,6 +126,7 @@ describe("the run cache (#232)", () => {
         name: null,
         coverFaceId: null,
         faces: 2,
+        photos: 2,
       },
     ]);
     expect(findRun(db, { ...KEY, paramsKey: pk }).id).toBe(runId);
@@ -148,6 +150,34 @@ describe("the run cache (#232)", () => {
       findRun(db, { ...KEY, algorithm: "tsne", paramsKey: pk })
     ).toBeNull();
     expect(findRun(db, { ...KEY, kind: "photo", paramsKey: pk })).toBeNull();
+  });
+
+  it("reports PHOTOS as well as faces, since dot size encodes photos", () => {
+    // Two faces of one person in a single frame is ONE photo. Sizing by faces
+    // would make a person photographed once with a mirror look twice as
+    // present as they are.
+    const db = getDb();
+    makePerson(db, 10, 2); // 2 faces on 2 distinct photos
+    const runId = createRun(db, {
+      ...KEY,
+      paramsKey: "k",
+      params: {},
+      members: 1,
+    });
+    savePoints(db, runId, Int32Array.from([10]), Float32Array.from([1, 2]));
+    expect(pointsForRun(db, runId)[0]).toMatchObject({ faces: 2, photos: 2 });
+
+    // Put a second face of the same person on a photo they are already in.
+    const photoId = db
+      .prepare(`SELECT photo_id FROM photo_faces WHERE person_id = 10 LIMIT 1`)
+      .get().photo_id;
+    db.prepare(
+      `INSERT INTO photo_faces
+         (photo_id, model, box_x, box_y, box_w, box_h, det_score, dim, scale,
+          vec, person_id)
+       VALUES (?, ?, 0,0,1,1, 0.5, 2, 1, x'0000', 10)`
+    ).run(photoId, MODEL);
+    expect(pointsForRun(db, runId)[0]).toMatchObject({ faces: 3, photos: 2 });
   });
 
   it("reads name and face count LIVE, so a rename needs no re-projection", () => {

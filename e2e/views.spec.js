@@ -85,14 +85,17 @@ test.describe("view registry @p1", () => {
     let returned = false;
     for (let i = 0; i < 10; i++) {
       await views.cycle(page);
+      // Settle BEFORE looking. Entering a working-set view runs a fetch, and
+      // checking immediately reports the view you just left — which made this
+      // miss the Face Map entirely and then "succeed" on the next press.
+      await page.waitForTimeout(400);
+      if (await page.locator('[data-testid="face-map"]').count()) {
+        seen.add("face-map");
+      }
       if (await views.grid(page).count()) {
         returned = true;
         break;
       }
-      if (await page.locator('[data-testid="face-map"]').count()) {
-        seen.add("face-map");
-      }
-      await page.waitForTimeout(200);
     }
     expect(returned, "V should cycle back to the grid").toBe(true);
     expect(seen.has("face-map"), "V should reach the Face Map").toBe(true);

@@ -120,7 +120,7 @@ export function savePoints(db, runId, ids, xy) {
  * exists. `faces` and `name` are read live too, so a rename shows up without
  * re-projecting.
  *
- * @returns {Array<{personId:number,x:number,y:number,name:string|null,coverFaceId:number|null,faces:number}>}
+ * @returns {Array<{personId:number,x:number,y:number,name:string|null,coverFaceId:number|null,faces:number,photos:number}>}
  */
 export function pointsForRun(db, runId) {
   return db
@@ -131,7 +131,13 @@ export function pointsForRun(db, runId) {
               p.name    AS name,
               p.cover_face_id AS coverFaceId,
               (SELECT COUNT(*) FROM photo_faces f WHERE f.person_id = p.id)
-                        AS faces
+                        AS faces,
+              -- PHOTOS, not faces: two faces of the same person in one frame
+              -- are one photo, and "how much of my library is this person in"
+              -- is what the dot size should say.
+              (SELECT COUNT(DISTINCT f.photo_id) FROM photo_faces f
+                WHERE f.person_id = p.id)
+                        AS photos
          FROM projection_point pp
          JOIN persons p ON p.id = pp.ref_id
         WHERE pp.run_id = ?
