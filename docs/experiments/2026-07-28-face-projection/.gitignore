@@ -1,0 +1,4 @@
+# Scratch deps for these benchmarks only — never part of the app's tree.
+node_modules/
+package-lock.json
+*.log
