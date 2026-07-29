@@ -349,3 +349,137 @@ describe("GET /api/projections/options", () => {
     expect(res.body.params.nEpochs).toBeLessThanOrEqual(2000);
   });
 });
+
+describe("POST /api/ml/people/merge-bulk (#232)", () => {
+  async function mergeBulk(body) {
+    const res = await fetch(`${srv.base}/api/ml/people/merge-bulk`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json() };
+  }
+  async function undo(token) {
+    const res = await fetch(`${srv.base}/api/ml/people/undo-merge`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    return { status: res.status, body: await res.json() };
+  }
+  const names = () =>
+    getDb().prepare(`SELECT id, name FROM persons ORDER BY id`).all();
+
+  it("merges and reports what happened", async () => {
+    seedPeople(4);
+    const res = await mergeBulk({ intoId: 1, ids: [2, 3, 4], name: "Mafe" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: 1, mergedCount: 3, name: "Mafe" });
+    expect(res.body.token).toEqual(expect.any(String));
+    expect(names()).toEqual([{ id: 1, name: "Mafe" }]);
+  });
+
+  it("REFUSES an ambiguous name instead of silently dropping one", async () => {
+    // Two differently-named people in one lasso is the case that must not
+    // resolve itself: merging asserts they are the same human and keeps one
+    // name, and the loss is invisible until someone goes looking.
+    seedPeople(3);
+    const db = getDb();
+    db.prepare(`UPDATE persons SET name='Mafe' WHERE id=1`).run();
+    db.prepare(`UPDATE persons SET name='John' WHERE id=2`).run();
+
+    const res = await mergeBulk({ intoId: 1, ids: [2, 3] });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/different names/i);
+    // The candidates come back so the UI can ask rather than guess.
+    expect(res.body.names.sort()).toEqual(["John", "Mafe"]);
+    // ...and nothing was merged.
+    expect(names()).toHaveLength(3);
+  });
+
+  it("proceeds once the user has chosen a name", async () => {
+    seedPeople(3);
+    const db = getDb();
+    db.prepare(`UPDATE persons SET name='Mafe' WHERE id=1`).run();
+    db.prepare(`UPDATE persons SET name='John' WHERE id=2`).run();
+
+    const res = await mergeBulk({ intoId: 1, ids: [2, 3], name: "John" });
+    expect(res.status).toBe(200);
+    expect(names()).toEqual([{ id: 1, name: "John" }]);
+  });
+
+  it("does not ask when only one name is present", async () => {
+    // No friction in the common case: 25,752 of this library's people are
+    // unnamed, so most lassos have at most one name in them.
+    seedPeople(3);
+    getDb().prepare(`UPDATE persons SET name='Mafe' WHERE id=1`).run();
+    const res = await mergeBulk({ intoId: 1, ids: [2, 3] });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("Mafe");
+  });
+
+  it("refuses an empty selection specifically", async () => {
+    seedPeople(2);
+    expect((await mergeBulk({ intoId: 1, ids: [] })).status).toBe(400);
+    expect((await mergeBulk({ intoId: 1 })).status).toBe(400);
+  });
+
+  it("413s an absurd selection rather than trying", async () => {
+    seedPeople(2);
+    const res = await mergeBulk({
+      intoId: 1,
+      ids: Array.from({ length: 20_001 }, (_, i) => i + 2),
+    });
+    expect(res.status).toBe(413);
+    expect(res.body.error).toMatch(/smaller region/i);
+  });
+
+  it("409s while people are being regrouped", async () => {
+    seedPeople(3);
+    await withClusterLatch(async () => {
+      const res = await mergeBulk({ intoId: 1, ids: [2], name: "X" });
+      expect(res.status).toBe(409);
+    });
+  });
+
+  it("round-trips through undo", async () => {
+    seedPeople(4);
+    const before = names();
+    const merged = await mergeBulk({ intoId: 1, ids: [2, 3, 4], name: "X" });
+    expect(names()).toHaveLength(1);
+
+    const back = await undo(merged.body.token);
+    expect(back.status).toBe(200);
+    expect(back.body.restored).toBe(3);
+    expect(names()).toEqual(before);
+  });
+
+  it("410s an undo token that is spent or expired, and says which", async () => {
+    seedPeople(2);
+    const merged = await mergeBulk({ intoId: 1, ids: [2], name: "X" });
+    await undo(merged.body.token);
+    const again = await undo(merged.body.token);
+    expect(again.status).toBe(410);
+    expect(again.body.error).toMatch(/no longer undoable/i);
+  });
+
+  it("restores a merged-away dot to the map, in place", async () => {
+    // The reason projection_point has no cascading FK: undo re-creates the
+    // person at its ORIGINAL id, so the cached point resolves again.
+    seedPeople(8);
+    const made = await post({ minFaces: 2, nEpochs: 30 });
+    await settled(made.body.jobId);
+    const mapOf = async () =>
+      (
+        await get(
+          `/api/projections/current?model=${MODEL}&minFaces=2&nEpochs=30`
+        )
+      ).body.points.length;
+
+    expect(await mapOf()).toBe(8);
+    const merged = await mergeBulk({ intoId: 1, ids: [2, 3], name: "X" });
+    expect(await mapOf()).toBe(6);
+    await undo(merged.body.token);
+    expect(await mapOf()).toBe(8);
+  });
+});

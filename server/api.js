@@ -112,6 +112,11 @@ import {
   withClusterLatch,
 } from "./ml/faceClusters.js";
 import { squareCrop } from "./ml/faceCrop.js";
+import {
+  mergePersonsBulk,
+  undoMerge,
+  distinctNames,
+} from "./db/personMerge.js";
 import { personCentroids } from "./db/personCentroids.js";
 import {
   paramsKey,
@@ -1972,6 +1977,79 @@ export function registerApi(app, { ml } = {}) {
       // transaction at the end, which a cancelled pass never reaches.
       registry.fail(job.id, e);
     });
+  });
+
+  /**
+   * Merge many people into one, in a single transaction (#232).
+   *
+   * Refuses an AMBIGUOUS name rather than resolving it. `mergePersons`'
+   * `into.name || from.name` rule is right for a two-person merge where the
+   * user pointed at a row; in a lasso there is no such row, and quietly
+   * dropping one of two names is data loss the user finds weeks later.
+   */
+  app.post("/api/ml/people/merge-bulk", (req, res) => {
+    if (isClusterInFlight()) {
+      return res.status(409).json({
+        error:
+          "People are being regrouped right now. Wait for that to finish, or your merge may be computed against a stale grouping.",
+      });
+    }
+    const db = getDb();
+    const intoId = Number(req.body?.intoId);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+    if (!Number.isSafeInteger(intoId) || intoId <= 0) {
+      return res.status(400).json({ error: "intoId must be a person id" });
+    }
+    if (!ids || !ids.length) {
+      return res
+        .status(400)
+        .json({ error: "Select some people to merge first." });
+    }
+    if (ids.length > 20_000) {
+      return res.status(413).json({
+        error: `That selection has ${ids.length.toLocaleString("en-US")} people in it, which is more than one merge can take. Lasso a smaller region.`,
+      });
+    }
+
+    // The caller may pass `name` explicitly (including null, meaning "leave
+    // them unnamed"). Only an OMITTED name triggers the ambiguity check.
+    const hasName = Object.prototype.hasOwnProperty.call(req.body, "name");
+    if (!hasName) {
+      const names = distinctNames(db, [intoId, ...ids]);
+      if (names.length > 1) {
+        return res.status(409).json({
+          error: `Those people have ${names.length} different names between them. Merging keeps only one, so choose it first.`,
+          names,
+        });
+      }
+    }
+
+    try {
+      const r = mergePersonsBulk(db, intoId, ids, {
+        name: hasName ? (req.body.name ?? null) : undefined,
+      });
+      res.json(r);
+    } catch (e) {
+      res.status(400).json({ error: String(e.message ?? e) });
+    }
+  });
+
+  /**
+   * Reverse a bulk merge.
+   *
+   * Synchronous rather than a job: the whole thing is one SQLite transaction
+   * well under a second. `undo-move` is a job only because it moves files.
+   */
+  app.post("/api/ml/people/undo-merge", (req, res) => {
+    const token = req.body?.token;
+    if (typeof token !== "string" || !token) {
+      return res.status(400).json({ error: "token is required" });
+    }
+    try {
+      res.json(undoMerge(getDb(), token));
+    } catch (e) {
+      res.status(410).json({ error: String(e.message ?? e) });
+    }
   });
 
   // --- the face map (#232) ------------------------------------------------

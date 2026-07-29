@@ -591,6 +591,26 @@ export function applySchema(db) {
     ) WITHOUT ROWID
   `);
 
+  // Undo for a bulk merge (#232).
+  //
+  // Server-side rather than a client-held manifest, for two reasons. The
+  // existing undo-move pattern hands the manifest to the client, and its known
+  // failure is quoted in CLAUDE.md — "the move record was too large to send
+  // (N files)". And a record the SERVER holds survives a page reload, which a
+  // client-held one never did.
+  //
+  // `payload` is JSON in a BLOB column so it can become a compact typed-array
+  // encoding later with no migration.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS person_merge_undo (
+      token            TEXT    PRIMARY KEY,
+      created_at       INTEGER NOT NULL,
+      into_id          INTEGER NOT NULL,
+      into_name_before TEXT,
+      payload          BLOB    NOT NULL
+    )
+  `);
+
   ensureFeedIndexes(db);
 }
 
