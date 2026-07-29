@@ -367,3 +367,56 @@ describe("the embed worklist's query plans", () => {
     expect(pending.length).toBe(rows.length - 1);
   });
 });
+
+/**
+ * The face map's points are read on every map load, and there may be three
+ * cached runs for the current model at once (`pruneRuns` keeps three). Reading
+ * a run therefore has to seek to that run, not scan every point of every run.
+ *
+ * `projection_point` is WITHOUT ROWID with `PRIMARY KEY (run_id, ref_id)`, so
+ * the primary key IS the table and one run's points are a contiguous prefix.
+ * Drop either half and SQLite silently falls back to scanning — no error, the
+ * map just gets slower as more runs accumulate. Exactly the rot this file
+ * exists to catch (#232).
+ */
+describe("projection point lookup", () => {
+  it("seeks to one run rather than scanning every run's points", () => {
+    const db = getDb();
+    const plan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT projection_point.ref_id, projection_point.x, projection_point.y
+           FROM projection_point
+           JOIN persons ON persons.id = projection_point.ref_id
+          WHERE projection_point.run_id = 1
+          ORDER BY projection_point.ref_id`
+      )
+      .all()
+      .map((r) => r.detail)
+      .join(" | ");
+
+    // A prefix seek on the WITHOUT ROWID primary key. SQLite words this as
+    // "SEARCH ... USING PRIMARY KEY", never "SCAN", when the index is right.
+    expect(plan).toMatch(/projection_point/);
+    expect(plan).toMatch(/SEARCH .*projection_point.*PRIMARY KEY/);
+    expect(plan).not.toMatch(/SCAN .*projection_point/);
+  });
+
+  it("finds a cached run by its whole key without scanning the runs table", () => {
+    // findRun runs on EVERY map request, including the cache-hit path whose
+    // whole purpose is to be instant.
+    const db = getDb();
+    const plan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT * FROM projection_runs
+          WHERE kind = 'person' AND model = 'buffalo_s'
+            AND algorithm = 'umap' AND params_key = 'abc'
+          ORDER BY id DESC LIMIT 1`
+      )
+      .all()
+      .map((r) => r.detail)
+      .join(" | ");
+    expect(plan).toMatch(/idx_projection_runs_key/);
+  });
+});
