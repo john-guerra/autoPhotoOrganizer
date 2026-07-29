@@ -367,9 +367,10 @@
           min="1"
           max="50"
           value={minFaces}
-          oninput={(e) =>
-            (draft = { ...draft, minFaces: +e.currentTarget.value })}
-          onchange={() => onoptions?.(currentParams())}
+          onchange={(e) => {
+            draft = { ...draft, minFaces: +e.currentTarget.value };
+            onoptions?.(currentParams());
+          }}
         />
       </label>
       <span class="members" data-testid="map-members">
@@ -452,7 +453,7 @@
                 max={spec.max}
                 step={spec.step}
                 value={draft[spec.key] ?? spec.default}
-                oninput={(e) =>
+                onchange={(e) =>
                   (draft = { ...draft, [spec.key]: +e.currentTarget.value })}
               />
               <span class="tunable-help">{spec.help}</span>
