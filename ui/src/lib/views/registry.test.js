@@ -3,6 +3,7 @@ import {
   VIEWS,
   GRID,
   ALBUMS,
+  FACE_MAP,
   CAPABILITIES,
   NAVIGATIONS,
   DATA_SOURCES,
@@ -247,5 +248,73 @@ describe("view-local keys (#232)", () => {
     // getView falls back to GRID, so this must be false rather than a crash.
     expect(claimsKey("no-such-view", "Escape")).toBe(false);
     expect(viewKeys("no-such-view")).toEqual([]);
+  });
+});
+
+describe("FACE_MAP (#232)", () => {
+  it("declares all three capabilities explicitly", () => {
+    for (const c of CAPABILITIES) {
+      expect(typeof FACE_MAP.capabilities[c]).toBe("boolean");
+    }
+  });
+
+  it("opens photos, because a 160px crop is not enough to judge a merge", () => {
+    // Declaring false while wiring photo-opening would be a lie nothing
+    // currently catches — capabilities.open is read by nothing yet, so it
+    // would break the moment something reads it.
+    expect(FACE_MAP.capabilities.open).toBe(true);
+  });
+
+  it("does NOT join App's photo selection or rating", () => {
+    // PeopleView's exact reason: `selected` indexes a feed window this view
+    // does not render, so a `3` here would rate a photo you cannot see. This
+    // view's selection is of people and is private to it.
+    expect(FACE_MAP.capabilities.select).toBe(false);
+    expect(FACE_MAP.capabilities.rate).toBe(false);
+  });
+
+  it("declares the keys it handles, so App does not refuse them", () => {
+    // Without this, Escape would be answered with "Selecting photos isn't
+    // available in Face Map" while the view has people selected.
+    expect(claimsKey(FACE_MAP.id, "Escape")).toBe(true);
+    expect(claimsKey(FACE_MAP.id, "0")).toBe(true);
+    expect(viewKeys(FACE_MAP.id).length).toBeGreaterThan(0);
+  });
+
+  it("is the first view to own its own viewport", () => {
+    expect(FACE_MAP.navigation).toBe("zoom");
+    expect(FACE_MAP.dataSource).toBe("working-set");
+  });
+
+  it("EARNS its toolbar slot rather than taking one unconditionally", () => {
+    // The toolbar folds by width and this is the fourth view; #223 hit that at
+    // 1280px, CI-only, with 151/151 green locally. A map of three people is
+    // useless anyway.
+    expect(FACE_MAP.offerable({ peopleCount: 3 })).toBe(false);
+    expect(FACE_MAP.offerable({ peopleCount: 99 })).toBe(false);
+    expect(FACE_MAP.offerable({ peopleCount: 5000 })).toBe(true);
+  });
+});
+
+describe("declared keys match real KeyboardEvent.key values", () => {
+  /** Tokens the overlay renders as connective text, never matched as keys. */
+  const JOINERS = new Set(["+", "–", "arrow", "drag", "⌘ / Ctrl"]);
+
+  it("spells named keys the way the browser reports them", () => {
+    // "Esc" reads fine in a help menu and NEVER matches: KeyboardEvent.key is
+    // "Escape". A declaration that cannot match is worse than none, because
+    // App then answers the key with a confidently wrong message.
+    const WRONG = { esc: "Escape", del: "Delete", ins: "Insert", spc: " " };
+    for (const v of VIEWS) {
+      for (const row of v.keys ?? []) {
+        for (const k of row.keys) {
+          if (JOINERS.has(k)) continue;
+          expect(
+            WRONG[k.toLowerCase()],
+            `${v.id} declares "${k}" — KeyboardEvent.key reports "${WRONG[k.toLowerCase()]}"`
+          ).toBeUndefined();
+        }
+      }
+    }
   });
 });

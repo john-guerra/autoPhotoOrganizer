@@ -90,7 +90,7 @@
         {
           keys: ["V"],
           label:
-            "Switch the main area to the next view (grid → Auto Albums → People → grid); not while the loupe is open",
+            "Switch the main area to the next view (grid → Auto Albums → People → Face Map → grid); not while the loupe is open",
         },
         { keys: [","], label: "Open scrolling & prefetch settings" },
         { keys: ["?"], label: "Toggle this shortcuts list" },

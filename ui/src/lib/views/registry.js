@@ -1,6 +1,11 @@
 import GridView from "./GridView.svelte";
 import AlbumsView from "../AlbumsView.svelte";
 import PeopleView from "./PeopleView.svelte";
+import FaceMapView from "./FaceMapView.svelte";
+
+/** The platform modifier, as a plain string. The registry is imported by
+ *  node-environment tests, so it must not reach for `navigator`. */
+const MOD_HINT = "\u2318 / Ctrl";
 
 /**
  * WHAT CAN OCCUPY THE MAIN AREA. One registry, so adding a view is one entry
@@ -194,8 +199,55 @@ export function offerableViews(ctx) {
   return VIEWS.filter((v) => v.offerable?.(ctx) ?? true);
 }
 
+export const FACE_MAP = {
+  id: "face-map",
+  label: "Face Map",
+  icon: "◌",
+  description:
+    "See everyone laid out by how alike their faces are, then lasso the ones who are really the same person and merge them in one go.",
+  // The FIRST view to declare this. It owns its viewport: it fills the column,
+  // hides overflow, and preventDefaults wheel, or App's .main-column scrolls
+  // underneath while you try to zoom.
+  navigation: "zoom",
+  dataSource: "working-set",
+  // `open` is TRUE, and this is a deliberate change from the first draft of
+  // the design: you cannot judge a merge from a 160px crop, so a tray face
+  // opens its photo, exactly as ALBUMS does. Declaring false while wiring
+  // photo-opening would be a lie nothing currently catches, because
+  // capabilities.open is read by nothing yet — and the moment something reads
+  // it, the feature breaks.
+  //
+  // `select` and `rate` are false for PeopleView's exact reason: `selected`
+  // indexes a feed window this view does not render, so a `3` here would rate
+  // a photo you cannot see. This view's own selection is of PEOPLE and is
+  // private to it.
+  capabilities: { open: true, select: false, rate: false },
+  // Keys this view handles itself (#232's Task 0). Declaring them is what
+  // stops App answering Escape with "Selecting photos isn't available in Face
+  // Map" while the view has a perfectly good selection of people — and the
+  // shortcuts overlay renders them from here, so they cannot ship
+  // undocumented.
+  keys: [
+    // "Escape", not "Esc": `claimsKey` matches on KeyboardEvent.key, so a
+    // display-only spelling silently never matches and App answers the key
+    // with a message about photos. Caught by a test, which is why this note
+    // exists.
+    { keys: ["Escape"], label: "Clear the lasso and empty the tray" },
+    { keys: ["0"], label: "Fit the whole map back into view" },
+    { keys: ["Shift", "+", "drag"], label: "Add to the selection" },
+    { keys: ["Alt", "+", "drag"], label: "Remove from the selection" },
+    { keys: [MOD_HINT, "+", "drag"], label: "Pan the map" },
+  ],
+  // The toolbar folds by WIDTH and this is the FOURTH view. PersonFilter
+  // learned that once; #223 hit it again at 1280px — CI-only, with 151/151
+  // green locally. A map of three people is useless anyway, so earn the slot
+  // rather than taking one unconditionally. `V` still cycles here.
+  offerable: ({ peopleCount }) => peopleCount >= 100,
+  component: FaceMapView,
+};
+
 /** Every registered view, in switcher order. Append a new view here. */
-export const VIEWS = [GRID, ALBUMS, PEOPLE];
+export const VIEWS = [GRID, ALBUMS, PEOPLE, FACE_MAP];
 
 export const DEFAULT_VIEW_ID = GRID.id;
 

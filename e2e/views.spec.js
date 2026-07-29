@@ -71,15 +71,31 @@ test.describe("view registry @p1", () => {
     await modal.locator("button", { hasText: "Cancel" }).click();
     await expect(modal).toBeHidden();
 
-    // ...and onward. V advances through the REGISTRY and wraps after the last
-    // one, so with three views registered the next press is People, not the
-    // grid. Asserting "one more press returns you" encoded a two-view world
-    // and broke the moment People landed — assert the cycle instead.
+    // ...and onward.
     await views.cycle(page);
     await expect(peopleView.root(page)).toBeVisible();
 
-    // Wrapping: from the last view, V comes back to the grid.
-    await views.cycle(page);
+    // Wrapping. This used to assert "one more press returns you to the grid",
+    // which encoded a TWO-view world and broke when People landed; it was then
+    // rewritten to encode a THREE-view world and broke again when the Face Map
+    // landed (#232). So stop counting: press V until the grid comes back, and
+    // assert only what is actually true of the registry — that the cycle
+    // terminates, and that it passes through every view on the way.
+    const seen = new Set(["albums", "people"]);
+    let returned = false;
+    for (let i = 0; i < 10; i++) {
+      await views.cycle(page);
+      if (await views.grid(page).count()) {
+        returned = true;
+        break;
+      }
+      if (await page.locator('[data-testid="face-map"]').count()) {
+        seen.add("face-map");
+      }
+      await page.waitForTimeout(200);
+    }
+    expect(returned, "V should cycle back to the grid").toBe(true);
+    expect(seen.has("face-map"), "V should reach the Face Map").toBe(true);
     await expect(views.grid(page)).toBeVisible();
     expect(errors).toEqual([]);
   });

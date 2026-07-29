@@ -156,6 +156,7 @@
     GRID,
     ALBUMS,
     PEOPLE,
+    FACE_MAP,
     DEFAULT_VIEW_ID,
     getView,
     supports,
@@ -2575,6 +2576,19 @@
     // construction (one row per person, not per photo) and it is the same
     // list the picker reads, so the view and the filter can never disagree
     // about who exists.
+    [FACE_MAP.id]: async () => {
+      mapLoading = true;
+      try {
+        await loadFaceMap();
+        await loadMapOptions();
+        return true;
+      } catch (e) {
+        error = `Couldn't load the face map: ${e.message}`;
+        return false;
+      } finally {
+        mapLoading = false;
+      }
+    },
     [PEOPLE.id]: async () => {
       peopleLoading = true;
       try {
@@ -2591,6 +2605,96 @@
 
   /** True while the People view's working set is being fetched. */
   let peopleLoading = $state(false);
+
+  // --- the face map's working set (#232) -----------------------------------
+  //
+  // App owns EVERY fetch here, including the one after a new projection —
+  // which is not view entry, so the working-set loader alone does not cover
+  // it. A view that fetched its own data is exactly how the #155 boundary
+  // rots.
+  let mapPoints = $state([]);
+  let mapMeta = $state({
+    runId: null,
+    createdAt: 0,
+    algorithm: "umap",
+    model: "",
+  });
+  let mapCoverage = $state(null);
+  let mapStaleness = $state(null);
+  let mapOptions = $state(null);
+  let mapLoading = $state(false);
+  let mapNotice = $state("");
+  let mapParams = $state({
+    minFaces: 2,
+    nNeighbors: 15,
+    minDist: 0.1,
+    algorithm: "umap",
+  });
+
+  const mapQuery = (p) =>
+    new URLSearchParams({
+      minFaces: String(p.minFaces),
+      nNeighbors: String(p.nNeighbors),
+      minDist: String(p.minDist),
+      algorithm: String(p.algorithm),
+    }).toString();
+
+  async function loadFaceMap(params = mapParams) {
+    mapParams = { ...params };
+    const res = await fetch(`/api/projections/current?${mapQuery(params)}`);
+    if (!res.ok) throw new Error(`map: ${res.status}`);
+    const d = await res.json();
+    mapPoints = d.points ?? [];
+    mapMeta = {
+      runId: d.runId ?? null,
+      createdAt: d.createdAt ?? 0,
+      algorithm: d.algorithm ?? params.algorithm,
+      model: d.model ?? "",
+    };
+    mapCoverage = d.coverage ?? null;
+    mapStaleness = d.staleness ?? null;
+    return true;
+  }
+
+  async function loadMapOptions(params = mapParams) {
+    const res = await fetch(`/api/projections/options?${mapQuery(params)}`);
+    if (res.ok) mapOptions = await res.json();
+  }
+
+  /**
+   * Build a projection, then reload the points.
+   *
+   * The VIEW asks; App runs the job and awaits it. `waitForJob` is the same
+   * helper every other long operation uses, so this appears in the JobsPanel
+   * and can be cancelled from there like anything else.
+   */
+  async function runFaceMap(params) {
+    mapNotice = "";
+    mapLoading = true;
+    try {
+      const res = await fetch("/api/projections", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(params),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Surface the server's specific refusal, never a generic one: it
+        // already says which minimum to lower or which algorithm to pick.
+        mapNotice = body.error ?? `Couldn't build the map (${res.status}).`;
+        return false;
+      }
+      if (body.jobId) await waitForJob(body.jobId);
+      await loadFaceMap(params);
+      await loadMapOptions(params);
+      return true;
+    } catch (e) {
+      mapNotice = `Couldn't build the map: ${e.message}`;
+      return false;
+    } finally {
+      mapLoading = false;
+    }
+  }
 
   /**
    * Switch the main area to another registered view.
@@ -2704,6 +2808,87 @@
    * another `{#if}` in the markup.
    */
   let viewProps = $derived.by(() => {
+    if (activeView.id === FACE_MAP.id) {
+      return {
+        points: mapPoints,
+        runId: mapMeta.runId,
+        createdAt: mapMeta.createdAt,
+        algorithm: mapMeta.algorithm,
+        model: mapMeta.model,
+        coverage: mapCoverage,
+        staleness: mapStaleness,
+        options: mapOptions,
+        loading: mapLoading,
+        notice: mapNotice,
+        onrun: runFaceMap,
+        onoptions: loadMapOptions,
+        // The EXISTING personId filter (#167), same as People — not a second
+        // way to narrow the feed.
+        onpick: (id) => {
+          const next = { ...filter };
+          if (id) next.personId = id;
+          else delete next.personId;
+          onFilterChange(next);
+        },
+        onmerge: async ({ intoId, ids, name }) => {
+          mapNotice = "";
+          try {
+            const res = await fetch("/api/ml/people/merge-bulk", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                intoId,
+                ids,
+                ...(name === undefined ? {} : { name }),
+              }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (res.status === 409 && body.names) {
+              // Not an error: the server found two real names and is asking
+              // which to keep. The view renders the choice.
+              return { ok: false, names: body.names };
+            }
+            if (!res.ok) {
+              mapNotice = body.error ?? `Merge failed (${res.status}).`;
+              return { ok: false };
+            }
+            // The map is served by a join against live persons, so the merged
+            // dots disappear on reload with no re-projection.
+            await loadFaceMap();
+            await refreshPeople();
+            return { ok: true, ...body };
+          } catch (e) {
+            mapNotice = `Merge failed: ${e.message}`;
+            return { ok: false };
+          }
+        },
+        onundo: async (token) => {
+          try {
+            const res = await fetch("/api/ml/people/undo-merge", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ token }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              mapNotice =
+                body.error ?? `Couldn't undo that merge (${res.status}).`;
+              return;
+            }
+            await loadFaceMap();
+            await refreshPeople();
+          } catch (e) {
+            mapNotice = `Couldn't undo that merge: ${e.message}`;
+          }
+        },
+        ongroup: () => {
+          // The map can only show grouped faces, and on a real library most
+          // are not. Send them where that gets fixed — the ML panel, which
+          // owns "Find faces" and "Group them into people" (#205).
+          mlPanelOpen = true;
+        },
+      };
+    }
     if (activeView.id === PEOPLE.id) {
       return {
         people,

@@ -247,6 +247,28 @@
     }
   }
 
+  /**
+   * Fit whenever the DATA changes identity.
+   *
+   * Without this the only fit is the one on first resize — which happens while
+   * the point set is still empty, so `transform` stays at k=1 with no
+   * translation and every dot renders in the top-left corner, mostly off
+   * screen. The map looked empty and the lasso caught nothing.
+   *
+   * Reads `points` and writes `transform`; it must NEVER read `transform`, or
+   * it re-fires on its own write forever (AlbumTimeline's
+   * effect_update_depth_exceeded). `untrack` around the write makes that
+   * explicit rather than incidental.
+   */
+  let fittedIds = null;
+  $effect(() => {
+    const ids = points?.ids ?? null;
+    if (!ids?.length || width <= 0 || height <= 0) return;
+    if (ids === fittedIds) return;
+    fittedIds = ids;
+    untrack(() => fit());
+  });
+
   // Redraw when the DATA or the viewport changes. Reads `transform` but never
   // writes it, so this cannot re-trigger itself.
   $effect(() => {
@@ -406,13 +428,13 @@
   onpointercancel={onPointerUp}
   onwheel={onWheel}
 >
-  <canvas bind:this={pointsCanvas} style="width:{width}px;height:{height}px"
-  ></canvas>
-  <canvas
-    class="overlay"
-    bind:this={overlayCanvas}
-    style="width:{width}px;height:{height}px"
-  ></canvas>
+  <!-- No inline width/height: `inset: 0` already sizes these, and writing a
+       px size here during a ResizeObserver callback feeds straight back into
+       layout — "ResizeObserver loop completed with undelivered notifications",
+       an uncaught error that (rightly) fails trackPageErrors. Only the BACKING
+       STORE is set, in JS, from sizeCanvas(). -->
+  <canvas bind:this={pointsCanvas}></canvas>
+  <canvas class="overlay" bind:this={overlayCanvas}></canvas>
 
   {#if tip && !dragging}
     <div
@@ -443,6 +465,11 @@
     position: absolute;
     inset: 0;
     display: block;
+    /* The element is sized by inset; the backing store is sized in JS at
+       devicePixelRatio. Without this the store's pixel size would also become
+       the layout size. */
+    width: 100%;
+    height: 100%;
   }
   .overlay {
     pointer-events: none;
