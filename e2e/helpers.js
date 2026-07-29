@@ -210,6 +210,13 @@ export const views = {
    * world and broke the moment People landed as the third — the exact latent
    * assumption a reviewer flagged when there were only two.
    */
+  /** Open the keyboard-shortcuts overlay and return its root. */
+  shortcuts: async (page) => {
+    await page.keyboard.press("?");
+    const root = page.locator('dialog:has-text("Keyboard shortcuts")');
+    await root.waitFor();
+    return root;
+  },
   toGrid: async (page) => {
     const pressed = page.locator(
       '[data-testid^="view-switch-"][aria-pressed="true"]'

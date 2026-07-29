@@ -159,6 +159,7 @@
     DEFAULT_VIEW_ID,
     getView,
     supports,
+    claimsKey,
     nextViewId,
     restorableViewId,
   } from "./lib/views/registry.js";
@@ -2674,10 +2675,19 @@
    * keystroke") and the house usability rule — a keystroke that vanishes reads
    * as a broken keyboard, so it names the view and the way out.
    *
+   * @param {"open"|"select"|"rate"} capability
+   * @param {string} whatTheUserTried
+   * @param {string} [key] the `KeyboardEvent.key`, when there is one. A view
+   *   that DECLARES this key handles it itself, so refusing here would answer
+   *   a question the user did not ask: `capabilities` is about PHOTOS, and a
+   *   view may own a selection of something else entirely (#232). Passing the
+   *   key is what lets the Face Map keep `X` while still declaring
+   *   `select: false` for App's photo selection.
    * @returns {boolean} true if the keystroke was refused and handled here
    */
-  function refuseUnsupported(capability, whatTheUserTried) {
+  function refuseUnsupported(capability, whatTheUserTried, key = null) {
     if (supports(viewId, capability)) return false;
+    if (claimsKey(viewId, key)) return false;
     // "press V to switch views", not "press V to go back to the grid": V
     // cycles to the NEXT view, which is only the grid while there are two of
     // them — and this lives in the file whose whole purpose is making the
@@ -5657,7 +5667,7 @@
       // declaring `select: false` is not showing you. It is handled up here,
       // above the blanket meta/ctrl bail, so it needs its own check — the one
       // further down guards only the plain keys.
-      if (refuseUnsupported("select", "Selecting photos")) return;
+      if (refuseUnsupported("select", "Selecting photos", e.key)) return;
       if (e.shiftKey) await bulkDeselect();
       else await bulkSelect();
       return;
@@ -5812,7 +5822,7 @@
       // the feed window, which such a view isn't showing you (see
       // refuseUnsupported). The loupe is an overlay and rates what it displays,
       // so it keeps working on top of any view.
-      if (!loupeOpen && refuseUnsupported("rate", "Rating")) return;
+      if (!loupeOpen && refuseUnsupported("rate", "Rating", e.key)) return;
       rate(selected, Number(key));
       // Auto-advance, but never onto a placeholder (see nextSelectable).
       if (loupeOpen) {
@@ -5835,7 +5845,10 @@
         // Gated on `select` because choosing a stack's cover is an act on a
         // photo you picked out, and a view that cannot express "this one"
         // cannot express it either.
-        if (!loupeOpen && refuseUnsupported("select", "Choosing a stack cover"))
+        if (
+          !loupeOpen &&
+          refuseUnsupported("select", "Choosing a stack cover", e.key)
+        )
           return;
         toggleCover(entry);
       }
@@ -5854,7 +5867,7 @@
       // the feed cursor) and both WRITE. Same reasoning as C.
       if (
         !loupeOpen &&
-        refuseUnsupported("select", "Grouping photos into stacks")
+        refuseUnsupported("select", "Grouping photos into stacks", e.key)
       )
         return;
       if (e.shiftKey) {
@@ -5879,7 +5892,8 @@
     // loupe it auto-advances (like rating) to keep the "look, pick, next" flow.
     if (key.toLowerCase() === "x") {
       e.preventDefault();
-      if (!loupeOpen && refuseUnsupported("select", "Selecting photos")) return;
+      if (!loupeOpen && refuseUnsupported("select", "Selecting photos", e.key))
+        return;
       const p = resolvedPhotos[selected];
       if (p && typeof p.id === "number") toggleSelect(p.id);
       if (loupeOpen) {
@@ -5975,7 +5989,7 @@
     // The plain arrows are left alone deliberately — moving an off-screen
     // cursor writes nothing, and refusing navigation would be noise.
     if (e.shiftKey && next !== selected) {
-      if (refuseUnsupported("select", "Selecting photos")) return;
+      if (refuseUnsupported("select", "Selecting photos", e.key)) return;
       selectRange(selected, next);
     }
     focusEntry(next);
@@ -6620,7 +6634,7 @@
 {/if}
 
 {#if shortcutsHelpOpen}
-  <ShortcutsOverlay onclose={() => (shortcutsHelpOpen = false)} />
+  <ShortcutsOverlay {viewId} onclose={() => (shortcutsHelpOpen = false)} />
 {/if}
 
 {#if settingsOpen}

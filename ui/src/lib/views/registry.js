@@ -52,6 +52,22 @@ import PeopleView from "./PeopleView.svelte";
  *   `truncated` FLAG — App performs it on entry (see `switchView` in
  *   App.svelte). A working-set view must never widen `items` to get it.
  * @property {ViewCapabilities} capabilities
+ * @property {Array<{keys: string[], label: string}>} [keys]
+ *   Keys this view handles ITSELF, in `ShortcutsOverlay`'s own `{keys, label}`
+ *   row shape so the overlay can render them without translation.
+ *
+ *   Two consumers, and both are the point. The overlay renders them, so a
+ *   view's shortcuts cannot ship undocumented — CLAUDE.md's rule that "a
+ *   shortcut nobody can find does not exist", enforced by the registry rather
+ *   than by remembering. And `refuseUnsupported` checks them before refusing,
+ *   because `capabilities` describes what happens to PHOTOS and a view may
+ *   legitimately own a selection of something else entirely.
+ *
+ *   `UI-CONTRACTS.md` §3's table already said "view-specific keys, declared"
+ *   belongs to the view; there was simply nowhere to declare them. #232 is the
+ *   first view to need one, and needed it badly enough that `X` would have
+ *   told the user "Selecting photos isn't available in Face Map" while the
+ *   Face Map had people selected.
  * @property {(ctx: {peopleCount: number}) => boolean} [offerable]
  *   Should the SWITCHER show a button for this view right now? Default: yes.
  *
@@ -201,6 +217,40 @@ export function getView(id) {
  */
 export function supports(id, capability) {
   return getView(id).capabilities[capability] === true;
+}
+
+/**
+ * The keys this view handles ITSELF.
+ *
+ * @param {string|undefined} id
+ * @returns {Array<{keys: string[], label: string}>}
+ */
+export function viewKeys(id) {
+  return getView(id).keys ?? [];
+}
+
+/**
+ * Does this view claim `key` as its own?
+ *
+ * Consulted by `refuseUnsupported` BEFORE it refuses on capability grounds.
+ * Without it, every view is answered in terms of PHOTOS: a view whose
+ * selection is of people gets told "Selecting photos isn't available here"
+ * while showing the user a perfectly good selection, which is worse than
+ * silence because it is confidently wrong.
+ *
+ * Case-insensitive, because `KeyboardEvent.key` reports `X` with shift held
+ * and `x` without, and a declaration matching only one would refuse half the
+ * presses.
+ *
+ * @param {string|undefined} id
+ * @param {string} key a `KeyboardEvent.key` value
+ */
+export function claimsKey(id, key) {
+  if (!key) return false;
+  const k = String(key).toLowerCase();
+  return viewKeys(id).some((row) =>
+    row.keys.some((declared) => String(declared).toLowerCase() === k)
+  );
 }
 
 /**

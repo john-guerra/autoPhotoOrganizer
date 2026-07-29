@@ -10,6 +10,8 @@ import {
   getView,
   supports,
   nextViewId,
+  viewKeys,
+  claimsKey,
   restorableViewId,
   offerableViews,
 } from "./registry.js";
@@ -197,5 +199,53 @@ describe("cycling views", () => {
     // the switcher and see nothing change. Same trap nextRendererId documents.
     expect(nextViewId("nope")).toBe(nextViewId(DEFAULT_VIEW_ID));
     expect(nextViewId("nope")).not.toBe(DEFAULT_VIEW_ID);
+  });
+});
+
+describe("view-local keys (#232)", () => {
+  it("defaults to no declared keys", () => {
+    // A view that declares nothing behaves exactly as before: App's capability
+    // check is the only gate.
+    expect(viewKeys(GRID.id)).toEqual([]);
+    expect(claimsKey(GRID.id, "Escape")).toBe(false);
+  });
+
+  it("every declared row has both keys[] and a label", () => {
+    // ShortcutsOverlay renders these rows directly and its own `groups` use
+    // the same {keys, label} shape, so a row missing either half is a blank
+    // line in the help menu — the "a shortcut nobody can find does not exist"
+    // rule, enforced rather than trusted.
+    for (const v of VIEWS) {
+      for (const row of v.keys ?? []) {
+        expect(Array.isArray(row.keys)).toBe(true);
+        expect(row.keys.length).toBeGreaterThan(0);
+        expect(typeof row.label).toBe("string");
+        expect(row.label.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("claimsKey matches case-insensitively, the way KeyboardEvent.key arrives", () => {
+    // `X` and `x` are the same keystroke with and without shift; a declaration
+    // that only matched one would refuse half the presses.
+    const fake = {
+      ...GRID,
+      id: "fake",
+      keys: [{ keys: ["X"], label: "test" }],
+    };
+    VIEWS.push(fake);
+    try {
+      expect(claimsKey("fake", "x")).toBe(true);
+      expect(claimsKey("fake", "X")).toBe(true);
+      expect(claimsKey("fake", "y")).toBe(false);
+    } finally {
+      VIEWS.pop();
+    }
+  });
+
+  it("answers for an unknown view without throwing", () => {
+    // getView falls back to GRID, so this must be false rather than a crash.
+    expect(claimsKey("no-such-view", "Escape")).toBe(false);
+    expect(viewKeys("no-such-view")).toEqual([]);
   });
 });

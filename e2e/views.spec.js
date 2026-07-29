@@ -278,3 +278,46 @@ test.describe("view registry @p1", () => {
     expect(errors).toEqual([]);
   });
 });
+
+/**
+ * The shortcuts overlay renders the ACTIVE view's declared keys (#232).
+ *
+ * A view declares the keys it handles in `registry.js`, and the overlay builds
+ * a group from them rather than from a hand-copied list — so a new view's
+ * shortcuts cannot ship undocumented. No view declares any yet, which is why
+ * this asserts the *absence* of a phantom section as well as the absence of
+ * errors: an empty titled group would read as "this view has no shortcuts",
+ * which is a different claim from "this view adds none to the shared set".
+ *
+ * It becomes a real behavioural test the moment a view declares keys, without
+ * being edited — the same self-extending shape as the conformance test above.
+ */
+test.describe("declared view keys @p2", () => {
+  test("the overlay opens in every view without a phantom section", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    for (let i = 0; i < 3; i++) {
+      const overlay = await views.shortcuts(page);
+      // The shared groups are always there...
+      await expect(
+        overlay.getByRole("heading", { name: "Grid & Loupe" })
+      ).toBeVisible();
+      // ...and no group is titled with a view's own name unless that view
+      // actually declared rows, so an empty section can never appear.
+      // Section headings only — the modal's own title is a heading too, and
+      // it is not a shortcut group.
+      const sections = overlay.locator("section");
+      const n = await sections.count();
+      expect(n).toBeGreaterThan(0);
+      for (let s = 0; s < n; s++) {
+        await expect(sections.nth(s).locator(".row").first()).toBeVisible();
+      }
+      await page.keyboard.press("?");
+      await views.cycle(page);
+    }
+    expect(errors).toEqual([]);
+  });
+});
