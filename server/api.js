@@ -98,6 +98,7 @@ import {
   faceVectors,
   saveClusters,
   listPersons,
+  listPersonsPage,
   renamePerson,
   mergePersons,
   detachFace,
@@ -2029,9 +2030,25 @@ export function registerApi(app, { ml } = {}) {
     }
   });
 
+  /**
+   * How many people the API hands over unless asked otherwise.
+   *
+   * 200 because the list is largest-first and the tail is singletons: on a
+   * real library 20,259 of 25,760 persons have exactly one face. The view says
+   * how many it is not showing and can ask for more.
+   */
+  const DEFAULT_PEOPLE_PAGE = 200;
+
   /** Everyone found so far, largest first — the order naming wants. */
   app.get("/api/ml/people", (req, res) =>
-    res.json({ people: listPersons(getDb()) })
+    res.json(
+      listPersonsPage(getDb(), {
+        // Bounded by default. `limit=0` asks for everything and is what the
+        // toolbar's person picker would need if it ever wanted the full set —
+        // the VIEW never asks for it.
+        limit: Number(req.query.limit) || DEFAULT_PEOPLE_PAGE,
+      })
+    )
   );
 
   /** Name a person (or clear the name with an empty string). */

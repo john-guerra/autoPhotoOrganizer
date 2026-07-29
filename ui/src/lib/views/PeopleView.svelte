@@ -27,6 +27,11 @@
     people = [],
     /** True while App's working-set fetch is in flight. */
     loading = false,
+    /** How many people exist in total, vs. the page we were handed. */
+    total = 0,
+    truncated = false,
+    /** Ask App for a bigger page. */
+    onmore,
     /** The person the feed is currently filtered to, if any. */
     activePersonId = null,
     /** Ask App to narrow the feed to this person (null clears). */
@@ -108,6 +113,12 @@
     <span class="count">
       {#if loading}
         Loading…
+      {:else if truncated}
+        <!-- SAY what is not shown. A real library has tens of thousands of
+             persons, most of them a stranger in the background of one photo,
+             so this list is capped and largest-first — but a view that
+             silently pretends the library has 200 people in it is lying. -->
+        {n(people.length)} of {n(total)} people · biggest first
       {:else}
         {n(people.length)}
         {people.length === 1 ? "person" : "people"}
@@ -221,6 +232,19 @@
         </li>
       {/each}
     </ul>
+    {#if truncated}
+      <div class="more">
+        <button onclick={() => onmore?.()} disabled={loading}>
+          {loading
+            ? "Loading…"
+            : `Show more (${n(total - people.length)} to go)`}
+        </button>
+        <p class="more-hint">
+          Most of the rest are people seen in a single photo — a passer-by in
+          the background. They are still here, just last.
+        </p>
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -368,6 +392,33 @@
   .merge-open:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+  .more {
+    text-align: center;
+    padding: 1.5rem 1rem 0.5rem;
+  }
+  .more button {
+    font: inherit;
+    background: #1c1c1c;
+    color: inherit;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 5px 14px;
+    cursor: pointer;
+  }
+  .more button:hover:not(:disabled) {
+    background: #2a2a2a;
+  }
+  .more button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .more-hint {
+    color: #777;
+    font-size: 0.78rem;
+    margin: 0.5rem auto 0;
+    max-width: 34rem;
+    line-height: 1.5;
   }
   .empty {
     text-align: center;

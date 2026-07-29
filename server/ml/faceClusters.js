@@ -86,11 +86,24 @@ export const MAX_DEGREE = 24;
  * heavy work never blocks the event loop, and clustering was the one place in
  * this feature that did.
  *
- * 512 is chosen so a yield lands roughly every few milliseconds at library
- * scale, which is often enough to keep the server responsive and rare enough
- * that the awaits are nowhere near the hot path.
+ * BUDGETED IN COMPARISONS, NOT ROWS — and that distinction is the whole bug
+ * (#231). This used to be `YIELD_EVERY = 512` rows, with a comment claiming
+ * "a yield lands roughly every few milliseconds at library scale". Measured on
+ * a real library (48,585 faces, 2026-07-28) it was **10,343 ms**: wrong by
+ * three orders of magnitude, and enough that the client gave up and showed
+ * "Lost the connection to the AutoGallery server… (attempt 4)".
+ *
+ * The reason is the same one that made the progress bar lie: the loop is O(n²)
+ * over the upper triangle, so row *i* does *(n − i)* comparisons. A fixed
+ * number of ROWS is a wildly variable amount of WORK — at n = 48,585 the first
+ * 512 rows are ~24.6M comparisons. Rows are not a unit of work.
+ *
+ * 100,000 pairs is ~37 ms at the measured 2.7M pairs/sec, so a chunk stays
+ * well inside any health check while the ~12,000 extra `setImmediate`s over a
+ * full pass cost microseconds each. The bound holds at ANY face count, which
+ * is what a row count could never do.
  */
-export const YIELD_EVERY = 512;
+export const YIELD_PAIRS = 100_000;
 
 /** One turn of the event loop. `setImmediate` rather than `await null`, which
  *  resolves as a microtask and therefore never lets I/O run at all. */
@@ -144,7 +157,8 @@ export async function withClusterLatch(fn) {
  * @param {number} [opts.minSize] clusters smaller than this stay unassigned.
  *   1 by default, i.e. a face seen once is still a (singleton) person — see
  *   #167: "a person with no name should still be browsable".
- * @param {number} [opts.yieldEvery] rows between yields to the event loop.
+ * @param {number} [opts.yieldPairs] COMPARISONS between yields to the event
+ *   loop — not rows. See YIELD_PAIRS on why the difference is load-bearing.
  * @param {AbortSignal} [opts.signal] checked at the yield point (#222). Throws
  *   an `AbortError` there, so a cancelled pass stops within one `yieldEvery`
  *   block having written NOTHING — the union-find is in-memory and the caller
@@ -165,7 +179,7 @@ export async function clusterFaces(vectors, opts = {}) {
     threshold = SAME_PERSON_COSINE,
     maxDegree = MAX_DEGREE,
     minSize = 1,
-    yieldEvery = YIELD_EVERY,
+    yieldPairs = YIELD_PAIRS,
     signal,
     onProgress,
   } = opts;
@@ -199,15 +213,22 @@ export async function clusterFaces(vectors, opts = {}) {
   // it; the near-dupe sweep taught that these scans are faster than they look.
   //
   // It yields every `yieldEvery` rows so the server keeps answering while it
-  // runs — see YIELD_EVERY. That is the only reason this function is async.
+  // runs — see YIELD_PAIRS. That is the only reason this function is async.
   // Total WORK, not total rows — see onProgress. n*(n-1)/2 is the upper
   // triangle; `maxDegree` skips make the real count lower, so this is an upper
   // bound that the bar approaches monotonically rather than overshooting.
   const totalPairs = (n * (n - 1)) / 2;
   const pairsThrough = (row) => row * n - (row * (row + 1)) / 2;
 
+  // Comparisons done since the last yield. Checked once per ROW rather than
+  // inside the inner loop: one row is at most `n` comparisons (~18 ms at
+  // 48,585 faces), so the chunk is bounded by `yieldPairs + n` and the check
+  // itself stays out of the hot path.
+  let sinceYield = 0;
+
   for (let i = 0; i < n; i++) {
-    if (i > 0 && i % yieldEvery === 0) {
+    if (sinceYield >= yieldPairs) {
+      sinceYield = 0;
       await breathe();
       // The abort check belongs HERE, at the yield, and nowhere else: it is
       // the only point in an O(n^2) loop where the process is not mid-scan,
@@ -219,6 +240,10 @@ export async function clusterFaces(vectors, opts = {}) {
       }
       onProgress?.({ done: pairsThrough(i), total: totalPairs });
     }
+    // Counted even when the row is SKIPPED below, because the skip is what a
+    // degree-capped row costs — near zero — and counting only the work we
+    // actually did would let a long run of capped rows delay a yield forever.
+    sinceYield += n - i - 1;
     if (degree[i] >= maxDegree) continue;
     const vi = data.subarray(i * dim, (i + 1) * dim);
     for (let j = i + 1; j < n; j++) {

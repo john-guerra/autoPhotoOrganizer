@@ -1265,8 +1265,18 @@ export async function clusterPeople(model, threshold) {
 }
 
 /** Everyone found, largest first. */
-export async function fetchPeople() {
-  const res = await fetch("/api/ml/people");
+/**
+ * Everyone found, largest first — BOUNDED (#223).
+ *
+ * Returns `{people, total, truncated}`. A real library has tens of thousands
+ * of persons, most of them singletons (a stranger in one photo's background),
+ * so the caller gets a page and is told what it is not seeing.
+ *
+ * @param {number} [limit] omit for the server's default page; 0 for everyone.
+ */
+export async function fetchPeople(limit) {
+  const q = limit === undefined ? "" : `?limit=${limit}`;
+  const res = await fetch(`/api/ml/people${q}`);
   if (!res.ok) throw new Error(`people failed (${res.status})`);
   return res.json();
 }

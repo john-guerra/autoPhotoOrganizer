@@ -943,11 +943,30 @@
    *  a failure stays silent because the picker is additive, and an ACTIVE
    *  person can vanish underneath the filter — a re-cluster deletes unnamed
    *  people — which would leave an empty feed and a picker naming nobody. */
+  /** How many people the People view has asked for so far (#223). */
+  let peopleLimit = $state(200);
+  /** Everyone the server has, vs. the page we hold. */
+  let peopleTotal = $state(0);
+  let peopleTruncated = $state(false);
+
   async function refreshPeople() {
-    people = await fetchPeople()
-      .then((r) => r.people ?? [])
-      .catch(() => []);
-    if (filter.personId && !people.some((p) => p.id === filter.personId)) {
+    const r = await fetchPeople(peopleLimit).catch(() => null);
+    if (!r) {
+      people = [];
+      return;
+    }
+    people = r.people ?? [];
+    peopleTotal = r.total ?? people.length;
+    peopleTruncated = !!r.truncated;
+    // ONLY when we hold the complete list. The list is capped now, so a person
+    // outside the page is absent from `people` while existing perfectly well —
+    // clearing the filter here would wipe the user's chosen person and tell
+    // them, falsely, that they "no longer exist".
+    if (
+      !peopleTruncated &&
+      filter.personId &&
+      !people.some((p) => p.id === filter.personId)
+    ) {
       const next = { ...filter };
       delete next.personId;
       onFilterChange(next);
@@ -2679,7 +2698,13 @@
       return {
         people,
         loading: peopleLoading,
+        total: peopleTotal,
+        truncated: peopleTruncated,
         activePersonId: filter.personId ?? null,
+        onmore: async () => {
+          peopleLimit += 200;
+          await refreshPeople();
+        },
         // The EXISTING personId filter (#167), not a second way to narrow the
         // feed. App owns the filter; the view asks.
         onpick: (id) => {
