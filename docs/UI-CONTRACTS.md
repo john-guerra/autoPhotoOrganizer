@@ -169,6 +169,8 @@ Specified in **#155**, and the registry is the deliverable — not any one view.
   navigation: "scroll" | "zoom",     // who owns the viewport
   dataSource: "feed" | "working-set",
   capabilities: { open, select, rate },   // all three REQUIRED, explicit booleans
+  keys: [{ keys: ["Escape"], label: "Clear the lasso" }],  // optional, see below
+  offerable: (ctx) => boolean,       // optional; earn a switcher slot
   component }
 ```
 
@@ -185,6 +187,38 @@ markup), and — if it declares `dataSource: "working-set"` — an entry in
 view. The grid is the one view mounted explicitly rather than generically:
 App computes its layout, so App needs its element and measured width, and
 `bind:` cannot be passed through a spread.
+
+### `keys` — a view declares the keys it handles itself
+
+Added by #232, and the gap it closes is worth naming because the table above
+had promised it since #155: "view-specific keys, declared" belonged to the
+view, and **there was nowhere to declare them.**
+
+`capabilities` describes what happens to PHOTOS. A view may legitimately own a
+selection of something else — the Face Map selects PEOPLE — and without a
+declaration `refuseUnsupported` answers every keystroke in photo terms.
+Concretely, `Escape` in the Face Map was answered _"Selecting photos isn't
+available in Face Map"_ while the user was looking at a selection of people.
+Confidently wrong is worse than silent.
+
+```js
+keys: [
+  { keys: ["Escape"], label: "Clear the lasso and empty the tray" },
+  { keys: ["0"], label: "Fit the whole map back into view" },
+];
+```
+
+Two consumers, and both are the point:
+
+- **`ShortcutsOverlay.svelte` renders them**, so a view's shortcuts cannot ship
+  undocumented. CLAUDE.md's "a shortcut nobody can find does not exist" now
+  holds by construction rather than by remembering.
+- **`refuseUnsupported` checks them before refusing**, so a declared key is the
+  view's business.
+
+**Spell the key the way `KeyboardEvent.key` reports it** — `"Escape"`, not
+`"Esc"`. A display-only spelling never matches, and the view then gets the
+wrong message with nothing failing. There is a test for exactly that.
 
 **The boundary is what makes this safe. App stays the data owner.**
 
@@ -253,6 +287,37 @@ declaration, not a shrug: People shows you PEOPLE, and `selected` indexes a
 feed window it does not render, so a `3` here would rate a photo you cannot
 see. That is the same bug the capability system was built for, now caught by a
 third view rather than argued about.
+
+### What adding the FOURTH view cost (#232)
+
+People (#223) tested the registry's claim; the Face Map tested whether it held
+a second time, with a view that is unlike the other three — it owns its own
+viewport, draws to a canvas, and selects people rather than photos.
+
+|                            |                                                      |
+| -------------------------- | ---------------------------------------------------- |
+| `views/registry.js`        | one `FACE_MAP` descriptor                            |
+| `views/FaceMapView.svelte` | the component                                        |
+| `scatter/`                 | a reusable canvas + four pure modules                |
+| `App.svelte`               | a `viewProps` case and a `WORKING_SET_LOADERS` entry |
+| `ShortcutsOverlay.svelte`  | one word in the `V` label                            |
+
+Still no new branch in App's markup, no second switcher, and the conformance
+test covered it without being edited. **The one genuinely new thing was the
+`keys` field above** — the registry's first missing capability in four views,
+and it was missing because nothing had yet needed to own a key.
+
+Two things this view paid that People did not, both worth budgeting for next
+time:
+
+- **`navigation: "zoom"` stopped being a forward-declaration.** A view that
+  owns its viewport must fill the column, hide its own overflow, and
+  `preventDefault()` on wheel, or App's `.main-column` scrolls underneath while
+  you try to zoom. That is a task, not a CSS afterthought.
+- **A working-set view can need data AFTER entry.** Building a new projection
+  is not view entry, so `WORKING_SET_LOADERS` does not cover it. The view emits
+  `onrun`; **App** runs the job and fetches. A view that fetched its own data
+  would be the boundary rotting in a new place.
 
 ### Three scales of pluggability
 
