@@ -161,18 +161,23 @@
     const drawImages = shouldDrawImages(t.k);
     const side = imageSide(t.k);
 
+    // TWO PASSES, and the reason is visible the moment you zoom in: drawing a
+    // dot and then its image per point means point 500's DOT lands on top of
+    // point 3's crop, so a dense region renders as faces speckled with blue.
+    // Dots first, images second, so a picture is never obscured by a
+    // neighbour's marker.
+    const drawn = [];
     for (let i = 0; i < n; i++) {
       const [px, py] = toScreen(points.x[i], points.y[i], t);
       // Cull generously: an image is drawn centred, so allow for its half-side.
       if (px < -side || py < -side || px > width + side || py > height + side) {
         continue;
       }
-
       const w = points.size ? points.size[i] : 1;
       const r = dotRadius(w, t.k);
 
-      // The dot is ALWAYS drawn, underneath. An unloaded crop is then a dot
-      // rather than a hole, so the map never looks broken mid-load.
+      // The dot is always drawn. An unloaded crop is then a dot rather than a
+      // hole, so the map never looks broken mid-load.
       ctx.fillStyle = points.group?.[i] ? "#2e8b57" : "#4c9aff";
       if (r <= 3) {
         // Several times cheaper than arc() and visually identical this small.
@@ -182,19 +187,29 @@
         ctx.arc(px, py, r, 0, Math.PI * 2);
         ctx.fill();
       }
-
-      if (drawImages) {
-        const img = imageAt(imageFor(i));
-        if (img) {
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(px, py, side / 2, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.drawImage(img, px - side / 2, py - side / 2, side, side);
-          ctx.restore();
-        }
-      }
+      if (drawImages) drawn.push(i, px, py);
     }
+
+    for (let k = 0; k < drawn.length; k += 3) {
+      const img = imageAt(imageFor(drawn[k]));
+      if (!img) continue;
+      const px = drawn[k + 1];
+      const py = drawn[k + 2];
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(px, py, side / 2, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(img, px - side / 2, py - side / 2, side, side);
+      ctx.restore();
+      // A thin ring so adjacent faces read as separate people rather than a
+      // collage.
+      ctx.strokeStyle = points.group?.[drawn[k]] ? "#2e8b57" : "#00000088";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(px, py, side / 2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     drawOverlay();
   }
 
