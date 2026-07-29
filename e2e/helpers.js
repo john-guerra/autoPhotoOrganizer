@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { join } from "node:path";
 
 /**
  * Shared page objects for the UI tests.
@@ -210,6 +211,13 @@ export const views = {
    * world and broke the moment People landed as the third — the exact latent
    * assumption a reviewer flagged when there were only two.
    */
+  /** Open the keyboard-shortcuts overlay and return its root. */
+  shortcuts: async (page) => {
+    await page.keyboard.press("?");
+    const root = page.locator('dialog:has-text("Keyboard shortcuts")');
+    await root.waitFor();
+    return root;
+  },
   toGrid: async (page) => {
     const pressed = page.locator(
       '[data-testid^="view-switch-"][aria-pressed="true"]'
@@ -218,6 +226,208 @@ export const views = {
     await page.locator("#feed-grid").waitFor();
   },
 };
+
+/**
+ * The Face Map (#232). Selectors live here, never in a spec, so a markup
+ * change is one edit rather than N.
+ */
+export const faceMap = {
+  root: (page) => page.locator('[data-testid="face-map"]'),
+  scatter: (page) => page.locator('[data-testid="scatter"]'),
+  empty: (page) => page.locator('[data-testid="map-empty"]'),
+  coverage: (page) => page.locator('[data-testid="map-coverage"]'),
+  notice: (page) => page.locator('[data-testid="map-notice"]'),
+  gear: (page) => page.locator('[data-testid="map-gear"]'),
+  gearPanel: (page) => page.locator('[data-testid="map-gear-panel"]'),
+  members: (page) => page.locator('[data-testid="map-members"]'),
+  build: (page) => page.locator('[data-testid="map-build-empty"]'),
+  rebuild: (page) => page.locator('[data-testid="map-build"]'),
+  count: (page) => page.locator('[data-testid="map-count"]'),
+  tray: (page) => page.locator('[data-testid="map-tray"]'),
+  trayCount: (page) => page.locator('[data-testid="tray-count"]'),
+  chips: (page) => page.locator('[data-testid="tray-chip"]'),
+  name: (page) => page.locator('[data-testid="tray-name"]'),
+  merge: (page) => page.locator('[data-testid="tray-merge"]'),
+  conflict: (page) => page.locator('[data-testid="tray-conflict"]'),
+  undo: (page) => page.locator('[data-testid="map-undo"]'),
+  undoBtn: (page) => page.locator('[data-testid="map-undo-btn"]'),
+  filteredEmpty: (page) => page.locator('[data-testid="map-filtered-empty"]'),
+
+  /**
+   * Build the map and wait for the dots.
+   *
+   * The button differs between the empty state and the gear, so this picks
+   * whichever is on screen — a spec should say "build the map", not know that.
+   */
+  build_: async (page) => {
+    const empty = faceMap.build(page);
+    if (await empty.count()) await empty.click();
+    else {
+      await faceMap.gear(page).click();
+      await faceMap.rebuild(page).click();
+    }
+    await faceMap.count(page).waitFor({ timeout: 60_000 });
+  },
+
+  /**
+   * Drag a lasso, in viewport coordinates relative to the canvas.
+   *
+   * Real pointer moves rather than a synthetic event: the component reads
+   * pointer capture and builds the path from pointermove, so a dispatched
+   * event would prove nothing about what a human gets.
+   */
+  lasso: async (page, path, { shift = false, alt = false } = {}) => {
+    const box = await faceMap.scatter(page).boundingBox();
+    const at = ([fx, fy]) => [box.x + box.width * fx, box.y + box.height * fy];
+    if (shift) await page.keyboard.down("Shift");
+    if (alt) await page.keyboard.down("Alt");
+    const [sx, sy] = at(path[0]);
+    await page.mouse.move(sx, sy);
+    await page.mouse.down();
+    for (const p of path.slice(1)) {
+      const [x, y] = at(p);
+      // Several steps per leg: one jump would leave a 2-vertex path, which
+      // `caught` correctly refuses as "not a region".
+      await page.mouse.move(x, y, { steps: 8 });
+    }
+    await page.mouse.up();
+    if (shift) await page.keyboard.up("Shift");
+    if (alt) await page.keyboard.up("Alt");
+  },
+};
+
+/**
+ * Seed synthetic people and faces straight into the scratch index.
+ *
+ * The generated fixture has no human faces in it — it is sharp-drawn
+ * rectangles — and face detection is deliberately unreachable in e2e (no model
+ * download, no ORT). So the only way to exercise the Face Map in a browser is
+ * to write the rows detection would have written.
+ *
+ * Hermetic by construction: AUTOGALLERY_HOME points at `e2e/.tmp/home`
+ * (playwright.config.js), so this can never touch a real library.
+ *
+ * @param {number} people how many persons to create
+ * @param {number} facesEach faces per person
+ */
+export async function seedFaces(people = 24, facesEach = 2) {
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(
+    join(process.cwd(), "e2e", ".tmp", "home", "index.db")
+  );
+  try {
+    const model = "buffalo_s";
+    const photos = db
+      .prepare(
+        `SELECT id FROM photos WHERE stale = 0 AND kind = 'image'
+                 ORDER BY id`
+      )
+      .all()
+      .map((r) => r.id);
+    if (!photos.length) throw new Error("seedFaces: no photos to attach to");
+
+    db.prepare(`DELETE FROM photo_faces WHERE model = ?`).run(model);
+    db.prepare(`DELETE FROM persons`).run();
+    db.prepare(`DELETE FROM projection_point`).run();
+    db.prepare(`DELETE FROM projection_runs`).run();
+    db.prepare(`DELETE FROM person_merge_undo`).run();
+
+    const DIM = 16;
+    const insPerson = db.prepare(
+      `INSERT INTO persons (id, name, created_at) VALUES (?, ?, ?)`
+    );
+    const insFace = db.prepare(
+      `INSERT INTO photo_faces
+         (photo_id, model, box_x, box_y, box_w, box_h, det_score,
+          dim, scale, vec, person_id, person_source, created_at)
+       VALUES (?, ?, 0, 0, 10, 10, 0.9, ?, ?, ?, ?, 'model', ?)`
+    );
+
+    db.transaction(() => {
+      for (let p = 1; p <= people; p++) {
+        insPerson.run(p, null, 1000 + p);
+        for (let f = 0; f < facesEach; f++) {
+          // A distinct direction per person, wobbled per face, so the
+          // projection has real structure rather than coincident points.
+          const bytes = new Int8Array(DIM);
+          for (let i = 0; i < DIM; i++) {
+            bytes[i] = Math.round(Math.sin(i * 0.7 + p * 1.3 + f * 0.05) * 100);
+          }
+          insFace.run(
+            photos[(p * facesEach + f) % photos.length],
+            model,
+            DIM,
+            0.01,
+            Buffer.from(bytes.buffer),
+            p,
+            Date.now()
+          );
+        }
+      }
+    })();
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Undo `seedFaces`.
+ *
+ * Not optional housekeeping. Seeded people persist for the rest of the RUN,
+ * and enough of them make both `PersonFilter` and the Face Map's switcher
+ * button render — two extra toolbar controls. The toolbar folds by WIDTH
+ * (docs/AGENT-NOTES.md), so that pushes unrelated groups into the overflow
+ * popover and breaks specs that have nothing to do with faces. Leave the
+ * library as you found it.
+ */
+export async function clearFaces() {
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(
+    join(process.cwd(), "e2e", ".tmp", "home", "index.db")
+  );
+  try {
+    db.exec(`
+      DELETE FROM photo_faces;
+      DELETE FROM persons;
+      DELETE FROM projection_point;
+      DELETE FROM projection_runs;
+      DELETE FROM person_merge_undo;
+    `);
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Clear every rating, straight in the index.
+ *
+ * `resetRatings` POSTs one request per photo, which is fine for the 19-photo
+ * fixture and pointless here — this runs in a beforeEach and only needs the
+ * rows zeroed. Same scratch-index-only guarantee as `seedFaces`.
+ */
+export async function clearRatings() {
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(
+    join(process.cwd(), "e2e", ".tmp", "home", "index.db")
+  );
+  try {
+    db.prepare(`UPDATE photos SET rating = 0`).run();
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * How many people exist right now, straight from the API.
+ *
+ * `total`, not `people.length`: the list is bounded at 200 by default (#223),
+ * so counting the page would silently plateau on a real library.
+ */
+export async function personCount(page) {
+  const r = await page.request.get("/api/ml/people");
+  const d = await r.json();
+  return d.total ?? (d.people ?? d).length;
+}
 
 // --- the status bar (counts + selection actions) -----------------------------
 

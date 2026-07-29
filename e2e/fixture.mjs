@@ -150,7 +150,21 @@ export const TOTAL_PHOTOS = FOLDERS.reduce((sum, f) => sum + itemsIn(f), 0);
  * is exactly the bug this fixture shipped with.
  */
 export async function buildFixture() {
-  rmSync(E2E_ROOT, { recursive: true, force: true });
+  // Only the PHOTOS, not the whole temp root.
+  //
+  // This runs from globalSetup, which Playwright runs AFTER the webServer is
+  // listening — so the server has already opened `home/index.db`. Deleting the
+  // whole root took that file out from under it: SQLite carried on happily
+  // through the open descriptor, but the database no longer existed at any
+  // path, so nothing outside the server process could ever read or seed it.
+  // (Which is how it stayed invisible: the suite worked perfectly.)
+  //
+  // The index is still scratch and still disposable — it lives in a temp
+  // AUTOGALLERY_HOME that no real library shares — and specs that need clean
+  // global state already reset it explicitly (`resetRatings`, `seedFaces`).
+  // What changes is that it is now a real file, which is what lets the face
+  // map's e2e seed the rows face detection would have written (#232).
+  rmSync(PHOTOS_DIR, { recursive: true, force: true });
   mkdirSync(PHOTOS_DIR, { recursive: true });
   mkdirSync(HOME_DIR, { recursive: true });
 

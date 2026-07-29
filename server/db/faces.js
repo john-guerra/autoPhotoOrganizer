@@ -208,6 +208,41 @@ export function faceCounts(db, model) {
 }
 
 /**
+ * How much of the face library has actually been grouped into people (#232).
+ *
+ * Separate from `faceCounts`, whose `total` is PHOTOS rather than faces — a
+ * distinction that is easy to miss and produces a banner quoting the wrong
+ * denominator.
+ *
+ * The face map exists to fix over-split people, and it can only show faces
+ * that HAVE a person. On a real library most do not: 69,786 of 118,371
+ * (59%) were ungrouped when this was written, because a grouping pass had
+ * never run to completion. A map that stays quiet about that lets someone
+ * lasso everything, merge, and reasonably conclude they are finished.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @returns {{detected: number, grouped: number, ungrouped: number, people: number}}
+ */
+export function faceGroupingCoverage(db, model) {
+  const r = db
+    .prepare(
+      `SELECT COUNT(*) detected,
+              COUNT(person_id) grouped,
+              COUNT(DISTINCT person_id) people
+         FROM photo_faces WHERE model = ?`
+    )
+    .get(model);
+  return {
+    detected: r.detected,
+    grouped: r.grouped,
+    // COUNT(col) skips NULLs, so this is exactly the faces with no person.
+    ungrouped: r.detected - r.grouped,
+    people: r.people,
+  };
+}
+
+/**
  * Every face vector for one model, for clustering (#167).
  *
  * Returned as one flat Int8Array plus per-face scales rather than an array of

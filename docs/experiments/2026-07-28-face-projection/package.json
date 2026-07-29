@@ -1,0 +1,13 @@
+{
+  "name": "autogallery-experiment-face-projection",
+  "private": true,
+  "type": "module",
+  "description": "Scratch deps for the 2026-07-28 projection benchmarks. Deliberately NOT app dependencies: @saehrimnir/druidjs is LGPL-3.0-or-later and the app is MIT. Nothing here is bundled or shipped.",
+  "scripts": {
+    "note": "run the .mjs files from the REPO ROOT so better-sqlite3 resolves"
+  },
+  "dependencies": {
+    "@saehrimnir/druidjs": "^0.8.0",
+    "umap-js": "^1.4.0"
+  }
+}

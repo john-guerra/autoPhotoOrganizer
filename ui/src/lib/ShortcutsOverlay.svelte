@@ -7,8 +7,15 @@
   // capture-vs-bubble double-toggle.
   import Modal from "./Modal.svelte";
 
-  let { onclose } = $props();
+  let { onclose, viewId = DEFAULT_VIEW_ID } = $props();
   const close = () => onclose?.();
+
+  // A view declares the keys it handles itself (registry.js `keys`), and they
+  // are rendered here rather than hand-copied into the list below. That is
+  // what makes CLAUDE.md's rule — "a shortcut nobody can find does not exist"
+  // — hold by construction for a new view instead of by remembering: the
+  // declaration IS the documentation, so the two cannot drift.
+  import { viewKeys, getView, DEFAULT_VIEW_ID } from "./views/registry.js";
 
   // The platform's own modifier key (lib/platform.js). Listing both as
   // "⌘ / Ctrl" rendered the slash as its own <kbd> pill — it read as a third key
@@ -18,7 +25,7 @@
   // Each group: a heading + rows of {keys, label}. `keys` is an array so each
   // token renders as its own <kbd>; connective tokens ("+", "arrow", "–")
   // render as plain text between keys.
-  const groups = [
+  const BASE_GROUPS = [
     {
       heading: "Grid & Loupe",
       rows: [
@@ -83,7 +90,7 @@
         {
           keys: ["V"],
           label:
-            "Switch the main area to the next view (grid → Auto Albums → People → grid); not while the loupe is open",
+            "Switch the main area to the next view (grid → Auto Albums → People → Face Map → grid); not while the loupe is open",
         },
         { keys: [","], label: "Open scrolling & prefetch settings" },
         { keys: ["?"], label: "Toggle this shortcuts list" },
@@ -142,6 +149,16 @@
       ],
     },
   ];
+
+  /** The static list, plus whatever the active view declares. */
+  const groups = $derived(
+    viewKeys(viewId).length
+      ? [
+          ...BASE_GROUPS,
+          { heading: getView(viewId).label, rows: viewKeys(viewId) },
+        ]
+      : BASE_GROUPS
+  );
 </script>
 
 <Modal open={true} title="Keyboard shortcuts" size="lg" onclose={close}>

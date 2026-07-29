@@ -156,9 +156,11 @@
     GRID,
     ALBUMS,
     PEOPLE,
+    FACE_MAP,
     DEFAULT_VIEW_ID,
     getView,
     supports,
+    claimsKey,
     nextViewId,
     restorableViewId,
   } from "./lib/views/registry.js";
@@ -2574,6 +2576,20 @@
     // construction (one row per person, not per photo) and it is the same
     // list the picker reads, so the view and the filter can never disagree
     // about who exists.
+    [FACE_MAP.id]: async () => {
+      mapLoading = true;
+      try {
+        await loadFaceMap();
+        await loadMapOptions();
+        await loadMapVisible();
+        return true;
+      } catch (e) {
+        error = `Couldn't load the face map: ${e.message}`;
+        return false;
+      } finally {
+        mapLoading = false;
+      }
+    },
     [PEOPLE.id]: async () => {
       peopleLoading = true;
       try {
@@ -2590,6 +2606,134 @@
 
   /** True while the People view's working set is being fetched. */
   let peopleLoading = $state(false);
+
+  // --- the face map's working set (#232) -----------------------------------
+  //
+  // App owns EVERY fetch here, including the one after a new projection —
+  // which is not view entry, so the working-set loader alone does not cover
+  // it. A view that fetched its own data is exactly how the #155 boundary
+  // rots.
+  let mapPoints = $state([]);
+  let mapMeta = $state({
+    runId: null,
+    createdAt: 0,
+    algorithm: "umap",
+    model: "",
+  });
+  let mapCoverage = $state(null);
+  let mapStaleness = $state(null);
+  let mapOptions = $state(null);
+  let mapLoading = $state(false);
+  let mapNotice = $state("");
+  let mapParams = $state({
+    minFaces: 2,
+    nNeighbors: 15,
+    minDist: 0.1,
+    algorithm: "umap",
+  });
+
+  const mapQuery = (p) =>
+    new URLSearchParams({
+      minFaces: String(p.minFaces),
+      nNeighbors: String(p.nNeighbors),
+      minDist: String(p.minDist),
+      algorithm: String(p.algorithm),
+    }).toString();
+
+  async function loadFaceMap(params = mapParams) {
+    mapParams = { ...params };
+    const res = await fetch(`/api/projections/current?${mapQuery(params)}`);
+    if (!res.ok) throw new Error(`map: ${res.status}`);
+    const d = await res.json();
+    mapPoints = d.points ?? [];
+    mapMeta = {
+      runId: d.runId ?? null,
+      createdAt: d.createdAt ?? 0,
+      algorithm: d.algorithm ?? params.algorithm,
+      model: d.model ?? "",
+    };
+    mapCoverage = d.coverage ?? null;
+    mapStaleness = d.staleness ?? null;
+    return true;
+  }
+
+  /**
+   * Which people the current filter is showing.
+   *
+   * `null` means "no filter is narrowing anything" — distinct from an empty
+   * array, which means "the filter matches nobody" and must dim the whole map
+   * rather than silently showing everyone. Same null-vs-empty discipline the
+   * scope ids use server-side.
+   */
+  let mapVisibleIds = $state(null);
+
+  async function loadMapVisible() {
+    try {
+      const q = new URLSearchParams({ filter: JSON.stringify(displayFilter) });
+      const res = await fetch(`/api/projections/visible?${q}`);
+      if (!res.ok) {
+        mapVisibleIds = null;
+        return;
+      }
+      // The SERVER decides whether this spec narrows anything. The client
+      // always holds a filter object whose keys are mostly defaults, so
+      // testing its shape made the map announce "in view" while showing
+      // everyone.
+      const body = await res.json();
+      mapVisibleIds = body.narrows ? (body.personIds ?? []) : null;
+    } catch {
+      // A failed narrowing must not silently pretend the filter is off.
+      mapNotice = "Couldn't work out who is in the photos you're viewing.";
+      mapVisibleIds = null;
+    }
+  }
+
+  // Re-derive whenever the filter changes AND the map is the active view, so a
+  // filter change while browsing the grid costs nothing.
+  $effect(() => {
+    displayFilter;
+    if (viewId === FACE_MAP.id) untrack(() => loadMapVisible());
+  });
+
+  async function loadMapOptions(params = mapParams) {
+    const res = await fetch(`/api/projections/options?${mapQuery(params)}`);
+    if (res.ok) mapOptions = await res.json();
+  }
+
+  /**
+   * Build a projection, then reload the points.
+   *
+   * The VIEW asks; App runs the job and awaits it. `waitForJob` is the same
+   * helper every other long operation uses, so this appears in the JobsPanel
+   * and can be cancelled from there like anything else.
+   */
+  async function runFaceMap(params) {
+    mapNotice = "";
+    mapLoading = true;
+    try {
+      const res = await fetch("/api/projections", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(params),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Surface the server's specific refusal, never a generic one: it
+        // already says which minimum to lower or which algorithm to pick.
+        mapNotice = body.error ?? `Couldn't build the map (${res.status}).`;
+        return false;
+      }
+      if (body.jobId) await waitForJob(body.jobId);
+      await loadFaceMap(params);
+      await loadMapOptions(params);
+      return true;
+    } catch (e) {
+      mapNotice = `Couldn't build the map: ${e.message}`;
+      return false;
+    } finally {
+      mapLoading = false;
+    }
+  }
 
   /**
    * Switch the main area to another registered view.
@@ -2674,10 +2818,19 @@
    * keystroke") and the house usability rule — a keystroke that vanishes reads
    * as a broken keyboard, so it names the view and the way out.
    *
+   * @param {"open"|"select"|"rate"} capability
+   * @param {string} whatTheUserTried
+   * @param {string} [key] the `KeyboardEvent.key`, when there is one. A view
+   *   that DECLARES this key handles it itself, so refusing here would answer
+   *   a question the user did not ask: `capabilities` is about PHOTOS, and a
+   *   view may own a selection of something else entirely (#232). Passing the
+   *   key is what lets the Face Map keep `X` while still declaring
+   *   `select: false` for App's photo selection.
    * @returns {boolean} true if the keystroke was refused and handled here
    */
-  function refuseUnsupported(capability, whatTheUserTried) {
+  function refuseUnsupported(capability, whatTheUserTried, key = null) {
     if (supports(viewId, capability)) return false;
+    if (claimsKey(viewId, key)) return false;
     // "press V to switch views", not "press V to go back to the grid": V
     // cycles to the NEXT view, which is only the grid while there are two of
     // them — and this lives in the file whose whole purpose is making the
@@ -2694,6 +2847,88 @@
    * another `{#if}` in the markup.
    */
   let viewProps = $derived.by(() => {
+    if (activeView.id === FACE_MAP.id) {
+      return {
+        points: mapPoints,
+        runId: mapMeta.runId,
+        createdAt: mapMeta.createdAt,
+        algorithm: mapMeta.algorithm,
+        model: mapMeta.model,
+        coverage: mapCoverage,
+        staleness: mapStaleness,
+        options: mapOptions,
+        visiblePersonIds: mapVisibleIds,
+        loading: mapLoading,
+        notice: mapNotice,
+        onrun: runFaceMap,
+        onoptions: loadMapOptions,
+        // The EXISTING personId filter (#167), same as People — not a second
+        // way to narrow the feed.
+        onpick: (id) => {
+          const next = { ...filter };
+          if (id) next.personId = id;
+          else delete next.personId;
+          onFilterChange(next);
+        },
+        onmerge: async ({ intoId, ids, name }) => {
+          mapNotice = "";
+          try {
+            const res = await fetch("/api/ml/people/merge-bulk", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                intoId,
+                ids,
+                ...(name === undefined ? {} : { name }),
+              }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (res.status === 409 && body.names) {
+              // Not an error: the server found two real names and is asking
+              // which to keep. The view renders the choice.
+              return { ok: false, names: body.names };
+            }
+            if (!res.ok) {
+              mapNotice = body.error ?? `Merge failed (${res.status}).`;
+              return { ok: false };
+            }
+            // The map is served by a join against live persons, so the merged
+            // dots disappear on reload with no re-projection.
+            await loadFaceMap();
+            await refreshPeople();
+            return { ok: true, ...body };
+          } catch (e) {
+            mapNotice = `Merge failed: ${e.message}`;
+            return { ok: false };
+          }
+        },
+        onundo: async (token) => {
+          try {
+            const res = await fetch("/api/ml/people/undo-merge", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ token }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              mapNotice =
+                body.error ?? `Couldn't undo that merge (${res.status}).`;
+              return;
+            }
+            await loadFaceMap();
+            await refreshPeople();
+          } catch (e) {
+            mapNotice = `Couldn't undo that merge: ${e.message}`;
+          }
+        },
+        ongroup: () => {
+          // The map can only show grouped faces, and on a real library most
+          // are not. Send them where that gets fixed — the ML panel, which
+          // owns "Find faces" and "Group them into people" (#205).
+          mlPanelOpen = true;
+        },
+      };
+    }
     if (activeView.id === PEOPLE.id) {
       return {
         people,
@@ -5657,7 +5892,7 @@
       // declaring `select: false` is not showing you. It is handled up here,
       // above the blanket meta/ctrl bail, so it needs its own check — the one
       // further down guards only the plain keys.
-      if (refuseUnsupported("select", "Selecting photos")) return;
+      if (refuseUnsupported("select", "Selecting photos", e.key)) return;
       if (e.shiftKey) await bulkDeselect();
       else await bulkSelect();
       return;
@@ -5812,7 +6047,7 @@
       // the feed window, which such a view isn't showing you (see
       // refuseUnsupported). The loupe is an overlay and rates what it displays,
       // so it keeps working on top of any view.
-      if (!loupeOpen && refuseUnsupported("rate", "Rating")) return;
+      if (!loupeOpen && refuseUnsupported("rate", "Rating", e.key)) return;
       rate(selected, Number(key));
       // Auto-advance, but never onto a placeholder (see nextSelectable).
       if (loupeOpen) {
@@ -5835,7 +6070,10 @@
         // Gated on `select` because choosing a stack's cover is an act on a
         // photo you picked out, and a view that cannot express "this one"
         // cannot express it either.
-        if (!loupeOpen && refuseUnsupported("select", "Choosing a stack cover"))
+        if (
+          !loupeOpen &&
+          refuseUnsupported("select", "Choosing a stack cover", e.key)
+        )
           return;
         toggleCover(entry);
       }
@@ -5854,7 +6092,7 @@
       // the feed cursor) and both WRITE. Same reasoning as C.
       if (
         !loupeOpen &&
-        refuseUnsupported("select", "Grouping photos into stacks")
+        refuseUnsupported("select", "Grouping photos into stacks", e.key)
       )
         return;
       if (e.shiftKey) {
@@ -5879,7 +6117,8 @@
     // loupe it auto-advances (like rating) to keep the "look, pick, next" flow.
     if (key.toLowerCase() === "x") {
       e.preventDefault();
-      if (!loupeOpen && refuseUnsupported("select", "Selecting photos")) return;
+      if (!loupeOpen && refuseUnsupported("select", "Selecting photos", e.key))
+        return;
       const p = resolvedPhotos[selected];
       if (p && typeof p.id === "number") toggleSelect(p.id);
       if (loupeOpen) {
@@ -5975,7 +6214,7 @@
     // The plain arrows are left alone deliberately — moving an off-screen
     // cursor writes nothing, and refusing navigation would be noise.
     if (e.shiftKey && next !== selected) {
-      if (refuseUnsupported("select", "Selecting photos")) return;
+      if (refuseUnsupported("select", "Selecting photos", e.key)) return;
       selectRange(selected, next);
     }
     focusEntry(next);
@@ -6620,7 +6859,7 @@
 {/if}
 
 {#if shortcutsHelpOpen}
-  <ShortcutsOverlay onclose={() => (shortcutsHelpOpen = false)} />
+  <ShortcutsOverlay {viewId} onclose={() => (shortcutsHelpOpen = false)} />
 {/if}
 
 {#if settingsOpen}

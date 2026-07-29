@@ -71,15 +71,34 @@ test.describe("view registry @p1", () => {
     await modal.locator("button", { hasText: "Cancel" }).click();
     await expect(modal).toBeHidden();
 
-    // ...and onward. V advances through the REGISTRY and wraps after the last
-    // one, so with three views registered the next press is People, not the
-    // grid. Asserting "one more press returns you" encoded a two-view world
-    // and broke the moment People landed — assert the cycle instead.
+    // ...and onward.
     await views.cycle(page);
     await expect(peopleView.root(page)).toBeVisible();
 
-    // Wrapping: from the last view, V comes back to the grid.
-    await views.cycle(page);
+    // Wrapping. This used to assert "one more press returns you to the grid",
+    // which encoded a TWO-view world and broke when People landed; it was then
+    // rewritten to encode a THREE-view world and broke again when the Face Map
+    // landed (#232). So stop counting: press V until the grid comes back, and
+    // assert only what is actually true of the registry — that the cycle
+    // terminates, and that it passes through every view on the way.
+    const seen = new Set(["albums", "people"]);
+    let returned = false;
+    for (let i = 0; i < 10; i++) {
+      await views.cycle(page);
+      // Settle BEFORE looking. Entering a working-set view runs a fetch, and
+      // checking immediately reports the view you just left — which made this
+      // miss the Face Map entirely and then "succeed" on the next press.
+      await page.waitForTimeout(400);
+      if (await page.locator('[data-testid="face-map"]').count()) {
+        seen.add("face-map");
+      }
+      if (await views.grid(page).count()) {
+        returned = true;
+        break;
+      }
+    }
+    expect(returned, "V should cycle back to the grid").toBe(true);
+    expect(seen.has("face-map"), "V should reach the Face Map").toBe(true);
     await expect(views.grid(page)).toBeVisible();
     expect(errors).toEqual([]);
   });
@@ -275,6 +294,49 @@ test.describe("view registry @p1", () => {
     // a trap.
     await btn.click();
     await expect(views.grid(page)).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+});
+
+/**
+ * The shortcuts overlay renders the ACTIVE view's declared keys (#232).
+ *
+ * A view declares the keys it handles in `registry.js`, and the overlay builds
+ * a group from them rather than from a hand-copied list — so a new view's
+ * shortcuts cannot ship undocumented. No view declares any yet, which is why
+ * this asserts the *absence* of a phantom section as well as the absence of
+ * errors: an empty titled group would read as "this view has no shortcuts",
+ * which is a different claim from "this view adds none to the shared set".
+ *
+ * It becomes a real behavioural test the moment a view declares keys, without
+ * being edited — the same self-extending shape as the conformance test above.
+ */
+test.describe("declared view keys @p2", () => {
+  test("the overlay opens in every view without a phantom section", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    for (let i = 0; i < 3; i++) {
+      const overlay = await views.shortcuts(page);
+      // The shared groups are always there...
+      await expect(
+        overlay.getByRole("heading", { name: "Grid & Loupe" })
+      ).toBeVisible();
+      // ...and no group is titled with a view's own name unless that view
+      // actually declared rows, so an empty section can never appear.
+      // Section headings only — the modal's own title is a heading too, and
+      // it is not a shortcut group.
+      const sections = overlay.locator("section");
+      const n = await sections.count();
+      expect(n).toBeGreaterThan(0);
+      for (let s = 0; s < n; s++) {
+        await expect(sections.nth(s).locator(".row").first()).toBeVisible();
+      }
+      await page.keyboard.press("?");
+      await views.cycle(page);
+    }
     expect(errors).toEqual([]);
   });
 });

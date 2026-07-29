@@ -545,6 +545,72 @@ export function applySchema(db) {
   // survive ("durable — it survives the next sweep and new photos").
   ensureColumn(db, "photo_faces", "person_source", "TEXT");
 
+  // 2-D projections of the library, for the face map (#232).
+  //
+  // A run is a SNAPSHOT identified by (kind, model, algorithm, params_key) —
+  // `params_key` being a canonicalised digest rather than the raw JSON, so
+  // {"a":1,"b":2} and {"b":2,"a":1} are one run and not two. `kind` is what
+  // lets #165's photo scatter be another row here rather than another schema.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS projection_runs (
+      id         INTEGER PRIMARY KEY,
+      kind       TEXT    NOT NULL,
+      model      TEXT    NOT NULL,
+      algorithm  TEXT    NOT NULL,
+      params_key TEXT    NOT NULL,
+      params     TEXT    NOT NULL,
+      members    INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_projection_runs_key
+       ON projection_runs(kind, model, algorithm, params_key)`
+  );
+
+  // The points. Served by INNER JOIN persons, which is the neatest property of
+  // the design: merge eight people away and their dots vanish with NO
+  // re-projection, so the map stays truthful about who exists and only their
+  // positions go stale.
+  //
+  // `ref_id` deliberately has NO foreign key and NO cascade, and this is the
+  // one thing here a future reader will want to "fix". The point rows must
+  // SURVIVE a merge so that an undo brings the dot back; the join already
+  // hides them while the person is gone. Adding ON DELETE CASCADE would look
+  // like tightening the schema and would silently break undo.
+  //
+  // WITHOUT ROWID so the primary key IS the table: a run's points are then a
+  // contiguous prefix scan rather than an index lookup plus a row fetch each.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS projection_point (
+      run_id INTEGER NOT NULL,
+      ref_id INTEGER NOT NULL,
+      x      REAL    NOT NULL,
+      y      REAL    NOT NULL,
+      PRIMARY KEY (run_id, ref_id)
+    ) WITHOUT ROWID
+  `);
+
+  // Undo for a bulk merge (#232).
+  //
+  // Server-side rather than a client-held manifest, for two reasons. The
+  // existing undo-move pattern hands the manifest to the client, and its known
+  // failure is quoted in CLAUDE.md — "the move record was too large to send
+  // (N files)". And a record the SERVER holds survives a page reload, which a
+  // client-held one never did.
+  //
+  // `payload` is JSON in a BLOB column so it can become a compact typed-array
+  // encoding later with no migration.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS person_merge_undo (
+      token            TEXT    PRIMARY KEY,
+      created_at       INTEGER NOT NULL,
+      into_id          INTEGER NOT NULL,
+      into_name_before TEXT,
+      payload          BLOB    NOT NULL
+    )
+  `);
+
   ensureFeedIndexes(db);
 }
 

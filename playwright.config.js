@@ -39,7 +39,26 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "npm run dev",
+    // Wipe the scratch index BEFORE the server opens it.
+    //
+    // The ordering here is load-bearing and was invisible for a long time.
+    // Playwright starts this webServer FIRST, then runs globalSetup — which
+    // used to `rm -rf` the whole `e2e/.tmp`, including the `index.db` the
+    // server had already opened. SQLite carried on through the open
+    // descriptor, so the suite worked perfectly, but the database existed at
+    // no path at all and nothing outside the server process could read or seed
+    // it.
+    //
+    // Doing the wipe here instead keeps the property that mattered (a fresh
+    // index every run — tags, keep-scope and ratings must not leak between
+    // runs) while making the file real, which is what lets a spec seed rows no
+    // API can create (see `seedFaces`, #232). `buildFixture` now clears only
+    // the photos.
+    //
+    // Spelled with node rather than `rm -rf` so it works wherever npm does.
+    command: `node -e "require('node:fs').rmSync(${JSON.stringify(
+      join(process.cwd(), "e2e", ".tmp", "home")
+    ).replace(/"/g, "'")}, { recursive: true, force: true })" && npm run dev`,
     url: `http://localhost:${UI_PORT}`,
     reuseExistingServer: false,
     timeout: 90_000,

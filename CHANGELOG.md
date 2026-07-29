@@ -6,6 +6,40 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.0
+
+Packaged build. Everything in 2.18.46 below, plus:
+
+- **The map is sized by photos, and you control the range.** A dot's area is
+  proportional to how many photos that person appears in, on a square-root
+  scale, with smallest/largest sliders in the map's gear. Faces carry the same
+  encoding as the dots now, so it survives at the zoom where you are actually
+  reading them.
+- **Filter the map to what you are viewing.** Narrow the feed — a keep-only
+  set, a rating, a folder — and the map shows only the people in those photos,
+  keeping everyone's position so you can compare across filters. It says
+  "50 of 120 people · in view" rather than quietly looking like the whole
+  library, and tells you when the filter matches nobody.
+- **Zoom in much further**, and the map no longer blinks while faces load.
+
+## 2.18.46
+
+- **New Face Map view.** See everyone laid out by how alike their faces are,
+  lasso the ones who are really the same person, and merge and name them in one
+  action — with undo. Built for the case where grouping has split one person
+  across dozens of groups (#232).
+- **The map says what it is not showing you**: how many faces have never been
+  grouped, and how many people have been added since it was built. Two
+  differently-named people in one lasso stops and asks which name to keep
+  rather than quietly dropping one.
+- **Choose how it lays out** — UMAP, t-SNE or PCA — with the minimum number of
+  faces, neighbours and other settings in the map's own gear. Each option says
+  how well it actually separates people, and how long it will take. Maps are
+  kept, so going back to one you have already built is instant.
+- A view can now bring its own keyboard shortcuts, so they show up in the help
+  overlay (**?**) automatically and the app stops answering them with a message
+  about photos.
+
 ## 2.18.45
 
 - **Grouping faces no longer makes the app say it lost the server.** The pass
