@@ -550,6 +550,47 @@ export function listPersons(db) {
 }
 
 /**
+ * The same list, BOUNDED, with the total — what the API serves (#223).
+ *
+ * A real library is not a fixture. Measured on a 31,976-photo library: 25,760
+ * persons, of which 20,259 are SINGLETONS — a stranger in the background of
+ * one photo, seen once. Handing all of them to the People view is 25,760 DOM
+ * tiles and 25,760 <img> elements, and it is not browsable even when it is
+ * fast. Largest-first is what makes a cap sane: ten minutes on the biggest
+ * clusters covers most of a library (#167), and the singleton tail is exactly
+ * the part nobody names.
+ *
+ * `total` and `truncated` come back so the caller can SAY what it is not
+ * showing. UI-CONTRACTS §3 requires a working-set view's fetch to be "bounded,
+ * capped, WITH A `truncated` FLAG"; without them this view silently pretends
+ * the library has 200 people in it.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {{limit?: number|null}} [opts] null = every person (tests, internals)
+ * @returns {{people: ReturnType<typeof listPersons>, total: number, truncated: boolean}}
+ */
+export function listPersonsPage(db, { limit = null } = {}) {
+  const total = db.prepare(`SELECT COUNT(*) n FROM persons`).get().n;
+  if (limit === null) {
+    const people = listPersons(db);
+    return { people, total, truncated: false };
+  }
+  const people = db
+    .prepare(
+      `SELECT p.id, p.name, p.cover_face_id AS coverFaceId,
+              COUNT(f.id) AS faces,
+              COUNT(DISTINCT f.photo_id) AS photos
+         FROM persons p
+         LEFT JOIN photo_faces f ON f.person_id = p.id
+        GROUP BY p.id
+        ORDER BY faces DESC, p.id
+        LIMIT @limit`
+    )
+    .all({ limit });
+  return { people, total, truncated: people.length < total };
+}
+
+/**
  * How many photos a face sweep will ACTUALLY look at (#221).
  *
  * The number a job's `total` must use. `ids.length` is the wrong one and

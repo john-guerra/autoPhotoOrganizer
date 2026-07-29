@@ -207,7 +207,7 @@ describe("clustering faces into people", () => {
     };
     setImmediate(pump);
 
-    await clusterFaces(v, { yieldEvery: 32 });
+    await clusterFaces(v, { yieldPairs: 2_000 });
     const observed = ticks;
     ticks = 10_000; // stop the pump
     expect(observed).toBeGreaterThan(0);
@@ -293,7 +293,7 @@ describe("cancelling a grouping pass (#222)", () => {
     let reports = 0;
     const run = clusterFaces(vectors, {
       threshold: T,
-      yieldEvery: 32,
+      yieldPairs: 2_000,
       signal: c.signal,
       onProgress: () => {
         if (++reports === 1) c.abort();
@@ -308,7 +308,7 @@ describe("cancelling a grouping pass (#222)", () => {
     const c = new AbortController();
     const { clusters } = await clusterFaces(many(80), {
       threshold: T,
-      yieldEvery: 16,
+      yieldPairs: 1_000,
       signal: c.signal,
     });
     expect(clusters.length).toBeGreaterThan(0);
@@ -324,7 +324,7 @@ describe("cancelling a grouping pass (#222)", () => {
     await expect(
       clusterFaces(many(400), {
         threshold: T,
-        yieldEvery: 32,
+        yieldPairs: 2_000,
         signal: c.signal,
       })
     ).rejects.toMatchObject({ name: "AbortError" });
@@ -339,7 +339,7 @@ describe("grouping progress is measured in work, not rows (#222)", () => {
       pack(Array.from({ length: n }, (_, i) => vec(i % 8, 0.02, i))),
       {
         threshold: T,
-        yieldEvery: 50,
+        yieldPairs: 5_000,
         onProgress: (p) => seen.push(p),
       }
     );
@@ -361,6 +361,66 @@ describe("grouping progress is measured in work, not rows (#222)", () => {
     // leap — which is what "honest progress" forbids.
     const half = seen.find((p) => p.done >= seen[0].total / 2);
     expect(half).toBeTruthy();
+  });
+});
+
+describe("the yield bounds WORK, not rows (#231)", () => {
+  const many = (count) =>
+    pack(Array.from({ length: count }, (_, i) => vec(i % 8, 0.02, i)));
+
+  it("keeps every synchronous chunk under the budget, even for early rows", async () => {
+    // THE bug, as an assertion. A row-based yield made the first chunk
+    // (n - 0) + (n - 1) + … over 512 rows — ~24.6M comparisons at 48,585
+    // faces, measured at 10,343 ms of blocked event loop, which is what made
+    // the app report "Lost the connection to the AutoGallery server".
+    //
+    // Rows are not a unit of work: row i does (n - i) comparisons, so the
+    // FIRST rows are the most expensive and a fixed row count is worst exactly
+    // where it matters most.
+    const n = 900;
+    const budget = 5_000;
+    const seen = [];
+    await clusterFaces(many(n), {
+      threshold: T,
+      yieldPairs: budget,
+      onProgress: ({ done }) => seen.push(done),
+    });
+
+    expect(seen.length).toBeGreaterThan(1);
+
+    // Every gap between yields is at most the budget plus ONE row — the check
+    // happens per row, and a single row is at most n comparisons.
+    const ceiling = budget + n;
+    let prev = 0;
+    for (const done of seen) {
+      expect(done - prev).toBeLessThanOrEqual(ceiling);
+      prev = done;
+    }
+
+    // And the FIRST chunk specifically, which is the expensive one a row-based
+    // yield got wrong: with 512 rows it would have been ~430,000 comparisons
+    // here instead of ~5,900.
+    expect(seen[0]).toBeLessThanOrEqual(ceiling);
+    expect(seen[0]).toBeLessThan(512 * n); // what the old rule would have cost
+  });
+
+  it("holds the same bound as the face count grows", async () => {
+    // A row count cannot do this: the same 512 rows is 10x the work at 10x the
+    // faces. A pair budget is scale-free, which is the point.
+    const budget = 4_000;
+    for (const n of [400, 1200]) {
+      const gaps = [];
+      let prev = 0;
+      await clusterFaces(many(n), {
+        threshold: T,
+        yieldPairs: budget,
+        onProgress: ({ done }) => {
+          gaps.push(done - prev);
+          prev = done;
+        },
+      });
+      expect(Math.max(...gaps)).toBeLessThanOrEqual(budget + n);
+    }
   });
 });
 

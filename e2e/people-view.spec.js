@@ -37,11 +37,18 @@ test.describe("People view @p1", () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    await page.route("**/api/ml/people", async (route) => {
+    await page.route("**/api/ml/people*", async (route, request) => {
+      // The pattern needs the trailing * to catch `?limit=N`, which also makes
+      // it match `PUT /api/ml/people/:id` (the rename). Only serve the list.
+      if (request.method() !== "GET") return route.continue();
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ people: PEOPLE }),
+        body: JSON.stringify({
+          people: PEOPLE,
+          total: PEOPLE.length,
+          truncated: false,
+        }),
       });
     });
     // The crops would 404 (no such faces in the fixture) and Chromium logs any
@@ -66,11 +73,14 @@ test.describe("People view @p1", () => {
     // into the overflow popover at 1280px, which is how CI caught this. So the
     // button is earned, not permanent. Same rule PersonFilter follows.
     const errors = trackPageErrors(page);
-    await page.route("**/api/ml/people", async (route) => {
+    await page.route("**/api/ml/people*", async (route, request) => {
+      // The pattern needs the trailing * to catch `?limit=N`, which also makes
+      // it match `PUT /api/ml/people/:id` (the rename). Only serve the list.
+      if (request.method() !== "GET") return route.continue();
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ people: [] }),
+        body: JSON.stringify({ people: [], total: 0, truncated: false }),
       });
     });
     await openApp(page);
@@ -209,6 +219,36 @@ test.describe("People view @p1", () => {
     await views.switchBtn(page, "people").click();
     await expect(views.grid(page)).toBeVisible();
     await expect(grid.ratingBadge(page, 0)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("says what it is NOT showing when the library has more people than fit", async ({
+    page,
+  }) => {
+    // A real library has tens of thousands of persons — 25,760 on the library
+    // this was found on, 20,259 of them seen in a single photo. The first cut
+    // of this view rendered every one: 25,760 tiles and 25,760 <img>s. A
+    // capped view that says "200 people" is lying about the library; a capped
+    // view that says "200 of 25,760" is not.
+    const errors = trackPageErrors(page);
+    await page.route("**/api/ml/people*", async (route, request) => {
+      if (request.method() !== "GET") return route.continue();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ people: PEOPLE, total: 25760, truncated: true }),
+      });
+    });
+    await openApp(page);
+    await views.switchBtn(page, "people").click();
+    await expect(peopleView.root(page)).toBeVisible();
+
+    await expect(peopleView.root(page)).toContainText("of 25,760");
+    await expect(peopleView.root(page)).toContainText(/biggest first/i);
+    // And a way to get the rest, with the count still honest.
+    await expect(page.locator(".people-view .more button")).toContainText(
+      /Show more/
+    );
     expect(errors).toEqual([]);
   });
 

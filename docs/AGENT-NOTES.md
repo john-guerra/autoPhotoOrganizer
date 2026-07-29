@@ -88,6 +88,48 @@ declared` at import time. It cost a cycle in #221: 1,549 unit tests passed
   cannot catch a decoder that agrees with it and disagrees with the real
   graph. Only this file can.
 
+## Native modules: better-sqlite3's ABI is a one-way switch
+
+- **`npm run electron:build:*` leaves better-sqlite3 built for ELECTRON, and
+  every Node process then dies.** The build script is
+  `rebuild:electron → build → rebuild:node`; if that last step does not run
+  (interrupted, failed, or the build was killed), the binary left behind is
+  `node_modules/better-sqlite3/bin/darwin-arm64-148/` — 148 is Electron 43's
+  `NODE_MODULE_VERSION`. Node 24 wants 137, so `npm run dev`, the e2e suite and
+  every unit test that opens a DB fail with
+  `Could not locate the bindings file`. Fix: **`npm run rebuild:node`**.
+- **`require("better-sqlite3")` is NOT a check for this.** It only loads the JS
+  wrapper; the native binding is not touched until `new Database()`. A require
+  that succeeds tells you nothing, and reading "it loads fine" as "the ABI is
+  right" cost a wrong diagnosis (2026-07-28). The real check is one line:
+
+  ```bash
+  node -e "const D=require('better-sqlite3'); new D(':memory:').prepare('select 1').get(); console.log('node ABI ok')"
+  ```
+
+- **`npm run electron:dev` needs NO rebuild.** In dev mode Electron only loads
+  the Vite URL (`electron/main.js`, `isDev`); the Express server stays a
+  separate NODE process, so it wants the Node ABI exactly like `npm run dev`.
+  Only a PACKAGED build runs the server inside Electron.
+- **`electron:dev` and `npm run dev` cannot both run.** `electron:dev` starts
+  its own server + Vite; with 5173 taken Vite silently moves to 5174 while
+  Electron's dev URL stays 5173, so the window loads nothing and the only clue
+  is a port line buried in the log.
+
+## The toolbar folds by WIDTH, and it is closer to the edge than it looks
+
+- Adding ONE control to the toolbar can push an unrelated group into the
+  overflow popover. `PersonFilter.svelte` documents this ("two extra controls
+  in GridControls once pushed the whole Group group into an overflow popover at
+  ordinary window sizes") and #223 hit it again: a third view-switcher button
+  made `.group-by` and `.seg-toggle` disappear at 1280px.
+- **It reproduced only in CI.** The local suite passed 151/151 at the same
+  viewport — this sits right on the threshold, so a slower runner folds and a
+  fast one does not. A green local run does not clear it; check the CI e2e.
+- The registry's answer is `offerable(ctx)` in `views/registry.js`: a view says
+  when it is worth a permanent slot (People earns one once people exist).
+  Prefer that to another always-on control.
+
 ## Dev-server & process gotchas
 
 - **Never pipe a long-running server into `head`/`tail`.** `npm run dev 2>&1 |

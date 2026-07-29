@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.18.45
+
+- **Grouping faces no longer makes the app say it lost the server.** The pass
+  blocked everything for ten seconds at a stretch on a large library, long
+  enough that the app gave up and showed "Lost the connection… Reconnecting".
+  Photos, the feed and the jobs panel now keep working throughout (#231).
+- **The People view no longer tries to draw every person at once.** A real
+  library can hold tens of thousands of them, most seen in a single photo. It
+  shows the biggest groups first, says how many more there are, and loads more
+  on request (#223).
+
 ## 2.18.44
 
 - **People moved out of the settings panel and into the main area.** Press `V`
