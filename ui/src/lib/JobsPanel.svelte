@@ -166,6 +166,15 @@
       const count = r.count ?? 0;
       return `${folders} folder${folders === 1 ? "" : "s"} · ${count} photo${count === 1 ? "" : "s"}`;
     }
+    if (job.type === "projection") {
+      // Without a branch here a finished map renders a bare ✓, which
+      // UI-CONTRACTS §2 calls an unfinished feature. Say what was mapped and
+      // how, because the algorithm is a choice the user made and may want to
+      // compare against.
+      const n = (r.members ?? 0).toLocaleString();
+      const how = String(r.algorithm ?? "").toUpperCase();
+      return how ? `${n} people · ${how}` : `${n} people`;
+    }
     if (job.type === "undo-move") {
       return r.skipped
         ? `restored ${r.restored} · skipped ${r.skipped}`

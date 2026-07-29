@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-/** @typedef {"scan"|"export"|"materialize"|"undo-move"|"enrich"|"transcode"|"hash"|"embed"|"faces"|"face-download"|"face-cluster"} JobType */
+/** @typedef {"scan"|"export"|"materialize"|"undo-move"|"enrich"|"transcode"|"hash"|"embed"|"faces"|"face-download"|"face-cluster"|"projection"} JobType */
 
 /**
  * Job types that clear their own row when they SUCCEED.

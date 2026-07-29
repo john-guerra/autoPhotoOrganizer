@@ -91,6 +91,7 @@ import { sweepFaces, isFaceSweepInFlight } from "./ml/faceSweep.js";
 import { createFaceEngine } from "./ml/faceEngine.js";
 import {
   faceCounts,
+  faceGroupingCoverage,
   faceCropSource,
   faceSweepPending,
   pendingFaceRows,
@@ -111,6 +112,26 @@ import {
   withClusterLatch,
 } from "./ml/faceClusters.js";
 import { squareCrop } from "./ml/faceCrop.js";
+import { personCentroids } from "./db/personCentroids.js";
+import {
+  paramsKey,
+  findRun,
+  createRun,
+  savePoints,
+  pointsForRun,
+  pruneRuns,
+  runStaleness,
+} from "./db/projections.js";
+import {
+  offerableAlgorithms,
+  isOfferable,
+  defaultParams,
+} from "./projection/algorithms.js";
+import { runProjection } from "./projection/runProjection.js";
+import {
+  isProjectionInFlight,
+  withProjectionLatch,
+} from "./projection/latch.js";
 import { orientedSize } from "./ml/faceEngine.js";
 import sharp from "sharp";
 
@@ -1949,6 +1970,185 @@ export function registerApi(app, { ml } = {}) {
       // failure (Finding 6, ML-UX-REVIEW-2026-07-26.md). Nothing was written
       // either way: the union-find is in memory and saveClusters is the single
       // transaction at the end, which a cancelled pass never reaches.
+      registry.fail(job.id, e);
+    });
+  });
+
+  // --- the face map (#232) ------------------------------------------------
+
+  /**
+   * What the map's gear may offer right now, with LIVE counts.
+   *
+   * This is how the projection satisfies contract 1 without a
+   * ScopeControl. `minFaces` is its one scope dimension, and the contract's
+   * requirement is that the user never faces a single button meaning "spend
+   * twenty minutes on everything" — so the choice carries a count and the
+   * estimate tracks it. ScopeControl itself is deliberately not wired: its
+   * machinery is about photo-id lists, and this is not one.
+   */
+  app.get("/api/projections/options", (req, res) => {
+    const db = getDb();
+    const modelId = faceModelIdOf(req.query.model);
+    const params = defaultParams(req.query);
+    const members = personCentroids(db, modelId, {
+      minFaces: params.minFaces,
+    }).ids.length;
+    const coverage = faceGroupingCoverage(db, modelId);
+    res.json({
+      model: modelId,
+      members,
+      params,
+      algorithms: offerableAlgorithms(members),
+      // The map can only show GROUPED faces, and on a real library most faces
+      // are not grouped yet. A view that stays quiet about that lets someone
+      // lasso everything, merge, and reasonably conclude they are done.
+      coverage,
+    });
+  });
+
+  /**
+   * The current map: a cached run's points, joined to the live persons table.
+   *
+   * Returns `runId: null` rather than 404 when nothing has been built — "you
+   * have not made one yet" is a state the view renders, not an error.
+   */
+  app.get("/api/projections/current", (req, res) => {
+    const db = getDb();
+    const modelId = faceModelIdOf(req.query.model);
+    const algorithm = String(req.query.algorithm ?? "umap");
+    const params = defaultParams(req.query);
+    const run = findRun(db, {
+      kind: "person",
+      model: modelId,
+      algorithm,
+      paramsKey: paramsKey(params),
+    });
+    const coverage = faceGroupingCoverage(db, modelId);
+    if (!run) {
+      return res.json({ runId: null, points: [], coverage, model: modelId });
+    }
+    res.json({
+      runId: run.id,
+      createdAt: run.created_at,
+      members: run.members,
+      algorithm: run.algorithm,
+      model: modelId,
+      params: JSON.parse(run.params),
+      points: pointsForRun(db, run.id),
+      staleness: runStaleness(db, run.id, { minFaces: params.minFaces }),
+      coverage,
+    });
+  });
+
+  /**
+   * Build a projection of the people.
+   *
+   * Every refusal is synchronous and precedes `registry.create`, so a rejected
+   * request never leaves a row that appears and immediately fails. And a CACHE
+   * HIT starts no job at all — the "if there is nothing pending, say so and
+   * start no job" rule applied to a different quantity.
+   */
+  app.post("/api/projections", (req, res) => {
+    if (isClusterInFlight()) {
+      return res.status(409).json({
+        error:
+          "People are being regrouped right now, which would change who is on the map. Try again when it finishes.",
+      });
+    }
+    if (isProjectionInFlight()) {
+      return res.status(409).json({
+        error: "A map is already being built — watch it in the jobs panel.",
+      });
+    }
+
+    const db = getDb();
+    const modelId = faceModelIdOf(req.body?.model);
+    const algorithm = String(req.body?.algorithm ?? "umap");
+    const params = defaultParams(req.body);
+
+    let centroids;
+    try {
+      centroids = personCentroids(db, modelId, { minFaces: params.minFaces });
+    } catch (e) {
+      // Mixed dimensions under one model name — a real bug worth surfacing as
+      // itself rather than as a blank map.
+      return res.status(500).json({ error: String(e.message ?? e) });
+    }
+    const members = centroids.ids.length;
+
+    // An empty or near-empty scope is refused SPECIFICALLY rather than run:
+    // a job that starts and finishes in 40ms looks like the button misfired.
+    if (members < 3) {
+      return res.status(400).json({
+        error:
+          members === 0
+            ? `Nobody has ${params.minFaces} or more faces yet. Group faces first, or lower the minimum.`
+            : `Only ${members} ${members === 1 ? "person has" : "people have"} ${params.minFaces} or more faces — that is not a map. Lower the minimum faces.`,
+      });
+    }
+    if (!isOfferable(algorithm, members)) {
+      const row = offerableAlgorithms(members).find((a) => a.id === algorithm);
+      return res
+        .status(400)
+        .json({ error: row?.reason ?? `Unknown algorithm: ${algorithm}` });
+    }
+
+    const pk = paramsKey(params);
+    const cached = findRun(db, {
+      kind: "person",
+      model: modelId,
+      algorithm,
+      paramsKey: pk,
+    });
+    if (cached) {
+      return res.json({
+        reused: true,
+        runId: cached.id,
+        members: cached.members,
+      });
+    }
+
+    // `total` is set HERE, not on the first progress tick, and that is only
+    // possible because nEpochs is an explicit parameter rather than umap-js's
+    // internal size heuristic. A total that arrives one tick late is an
+    // indeterminate bar at exactly the moment the user is deciding whether it
+    // hung (#208).
+    const job = registry.create("projection", {
+      label: `Mapping ${members.toLocaleString("en-US")} people`,
+      total: params.nEpochs,
+    });
+    res.status(201).json({ jobId: job.id, members, algorithm });
+
+    // From here the response is sent: everything else reaches the user through
+    // the job.
+    withProjectionLatch(async () => {
+      const xy = await runProjection({
+        data: centroids.data,
+        dim: centroids.dim,
+        n: members,
+        algorithm,
+        params,
+        signal: job.controller.signal,
+        onPhase: (phase) => registry.update(job.id, { phase }),
+        onProgress: ({ done, total }) =>
+          registry.update(job.id, { done, total }),
+      });
+      const runId = createRun(db, {
+        kind: "person",
+        model: modelId,
+        algorithm,
+        paramsKey: pk,
+        params,
+        members,
+      });
+      savePoints(db, runId, centroids.ids, xy);
+      pruneRuns(db, { kind: "person", model: modelId, keep: 3 });
+      registry.finish(job.id, { runId, members, algorithm });
+    }).catch((e) => {
+      // registry.fail reads the abort signal and records a cancellation as
+      // "canceled" rather than "failed". Nothing partial was written either
+      // way: the run row and its points are created together, AFTER the
+      // worker returns, so a cancelled run leaves no half-map behind.
       registry.fail(job.id, e);
     });
   });
