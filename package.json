@@ -48,7 +48,7 @@
     "i18n-iso-countries": "^7.14.0",
     "multi-auto-select": "^0.0.13",
     "onnxruntime-node": "^1.27.0",
-    "reactive-widget-helper": "^0.0.3",
+    "reactive-widget-helper": "^0.0.4",
     "sharp": "^0.35.3",
     "smart-labels": "^0.0.14",
     "sortablejs": "^1.15.7",
