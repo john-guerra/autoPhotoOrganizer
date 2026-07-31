@@ -162,4 +162,69 @@ test.describe("@p1 timeline keep-only filter", () => {
 
     expect(errors).toEqual([]);
   });
+
+  test("narrows again when one kept set REPLACES another (#246)", async ({
+    page,
+  }) => {
+    /**
+     * The case the other three miss, and the one that shipped broken.
+     *
+     * They all go from "no scope" to "a scope" — and that transition changes
+     * the filter's JSON ( `{}` → `{keepScope: true}` ), so the timeline's cache
+     * key changes and it refetches whether or not anything understands why.
+     *
+     * Going from one ids scope STRAIGHT to another does not. Both project to
+     * the identical constant `{keepScope: true}` (the ids live server-side, in
+     * keep_scope), so the key was byte-identical, the refetch guard suppressed
+     * the fetch, and the timeline kept plotting the previous working set —
+     * while the feed underneath it showed the new one.
+     *
+     * Hence: keep EVERYTHING (an ids scope spanning Jan–Mar), then keep only
+     * Trip (an ids scope in Jan) with no exit in between. Mar is the witness.
+     */
+    const errors = trackPageErrors(page);
+    await enrichAll(page);
+    await openApp(page, { groupBy: ["folder"] });
+
+    // First ids scope: the whole library. ⌘A is a two-step — the first press
+    // takes the group you are in, the second ASKS before taking everything,
+    // via a modal that intercepts pointer events until answered.
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.press("Meta+a");
+    await statusBar.confirmSelectAll(page).click();
+    await statusBar.keepOnly(page).click();
+    await expect(statusBar.scopeChip(page)).toBeVisible();
+
+    // The badges are the range's two ENDPOINTS, not every month in it. Keeping
+    // everything spans the fixture's full range: Jan 8 2024 (the HEVC clip's
+    // pinned mtime) to today (the .avi's real build-time mtime).
+    await expect(async () => {
+      const texts = (await timelineFilter.badgeTexts(page)).join("|");
+      expect(texts).toMatch(/Jan 8, 2024/);
+      expect(texts).toMatch(/202[5-9]/); // the upper bound is "today"
+    }).toPass({ timeout: 5000 });
+
+    // Second ids scope, replacing the first with NO exit in between. This is
+    // the transition the filter cannot see.
+    //
+    // PARTY, not Trip — for the reason this file's header already gives: the
+    // other folders carry the two videos whose dates come from file mtime
+    // (Jan 8 2024 and today), so scoping to one of them would legitimately
+    // keep both endpoints and the assertion below would be meaningless.
+    // Party is Feb 20-21 2024 and video-free, so both endpoints must move.
+    await rightClickHeader(page, "Party");
+    await menu.item(page, "Keep only these photos").click();
+
+    // BOTH endpoints have to move, and asserting both is the point: the strip
+    // stuck on the previous set still shows a January lower bound, so checking
+    // only one end is how a half-updated timeline passes.
+    await expect(async () => {
+      const texts = (await timelineFilter.badgeTexts(page)).join("|");
+      expect(texts).not.toMatch(/Jan/);
+      expect(texts).not.toMatch(/202[5-9]/);
+      expect(texts).toMatch(/Feb 2[01], 2024/);
+    }).toPass({ timeout: 5000 });
+
+    expect(errors).toEqual([]);
+  });
 });

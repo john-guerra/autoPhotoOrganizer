@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.7
+
+- The toolbar timeline now updates when you change what "Keep only" is
+  keeping. Replacing one kept selection with another left the strip plotting
+  the previous set's dates, so the timeline and the photos below it disagreed
+  (#246).
+
 ## 2.19.6
 
 - Build and security tooling updated to current major versions
