@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, _resetDbForTest } from "./connection.js";
-import { setKeepScope } from "./keepScope.js";
+import { setKeepScope, keepScopeIds } from "./keepScope.js";
+import { upsertScan } from "./photos.js";
 
 let cacheDir;
 
@@ -57,5 +58,55 @@ describe("setKeepScope", () => {
     const db = getDb();
     expect(setKeepScope(db, [1, "x", 2.5, 3])).toBe(2);
     expect(scopeIds(db)).toEqual([1, 3]);
+  });
+});
+
+describe("keepScopeIds — reading the working set back (#212)", () => {
+  /** `n` photos in one folder. @returns {number[]} their ids */
+  function seedPhotos(db, n) {
+    db.prepare(
+      `INSERT INTO volumes (id, label, uuid, last_mount_path, last_seen_at)
+       VALUES (1, 'v', 'uuid-1', '/test', ?)`
+    ).run(Date.now());
+    const files = Array.from({ length: n }, (_, i) => ({
+      name: `IMG_${i}.jpg`,
+      size: 100 + i,
+      mtimeMs: 1700000000000 + i,
+      kind: "image",
+    }));
+    return upsertScan(db, "/vol/a", 1, files).map((r) => r.id);
+  }
+
+  it("is empty when no scope is in force", () => {
+    expect(keepScopeIds(getDb())).toEqual([]);
+  });
+
+  it("round-trips what setKeepScope stored", () => {
+    const db = getDb();
+    const ids = seedPhotos(db, 4);
+    setKeepScope(db, [ids[2], ids[0]]);
+    expect(keepScopeIds(db)).toEqual([ids[0], ids[2]].sort((a, b) => a - b));
+  });
+
+  it("drops rows whose photo is GONE, so the chip's count is honest", () => {
+    // keep_scope has no foreign key (schema.js: `photo_id INTEGER PRIMARY KEY`,
+    // no REFERENCES), so removing a folder leaves its ids behind. The FEED is
+    // unaffected — buildFilter phrases it `photos.id IN (SELECT …)`, which
+    // ignores the dead rows — but a restore that trusted the table would put
+    // "4 photos" on the scope chip above a grid showing 2.
+    const db = getDb();
+    const ids = seedPhotos(db, 4);
+    setKeepScope(db, ids);
+
+    db.prepare(`DELETE FROM photos WHERE id IN (?, ?)`).run(ids[1], ids[3]);
+    expect(keepScopeIds(db)).toEqual([ids[0], ids[2]]);
+  });
+
+  it("comes back empty after the scope is cleared", () => {
+    const db = getDb();
+    const ids = seedPhotos(db, 3);
+    setKeepScope(db, ids);
+    setKeepScope(db, []);
+    expect(keepScopeIds(db)).toEqual([]);
   });
 });

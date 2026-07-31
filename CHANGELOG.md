@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.3
+
+- "Keep only" now survives a reload and an app restart. It used to come back
+  showing the whole library while the working set was still in force on the
+  server — one side remembering and the other not (#212).
+
 ## 2.19.2
 
 - **Grouping faces now works on a selection**, like everything else: All /

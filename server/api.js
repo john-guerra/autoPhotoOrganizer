@@ -280,7 +280,7 @@ import { getTreeNode, getFlatTree } from "./db/tree.js";
 import { ALLOWED_ORIENTATIONS, ALLOWED_KINDS } from "./db/filters.js";
 import { parseSort, DATE_SORTS } from "./db/sort.js";
 import { sampleOffsets } from "./db/sampleGroup.js";
-import { setKeepScope } from "./db/keepScope.js";
+import { setKeepScope, keepScopeIds } from "./db/keepScope.js";
 import { createManualStack, dissolveStack } from "./db/manualStacks.js";
 import { registry } from "./jobs/registry.js";
 import {
@@ -3706,6 +3706,18 @@ export function registerApi(app, { ml } = {}) {
     const db = getDb();
     const count = setKeepScope(db, ids ?? []);
     res.json({ count });
+  });
+
+  // GET -> the working set that is currently in force (#212).
+  //
+  // The client boots from this rather than from localStorage: the ids live
+  // here, so this is the one place that can answer "is a keep-only scope in
+  // force, and over how many photos". Storing a second copy in the browser is
+  // what let the two sides disagree — the server kept the rows across a reload
+  // while the UI came back showing everything.
+  app.get("/api/scope", (req, res) => {
+    const ids = keepScopeIds(getDb());
+    res.json({ ids, count: ids.length });
   });
 
   // --- Manual burst stacks (issue #24) -------------------------------------
