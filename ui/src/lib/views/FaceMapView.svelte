@@ -148,31 +148,54 @@
   );
   $effect(() => saveSetting("faceMapMinRadius", minRadius));
   $effect(() => saveSetting("faceMapMaxRadius", maxRadius));
-  let minFaces = $state(2);
   let algo = $state("umap");
-  let nNeighbors = $state(15);
-  let minDist = $state(0.1);
 
+  /**
+   * The run parameters the user is editing, keyed by parameter name.
+   *
+   * A bag rather than named fields, because the SCHEMA decides which
+   * parameters exist for the chosen algorithm — hand-written fields shipped
+   * with UMAP's two as the only controls, so t-SNE had nothing to tune.
+   */
+  let draft = $state({});
+
+  /** The controls to render, from the server's schema for this algorithm. */
+  const specs = $derived(options?.paramSpecs ?? []);
+
+  /**
+   * Seed each parameter from the server ONCE, then leave it alone.
+   *
+   * The previous version re-synced on every options refresh, and App refreshes
+   * options with ITS params rather than the ones being typed — so editing a
+   * value and touching anything else silently reverted it. A control that
+   * appears to work and then undoes itself is worse than one that is disabled.
+   *
+   * Seeding still matters: it is how the gear starts from the server's clamped
+   * defaults, so the gear and the cache key agree from the first render.
+   */
+  const seeded = new Set();
   $effect(() => {
-    // Follow the server's clamped values so the gear and the cache key agree —
-    // otherwise every request misses the cache forever.
-    if (options?.params) {
-      minFaces = options.params.minFaces;
-      nNeighbors = options.params.nNeighbors;
-      minDist = options.params.minDist;
+    const next = { ...draft };
+    let changed = false;
+    for (const spec of specs) {
+      if (seeded.has(spec.key)) continue;
+      seeded.add(spec.key);
+      next[spec.key] = options?.params?.[spec.key] ?? spec.default;
+      changed = true;
     }
+    if (changed) draft = next;
   });
 
-  const currentParams = () => ({
-    minFaces,
-    nNeighbors,
-    minDist,
-    algorithm: algo,
-  });
+  const minFaces = $derived(draft.minFaces ?? 2);
+
+  const currentParams = () => ({ ...draft, algorithm: algo });
 
   const algoRow = $derived(
     options?.algorithms?.find((a) => a.id === algo) ?? null
   );
+  const algoLabel = $derived(algoRow?.label ?? "This projection");
+  /** The algorithm's own knobs — `minFaces` has its own control above. */
+  const tunables = $derived(specs.filter((s) => s.key !== "minFaces"));
   /** ~4s at 5,499 members, ~20s at 25,758 — measured, so the estimate is real. */
   const estimateSeconds = $derived(
     Math.max(2, Math.round(((options?.members ?? 0) / 5499) * 4))
@@ -343,8 +366,11 @@
           type="number"
           min="1"
           max="50"
-          bind:value={minFaces}
-          onchange={() => onoptions?.(currentParams())}
+          value={minFaces}
+          onchange={(e) => {
+            draft = { ...draft, minFaces: +e.currentTarget.value };
+            onoptions?.(currentParams());
+          }}
         />
       </label>
       <span class="members" data-testid="map-members">
@@ -361,7 +387,12 @@
               value={a.id}
               disabled={!a.enabled}
               checked={algo === a.id}
-              onchange={() => (algo = a.id)}
+              onchange={() => {
+                algo = a.id;
+                // Refetch so the panel below shows THIS algorithm's
+                // parameters; the schema is per-algorithm.
+                onoptions?.(currentParams());
+              }}
             />
             <span class="algo-label">{a.label}</span>
             <!-- The measured score, so a menu of three options where two are
@@ -406,23 +437,36 @@
         </p>
       </fieldset>
 
-      <details>
-        <summary>Fine tuning</summary>
-        <label>
-          Neighbours
-          <input type="number" min="2" max="200" bind:value={nNeighbors} />
-        </label>
-        <label>
-          Minimum distance
-          <input
-            type="number"
-            min="0"
-            max="5"
-            step="0.05"
-            bind:value={minDist}
-          />
-        </label>
-      </details>
+      <!-- Rendered from the algorithm's OWN schema, so choosing t-SNE offers
+           perplexity rather than neighbours, and a new algorithm arrives with
+           its controls instead of needing a third place hand-edited. -->
+      <fieldset class="tuning" data-testid="map-tuning">
+        <legend>{algoLabel} settings</legend>
+        {#if tunables.length}
+          {#each tunables as spec (spec.key)}
+            <label class="tunable">
+              <span class="tunable-name">{spec.label}</span>
+              <input
+                type="number"
+                data-testid={`map-param-${spec.key}`}
+                min={spec.min}
+                max={spec.max}
+                step={spec.step}
+                value={draft[spec.key] ?? spec.default}
+                onchange={(e) =>
+                  (draft = { ...draft, [spec.key]: +e.currentTarget.value })}
+              />
+              <span class="tunable-help">{spec.help}</span>
+            </label>
+          {/each}
+        {:else}
+          <!-- An empty panel reads as a broken control; say why it is empty. -->
+          <p class="hint" data-testid="map-no-params">
+            {algoLabel} is a fixed projection — there is nothing to tune. It always
+            produces the same map from the same photos.
+          </p>
+        {/if}
+      </fieldset>
 
       <button
         class="primary"
@@ -654,6 +698,26 @@
   }
   .sizes {
     min-width: 20rem;
+  }
+  .tuning {
+    min-width: 22rem;
+    max-width: 30rem;
+  }
+  .tunable {
+    display: grid;
+    grid-template-columns: 9rem 6rem;
+    gap: 4px 8px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .tunable-name {
+    color: #ddd;
+  }
+  .tunable-help {
+    grid-column: 1 / -1;
+    color: #888;
+    font-size: 0.74rem;
+    line-height: 1.4;
   }
   .sizes label {
     flex-direction: row;

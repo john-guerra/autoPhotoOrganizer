@@ -133,6 +133,7 @@ import {
   offerableAlgorithms,
   isOfferable,
   defaultParams,
+  allParamSpecs,
 } from "./projection/algorithms.js";
 import { runProjection } from "./projection/runProjection.js";
 import {
@@ -2069,13 +2070,20 @@ export function registerApi(app, { ml } = {}) {
   app.get("/api/projections/options", (req, res) => {
     const db = getDb();
     const modelId = faceModelIdOf(req.query.model);
-    const params = defaultParams(req.query);
+    const algorithm = String(req.query.algorithm ?? "umap");
+    const params = defaultParams({ ...req.query, algorithm });
     const members = personCentroids(db, modelId, {
       minFaces: params.minFaces,
     }).ids.length;
     const coverage = faceGroupingCoverage(db, modelId);
     res.json({
       model: modelId,
+      algorithm,
+      // The controls to render, declared once beside the algorithm rather than
+      // hand-written into the gear — which is how the first version shipped
+      // with UMAP's two parameters as the only knobs, leaving t-SNE's
+      // perplexity frozen in the worker.
+      paramSpecs: allParamSpecs(algorithm),
       members,
       params,
       algorithms: offerableAlgorithms(members),
@@ -2096,7 +2104,10 @@ export function registerApi(app, { ml } = {}) {
     const db = getDb();
     const modelId = faceModelIdOf(req.query.model);
     const algorithm = String(req.query.algorithm ?? "umap");
-    const params = defaultParams(req.query);
+    // The algorithm decides WHICH parameters exist, so it has to reach
+    // defaultParams or the cache key is computed over the wrong shape and a
+    // cached run is never found again.
+    const params = defaultParams({ ...req.query, algorithm });
     const run = findRun(db, {
       kind: "person",
       model: modelId,
