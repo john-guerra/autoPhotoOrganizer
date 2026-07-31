@@ -1467,27 +1467,18 @@ export function registerApi(app, { ml } = {}) {
     // whole-library sweep; rejecting it as malformed made that instruction a
     // 400 nobody could debug, and left ui/src/lib/api.js carrying an
     // undocumented workaround to avoid tripping it.
-    const ids = req.body?.ids ?? undefined;
-    if (ids !== undefined) {
-      if (!Array.isArray(ids) || ids.length === 0) {
-        // Specific over generic: an empty selection is a real thing a user can
-        // do, and "nothing selected" is far more useful than "bad request".
-        return res
-          .status(400)
-          .json({ error: "No photos were selected to embed." });
-      }
-      if (ids.length > 50_000) {
-        return res.status(413).json({
-          error: `That is ${ids.length.toLocaleString()} photos — too many to send at once. Embed the whole library instead.`,
-        });
-      }
+    // `{ids}` OR `{filter}` — the latter because "Filtered" and "Keep only"
+    // can each be the whole library and cannot travel as a list (#245).
+    const scoped = scopeForRoute(getDb(), req.body, { verb: "embed" });
+    if (scoped.error) {
+      return res.status(scoped.status).json({ error: scoped.error });
     }
     kickEmbedSweep(getDb(), getMl, {
       force: true,
-      scopeIds: ids ?? null,
-      scopeLabel: ids ? `${ids.length.toLocaleString()} photos` : null,
+      scopeIds: scoped.ids,
+      scopeLabel: scoped.label,
     });
-    res.json({ started: true, scoped: ids ? ids.length : null });
+    res.json({ started: true, scoped: scoped.ids ? scoped.ids.length : null });
   });
 
   // POST -> recompute the near-duplicate grouping (#162) against the current
@@ -1734,22 +1725,15 @@ export function registerApi(app, { ml } = {}) {
     // whole-library sweep; rejecting it as malformed made that instruction a
     // 400 nobody could debug, and left ui/src/lib/api.js carrying an
     // undocumented workaround to avoid tripping it.
-    const ids = req.body?.ids ?? undefined;
-    if (ids !== undefined) {
-      if (!Array.isArray(ids) || ids.length === 0) {
-        // Specific over generic: an empty selection is a real thing a user can
-        // do, and saying so beats "bad request" — and beats silently sweeping
-        // the library, which is the failure this issue exists for.
-        return res
-          .status(400)
-          .json({ error: "No photos were selected to look for faces in." });
-      }
-      if (ids.length > 50_000) {
-        return res.status(413).json({
-          error: `That is ${ids.length.toLocaleString()} photos — too many to send at once. Look for faces in the whole library instead.`,
-        });
-      }
+    // `{ids}` OR `{filter}` (#245). Refusals stay BEFORE registry.create, so a
+    // rejected request never leaves a job row that appears and instantly fails.
+    const scoped = scopeForRoute(getDb(), req.body, {
+      verb: "look for faces in",
+    });
+    if (scoped.error) {
+      return res.status(scoped.status).json({ error: scoped.error });
     }
+    const ids = scoped.ids ?? undefined;
     const modelId = faceModelIdOf(req.body?.model);
     const model = faceModelById(modelId);
     const weights = await faceWeightsStatus(modelId);
@@ -1954,22 +1938,14 @@ export function registerApi(app, { ml } = {}) {
     // Grouping was the one long operation that never got this — it read every
     // face for the model, unconditionally — which on a 118,371-face library
     // meant the only offer was "do everything".
-    const rawIds = req.body?.ids;
-    if (rawIds !== undefined && rawIds !== null) {
-      if (!Array.isArray(rawIds) || rawIds.length === 0) {
-        // Specific over generic: an empty selection is a real thing a user can
-        // do, and it must be refused rather than widened to the library.
-        return res
-          .status(400)
-          .json({ error: "No photos were selected to group." });
-      }
-      if (rawIds.length > 50_000) {
-        return res.status(413).json({
-          error: `That is ${rawIds.length.toLocaleString("en-US")} photos — too many to send at once. Group the whole library instead.`,
-        });
-      }
+    // `{ids}` OR `{filter}` (#245), through the same helper the other two
+    // scoped routes use — three copies of "which photos did they pick?" is how
+    // one copy drifts.
+    const scopedGroup = scopeForRoute(db, req.body, { verb: "group" });
+    if (scopedGroup.error) {
+      return res.status(scopedGroup.status).json({ error: scopedGroup.error });
     }
-    const scopeIds = normalizeScope(rawIds);
+    const scopeIds = normalizeScope(scopedGroup.ids);
 
     // `regroup` is the old whole-partition pass: it throws away every
     // model-owned assignment and rebuilds. Destructive, all-or-nothing, and
@@ -3689,6 +3665,59 @@ export function registerApi(app, { ml } = {}) {
   });
 
   // --- Photo count (library total when unfiltered; "showing" with a filter) -
+  /**
+   * The scope a scoped ML route should run over, from `{ids}` or `{filter}`
+   * (#245).
+   *
+   * Returns `{ ids, label }` on success — `ids` is `null` for the whole-library
+   * sweep — or `{ error, status }` for a refusal the caller should send back
+   * verbatim. Refusals are SPECIFIC on purpose: "no photos were selected" is a
+   * thing the user can act on, "bad request" is not.
+   *
+   * A filter that does not actually narrow anything (`1=1`) collapses to the
+   * unscoped sweep rather than materializing every id in the library. That is
+   * both the cheap answer and the correct one: "Filtered" with no facets
+   * active IS "All".
+   *
+   * @param {import("better-sqlite3").Database} db
+   * @param {object} body
+   * @param {{verb: string}} msg what the user was trying to do, for the errors
+   */
+  function scopeForRoute(db, body, { verb }) {
+    const rawIds = body?.ids ?? undefined;
+    if (rawIds !== undefined) {
+      if (!Array.isArray(rawIds) || rawIds.length === 0) {
+        return { error: `No photos were selected to ${verb}.`, status: 400 };
+      }
+      if (rawIds.length > 50_000) {
+        return {
+          status: 413,
+          error: `That is ${rawIds.length.toLocaleString()} photos — too many to send at once. ${verb[0].toUpperCase()}${verb.slice(1)} the whole library instead.`,
+        };
+      }
+      return {
+        ids: rawIds,
+        label: `${rawIds.length.toLocaleString()} photos`,
+      };
+    }
+
+    const filter = body?.filter ?? undefined;
+    if (filter === undefined) return { ids: null, label: null };
+
+    // A filter that constrains nothing is the sweep. Checking BEFORE resolving
+    // is what keeps "Filtered with no filter" from materializing 125,000 ids.
+    if (buildFilter(filter).sql === "1=1") return { ids: null, label: null };
+
+    const ids = resolveScope(db, { filter }, buildFilter);
+    if (ids.length === 0) {
+      return {
+        status: 400,
+        error: `Nothing in the current filter to ${verb}.`,
+      };
+    }
+    return { ids, label: `${ids.length.toLocaleString()} photos` };
+  }
+
   app.get("/api/photos/count", (req, res) => {
     const { spec: filter, error: filterError } = parseFilterParam(req);
     if (filterError) return res.status(400).json({ error: filterError });

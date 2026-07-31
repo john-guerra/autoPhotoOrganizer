@@ -27,11 +27,30 @@
   let {
     onclose,
     selectedIds = [],
-    visibleIds = [],
+    /** Everything the scope control needs, straight from App — which owns the
+     *  filter and the working set. The panel is a pass-through on purpose: it
+     *  owns no grid state, and a panel that derived its own scope counts is
+     *  how the two came to disagree (#245). */
+    selectedInFilter = undefined,
+    filterSpec = {},
+    filteredCount = 0,
+    keepActive = false,
+    keepCount = 0,
     onrefinechange,
     onsemanticapply,
     onnotice,
   } = $props();
+
+  // One object, so adding a scope input later cannot reach one panel and miss
+  // the other — which is exactly how faces shipped with no scope at all.
+  const scopeProps = $derived({
+    selectedIds,
+    selectedInFilter,
+    filterSpec,
+    filteredCount,
+    keepActive,
+    keepCount,
+  });
 </script>
 
 <Modal
@@ -57,9 +76,9 @@
          reason search sits above both: they are a thing the models are FOR.
          The download button here is the only place in the app that asks the
          user to accept someone else's licence, so it must not be buried. -->
-    <FaceSettings {selectedIds} {visibleIds} onnotice={(m) => onnotice?.(m)} />
+    <FaceSettings {...scopeProps} onnotice={(m) => onnotice?.(m)} />
     <hr />
-    <MlSettings {selectedIds} {visibleIds} {onrefinechange} />
+    <MlSettings {...scopeProps} {onrefinechange} />
   </div>
 </Modal>
 

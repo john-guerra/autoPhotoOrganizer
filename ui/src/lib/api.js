@@ -565,6 +565,36 @@ export async function fetchPhotoIds(
  * @param {{minRating?:number, orientations?:string[]}|null} [filter=null]
  * @returns {Promise<number>}
  */
+/**
+ * How many of `ids` match `filter` (#245).
+ *
+ * A POST because a selection is routinely thousands of ids and a query string
+ * is not. Used for the one number the scope control cannot derive locally: the
+ * overlap between a selection — which SURVIVES a filter change by design — and
+ * what the filter currently matches.
+ *
+ * Never throws: an overlap that cannot be read is reported as `undefined`, and
+ * `buildScopes` then claims nothing rather than showing a wrong number. A
+ * disclosure that lies is worse than no disclosure.
+ *
+ * @param {{filter?: object, ids?: number[]}} scope
+ * @returns {Promise<number|undefined>}
+ */
+export async function fetchScopedCount({ filter = {}, ids } = {}) {
+  try {
+    const res = await fetch("/api/photos/count", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filter, ids }),
+    });
+    if (!res.ok) return undefined;
+    const body = await res.json();
+    return Number.isFinite(body?.count) ? body.count : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function fetchPhotoCount(filter = null) {
   const params = new URLSearchParams();
   const fp = filter ? toQueryParam(filter) : null;
@@ -1048,11 +1078,15 @@ export async function retryMlFailed() {
  * point it at the shoot they are culling instead of waiting out the library.
  * @param {number[]|null} [ids]
  */
-export async function startEmbed(ids = null) {
+export async function startEmbed(scope = {}) {
+  // `scope` is what scopeRequestFor produced: `{}`, `{ids}` or `{filter}`.
+  // Passed through as-is — an `ids: []` MUST survive as an empty array, since
+  // the server reads that as "these zero photos" and a stripped key as "the
+  // whole library" (#245).
   const res = await fetch("/api/ml/embed", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(ids ? { ids } : {}),
+    body: JSON.stringify(scope ?? {}),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -1207,11 +1241,13 @@ export async function downloadFaceModel(model) {
  *   message: it means "these zero photos", and quietly promoting it to a
  *   full-library sweep is the failure this scope exists to prevent.
  */
-export async function startFaceScan(model, ids = null) {
+export async function startFaceScan(model, scope = {}) {
+  // Same contract as startEmbed: spread the scope rather than reconstructing
+  // it, so `ids: []` reaches the server as an empty array instead of vanishing.
   const res = await fetch("/api/ml/faces", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(ids === null ? { model } : { model, ids }),
+    body: JSON.stringify({ model, ...(scope ?? {}) }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -1285,14 +1321,21 @@ export async function retryFailedFaces(model) {
  *   `mode` defaults to "remaining", which files whatever still has no person
  *   in committed batches; "regroup" is the destructive whole-partition pass.
  */
-export async function clusterPeople(model, threshold, { ids, mode } = {}) {
+export async function clusterPeople(
+  model,
+  threshold,
+  { ids, filter, mode } = {}
+) {
   const res = await fetch("/api/ml/faces/cluster", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       model,
       threshold,
+      // Each key only when present. `ids: []` must survive (zero photos);
+      // an absent key means "no id scope" (#245).
       ...(ids === undefined ? {} : { ids }),
+      ...(filter === undefined ? {} : { filter }),
       ...(mode ? { mode } : {}),
     }),
   });
