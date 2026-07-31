@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.6
+
+- Build and security tooling updated to current major versions
+  (`actions/checkout` v7, CodeQL v4), so CI keeps running on supported
+  actions (#242, #244).
+
 ## 2.19.5
 
 - No user-facing change. Repairs the test suite, which went red across 36
