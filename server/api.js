@@ -92,6 +92,7 @@ import { createFaceEngine } from "./ml/faceEngine.js";
 import {
   faceCounts,
   faceGroupingCoverage,
+  ungroupedFaceCount,
   faceCropSource,
   faceSweepPending,
   pendingFaceRows,
@@ -106,6 +107,8 @@ import {
   clearFaceFailures,
 } from "./db/faces.js";
 import { assignNewFaces } from "./ml/faceAssign.js";
+import { groupRemaining } from "./ml/faceGrouping.js";
+import { normalizeScope } from "./db/scopeIds.js";
 import {
   clusterFaces,
   isClusterInFlight,
@@ -1934,50 +1937,115 @@ export function registerApi(app, { ml } = {}) {
       });
     }
     const modelId = faceModelIdOf(req.body?.model);
-    const vectors = faceVectors(getDb(), modelId);
-    if (!vectors.ids.length) {
+    const db = getDb();
+    const threshold = Number(req.body?.threshold);
+
+    // #235: the SCOPE, exactly as /api/ml/embed and /api/ml/faces take it.
+    // Grouping was the one long operation that never got this — it read every
+    // face for the model, unconditionally — which on a 118,371-face library
+    // meant the only offer was "do everything".
+    const rawIds = req.body?.ids;
+    if (rawIds !== undefined && rawIds !== null) {
+      if (!Array.isArray(rawIds) || rawIds.length === 0) {
+        // Specific over generic: an empty selection is a real thing a user can
+        // do, and it must be refused rather than widened to the library.
+        return res
+          .status(400)
+          .json({ error: "No photos were selected to group." });
+      }
+      if (rawIds.length > 50_000) {
+        return res.status(413).json({
+          error: `That is ${rawIds.length.toLocaleString("en-US")} photos — too many to send at once. Group the whole library instead.`,
+        });
+      }
+    }
+    const scopeIds = normalizeScope(rawIds);
+
+    // `regroup` is the old whole-partition pass: it throws away every
+    // model-owned assignment and rebuilds. Destructive, all-or-nothing, and
+    // NOT what you want for "file the rest" — so it is opt-in and the default
+    // is the incremental pass.
+    const regroup = req.body?.mode === "regroup";
+
+    if (regroup) {
+      const vectors = faceVectors(db, modelId);
+      if (!vectors.ids.length) {
+        return res.status(409).json({
+          error:
+            "No faces have been found yet. Run \u201cFind faces\u201d first, then group them into people.",
+        });
+      }
+      const n = vectors.ids.length;
+      const job = registry.create("face-cluster", {
+        // Short enough to READ in the jobs panel (#236). The old label ran to
+        // "Grouping 118,371 faces into people" and was clipped, so you could
+        // not tell what was running — which is half of contract 2's "visible".
+        label: `Regrouping ${n.toLocaleString("en-US")} faces`,
+        // Pairs, not faces: the work is the upper triangle. See clusterFaces.
+        total: (n * (n - 1)) / 2,
+      });
+      res.json({ started: true, jobId: job.id, faces: n, mode: "regroup" });
+
+      withClusterLatch(async () => {
+        const { clusters } = await clusterFaces(vectors, {
+          ...(Number.isFinite(threshold) ? { threshold } : {}),
+          signal: job.controller.signal,
+          onProgress: ({ done, total }) =>
+            registry.update(job.id, { done, total }),
+        });
+        // A second scan may have started while that ran; writing now would
+        // clear person assignments for faces it is still producing.
+        if (isFaceSweepInFlight()) {
+          throw new Error(
+            "A face scan started while these were being grouped, so nothing was saved. Try again once it finishes."
+          );
+        }
+        const r = saveClusters(db, clusters, { model: modelId });
+        registry.finish(job.id, { ...r, faces: n, mode: "regroup" });
+      }).catch((e) => registry.fail(job.id, e));
+      return;
+    }
+
+    // --- the default: file whatever still needs a person ------------------
+    const pending = ungroupedFaceCount(db, modelId, scopeIds);
+    if (!pending) {
+      // "Nothing to do" is an answer, not a job. Starting one that finishes in
+      // 40ms reads as the button having misfired.
+      const anyFaces = faceGroupingCoverage(db, modelId).detected;
       return res.status(409).json({
-        error:
-          "No faces have been found yet. Run “Find faces” first, then group them into people.",
+        error: anyFaces
+          ? "Every face here already belongs to someone. Choose a wider selection, or use Regroup to rebuild the groups from scratch."
+          : "No faces have been found yet. Run \u201cFind faces\u201d first, then group them into people.",
       });
     }
-    const threshold = Number(req.body?.threshold);
-    const n = vectors.ids.length;
 
-    // Every refusal above is a synchronous 4xx, BEFORE any job exists — a
-    // rejected request must never leave a row that appears and immediately
-    // fails (the #166 zombie-job shape).
     const job = registry.create("face-cluster", {
-      label: `Grouping ${n.toLocaleString()} faces into people`,
-      // Pairs, not faces: the work is the upper triangle. See clusterFaces.
-      total: (n * (n - 1)) / 2,
+      label: `Grouping ${pending.toLocaleString("en-US")} faces`,
+      // The REMAINING count, set at creation. A scope includes faces already
+      // grouped, so `ids.length` would make the bar finish early and stop.
+      total: pending,
     });
-    res.json({ started: true, jobId: job.id, faces: n });
+    res.json({
+      started: true,
+      jobId: job.id,
+      faces: pending,
+      mode: "remaining",
+    });
 
-    // From here the response is already sent: everything else reaches the user
-    // through the job.
     withClusterLatch(async () => {
-      const { clusters } = await clusterFaces(vectors, {
+      const r = await groupRemaining(db, modelId, {
+        scopeIds,
         ...(Number.isFinite(threshold) ? { threshold } : {}),
         signal: job.controller.signal,
+        onPhase: (phase) => registry.update(job.id, { phase }),
         onProgress: ({ done, total }) =>
           registry.update(job.id, { done, total }),
       });
-      // A second scan may have started while that ran; writing now would clear
-      // person assignments for faces it is still producing.
-      if (isFaceSweepInFlight()) {
-        throw new Error(
-          "A face scan started while these were being grouped, so nothing was saved. Try again once it finishes."
-        );
-      }
-      const r = saveClusters(getDb(), clusters, { model: modelId });
-      registry.finish(job.id, { ...r, faces: n });
+      registry.finish(job.id, { ...r, mode: "remaining" });
     }).catch((e) => {
-      // `registry.fail` reads the abort signal and records a cancellation as
-      // "canceled" rather than "failed" — a cancellation is an outcome, not a
-      // failure (Finding 6, ML-UX-REVIEW-2026-07-26.md). Nothing was written
-      // either way: the union-find is in memory and saveClusters is the single
-      // transaction at the end, which a cancelled pass never reaches.
+      // A cancellation is an outcome, and unlike the regroup path it is NOT a
+      // loss: every committed batch stays, and running again continues from
+      // there. That is the whole point of #235.
       registry.fail(job.id, e);
     });
   });

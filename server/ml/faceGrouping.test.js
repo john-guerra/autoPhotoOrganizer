@@ -157,6 +157,13 @@ describe("groupRemaining (#235)", () => {
     expect(done).toBeGreaterThan(0); // it kept its work...
     expect(done).toBeLessThan(80); // ...and did not finish
 
+    // And it kept a WHOLE number of batches, which is the property that
+    // actually distinguishes "commits as it goes" from "commits at the end".
+    // An earlier version of this test only checked done > 0, and stayed GREEN
+    // when the commit was moved after the abort check — because the batches
+    // before the cancelled one had already landed either way.
+    expect(done % 10).toBe(0);
+
     // Running again CONTINUES rather than restarting.
     const r = await groupRemaining(db, MODEL, { batchSize: 10 });
     expect(r.remaining).toBe(0);
