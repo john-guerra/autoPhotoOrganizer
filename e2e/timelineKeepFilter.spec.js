@@ -6,6 +6,7 @@ import {
   menu,
   statusBar,
   timelineFilter,
+  clearScope,
 } from "./helpers.js";
 
 /**
@@ -32,6 +33,30 @@ async function rightClickHeader(page, name) {
 }
 
 test.describe("@p1 timeline keep-only filter", () => {
+  /**
+   * The working set is GLOBAL, SERVER-SIDE state, and since #212 it survives a
+   * reload by design — the server is the one source of truth and the UI
+   * restores it on boot.
+   *
+   * That turned this file from harmless into a suite-wide hazard. It clicks
+   * "Keep only" three times and used to clean up after none of them; before
+   * #212 the next `openApp` forgot the scope on its own, so nothing noticed.
+   * Afterwards the scope persisted, every later spec ran against a two-photo
+   * library, and 36 tests went red across files this one has never heard of —
+   * plus its own third test, which is what makes the leak self-evident once
+   * you look.
+   *
+   * Same rule as `clearFaces` for `seedFaces` (docs/AGENT-NOTES.md): a spec
+   * that seeds global state cleans it up. `beforeEach` as well as `afterAll`,
+   * so a failure part-way through one test cannot leak into the next.
+   */
+  test.beforeEach(async ({ page }) => await clearScope(page));
+  test.afterAll(async ({ browser }) => {
+    const page = await browser.newPage();
+    await clearScope(page);
+    await page.close();
+  });
+
   test("toolbar timeline narrows to the kept group's date range (#194)", async ({
     page,
   }) => {
