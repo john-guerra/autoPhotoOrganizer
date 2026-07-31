@@ -108,7 +108,7 @@ import {
 } from "./db/faces.js";
 import { assignNewFaces } from "./ml/faceAssign.js";
 import { groupRemaining } from "./ml/faceGrouping.js";
-import { normalizeScope } from "./db/scopeIds.js";
+import { normalizeScope, resolveScope } from "./db/scopeIds.js";
 import {
   clusterFaces,
   isClusterInFlight,
@@ -3694,6 +3694,38 @@ export function registerApi(app, { ml } = {}) {
     if (filterError) return res.status(400).json({ error: filterError });
     const db = getDb();
     res.json({ count: photoCountMatchingFilter(db, filter) });
+  });
+
+  // POST variant, for the one question a GET cannot ask: "how many of THESE
+  // photos match the current filter?" (#245)
+  //
+  // The scope control discloses the overlap when a selection and a filter
+  // disagree — a selection survives a filter change by design, so "20 selected"
+  // and "14 in the current filter" are both true and the user needs to see
+  // which is which. That count needs the id list, and a selection is routinely
+  // thousands of ids: far past what a query string can carry. Hence a body.
+  //
+  // Answers the plain filtered count too when `ids` is absent, so a caller
+  // needing both numbers makes one request instead of two.
+  app.post("/api/photos/count", (req, res) => {
+    const db = getDb();
+    const filter = req.body?.filter ?? {};
+    const rawIds = req.body?.ids;
+    if (rawIds !== undefined && rawIds !== null && !Array.isArray(rawIds)) {
+      return res.status(400).json({ error: "ids must be an array" });
+    }
+    // No ids: this is just the filtered count.
+    if (rawIds === undefined || rawIds === null) {
+      return res.json({ count: photoCountMatchingFilter(db, filter) });
+    }
+    const ids = normalizeScope(rawIds);
+    // An empty selection is zero photos, never all of them — the same
+    // distinction the ML routes keep, kept here so the DISPLAYED number cannot
+    // contradict what an operation would act on.
+    if (ids.length === 0) return res.json({ count: 0 });
+    const inFilter = resolveScope(db, { filter }, buildFilter);
+    const wanted = new Set(ids);
+    res.json({ count: inFilter.filter((id) => wanted.has(id)).length });
   });
 
   // --- "Keep only" working set: store the id list server-side so the filter

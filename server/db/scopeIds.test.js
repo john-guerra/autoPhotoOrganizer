@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { normalizeScope, scopeClauseFor } from "./scopeIds.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { normalizeScope, scopeClauseFor, resolveScope } from "./scopeIds.js";
+import { getDb, _resetDbForTest } from "./connection.js";
+import { buildFilter } from "./filters.js";
+import { upsertScan } from "./photos.js";
 
 describe("normalizeScope", () => {
   it("distinguishes 'no scope' from 'an empty scope'", () => {
@@ -68,5 +74,92 @@ describe("scopeClauseFor", () => {
 
   it("can scope a differently-named column", () => {
     expect(scopeClauseFor([3], "f.photo_id")).toBe("AND f.photo_id IN (3)");
+  });
+});
+
+describe("resolveScope — a scope that cannot be enumerated on the wire (#245)", () => {
+  let cacheDir;
+  let db;
+
+  beforeEach(async () => {
+    cacheDir = await mkdtemp(join(tmpdir(), "ag-resolve-"));
+    process.env.AUTOGALLERY_HOME = cacheDir;
+    _resetDbForTest();
+    db = getDb();
+    // Six photos in one folder; the first three are rated 5.
+    // The volumes row is required first — folders.volume_id is a real foreign
+    // key, so upsertScan fails without it.
+    db.prepare(
+      `INSERT INTO volumes (id, label, uuid, last_mount_path, last_seen_at)
+       VALUES (1, 'v', 'uuid-1', '/test', ?)`
+    ).run(Date.now());
+    upsertScan(
+      db,
+      "/vol/pics",
+      1,
+      Array.from({ length: 6 }, (_, i) => ({
+        name: `p${i + 1}.jpg`,
+        size: 10,
+        mtimeMs: 1000 + i,
+        kind: "image",
+      }))
+    );
+    const ids = db.prepare(`SELECT id FROM photos ORDER BY id`).all();
+    for (const { id } of ids.slice(0, 3)) {
+      db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(id);
+    }
+  });
+
+  afterEach(async () => {
+    _resetDbForTest();
+    await rm(cacheDir, { recursive: true, force: true });
+    delete process.env.AUTOGALLERY_HOME;
+  });
+
+  const allIds = () =>
+    db
+      .prepare(`SELECT id FROM photos ORDER BY id`)
+      .all()
+      .map((r) => r.id);
+
+  it("returns null for no scope at all, so the sweep stays a sweep", () => {
+    expect(resolveScope(db, {}, buildFilter)).toBeNull();
+  });
+
+  it("resolves a filter to exactly the photos it matches", () => {
+    const got = resolveScope(db, { filter: { minRating: 5 } }, buildFilter);
+    expect(got).toEqual(allIds().slice(0, 3));
+  });
+
+  it("keeps an EMPTY selection empty instead of widening to the library", () => {
+    // The whole point of the null/[] distinction, restated at this layer: an
+    // empty selection that fell through to "no scope" would be an hour of
+    // inference over everything, which is the most expensive possible way to
+    // misread an empty array.
+    expect(resolveScope(db, { ids: [] }, buildFilter)).toEqual([]);
+    expect(resolveScope(db, { ids: [] }, buildFilter)).not.toBeNull();
+  });
+
+  it("prefers an explicit id list over a filter when both are sent", () => {
+    // Narrower and explicit wins. Preferring the filter would silently widen
+    // the operation, which is the wrong direction to fail in.
+    const last = allIds().at(-1);
+    expect(
+      resolveScope(db, { ids: [last], filter: { minRating: 5 } }, buildFilter)
+    ).toEqual([last]);
+  });
+
+  it("never returns a stale photo, whatever the scope", () => {
+    const [first] = allIds();
+    db.prepare(`UPDATE photos SET stale = 1 WHERE id = ?`).run(first);
+    const got = resolveScope(db, { filter: { minRating: 5 } }, buildFilter);
+    expect(got).not.toContain(first);
+  });
+
+  it("treats an explicit null filter as no scope, not as an empty one", () => {
+    // `null` and an omitted key both mean "no scope" on the wire — the
+    // contract UI-CONTRACTS.md already fixes for ids, held to for filters.
+    expect(resolveScope(db, { filter: null }, buildFilter)).toBeNull();
+    expect(resolveScope(db, { ids: null }, buildFilter)).toBeNull();
   });
 });

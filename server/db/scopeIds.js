@@ -66,3 +66,63 @@ export function scopeClauseFor(ids, column = "photos.id") {
   }
   return `AND ${column} IN (${ids.join(",")})`;
 }
+
+/**
+ * Resolve a request's scope — `{ids}` or `{filter}` — to the id list every
+ * scoped worklist already understands (#245).
+ *
+ * ## Why a filter arrives at all
+ *
+ * Three of the four scopes the UI offers can be arbitrarily large: "All",
+ * "Keep only", and "Filtered" with no facets active is the whole library. So
+ * they travel as a DESCRIPTION rather than an enumeration — the same reason
+ * `keep_scope` exists. Only "Selected" is a genuine list.
+ *
+ * ## Why it becomes ids HERE rather than a SQL clause
+ *
+ * Tempting to splice `buildFilter`'s SQL straight into the worklist. It does
+ * not work: `buildFilter` emits POSITIONAL (`?`) parameters and the worklists
+ * bind NAMED ones (`@model`, `@limit`), and better-sqlite3 refuses a statement
+ * that mixes the two. A temp table would dodge that, but temp tables are
+ * per-connection and a sweep yields between batches, so a concurrent request
+ * would clobber the scope mid-run — a bug that only appears under load.
+ *
+ * Resolving to ids up front avoids both, and gives the sweep a SNAPSHOT: the
+ * work is fixed at request time, so a rating changed while the sweep runs
+ * cannot silently add or drop photos from a job the user already approved.
+ *
+ * **Known cost, stated rather than hidden:** a filter matching the whole
+ * library materializes that many integers and inlines them into SQL. Callers
+ * should collapse "no active filter" to an unscoped sweep (`{}`) before
+ * reaching here, which is what the client does. The proper fix is the scope
+ * temp table in `docs/superpowers/specs/2026-07-31-unified-scan-pipeline-design.md`
+ * §2.2, which has to solve the concurrency question above first.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {{ids?: unknown, filter?: object}} body the request body
+ * @param {(spec: object) => {sql: string, params: unknown[]}} buildFilter
+ * @returns {number[]|null} `null` for an unscoped sweep; otherwise the ids,
+ *   possibly EMPTY, which means "these zero photos" and never "all of them".
+ */
+export function resolveScope(db, body, buildFilter) {
+  const hasIds = body?.ids !== undefined && body?.ids !== null;
+  const hasFilter = body?.filter !== undefined && body?.filter !== null;
+
+  // An id scope wins if both are somehow present: it is the narrower, explicit
+  // one, and silently preferring the broader would be the wrong direction to
+  // fail in.
+  if (hasIds) return normalizeScope(body.ids);
+  if (!hasFilter) return null;
+
+  const filter = buildFilter(body.filter);
+  return db
+    .prepare(
+      `SELECT photos.id AS id
+         FROM photos
+         JOIN folders ON folders.id = photos.folder_id
+        WHERE photos.stale = 0 AND (${filter.sql})
+        ORDER BY photos.id`
+    )
+    .all(...filter.params)
+    .map((r) => r.id);
+}
