@@ -7,7 +7,11 @@ import {
   faceSettings,
   seedFaces,
   clearFaces,
+  statusBar,
+  filterBar,
+  clearScope,
 } from "./helpers.js";
+import { TOTAL_PHOTOS } from "./fixture.mjs";
 
 /** Faces still waiting for a person, straight from the status endpoint. */
 async function ungroupedCount(page) {
@@ -27,6 +31,16 @@ async function ungroupedCount(page) {
  * is readable with faces switched off, which is also what every new user sees.
  */
 test.describe("faces scope @p1", () => {
+  // This file now drives "Keep only" (#245), which writes the server's
+  // keep_scope table and — since #212 — outlives the page. `openApp` clears it
+  // for specs that call it, but `filmstripBurst.spec.js` runs after this one
+  // and never does. See docs/AGENT-NOTES.md.
+  test.afterAll(async ({ browser }) => {
+    const page = await browser.newPage();
+    await clearScope(page);
+    await page.close();
+  });
+
   /**
    * The scope control only renders once the weights are present — offering a
    * scope for an operation you cannot run would be noise. The real weights are
@@ -71,15 +85,88 @@ test.describe("faces scope @p1", () => {
     });
   });
 
-  test("offers All / Visible / Selected with live counts", async ({ page }) => {
+  test("offers All / Filtered / Selected with live counts", async ({
+    page,
+  }) => {
     const errors = trackPageErrors(page);
     await openApp(page);
     await mlPanel.open(page);
 
     await expect(faceSettings.scope(page)).toBeVisible();
-    for (const key of ["selected", "visible", "all"]) {
+    for (const key of ["selected", "filtered", "all"]) {
       await expect(faceSettings.scopeOption(page, key)).toHaveCount(1);
     }
+    // The rename IS the fix (#245): "visible" was read as "what is on screen"
+    // and meant "what the filter matches", so the count came from the loaded
+    // feed window. The old key must be gone, not merely relabelled — a stale
+    // `value="visible"` would mean a stale code path is still wired up.
+    await expect(faceSettings.scopeOption(page, "visible")).toHaveCount(0);
+    // "Keep only" is a FOURTH option that appears only while a working set is
+    // in force. Without one it is the same set as All, and offering a
+    // duplicate invites the user to distinguish two identical things.
+    await expect(faceSettings.scopeOption(page, "keep")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("adds a Keep only scope, with its count, once one is in force (#245)", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    // Keep a real subset, so the scope is narrower than the library.
+    await page.keyboard.press("Meta+a");
+    const kept = Number(
+      (await statusBar.root(page).textContent()).match(/(\d+) selected/)[1]
+    );
+    expect(kept).toBeGreaterThan(0);
+    expect(kept).toBeLessThan(TOTAL_PHOTOS);
+    await statusBar.keepOnly(page).click();
+    await expect(statusBar.scopeChip(page)).toBeVisible();
+
+    await mlPanel.open(page);
+    const keep = faceSettings.scopeOption(page, "keep");
+    await expect(keep).toHaveCount(1);
+    // The count is the working set's, read back from the server — not the
+    // number of rows the grid happens to have loaded.
+    await expect(faceSettings.scope(page)).toContainText(String(kept));
+    expect(errors).toEqual([]);
+  });
+
+  test("says how many SELECTED photos the filter actually matches (#245)", async ({
+    page,
+  }) => {
+    // A selection SURVIVES a filter change on purpose, so "Selected" can hold
+    // photos "Filtered" excludes. Both numbers are true and the control has to
+    // say which is which, rather than showing one that looks like a subset of
+    // the other.
+    //
+    // NOTE what this file CANNOT prove: that the Filtered COUNT is the
+    // filter's whole result set rather than the loaded feed window. The
+    // fixture's 19 photos fit in a single feed page, so the two are equal here
+    // and were equal before the fix. Distinguishing them needs a library
+    // larger than one page — see the large-fixture note on #248.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    // Rate exactly one photo, select two, then filter to rated. The selection
+    // outlives the filter, so 2 selected / 1 in filter.
+    await grid.focus(page, 0);
+    await page.keyboard.press("5");
+    await page.keyboard.press("x");
+    await grid.focus(page, 1);
+    await page.keyboard.press("x");
+    await expect(statusBar.root(page)).toContainText(/2 selected/);
+
+    await filterBar.minRating(page, 5);
+
+    await mlPanel.open(page);
+    // "Selected 2 · 1 in the current filter" — the exact disclosure John asked
+    // for. The number can only come from the server: the client holds the feed
+    // window, which is the mistake this issue is about.
+    await expect(faceSettings.scope(page)).toContainText(
+      /1 in the current filter/
+    );
     expect(errors).toEqual([]);
   });
 
@@ -241,7 +328,9 @@ test.describe("grouping scope @p1", () => {
     await clearFaces();
   });
 
-  test("offers grouping its OWN All / Visible / Selected", async ({ page }) => {
+  test("offers grouping its OWN All / Filtered / Selected", async ({
+    page,
+  }) => {
     // Its own control, not detection's: "All" means a different quantity for
     // each — faces without a person versus photos without a scan — and
     // contract 1 says `allCount` is the operation's remaining work.
@@ -250,7 +339,7 @@ test.describe("grouping scope @p1", () => {
     await mlPanel.open(page);
 
     await expect(faceSettings.groupScope(page)).toBeVisible();
-    for (const key of ["selected", "visible", "all"]) {
+    for (const key of ["selected", "filtered", "all"]) {
       await expect(faceSettings.groupScopeOption(page, key)).toHaveCount(1);
     }
     // ...and it is a SEPARATE radio group. Two groups sharing a name are one

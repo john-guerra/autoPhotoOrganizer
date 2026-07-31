@@ -918,6 +918,19 @@ export async function openManageLibrary(page) {
 /** The standalone Machine learning panel (#205) — reached from the toolbar's
  *  gear, and the only home of the semantic search (#164). Distinct from
  *  `mlSettings` above, which is the section embedded in Manage library. */
+/** The toolbar's minimum-rating filter. Keyed on the accessible label rather
+ *  than markup, so a restyle of the star widget does not break specs that only
+ *  care about the filter being APPLIED. */
+export const filterBar = {
+  minRating: async (page, stars) => {
+    await page
+      .getByRole("button", {
+        name: `filter: ${stars} star${stars > 1 ? "s" : ""} or more`,
+      })
+      .click();
+  },
+};
+
 export const mlPanel = {
   /** The toolbar gear. Scoped to the toolbar: the dialogs it opens carry their
    *  own accessible names, and an unscoped "Settings" matches more than one. */
