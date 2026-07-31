@@ -249,6 +249,35 @@ No cursor is stored. A completed cohort's photos are no longer pending in any st
 next call returns the next cohort. A crash costs one cohort's _in-flight batch_, exactly as
 today.
 
+> **MEASURED, 2026-07-31 — the risk is real but affordable.**
+> `scripts/benchmark.mjs`, against 125,000 rows:
+>
+> | case                                     | per execution |
+> | ---------------------------------------- | ------------- |
+> | first cohort (everything pending)        | **0.01 ms**   |
+> | last cohort (everything done but a tail) | **7.5 ms**    |
+>
+> Plan: `SCAN photos | SEARCH folders USING INTEGER PRIMARY KEY (rowid=?)` — a
+> full scan, exactly as `schema.js:453` predicted.
+>
+> **The two numbers differ by 750×, and only the second one matters.** `LIMIT`
+> short-circuits: while everything is still pending SQLite finds 57 matches in
+> the first 57 rows and stops, so the query looks free however large the table
+> is. Measure only that and you get a reassuring number for a risk you never
+> touched. The cost the design was worried about is the LAST cohort, where the
+> scan walks the whole table to find the few rows still outstanding.
+>
+> Projected over a full-library run at D1's ~57-photo cohorts (~2,200 of them):
+> **≈16 s of pure query overhead.** Against a run that is hours of inference,
+> that is acceptable — it is not the "minutes" that would force a plan change.
+> So **Phase 3 may proceed without the composite index**, and mitigation 2
+> below stays a proposal rather than a prerequisite. Mitigation 1
+> (scan-derived cohorts keyed on `folder_id`) is still worth doing for the
+> common path, where it removes the scan entirely.
+>
+> Re-measure if the cohort size shrinks: the overhead is linear in the number
+> of cohorts, so halving the time budget doubles it.
+
 **Known cost risk, flagged rather than papered over:** this is a disjunction, and SQLite will
 not use the partial `idx_photos_pending_meta` for it — `schema.js:453` already documents that
 the multi-index OR optimisation does not apply to this file's index style, verified via
