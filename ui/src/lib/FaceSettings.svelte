@@ -103,6 +103,26 @@
     scopeIdsFor(scopeChoice, { selectedIds, visibleIds })
   );
 
+  // GROUPING gets its own scope, and must: contract 1 says `allCount` is the
+  // operation's REMAINING work, and grouping's remaining is faces without a
+  // person — a different quantity from detection's photos-without-a-scan.
+  // Sharing one control would make "All" quote the wrong number for whichever
+  // operation lost.
+  let groupChoice = $state(DEFAULT_SCOPE);
+  const groupPending = $derived(status?.grouping?.pending ?? 0);
+  let groupScopes = $derived(
+    buildScopes({
+      selectedIds,
+      visibleIds,
+      allCount: groupPending,
+      allLabel: "All remaining",
+    })
+  );
+  let activeGroupScope = $derived(activeScopeOf(groupScopes, groupChoice));
+  let groupScopeIds = $derived(
+    scopeIdsFor(groupChoice, { selectedIds, visibleIds })
+  );
+
   async function act(label, fn) {
     busy = label;
     error = "";
@@ -373,18 +393,59 @@
                operation with it when you closed it. Progress, cancel and the
                outcome all live in the JobsPanel now — reachable from the main
                interface, which is the point. -->
-          <button
+          <ScopeControl
+            legend="Group"
+            name="face-group-scope"
+            testid="face-group-scope"
+            {selectedIds}
+            {visibleIds}
+            allCount={groupPending}
+            allLabel="All remaining"
+            emptyMessage="Every face here already belongs to someone."
             disabled={!!busy || status.running || !!clusterJob}
+            bind:choice={groupChoice}
+          />
+          <button
+            disabled={!!busy ||
+              status.running ||
+              !!clusterJob ||
+              !activeGroupScope?.n}
             onclick={() =>
               act("cluster", async () => {
-                await clusterPeople(modelId);
+                await clusterPeople(modelId, undefined, { ids: groupScopeIds });
                 onnotice?.(
-                  "Grouping faces into people — progress is in the jobs panel, and you can stop it there."
+                  "Grouping faces into people — progress is in the jobs panel, and you can stop it there. It keeps what it finishes, so you can stop and pick it up later."
                 );
               })}
             data-testid="face-cluster"
           >
-            {clusterJob ? "Grouping…" : "Group faces into people"}
+            {clusterJob
+              ? "Grouping…"
+              : `Group ${(activeGroupScope?.n ?? 0).toLocaleString()} faces`}
+          </button>
+          <!-- The old whole-library pass, kept but demoted. It THROWS AWAY
+               every grouping the model owns and rebuilds from scratch, so it
+               is destructive in a way the default is not, all-or-nothing, and
+               far slower. Confirmed rather than one-click, per CLAUDE.md on
+               destructive actions. -->
+          <button
+            class="quiet"
+            disabled={!!busy || status.running || !!clusterJob}
+            title="Throw away the current groups and rebuild them from scratch"
+            onclick={() =>
+              act("regroup", async () => {
+                const ok = confirm(
+                  `Rebuild every group from scratch?\n\nThis discards the groups the app worked out (your named people and manual merges are kept) and regroups all ${status.counts.faces.toLocaleString()} faces. It cannot be stopped part-way — unlike Group, which keeps what it finishes.`
+                );
+                if (!ok) return;
+                await clusterPeople(modelId, undefined, { mode: "regroup" });
+                onnotice?.(
+                  "Rebuilding every group — progress is in the jobs panel."
+                );
+              })}
+            data-testid="face-regroup"
+          >
+            Regroup everything…
           </button>
           {#if clusterJob}
             <!-- A second way to stop it, right where it was started. The

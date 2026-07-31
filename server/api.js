@@ -1640,7 +1640,17 @@ export function registerApi(app, { ml } = {}) {
     const model = faceModelById(modelId);
     const model_ = await faceWeightsStatus(modelId);
     const counts = faceCounts(getDb(), modelId);
+    // What GROUPING still has to do, which is a different quantity from what
+    // DETECTION has to do — faces without a person, not photos without a scan.
+    // The scope control needs it for its "All" count, and contract 1 wants
+    // that count to be the operation's own REMAINING work (#235).
+    const grouping = faceGroupingCoverage(getDb(), modelId);
     res.json({
+      grouping: {
+        ...grouping,
+        // Faces the grouping pass would act on right now, library-wide.
+        pending: ungroupedFaceCount(getDb(), modelId, null),
+      },
       models: FACE_MODELS.map((m) => ({
         id: m.id,
         label: m.label,

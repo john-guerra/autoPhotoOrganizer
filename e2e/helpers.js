@@ -309,8 +309,15 @@ export const faceMap = {
  *
  * @param {number} people how many persons to create
  * @param {number} facesEach faces per person
+ * @param {{assign?: boolean}} [opts] `assign: false` leaves every face WITHOUT
+ *   a person — which is what the grouping pass exists to fix, and the only
+ *   state in which it has anything to do (#235).
  */
-export async function seedFaces(people = 24, facesEach = 2) {
+export async function seedFaces(
+  people = 24,
+  facesEach = 2,
+  { assign = true } = {}
+) {
   const { default: Database } = await import("better-sqlite3");
   const db = new Database(
     join(process.cwd(), "e2e", ".tmp", "home", "index.db")
@@ -345,7 +352,7 @@ export async function seedFaces(people = 24, facesEach = 2) {
 
     db.transaction(() => {
       for (let p = 1; p <= people; p++) {
-        insPerson.run(p, null, 1000 + p);
+        if (assign) insPerson.run(p, null, 1000 + p);
         for (let f = 0; f < facesEach; f++) {
           // A distinct direction per person, wobbled per face, so the
           // projection has real structure rather than coincident points.
@@ -359,7 +366,7 @@ export async function seedFaces(people = 24, facesEach = 2) {
             DIM,
             0.01,
             Buffer.from(bytes.buffer),
-            p,
+            assign ? p : null,
             Date.now()
           );
         }
@@ -925,9 +932,17 @@ export const faceSettings = {
     page.getByTestId("face-scope").locator(`input[value="${which}"]`),
   /** The "up to N photos · about T" line under the control. */
   estimate: (page) => page.getByTestId("face-scope-estimate"),
-  /** "Group faces into people" — starts a JOB (#222), it does not await a
-   *  result. */
+  /** "Group N faces" — starts a JOB (#222), it does not await a result. */
   cluster: (page) => page.getByTestId("face-cluster"),
+  /** GROUPING's own scope control (#235). Separate from `scope` above on
+   *  purpose: "All" means a different quantity for grouping (faces without a
+   *  person) than for detection (photos without a scan). */
+  groupScope: (page) => page.getByTestId("face-group-scope"),
+  groupScopeOption: (page, which) =>
+    page.getByTestId("face-group-scope").locator(`input[value="${which}"]`),
+  groupEstimate: (page) => page.getByTestId("face-group-scope-estimate"),
+  /** The demoted, destructive whole-library rebuild. */
+  regroup: (page) => page.getByTestId("face-regroup"),
   /** Stop, next to the button that started it. The JobsPanel's Cancel is the
    *  canonical one; this exists because the user is looking here. */
   clusterStop: (page) => page.getByTestId("face-cluster-stop"),

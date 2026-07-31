@@ -6,6 +6,21 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.2
+
+- **Grouping faces now works on a selection**, like everything else: All /
+  Visible / Selected, with a live count of how many faces it will actually
+  group. It used to offer only the whole library (#235).
+- **And it keeps what it finishes.** Grouping files faces in batches as it
+  goes, so stopping it — or closing the app — no longer throws the work away.
+  Run it again and it picks up where it left off instead of starting over.
+  This is what makes a large library groupable at all.
+- Rebuilding every group from scratch is still available, as its own
+  clearly-marked action with a confirmation, since it discards the groups the
+  app worked out.
+- The grouping job's label in the jobs panel is short enough to read now
+  (#236).
+
 ## 2.19.1
 
 - **The face map's settings can actually be changed now.** Editing a value used
