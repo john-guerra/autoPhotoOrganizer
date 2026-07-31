@@ -44,6 +44,8 @@ const { putFaces } = await import("./db/faces.js");
 const { quantize } = await import("./ml/quantize.js");
 const { withClusterLatch, _resetClusterForTest } =
   await import("./ml/faceClusters.js");
+const { upsertScan } = await import("./db/photos.js");
+const { ungroupedFaceCount } = await import("./db/faces.js");
 
 let home;
 let srv;
@@ -302,5 +304,143 @@ describe("POST /api/ml/faces/retry-failed", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ cleared: 2 });
     expect(faceCounts(db, "buffalo_s").failed).toBe(0);
+  });
+});
+
+/**
+ * The grouping SCOPE (#235).
+ *
+ * Grouping was the one long operation that never got All / Visible / Selected:
+ * it read every face for the model, unconditionally. On a 118,371-face library
+ * that made it unusable — no way to work in chunks, and a cancelled run wrote
+ * nothing.
+ */
+describe("POST /api/ml/faces/cluster takes a scope (#235)", () => {
+  /** `n` faces along `axis`, on their own photos in `folder`. */
+  function seed(folder, axis, n) {
+    const db = getDb();
+    const files = Array.from({ length: n }, (_, i) => ({
+      name: `S_${i}.jpg`,
+      size: 10 + i,
+      mtimeMs: 1700000000000 + i,
+      kind: "image",
+    }));
+    const photos = upsertScan(db, folder, 1, files).map((r) => r.id);
+    const v = new Float32Array(64);
+    v[axis] = 1;
+    const { scale, bytes } = quantize(v);
+    for (const pid of photos) {
+      putFaces(db, {
+        photoId: pid,
+        model: MODEL,
+        faces: [{ box: [0, 0, 9, 9], score: 0.9, dim: 64, scale, bytes }],
+      });
+    }
+    return photos;
+  }
+
+  const settle = async (id, ms = 20_000) => {
+    const t0 = Date.now();
+    for (;;) {
+      const j = registry.get(id);
+      if (j && j.status !== "running") return j;
+      if (Date.now() - t0 > ms) throw new Error("job hung");
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+
+  const MODEL = "buffalo_l";
+
+  it("refuses an EMPTY selection specifically, and starts no job", async () => {
+    // The failure this prevents costs an hour of CPU: falling back to the
+    // whole library because the selection was empty looks like the button
+    // misfired, and #206 keeps null-vs-empty distinct for exactly this.
+    seed("/vol/scope-a", 1, 4);
+    const before = registry.list().length;
+    const res = await post("/api/ml/faces/cluster", { model: MODEL, ids: [] });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/selected/i);
+    expect(registry.list().length).toBe(before);
+  });
+
+  it("413s an oversized selection rather than trying", async () => {
+    const res = await post("/api/ml/faces/cluster", {
+      ids: Array.from({ length: 50_001 }, (_, i) => i + 1),
+    });
+    expect(res.status).toBe(413);
+  });
+
+  it("groups ONLY the scope, leaving everything else ungrouped", async () => {
+    // The seam that was silently droppable in #221: a scope that never reaches
+    // the worklist looks identical from the outside until you check what was
+    // left alone.
+    _resetClusterForTest();
+    const inScope = seed("/vol/scope-in", 2, 5);
+    seed("/vol/scope-out", 9, 5);
+
+    const res = await post("/api/ml/faces/cluster", {
+      model: MODEL,
+      ids: inScope,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.mode).toBe("remaining");
+    const job = await settle(body.jobId);
+    expect(job.status).toBe("done");
+
+    // Nothing outside the scope was touched.
+    expect(ungroupedFaceCount(getDb(), MODEL, inScope)).toBe(0);
+    const outstanding = ungroupedFaceCount(getDb(), MODEL, null);
+    expect(outstanding).toBeGreaterThan(0);
+  });
+
+  it("sets the job total to what REMAINS, not to the scope's size", async () => {
+    // A scope includes faces already grouped, so `ids.length` makes the bar
+    // finish at some fraction and stop (#208's other half).
+    _resetClusterForTest();
+    const photos = seed("/vol/scope-total", 3, 6);
+    const remaining = ungroupedFaceCount(getDb(), MODEL, photos);
+    const res = await post("/api/ml/faces/cluster", {
+      model: MODEL,
+      ids: photos,
+    });
+    const body = await res.json();
+    expect(registry.get(body.jobId).total).toBe(remaining);
+    await settle(body.jobId);
+  });
+
+  it("says so when everything here already has a person, rather than running", async () => {
+    _resetClusterForTest();
+    const photos = seed("/vol/scope-done", 4, 4);
+    const first = await post("/api/ml/faces/cluster", {
+      model: MODEL,
+      ids: photos,
+    });
+    await settle((await first.json()).jobId);
+
+    const before = registry.list().length;
+    const again = await post("/api/ml/faces/cluster", {
+      model: MODEL,
+      ids: photos,
+    });
+    expect(again.status).toBe(409);
+    expect((await again.json()).error).toMatch(/already belongs/i);
+    expect(registry.list().length).toBe(before);
+  });
+
+  it("labels the job briefly enough to read in the panel (#236)", async () => {
+    _resetClusterForTest();
+    const photos = seed("/vol/scope-label", 5, 3);
+    const res = await post("/api/ml/faces/cluster", {
+      model: MODEL,
+      ids: photos,
+    });
+    const body = await res.json();
+    const { label } = registry.get(body.jobId);
+    // The old label was "Grouping 118,371 faces into people" and was clipped,
+    // so you could not tell what was running.
+    expect(label).toMatch(/^Grouping [\d,]+ faces$/);
+    expect(label.length).toBeLessThan(32);
+    await settle(body.jobId);
   });
 });
