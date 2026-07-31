@@ -59,7 +59,13 @@ test.describe("@p1 keep-only persistence", () => {
     // would pass on a scope that is remembered but not applied, and the tiles
     // alone would pass on one applied but not shown. The bug was precisely a
     // disagreement between those two, so testing one is testing neither.
-    await openApp(page);
+    //
+    // `preserveScope` opts out of openApp's harness-level scope reset — without
+    // it the helper would clear the very thing this test exists to observe, and
+    // the assertion below would be checking nothing. It changes no product
+    // behaviour: localStorage is still wiped, so the scope still has to come
+    // back from the server with no browser-side help.
+    await openApp(page, { preserveScope: true });
 
     await expect(statusBar.scopeChip(page)).toBeVisible();
     await expect(statusBar.scopeChip(page)).toContainText(
@@ -86,7 +92,11 @@ test.describe("@p1 keep-only persistence", () => {
     await statusBar.scopeChip(page).click(); // the chip IS the exit
     await expect(statusBar.scopeChip(page)).toHaveCount(0);
 
-    await openApp(page);
+    // `preserveScope` here too, and for the same reason: if the helper cleared
+    // the scope the assertion would pass whether or not exiting actually wrote
+    // through to the server. The point is that the EXIT persisted, so the
+    // harness must not do the persisting.
+    await openApp(page, { preserveScope: true });
     await expect(statusBar.scopeChip(page)).toHaveCount(0);
     await expect(page.locator(".thumb").first()).toBeVisible();
 

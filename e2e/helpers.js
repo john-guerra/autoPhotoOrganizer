@@ -44,7 +44,25 @@ export function trackPageErrors(page) {
  * *folding* would otherwise break whenever the widget's markup changed — a test
  * should fail for the thing it actually tests.
  */
-export async function openApp(page, { groupBy } = {}) {
+export async function openApp(page, { groupBy, preserveScope = false } = {}) {
+  // Clear the "keep only" working set unless the spec explicitly wants it kept.
+  //
+  // This mirrors the localStorage.clear() below: openApp means "start from a
+  // clean app". It was not needed until #212, because an ids scope used to be
+  // forgotten on reload all by itself — so a spec could scope the app, walk
+  // away, and leave nothing behind. Once the server became the source of truth,
+  // THREE specs turned out to be doing exactly that (albums.spec.js auto-scopes
+  // via Auto Albums, headerMenu.spec.js and timelineKeepFilter.spec.js use
+  // "Keep only"), and every spec that ran after any of them was quietly
+  // browsing a three-photo library. That is 36 tests red across files those
+  // three have never heard of, including culling.spec.js (@p0).
+  //
+  // Doing it HERE rather than in each spec's beforeEach is the point: leaking is
+  // now impossible by default, so the next spec to scope the app cannot
+  // reintroduce this by forgetting. `preserveScope` is for the one spec that
+  // asserts the scope SURVIVES a reload — it opts out of the harness cleanup
+  // only, never out of any product behaviour.
+  if (!preserveScope) await clearScope(page);
   await page.addInitScript((dims) => {
     window.localStorage.clear();
     if (dims) {

@@ -37,6 +37,45 @@ Keep this current: when one of these facts changes, update it in the same commit
   below), so that pushed unrelated groups into the overflow popover and turned
   `tagFilter` and `timelineKeepFilter` red. Hence `clearFaces` in `afterAll`.
 
+  **It happened again, worse, and the trigger is the part worth remembering: a
+  feature can turn an existing, previously harmless spec into a leaking one.**
+  #212 made the "keep only" working set survive a reload — correct behaviour,
+  and the entire point of the fix. Three specs had been scoping the app and
+  cleaning up after none of it, which cost nothing only because the UI used to
+  forget an ids scope on the next `openApp`. The moment the server became the
+  source of truth, each of them started leaving a **three-photo library** behind
+  it: **36 tests red across files they have never heard of**, including
+  `culling.spec.js` (@p0). Both PRs were individually green — the specs that
+  leaked and the change that made leaking matter were never in one tree until
+  they merged.
+
+  The fix is structural, in `openApp`: **it clears the working set by default**,
+  exactly as it already clears localStorage. Per-spec cleanup was tried first
+  and is the wrong shape — it fixed one of the three, took the failure count
+  from 36 to 26, and looked done. The next spec to scope the app would have
+  reintroduced it.
+
+  Four things that generalise:
+
+  - **`openApp` clears the scope; `preserveScope: true` opts out.** Only
+    `keepOnlyPersist.spec.js` needs it, because it exists to assert the scope
+    survives a reload. Opting out skips harness cleanup only — localStorage is
+    still wiped, so the scope still has to come back from the server unaided.
+  - **`openApp` is not a complete net: `burst.spec.js` and
+    `filmstripBurst.spec.js` never call it**, and `burst` runs immediately after
+    the leaking `albums.spec.js`. So a spec that scopes the app ALSO clears in
+    `afterAll`. Belt and braces, and the braces have a known hole.
+  - **The leak had no grep signature.** `albums.spec.js` never says "keep only" —
+    Auto Albums **auto-scopes to the selection**, so it writes `keep_scope` as a
+    side effect. `grep -rln keepOnly e2e/*.spec.js` found the other two and
+    missed the one doing most of the damage. What found it was bisecting the
+    suite; treat greps as a first pass, not an audit.
+  - **When a change makes state durable, bisect the suite rather than reasoning
+    about it.** Running the same batch against the commit before the merge
+    (61/61 green vs 10 red) settled in two runs what an afternoon of log-reading
+    had not. Both halves of a merge can be green; only their combination is the
+    thing under test.
+
 - **Isolate destructive index tests.** Anything that removes folders, resets, or
   materialize-moves must run against a **temp `AUTOGALLERY_HOME`**, never the real
   `~/.autogallery/`. Playwright already points `AUTOGALLERY_HOME` at `e2e/.tmp/home`

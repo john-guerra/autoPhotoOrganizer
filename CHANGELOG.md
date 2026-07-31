@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.5
+
+- No user-facing change. Repairs the test suite, which went red across 36
+  tests after "Keep only" was made to survive a reload (#212): a test that
+  scoped the app never cleaned up, so every test after it ran against a
+  two-photo library.
+
 ## 2.19.3
 
 - "Keep only" now survives a reload and an app restart. It used to come back

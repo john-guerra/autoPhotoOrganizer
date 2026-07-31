@@ -6,7 +6,22 @@ import {
   albums,
   grid,
   statusBar,
+  clearScope,
 } from "./helpers.js";
+
+/**
+ * Auto Albums AUTO-SCOPES to the selection (see the test below — the chip says
+ * "3 photos"), which writes the server's keep_scope table. `openApp` clears that
+ * for any spec that calls it, but `burst.spec.js` and `filmstripBurst.spec.js`
+ * do not call it, and `burst` runs immediately after this file. So this cleanup
+ * is not redundant with openApp's: it is what protects the two specs openApp
+ * cannot reach. Without it they browse a three-photo library (#212).
+ */
+test.afterAll(async ({ browser }) => {
+  const page = await browser.newPage();
+  await clearScope(page);
+  await page.close();
+});
 
 /**
  * P0 — THE ALBUM TIMELINE. Both tests here are bugs that were live in the first

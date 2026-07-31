@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { trackPageErrors, openApp, menu } from "./helpers.js";
+import { trackPageErrors, openApp, menu, clearScope } from "./helpers.js";
 
 /**
  * Right-clicking a FEED section header opens the same group menu the tree offers.
@@ -30,6 +30,16 @@ async function rightClickHeader(page, name) {
 }
 
 test.describe("@p1 the feed header's right-click menu", () => {
+  // This file drives "Keep only these photos", which writes the server's
+  // keep_scope table and — since #212 — outlives the page. `openApp` clears it
+  // for the specs that call it; this is the belt to that pair of braces, for
+  // the ones that do not (`burst.spec.js`, `filmstripBurst.spec.js`).
+  test.afterAll(async ({ browser }) => {
+    const page = await browser.newPage();
+    await clearScope(page);
+    await page.close();
+  });
+
   test("a real folder header offers the full group menu", async ({ page }) => {
     const errors = trackPageErrors(page);
     await openApp(page, { groupBy: ["folder"] });
