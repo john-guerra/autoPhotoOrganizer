@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.8
+
+- **The scope you pick is now the scope it runs on.** "Visible" meant
+  whatever had scrolled into view, so asking to find faces in 1,557 photos
+  quietly scanned 175 and said it worked. It is called **Filtered** now and
+  means every photo the current filter matches (#245).
+- **A "Keep only" scope appears while a working set is in force**, so you can
+  run something over the whole working set without selecting it all first.
+- **Selected now says how many of your selection the filter matches** — a
+  selection survives a filter change on purpose, so "20 selected · 14 in the
+  current filter" tells you which number is which.
+
 ## 2.19.7
 
 - The toolbar timeline now updates when you change what "Keep only" is

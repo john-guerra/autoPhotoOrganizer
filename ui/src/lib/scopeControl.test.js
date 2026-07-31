@@ -3,17 +3,58 @@ import {
   buildScopes,
   activeScope,
   scopeIdsFor,
+  scopeRequestFor,
   formatEstimate,
   DEFAULT_SCOPE,
 } from "./scopeControl.js";
 
-const sets = { selectedIds: [1, 2, 3], visibleIds: [1, 2, 3, 4, 5] };
+const sets = { selectedIds: [1, 2, 3], filteredCount: 5 };
 
 describe("buildScopes", () => {
-  it("offers the three scopes in the order the contract fixes", () => {
+  it("offers three scopes when no working set is in force", () => {
     const scopes = buildScopes({ ...sets, allCount: 900 });
-    expect(scopes.map((s) => s.key)).toEqual(["selected", "visible", "all"]);
+    expect(scopes.map((s) => s.key)).toEqual(["selected", "filtered", "all"]);
     expect(scopes.map((s) => s.n)).toEqual([3, 5, 900]);
+  });
+
+  it("adds 'Keep only' ONLY while a working set is in force (#245)", () => {
+    // Without one it is the same set as All, and a duplicate option is worse
+    // than three: it invites the user to distinguish two identical things.
+    const off = buildScopes({ ...sets, allCount: 900, keepCount: 40 });
+    expect(off.map((s) => s.key)).not.toContain("keep");
+
+    const on = buildScopes({
+      ...sets,
+      allCount: 900,
+      keepCount: 40,
+      keepActive: true,
+    });
+    expect(on.map((s) => s.key)).toEqual([
+      "selected",
+      "filtered",
+      "keep",
+      "all",
+    ]);
+    expect(on.find((s) => s.key === "keep").n).toBe(40);
+  });
+
+  it("discloses the overlap when the selection and the filter disagree", () => {
+    // A selection SURVIVES a filter change by design, so "Selected" can hold
+    // photos "Filtered" excludes. Both numbers are true; the control has to
+    // say which is which rather than imply one is a subset of the other.
+    const [sel] = buildScopes({ ...sets, selectedInFilter: 2, allCount: 9 });
+    expect(sel.n).toBe(3);
+    expect(sel.note).toBe("2 in the current filter");
+  });
+
+  it("stays quiet when they agree, so a real disagreement is not skimmed past", () => {
+    const [sel] = buildScopes({ ...sets, selectedInFilter: 3, allCount: 9 });
+    expect(sel.note).toBeUndefined();
+  });
+
+  it("claims nothing about the overlap when it is unknown", () => {
+    const [sel] = buildScopes({ ...sets, allCount: 9 });
+    expect(sel.note).toBeUndefined();
   });
 
   it("counts every scope, including the empty ones", () => {
@@ -22,7 +63,7 @@ describe("buildScopes", () => {
     // not shift under the cursor as the selection changes.
     const scopes = buildScopes({
       selectedIds: [],
-      visibleIds: [],
+      filteredCount: 0,
       allCount: 0,
     });
     expect(scopes.map((s) => s.n)).toEqual([0, 0, 0]);
@@ -45,7 +86,7 @@ describe("buildScopes", () => {
 describe("activeScope", () => {
   it("finds the chosen scope", () => {
     const scopes = buildScopes({ ...sets, allCount: 9 });
-    expect(activeScope(scopes, "visible").n).toBe(5);
+    expect(activeScope(scopes, "filtered").n).toBe(5);
   });
 
   it("falls back to All for an unknown or missing choice", () => {
@@ -55,24 +96,56 @@ describe("activeScope", () => {
   });
 });
 
-describe("scopeIdsFor", () => {
-  it("sends the selection or the visible set", () => {
-    expect(scopeIdsFor("selected", sets)).toEqual([1, 2, 3]);
-    expect(scopeIdsFor("visible", sets)).toEqual([1, 2, 3, 4, 5]);
+describe("scopeRequestFor — what goes on the wire (#245)", () => {
+  const spec = { minRating: 3 };
+
+  it("enumerates ONLY the selection", () => {
+    expect(scopeRequestFor("selected", { selectedIds: [1, 2, 3] })).toEqual({
+      ids: [1, 2, 3],
+    });
   });
 
-  it("sends null — not [] — for the whole-library sweep", () => {
-    // The server treats [] as "these zero photos" and null as "everything".
-    // Returning [] here would make "All" a no-op that looks like a hang.
+  it("sends the filter SPEC for Filtered, never an id list", () => {
+    // "Filtered" with no facets active is the whole library — 125,000 ids in a
+    // request body. It has to travel as a description the server resolves.
+    const req = scopeRequestFor("filtered", { filterSpec: spec });
+    expect(req).toEqual({ filter: spec });
+    expect(req.ids).toBeUndefined();
+  });
+
+  it("sends the keepScope flag for the working set, whose ids live server-side", () => {
+    expect(scopeRequestFor("keep", {})).toEqual({
+      filter: { keepScope: true },
+    });
+  });
+
+  it("sends NOTHING for the whole-library sweep", () => {
+    // An omitted key and null both mean "no scope"; only an actual empty array
+    // means "these zero photos".
+    expect(scopeRequestFor("all", { selectedIds: [1] })).toEqual({});
+  });
+
+  it("sends [] — not {} — for an empty selection", () => {
+    // The expensive direction. Sending {} would turn "I selected nothing" into
+    // a full-library sweep, which is the whole of #221.
+    expect(scopeRequestFor("selected", { selectedIds: [] })).toEqual({
+      ids: [],
+    });
+  });
+});
+
+describe("scopeIdsFor — the deprecated shape", () => {
+  it("still answers for the one scope that IS a list", () => {
+    expect(scopeIdsFor("selected", sets)).toEqual([1, 2, 3]);
     expect(scopeIdsFor("all", sets)).toBeNull();
   });
 
-  it("sends [] — not null — for an empty selection", () => {
-    // The expensive direction. Returning null would turn "I selected nothing"
-    // into a full-library sweep, which is the whole of #221.
-    expect(
-      scopeIdsFor("selected", { selectedIds: [], visibleIds: [9] })
-    ).toEqual([]);
+  it("THROWS for the scopes that cannot be enumerated", () => {
+    // Not politeness — this is the #245 bug's shape. A caller that still
+    // thinks in ids must fail loudly, because the alternative is silently
+    // acting on a fraction of what the user asked for and reporting success.
+    expect(() => scopeIdsFor("filtered", sets)).toThrow(/cannot be enumerated/);
+    expect(() => scopeIdsFor("keep", sets)).toThrow(/cannot be enumerated/);
   });
 });
 
@@ -107,7 +180,7 @@ describe("the default scope", () => {
     // button out disabled.
     const scopes = buildScopes({
       selectedIds: [],
-      visibleIds: [],
+      filteredCount: 0,
       allCount: 9,
     });
     const chosen = activeScope(scopes, DEFAULT_SCOPE);

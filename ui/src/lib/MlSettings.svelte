@@ -22,7 +22,7 @@
   import {
     buildScopes,
     activeScope as activeScopeOf,
-    scopeIdsFor,
+    scopeRequestFor,
     formatEstimate,
     DEFAULT_SCOPE,
   } from "./scopeControl.js";
@@ -42,7 +42,15 @@
    * panel still works standalone (Manage library renders it with no grid
    * context) — the scope selector simply offers fewer choices there.
    */
-  let { selectedIds = [], visibleIds = [], onrefinechange } = $props();
+  let {
+    selectedIds = [],
+    selectedInFilter = undefined,
+    filterSpec = {},
+    filteredCount = 0,
+    keepActive = false,
+    keepCount = 0,
+    onrefinechange,
+  } = $props();
 
   /** What "Embed now" will act on. Defaults to the whole library, matching the
    *  behaviour this control had before a choice existed. */
@@ -154,11 +162,21 @@
   // the same functions for what to send. Two copies of "which ids did they
   // pick?" is how the button and the radio buttons come to disagree.
   const scopes = $derived(
-    buildScopes({ selectedIds, visibleIds, allCount: pending })
+    buildScopes({
+      selectedIds,
+      selectedInFilter,
+      filteredCount,
+      keepActive,
+      keepCount,
+      allCount: pending,
+    })
   );
   const activeScope = $derived(activeScopeOf(scopes, scopeChoice));
-  const scopeIds = $derived(
-    scopeIdsFor(scopeChoice, { selectedIds, visibleIds })
+  // What goes on the wire. Only "Selected" is an id list; the rest are
+  // descriptions the server resolves, because they can each be the whole
+  // library (#245).
+  const scopeRequest = $derived(
+    scopeRequestFor(scopeChoice, { selectedIds, filterSpec })
   );
 
   /**
@@ -491,7 +509,7 @@
     }
     busy = true;
     try {
-      const r = await startEmbed(scopeIds);
+      const r = await startEmbed(scopeRequest);
       if (r.started) {
         say(
           `Embedding ${activeScope.n.toLocaleString()} photo(s) — ${formatEstimate(activeScope.n, activeModel?.approxMsPerPhoto)}. Watch it in the jobs panel.`
@@ -796,7 +814,10 @@
       name="ml-scope"
       testid="ml-scope"
       {selectedIds}
-      {visibleIds}
+      {selectedInFilter}
+      {filteredCount}
+      {keepActive}
+      {keepCount}
       allCount={pending}
       msPerPhoto={activeModel?.approxMsPerPhoto}
       estimateSuffix={` at ~${activeModel?.approxMsPerPhoto ?? "?"}ms each on this model. Already-read photos are skipped, so it is often faster.`}

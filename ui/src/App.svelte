@@ -64,6 +64,7 @@
     startExport,
     fetchPhotoIds,
     fetchPhotoCount,
+    fetchScopedCount,
     fetchAlbumTimeline,
     fetchTimes,
     fetchFlatTree,
@@ -607,6 +608,31 @@
   let libraryTotal = $state(0);
   let showingCount = $state(0);
   let selectedCount = $derived(selectedIds.size);
+  // How many SELECTED photos the current filter actually matches (#245).
+  //
+  // A selection survives a filter change on purpose, so these two can differ,
+  // and the scope control discloses the gap. It has to come from the server:
+  // the client only holds the loaded feed window, which is the very mistake
+  // this issue is about. `undefined` means "not known" and the control then
+  // claims nothing.
+  let selectedInFilter = $state(undefined);
+  let overlapSeq = 0;
+  $effect(() => {
+    // Read both dependencies up front so the effect tracks them, then bail on
+    // the cases where the answer is knowable without asking.
+    const ids = [...selectedIds];
+    const spec = displayFilter;
+    if (!ids.length || !filterIsActive(spec)) {
+      // No selection, or a filter that matches everything: the overlap IS the
+      // selection, so there is nothing to disclose and nothing to fetch.
+      selectedInFilter = undefined;
+      return;
+    }
+    const seq = ++overlapSeq;
+    fetchScopedCount({ filter: spec, ids }).then((n) => {
+      if (seq === overlapSeq) selectedInFilter = n;
+    });
+  });
 
   // Export popover state (mirrors the add-folder popover).
   const LS_EXPORT_DEST = "autogallery.exportDest";
@@ -6941,7 +6967,11 @@
       refreshPeople();
     }}
     selectedIds={[...selectedIds]}
-    visibleIds={items.map((it) => it.id)}
+    {selectedInFilter}
+    filterSpec={displayFilter}
+    filteredCount={showingCount}
+    keepActive={scope?.kind === "ids"}
+    keepCount={scope?.kind === "ids" ? scope.ids.length : 0}
     onrefinechange={(v) => (unrelatedBelow = v)}
     onnotice={(m) => (faceNotice = m)}
     onsemanticapply={(ids) => {

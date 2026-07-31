@@ -37,7 +37,15 @@
     name,
     testid = "ml-scope",
     selectedIds = [],
-    visibleIds = [],
+    /** How many of `selectedIds` match the current filter. `undefined` when
+     *  unknown — nothing is claimed rather than a wrong overlap shown. */
+    selectedInFilter = undefined,
+    /** The filter's WHOLE result set, from the server — never `items.length`.
+     *  Passing the loaded feed window here is the #245 bug returning. */
+    filteredCount = 0,
+    /** The "keep only" working set, and whether one is in force at all. */
+    keepCount = 0,
+    keepActive = false,
     /** What "All" means to THIS operation — its remaining work, not the
      *  library total. See buildScopes. */
     allCount = 0,
@@ -55,7 +63,15 @@
   } = $props();
 
   const scopes = $derived(
-    buildScopes({ selectedIds, visibleIds, allCount, allLabel })
+    buildScopes({
+      selectedIds,
+      selectedInFilter,
+      filteredCount,
+      keepCount,
+      keepActive,
+      allCount,
+      allLabel,
+    })
   );
   const active = $derived(activeScope(scopes, choice));
   const estimate = $derived(formatEstimate(active?.n ?? 0, msPerPhoto));
@@ -75,6 +91,12 @@
       />
       <span>{s.label}</span>
       <span class="scope-n">{s.n.toLocaleString()}</span>
+      {#if s.note}
+        <!-- Only rendered when the selection and the filter genuinely
+             disagree. A selection survives a filter change by design, so this
+             says which number is which rather than implying one is wrong. -->
+        <span class="scope-note">· {s.note}</span>
+      {/if}
     </label>
   {/each}
 </fieldset>
@@ -115,6 +137,13 @@
   }
   .scope-n {
     color: #888;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Quieter than the count it qualifies: it explains the number, it is not a
+     second number competing with it. */
+  .scope-note {
+    color: #777;
+    font-size: 0.8rem;
     font-variant-numeric: tabular-nums;
   }
   .hint {

@@ -18,18 +18,58 @@ this file exists to stop.
 
 **Every operation over photos states its scope, and the user picks it.**
 
-The three scopes, always in this order, always with a live count:
+The scopes, always in this order, always with a live count:
 
-| Scope        | Means                                    | Server shape         |
-| ------------ | ---------------------------------------- | -------------------- |
-| **All**      | everything the operation still has to do | no `ids` — the sweep |
-| **Visible**  | what the current filter/view is showing  | `ids: visibleIds`    |
-| **Selected** | the user's selection                     | `ids: selectedIds`   |
+| Scope         | Means                                    | On the wire             |
+| ------------- | ---------------------------------------- | ----------------------- |
+| **All**       | everything the operation still has to do | nothing — the sweep     |
+| **Keep only** | the working set, when one is in force    | `filter: { keepScope }` |
+| **Filtered**  | everything the current filter matches    | `filter: <spec>`        |
+| **Selected**  | the user's selection                     | `ids: selectedIds`      |
+
+**"Keep only" is offered ONLY while a working set is in force.** Without one it
+is the same set as All, and a duplicate option invites the user to distinguish
+two identical things.
+
+### Three of them nest. Selected does not, on purpose (#245)
+
+    All  ⊇  Keep only  ⊇  Filtered        Selected — deliberately outside
+
+A selection **survives a filter change**: check twenty photos, narrow the view,
+and all twenty are still yours to act on. So "Selected" can contain photos
+"Filtered" excludes. The set is not wrong — a UI that implies it nests is. When
+the two disagree the control discloses the overlap ("Selected 20 · 14 in the
+current filter") rather than showing a number that looks like a subset of the
+one above it.
+
+### Only Selected may travel as ids
+
+This is the part that was wrong for a year, and it was wrong because of a NAME.
+"Visible" was read as "what is on screen" and meant "what the filter matches",
+so the count came from the loaded feed window — a few hundred rows that vary
+with how far you have scrolled. Asking to find faces in 1,557 photos scanned
+175 of them and reported success (#245).
+
+The rename to **Filtered** is the fix, and the wire format follows from it:
+All, Keep only and Filtered can each be **arbitrarily large** — Filtered with
+no facets active IS the whole library — so they travel as a DESCRIPTION the
+server resolves (`resolveScope` in `server/db/scopeIds.js`), never as an
+enumeration. Only Selected is a genuine list, and it keeps its 413.
+
+Two consequences worth stating:
+
+- **A filter that constrains nothing collapses to the sweep** before it is
+  resolved, so "Filtered" cannot materialize 125,000 ids. It is also the
+  correct answer, since that IS "All".
+- **`scopeIdsFor` THROWS for Filtered and Keep only.** A caller still thinking
+  in ids must fail loudly, because the alternative is silently acting on a
+  fraction of what the user asked for and reporting success — the shape of the
+  original bug.
 
 **There is now ONE component — use it, do not write a second.**
 `ui/src/lib/ScopeControl.svelte` renders the fieldset and the estimate;
 `ui/src/lib/scopeControl.js` holds the arithmetic (`buildScopes`,
-`activeScope`, `scopeIdsFor`, `formatEstimate`) so a caller can ask "which ids
+`activeScope`, `scopeRequestFor`, `formatEstimate`) so a caller can ask "which ids
 did they pick?" without reaching inside a component, and so it is testable
 without a DOM. Embedding (#215/#206) and faces (#221) are its two clients.
 
@@ -39,13 +79,17 @@ Wiring a third takes five things:
    be unique per instance.** Two radio groups sharing a name are ONE group to
    the browser, so choosing a scope in one panel silently clears the other's.
 2. `allCount` is the operation's own REMAINING work, not the library total.
-3. Send `scopeIdsFor(choice, …)` — `null` for the sweep, `[]` for an empty
-   selection. The server keeps those distinct all the way into the SQL
-   (`server/db/scopeIds.js`); collapsing them is how an empty selection becomes
-   an hour of inference. On the wire, **`null` and an omitted key both mean
-   "no scope"** — only an actual empty array is refused.
-4. The route validates `ids` the way `POST /api/ml/embed` and
-   `POST /api/ml/faces` do — empty is a specific 400, oversized a 413.
+3. Send `scopeRequestFor(choice, { selectedIds, filterSpec })` — `{}` for the
+   sweep, `{ ids: [] }` for an empty selection, `{ filter }` for the two that
+   cannot be enumerated. The server keeps "no scope" and "zero photos" distinct
+   all the way into the SQL (`server/db/scopeIds.js`); collapsing them is how
+   an empty selection becomes an hour of inference. On the wire, **an omitted
+   key and `null` both mean "no scope"** — only an actual empty array is
+   refused.
+4. The route resolves the scope through `scopeForRoute` (`server/api.js`),
+   which both `POST /api/ml/embed` and `POST /api/ml/faces` use — empty is a
+   specific 400, oversized a 413, and a filter is resolved to ids server-side.
+   Do not hand-roll a fourth copy of that validation.
 5. The job's `total` is the scope's **pending count** — the worklist query run
    once up front (`pendingFaceRows(db, model, MAX_SAFE_INTEGER, ids).length`)
    — **not `ids.length`**, and it is set at `registry.create`, not on the first

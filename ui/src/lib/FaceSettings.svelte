@@ -34,14 +34,22 @@
   import {
     buildScopes,
     activeScope as activeScopeOf,
-    scopeIdsFor,
+    scopeRequestFor,
     DEFAULT_SCOPE,
   } from "./scopeControl.js";
 
   /** #221: the scope selector needs the same two id sets MlSettings gets.
    *  They come down through MlPanel from App, which owns the selection and
    *  knows what the feed is showing. */
-  let { onnotice, selectedIds = [], visibleIds = [] } = $props();
+  let {
+    onnotice,
+    selectedIds = [],
+    selectedInFilter = undefined,
+    filterSpec = {},
+    filteredCount = 0,
+    keepActive = false,
+    keepCount = 0,
+  } = $props();
 
   /** Which set the next scan runs over. Defaults to the whole library — the
    *  panel is often opened with nothing selected, and a default that is empty
@@ -93,14 +101,17 @@
   let scopes = $derived(
     buildScopes({
       selectedIds,
-      visibleIds,
+      selectedInFilter,
+      filteredCount,
+      keepActive,
+      keepCount,
       allCount: pending,
       allLabel: "All remaining",
     })
   );
   let activeScope = $derived(activeScopeOf(scopes, scopeChoice));
-  let scopeIds = $derived(
-    scopeIdsFor(scopeChoice, { selectedIds, visibleIds })
+  let scopeRequest = $derived(
+    scopeRequestFor(scopeChoice, { selectedIds, filterSpec })
   );
 
   // GROUPING gets its own scope, and must: contract 1 says `allCount` is the
@@ -113,14 +124,17 @@
   let groupScopes = $derived(
     buildScopes({
       selectedIds,
-      visibleIds,
+      selectedInFilter,
+      filteredCount,
+      keepActive,
+      keepCount,
       allCount: groupPending,
       allLabel: "All remaining",
     })
   );
   let activeGroupScope = $derived(activeScopeOf(groupScopes, groupChoice));
-  let groupScopeIds = $derived(
-    scopeIdsFor(groupChoice, { selectedIds, visibleIds })
+  let groupScopeRequest = $derived(
+    scopeRequestFor(groupChoice, { selectedIds, filterSpec })
   );
 
   async function act(label, fn) {
@@ -296,7 +310,10 @@
         name="face-scope"
         testid="face-scope"
         {selectedIds}
-        {visibleIds}
+        {selectedInFilter}
+        {filteredCount}
+        {keepActive}
+        {keepCount}
         allCount={pending}
         allLabel="All remaining"
         msPerPhoto={model?.approxMsPerPhoto}
@@ -313,7 +330,7 @@
           disabled={!!busy || status.running || !!clusterJob || !activeScope?.n}
           onclick={() =>
             act("scan", async () => {
-              const r = await startFaceScan(modelId, scopeIds);
+              const r = await startFaceScan(modelId, scopeRequest);
               // `r.pending` — how many of the chosen photos are actually still
               // to be looked at — comes from the SERVER, because only the
               // worklist query knows. Saying `activeScope.n` here would
@@ -398,7 +415,10 @@
             name="face-group-scope"
             testid="face-group-scope"
             {selectedIds}
-            {visibleIds}
+            {selectedInFilter}
+            {filteredCount}
+            {keepActive}
+            {keepCount}
             allCount={groupPending}
             allLabel="All remaining"
             emptyMessage="Every face here already belongs to someone."
@@ -412,7 +432,7 @@
               !activeGroupScope?.n}
             onclick={() =>
               act("cluster", async () => {
-                await clusterPeople(modelId, undefined, { ids: groupScopeIds });
+                await clusterPeople(modelId, undefined, groupScopeRequest);
                 onnotice?.(
                   "Grouping faces into people — progress is in the jobs panel, and you can stop it there. It keeps what it finishes, so you can stop and pick it up later."
                 );
