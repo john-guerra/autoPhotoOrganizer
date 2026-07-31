@@ -15,16 +15,16 @@ must report what happened). Those were filed after this document was drafted, wh
 
 ## 0. What is actually there today (verified by reading, not assumed)
 
-| Stage | Entry point | Worklist | Batch | Latch | Job type |
-|---|---|---|---|---|---|
-| scan | `POST /api/scan` (`api.js:1008`) | filesystem walk | 1 dir | none | `scan` |
-| metadata | `POST /api/enrich` (`api.js:1194`) | `PENDING_CONDITION` (`db/enrich.js:46`) | `BATCH` | none | `enrich` |
-| hash | `kickHashSweep` (`api.js:297`) | `pendingHashRows` (`db/hashing.js:23`) | 50 | `hashingInFlight` | `hash` |
-| embed | `kickEmbedSweep` (`api.js:359`) / `POST /api/ml/embed` | `pendingEmbedRows` (`db/embeddings.js:109`) | 16 | `isEmbedInFlight` | `embed` |
-| faces | `POST /api/ml/faces` (`api.js:1706`) | `pendingFaceRows` (`db/faces.js:144`) | `FACE_BATCH` = 8 | `isFaceSweepInFlight` | `faces` |
-| face grouping | `POST /api/ml/faces/cluster` (`api.js:1936`) | `ungroupedFaceRows` (`db/faces.js:543`) | `GROUP_BATCH` = 500 | `isClusterInFlight` | `face-cluster` |
-| near-dupes | `kickNearDupeSweep` (`api.js:503`) | whole-library | — | `isNearDupeSweepInFlight` | `near-dupes` |
-| projection | `POST /api/projections` | working set | — | `isProjectionInFlight` | `projection` |
+| Stage         | Entry point                                            | Worklist                                    | Batch               | Latch                     | Job type       |
+| ------------- | ------------------------------------------------------ | ------------------------------------------- | ------------------- | ------------------------- | -------------- |
+| scan          | `POST /api/scan` (`api.js:1008`)                       | filesystem walk                             | 1 dir               | none                      | `scan`         |
+| metadata      | `POST /api/enrich` (`api.js:1194`)                     | `PENDING_CONDITION` (`db/enrich.js:46`)     | `BATCH`             | none                      | `enrich`       |
+| hash          | `kickHashSweep` (`api.js:297`)                         | `pendingHashRows` (`db/hashing.js:23`)      | 50                  | `hashingInFlight`         | `hash`         |
+| embed         | `kickEmbedSweep` (`api.js:359`) / `POST /api/ml/embed` | `pendingEmbedRows` (`db/embeddings.js:109`) | 16                  | `isEmbedInFlight`         | `embed`        |
+| faces         | `POST /api/ml/faces` (`api.js:1706`)                   | `pendingFaceRows` (`db/faces.js:144`)       | `FACE_BATCH` = 8    | `isFaceSweepInFlight`     | `faces`        |
+| face grouping | `POST /api/ml/faces/cluster` (`api.js:1936`)           | `ungroupedFaceRows` (`db/faces.js:543`)     | `GROUP_BATCH` = 500 | `isClusterInFlight`       | `face-cluster` |
+| near-dupes    | `kickNearDupeSweep` (`api.js:503`)                     | whole-library                               | —                   | `isNearDupeSweepInFlight` | `near-dupes`   |
+| projection    | `POST /api/projections`                                | working set                                 | —                   | `isProjectionInFlight`    | `projection`   |
 
 Six independent single-flight latches, all module globals, none of which know about each
 other. Coordination between them is currently **`409` refusals written by hand at each
@@ -72,17 +72,19 @@ three reasons that are all visible in the code:
 
 **Decision: cohort-major, stage-minor.**
 
-A pipeline *run* walks its scope in **cohorts** — a bounded slab of photos (default 500) —
-and runs every enabled stage over that cohort before taking the next one. Inside a cohort,
-each stage keeps its own batch size and its own `runSweep` call, restricted by
+A pipeline _run_ walks its scope in **cohorts** — a slab of photos sized to about **20 seconds
+of work** (see D1 in §7; roughly 57 photos with every stage on, roughly 800 with only metadata
+and hashing) — and runs every enabled stage over that cohort before taking the next one. Inside
+a cohort, each stage keeps its own batch size and its own `runSweep` call, restricted by
 `scopeIds = cohortIds`.
 
 The face engine and the ML worker are opened **once per run**, held across cohorts, and
 closed in a `finally`. That removes the session-thrash objection entirely.
 
-What the user perceives: after roughly two minutes, the first 500 photos have dates, hashes,
-vectors, faces and people — and the counts for *all* stages climb together instead of
-completing one at a time over an afternoon.
+What the user perceives: every ~20 seconds another slab of photos has dates, hashes, vectors,
+faces and people — and the counts for _all_ stages climb together instead of completing one at
+a time over an afternoon. The interval is deliberately constant regardless of which stages are
+enabled, so "is it still working?" is answered the same way every time.
 
 ### 1.2 Ordering, and the real dependencies
 
@@ -123,7 +125,7 @@ differ. This is the part of the design worth arguing about.
   because the DATABASE is the checkpoint";
 - scoped — takes `scopeIds` like every other long operation;
 - and, critically, **monotone**: `UPDATE photo_faces SET person_id = ? WHERE id = ? AND
-  person_id IS NULL`. It never un-assigns. It scores each new face against a **frozen** set of
+person_id IS NULL`. It never un-assigns. It scores each new face against a **frozen** set of
   person centroids and clusters the leftovers among themselves.
 
 Monotone + frozen centroids is exactly the property that lets a cross-photo stage live inside
@@ -147,7 +149,7 @@ protects named people and manual merges (`db/faces.js:390`). So:
 `assignNewFaces` (`ml/faceAssign.js`, named people only) stays and runs **before**
 `groupRemaining` in each cohort. Both are monotone, both key on `person_id IS NULL`, so they
 compose — and the ordering preserves the deliberate bias toward filing a face under someone
-the user has *named* rather than under an unnamed machine guess.
+the user has _named_ rather than under an unnamed machine guess.
 
 **Near-duplicate grouping is not monotone and must not be per-cohort.** `groupNearDupes`
 replaces the whole grouping wholesale (`replaceNearDupeGroups`), and one new photo can merge
@@ -162,11 +164,11 @@ also cheap: "seconds of arithmetic" against "72 minutes of inference".
 That gives a three-tier vocabulary the whole design rests on, and it should be named in the
 code:
 
-| Tier | Stages | Property | Where it runs |
-|---|---|---|---|
-| **Per-photo** | `meta`, `hash`, `embed`, `faces` | worklist-driven, scoped, batched | inside each cohort |
-| **Incremental consolidation** | `group` | cross-photo but **monotone**, frozen centroids | after each cohort |
-| **Global consolidation** | `near-dupes`, face `regroup` | non-monotone, wholesale replace | once at end of run / on request |
+| Tier                          | Stages                           | Property                                       | Where it runs                   |
+| ----------------------------- | -------------------------------- | ---------------------------------------------- | ------------------------------- |
+| **Per-photo**                 | `meta`, `hash`, `embed`, `faces` | worklist-driven, scoped, batched               | inside each cohort              |
+| **Incremental consolidation** | `group`                          | cross-photo but **monotone**, frozen centroids | after each cohort               |
+| **Global consolidation**      | `near-dupes`, face `regroup`     | non-monotone, wholesale replace                | once at end of run / on request |
 
 ### 1.4 The worklist query
 
@@ -227,7 +229,7 @@ behaviour change**, because the alternative — a hand-copied second copy of a p
 `idx_photos_pending_meta` note).
 
 **Cohort selection.** The next cohort is "the next N photos in the scope that are pending in
-*any* enabled stage, by id":
+_any_ enabled stage, by id":
 
 ```sql
 SELECT photos.id
@@ -244,7 +246,7 @@ SELECT photos.id
 ```
 
 No cursor is stored. A completed cohort's photos are no longer pending in any stage, so the
-next call returns the next cohort. A crash costs one cohort's *in-flight batch*, exactly as
+next call returns the next cohort. A crash costs one cohort's _in-flight batch_, exactly as
 today.
 
 **Known cost risk, flagged rather than papered over:** this is a disjunction, and SQLite will
@@ -273,7 +275,7 @@ Two mitigations, in order of preference:
 The user asked for counts in "keep only, selected, and all". `ScopeControl` today offers
 **All / Visible / Selected**, and `visibleIds` is `items.map(it => it.id)` (`App.svelte:6928`)
 — i.e. **the loaded feed window**, a few hundred rows, not "what the current filter matches".
-Keep-only is a *server-side* filter flag (`keep_scope` table, `buildFilter`'s `keepScope`), not
+Keep-only is a _server-side_ filter flag (`keep_scope` table, `buildFilter`'s `keepScope`), not
 an id list.
 
 **Decision:** when a keep-only scope is in force, `ScopeControl` renders **four** options:
@@ -307,7 +309,7 @@ Three ways to express a scope, and all three matter:
 
 - **library** — no join, no filter clause;
 - **filter** — `buildFilter(spec)` returns `{sql, params}` (`db/filters.js:16`). This is how
-  keep-only, rating, orientation, kind, person and tag filters are *already* expressed
+  keep-only, rating, orientation, kind, person and tag filters are _already_ expressed
   server-side. Keep-only coverage therefore costs nothing extra and **never ships 40,000 ids
   over the wire**;
 - **ids** — an explicit selection.
@@ -398,12 +400,12 @@ Rationale tied to this codebase:
 
 Worst-case latency before the user's scoped work starts, by stage:
 
-| Stage | Batch | Approx. batch wall time |
-|---|---|---|
-| faces | 8 | ~2.5 s (the worst case) |
-| embed | 16 | ~0.6 s |
-| hash | 50 | ~1 s |
-| meta | `BATCH` | <1 s |
+| Stage | Batch   | Approx. batch wall time |
+| ----- | ------- | ----------------------- |
+| faces | 8       | ~2.5 s (the worst case) |
+| embed | 16      | ~0.6 s                  |
+| hash  | 50      | ~1 s                    |
+| meta  | `BATCH` | <1 s                    |
 
 So: **the user waits at most about three seconds**, and nothing is thrown away. That is a
 number worth stating in the UI ("pausing…") and is strictly better than cancel-and-restart.
@@ -442,14 +444,14 @@ Rules, and the requested behaviours that fall out of them rather than being spec
   and the same 16-slot libuv pool.
 - `checkpoint()` resolves immediately unless a **strictly higher** priority run is queued or
   running. Otherwise it parks and resolves when nothing higher-priority remains.
-- **Equal priority does not preempt — FIFO.** Therefore *"two scoped requests arriving in
-  sequence"*: the first runs to completion, **including its grouping**, then the second runs;
+- **Equal priority does not preempt — FIFO.** Therefore _"two scoped requests arriving in
+  sequence"_: the first runs to completion, **including its grouping**, then the second runs;
   the background sweep stays parked through both, because at every checkpoint it still sees
   higher-priority work outstanding. Requested behaviour, zero special-casing.
 - **`key` coalesces.** A second BACKGROUND submission with a key already queued is dropped and
   the response says so — it would recompute the identical worklist.
 - **The parked run holds no resources.** The face engine and the configured ML worker are owned
-  by the *scheduler* as a ref-counted holder, not by each run. A parked run drops its ref; the
+  by the _scheduler_ as a ref-counted holder, not by each run. A parked run drops its ref; the
   incoming run takes it and inherits the already-loaded ~200 MB session. Same model in the
   overwhelming majority of cases, so this is a strict win: **one session load, ever**. If the
   incoming run wants a different face pack, the holder rebuilds — that case must be tested.
@@ -459,16 +461,16 @@ Rules, and the requested behaviours that fall out of them rather than being spec
 **There is no stored resume point, and this is the design's main claim.** A parked run is a
 live JS closure holding counters and nothing else; on resume `nextBatch()` re-queries SQL. If
 the app quits while paused, the registry `Map` dies with the process and the next scan or kick
-re-derives the *identical* worklist from the database. The `faceGrouping.js` property — "there
+re-derives the _identical_ worklist from the database. The `faceGrouping.js` property — "there
 is no checkpoint to corrupt, because the DATABASE is the checkpoint" — is preserved unchanged.
 
-What is lost on quit: the run's *intent* (which stages were enabled for that scope) and its
+What is lost on quit: the run's _intent_ (which stages were enabled for that scope) and its
 counters. Both are cheap to reconstruct — stages come from settings, counters from coverage —
 and neither is data.
 
 ### 3.5 Starvation, stated rather than hidden
 
-A background run can be parked indefinitely if scoped requests keep arriving. That is *correct*
+A background run can be parked indefinitely if scoped requests keep arriving. That is _correct_
 — the user is asking for those — but it must never be silent:
 
 ```
@@ -481,7 +483,7 @@ A background run can be parked indefinitely if scoped requests keep arriving. Th
 
 ### 4.1 One job row per RUN
 
-Not one per stage. The user asked for *one process*; five rows is five processes.
+Not one per stage. The user asked for _one process_; five rows is five processes.
 `registry.create("pipeline", {label, total})`.
 
 ### 4.2 `total` is milliseconds of estimated work, set at `registry.create`
@@ -509,7 +511,7 @@ indeterminate bar at exactly the moment the user is deciding whether it hung).
 minutes" cannot disagree.
 
 Honest trade-off, to be written in the code: the estimate is per-machine and the implied ETA
-can be off by 2×. That is still far better than an item count off by 30×, and the *proportion*
+can be off by 2×. That is still far better than an item count off by 30×, and the _proportion_
 — which is what a bar communicates — is right.
 
 **Grouping is deliberately NOT in `total`.** Its work is (new faces × people so far), which is
@@ -540,7 +542,7 @@ place the user is already looking, updated per batch.
 3. **The pill**: `paused` must not count as `broken` (`JobsPanel.svelte:48`). Priority becomes
    broken > running > paused > stopped > done.
 4. **`ui/src/lib/jobs.js:117` `waitForJob`**: `if (job.status === "running" || job.status ===
-   "paused") { onProgress?.(job); return; }`. Without this every waiter — including the
+"paused") { onProgress?.(job); return; }`. Without this every waiter — including the
    progressive-render path CLAUDE.md describes (`crossedStep`) — resolves the moment a job
    parks and behaves as if the scan finished.
 
@@ -575,10 +577,10 @@ today, where each stage's failure is an unrelated red row.
 if (job.type === "pipeline") {
   // Order: what the user asked about, then the new signals, then what went wrong.
   const parts = [`${n(r.photos)} photos`];
-  if (r.faces)     parts.push(`${n(r.faces)} faces in ${n(r.people)} people`);
-  if (r.embedded)  parts.push(`${n(r.embedded)} embedded`);
-  if (r.hashed)    parts.push(`${n(r.hashed)} hashed`);
-  if (r.failed)    parts.push(`${n(r.failed)} unreadable`);
+  if (r.faces) parts.push(`${n(r.faces)} faces in ${n(r.people)} people`);
+  if (r.embedded) parts.push(`${n(r.embedded)} embedded`);
+  if (r.hashed) parts.push(`${n(r.hashed)} hashed`);
+  if (r.failed) parts.push(`${n(r.failed)} unreadable`);
   for (const s of r.stalled ?? []) parts.push(`${s.id} skipped: ${s.reason}`);
   return parts.join(" · ");
 }
@@ -594,7 +596,7 @@ turned faces on is a bug report waiting to be filed.
 Five phases, each independently shippable, each a patch bump with a `CHANGELOG.md` line.
 No big-bang rewrite, and nothing on the server is deleted.
 
-### Phase 0 — one source of truth for "pending" *(no user-visible change)*
+### Phase 0 — one source of truth for "pending" _(no user-visible change)_
 
 - New `server/pipeline/stages.js` with the `STAGES` descriptors and the four `PENDING_*`
   strings.
@@ -607,7 +609,7 @@ No big-bang rewrite, and nothing on the server is deleted.
   `node -e "import('./server/pipeline/stages.js')"` — `AGENT-NOTES.md` documents that
   `npm test` can be green on code plain Node refuses to load.
 
-### Phase 1 — coverage *(independently valuable; answers ask #3 on its own)*
+### Phase 1 — coverage _(independently valuable; answers ask #3 on its own)_
 
 - `server/pipeline/coverage.js` + `POST /api/pipeline/coverage`.
 - `ScopeControl` gains the fourth "Keep only" option when a keep-scope is in force;
@@ -617,14 +619,14 @@ No big-bang rewrite, and nothing on the server is deleted.
   two different endpoints.
 - `GET /api/ml/faces` and `GET /api/ml/stats` keep working unchanged.
 
-### Phase 2 — the scheduler, with today's jobs as its clients *(where preemption ships)*
+### Phase 2 — the scheduler, with today's jobs as its clients _(where preemption ships)_
 
 - `server/pipeline/scheduler.js`; `runSweep` gains its one `await checkpoint()`.
 - Convert `kickHashSweep`, `kickEmbedSweep`, `kickNearDupeSweep`, `POST /api/ml/faces` and
   `POST /api/ml/faces/cluster` to submit through it. The six `inFlight` latches become
   assertions or are deleted.
 - `registry` gains `paused`; the four changes in §4.4 land together.
-- The hand-written `409`s between stages become *queueing* instead of refusal — which is
+- The hand-written `409`s between stages become _queueing_ instead of refusal — which is
   itself a user-visible improvement, and testable on its own.
 - e2e: start a background sweep, fire a scoped request, assert the scoped job reaches `done`
   while the background job shows `paused`, then resumes. `trackPageErrors` throughout.
@@ -653,7 +655,7 @@ No big-bang rewrite, and nothing on the server is deleted.
 
 ### Explicitly out of scope
 
-Rewriting `runSweep`. It is the right abstraction; the pipeline is a *caller* of it.
+Rewriting `runSweep`. It is the right abstraction; the pipeline is a _caller_ of it.
 
 ---
 
@@ -668,7 +670,7 @@ Per `docs/TESTING.md`, pushed as far down the pyramid as each thing allows.
   coverage matches an equivalent explicit id list.
 - `scheduler.test.js`: a BACKGROUND run parks when a SCOPED one is submitted; two sequential
   SCOPED runs are FIFO and the BACKGROUND one stays parked through both; the resource holder
-  is not rebuilt when models match and *is* when they differ; `key` coalescing drops the
+  is not rebuilt when models match and _is_ when they differ; `key` coalescing drops the
   duplicate.
 - `run.test.js`: cohort ordering; a stalled stage does not fail the run; cancel keeps committed
   work and skips consolidation; `total` equals `Σ pending × msPerPhoto` at creation and is
@@ -679,7 +681,7 @@ Per `docs/TESTING.md`, pushed as far down the pyramid as each thing allows.
 
 - the paused row renders neutral with a working Cancel, and the pill does not say "failed";
 - a scoped scan while a background sweep runs finishes first, and the background one resumes;
-- `waitForJob` does not resolve early when a job parks (this is a *load-order* bug and no unit
+- `waitForJob` does not resolve early when a job parks (this is a _load-order_ bug and no unit
   test can see it);
 - `trackPageErrors(page)` in every spec.
 
@@ -689,20 +691,66 @@ widens the toolbar and folds unrelated groups into the overflow popover.
 
 ---
 
-## 7. Open questions
+## 7. Decisions and open questions
 
-1. **Cohort size.** 500 is a guess. It should be chosen so a cohort is ~1–2 minutes of work,
-   which depends on which stages are on. Consider deriving it from `msPerPhoto` rather than
-   fixing it.
-2. **Does John want grouping to happen inside a *scoped* run, or only at the end?** Per-cohort
-   grouping is correct and free (§1.3) but it means people appear and get named while a run is
-   still going, and a later cohort can create a *second* person for someone the user just named.
-   `assignNewFaces` running first mitigates it. Worth confirming with him.
-3. **Should `near-dupes` run at the end of a *scoped* run at all?** It is whole-library and
-   wholesale. Proposal: debounce it — schedule one global consolidation, coalesced by key, a
-   minute after the last run finishes, so ten folder scans cost one regrouping.
-4. **The fourth scope radio** (§2.1) requires amending `docs/UI-CONTRACTS.md` §1. Confirm before
-   writing it.
+### Decided (John, 2026-07-31)
+
+**D1 — Cohort size is a TIME budget, not a photo count.** A cohort is however many photos can
+be processed in **~20 seconds**, so the user sees the counts move rather than watching a still
+bar. Derived, not fixed:
+
+```
+cohortSize = clamp( 20_000 / Σ_enabled msPerPhoto[stage], MIN, MAX )
+```
+
+With all stages on (~350 ms/photo) that is ~57 photos; with metadata and hashing only
+(~25 ms/photo) it is ~800. Both feel the same to the user, which is the point. `MIN` and `MAX`
+exist so a wildly wrong `msPerPhoto` cannot produce a 1-photo or 100,000-photo cohort — clamp
+to roughly 25 and 2,000. **Consequence to watch:** a smaller cohort means the §1.4 cohort query
+runs _more often_ (~2,200 times for a full-library run at 57/cohort, not ~250), which makes
+measuring that query's cost more urgent, not less. See §1.4.
+
+**D2 — The pipeline must be AT LEAST AS FAST as today's separate passes.** This is an
+acceptance criterion, not an aspiration. It is the main risk the cohort design carries: cohorts
+re-run the worklist query more often, and a per-cohort grouping call has per-call overhead that
+one big call amortises. Required before Phase 3 merges:
+
+- A recorded **baseline** of today's throughput (photos/sec for meta, hash, embed, faces;
+  faces/sec for grouping) on a real library, captured at the pre-pipeline checkpoint.
+- The same measurement after, on the same library and machine.
+- **Total wall time no worse than baseline.** If it is worse, the cohort size or the
+  per-cohort grouping cadence is wrong — fix it before merging, do not ship a slower pipeline
+  with a nicer progress bar.
+
+**D3 — The four scopes are confirmed** (§2.1), and they nest: **All ⊇ Keep only ⊇ Filtered ⊇
+Selected**. "Visible" is **renamed to "Filtered"**, because the ambiguity of "visible" is the
+direct cause of #245 — it was read as "on screen" and meant "matching the view".
+
+Two consequences:
+
+- `docs/UI-CONTRACTS.md` §1 must be amended. **Amend it in #245's implementation commit, not
+  before** — a contract file that describes unimplemented behaviour is its own trap. The
+  decision lives here until then.
+- **Selected does not actually nest.** A selection survives a filter change, so it can contain
+  photos the current filter excludes. Either the UI discloses it ("20 selected, 14 in the
+  current filter") or selecting is defined to intersect. Unresolved — see Q3.
+
+**D4 — Sequencing.** The critical bugs are fixed and a **stable, benchmarked checkpoint** is
+cut BEFORE any pipeline work begins, so there is a known-good state to compare against and
+return to. The baseline in D2 is captured at that checkpoint.
+
+### Open
+
+1. **Grouping inside a _scoped_ run: per cohort, or once at the end of the run?** Per-cohort is
+   correct and costs the same total comparisons (§1.3), but it means people appear and get
+   named while the run is still going — and a later cohort can create a _second_ person for
+   someone just named. `assignNewFaces` running first mitigates it. Note D1 makes cohorts
+   _smaller_ than originally proposed, which raises the per-call overhead of grouping and makes
+   this interact with D2.
+2. **Should `near-dupes` run at the end of a _scoped_ run at all?** It is whole-library and
+   wholesale. Proposal: debounce it — one global consolidation, coalesced by key, a minute
+   after the last run finishes, so ten folder scans cost one regrouping rather than ten.
+3. **Does a selection intersect the filter, or survive it?** (from D3.)
 
 ---
 
