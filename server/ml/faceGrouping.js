@@ -1,0 +1,283 @@
+/**
+ * Grouping the faces that still need a person — progressively (#235).
+ *
+ * ## Why this exists beside `clusterFaces`
+ *
+ * `clusterFaces` computes a whole partition: it is O(n^2) over every face, and
+ * `saveClusters` clears and rewrites the lot in one transaction. That is right
+ * for "regroup everything from scratch", and it has a property the user paid
+ * for without being offered anything in return — a cancelled pass writes
+ * NOTHING, so on a 118,371-face library there was no way to make progress in
+ * chunks and no way to stop. Running it again started from zero.
+ *
+ * This pass answers the ordinary question instead: *these faces have no person
+ * yet — file them.* It is:
+ *
+ * - **incremental**: each batch is committed, so stopping keeps what is done;
+ * - **resumable**: the worklist is "faces with no person", so the next run
+ *   simply finds fewer. There is no checkpoint to corrupt, because the
+ *   DATABASE is the checkpoint;
+ * - **scoped**: it takes the same photo-id scope every other long operation
+ *   takes, so All / Visible / Selected mean something here too (contract 1);
+ * - **cheaper**: comparing each face against one centroid per person is
+ *   roughly 1.8 billion comparisons on a real library where a full re-cluster
+ *   is 7 billion.
+ *
+ * ## Centroids are fixed for the whole run
+ *
+ * A face joining a person shifts that person's centroid slightly. Feeding it
+ * back would let a run of borderline faces walk a centroid onto somebody else
+ * — drift with nothing to stop it, which is exactly the trap `assignNewFaces`
+ * documents. So every face in a run is scored against the same definition of
+ * each person, and a person created DURING the run gets a centroid that is
+ * likewise frozen once made.
+ */
+import { dot } from "./quantize.js";
+import { SAME_PERSON_COSINE } from "./faceClusters.js";
+import { ungroupedFaceRows, ungroupedFaceCount } from "../db/faces.js";
+
+/** Faces per committed batch. Small enough that stopping loses little, big
+ *  enough that the transaction overhead disappears. */
+export const GROUP_BATCH = 500;
+
+/** Yield to the event loop every this many comparisons. Same reasoning, and
+ *  the same units, as #231: comparisons, never rows. */
+export const YIELD_COMPARISONS = 200_000;
+
+const breathe = () => new Promise((r) => setImmediate(r));
+
+/**
+ * Every person's centroid, as int8 plus a scale, so the fast `dot` path works.
+ *
+ * Int8 rather than float because `dot` is the same primitive the clustering
+ * pass uses, and re-quantizing a unit-norm mean loses nothing that matters at
+ * a 0.8 cosine threshold.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @returns {Array<{personId:number, bytes:Int8Array, scale:number}>}
+ */
+export function personCentroidVectors(db, model) {
+  const rows = db
+    .prepare(
+      `SELECT person_id AS pid, dim, scale, vec
+         FROM photo_faces
+        WHERE model = ? AND person_id IS NOT NULL
+        ORDER BY person_id`
+    )
+    .all(model);
+  if (!rows.length) return [];
+
+  const dim = rows[0].dim;
+  /** @type {Map<number, Float64Array>} */
+  const sums = new Map();
+  for (const r of rows) {
+    if (r.dim !== dim) continue; // a mixed-width model is faceVectors' problem
+    let v = sums.get(r.pid);
+    if (!v) sums.set(r.pid, (v = new Float64Array(dim)));
+    const b = new Int8Array(r.vec.buffer, r.vec.byteOffset, r.vec.byteLength);
+    for (let i = 0; i < dim; i++) v[i] += b[i] * r.scale;
+  }
+
+  const out = [];
+  for (const [pid, v] of sums) {
+    let norm = 0;
+    for (let i = 0; i < dim; i++) norm += v[i] * v[i];
+    norm = Math.sqrt(norm);
+    if (!(norm > 0)) continue; // a cancelled-out centroid has no direction
+    let maxAbs = 0;
+    for (let i = 0; i < dim; i++) {
+      const a = Math.abs(v[i] / norm);
+      if (a > maxAbs) maxAbs = a;
+    }
+    const scale = maxAbs / 127 || 1;
+    const bytes = new Int8Array(dim);
+    for (let i = 0; i < dim; i++) bytes[i] = Math.round(v[i] / norm / scale);
+    out.push({ personId: pid, bytes, scale });
+  }
+  return out;
+}
+
+/**
+ * The best-matching person for a face, or null.
+ * @returns {{personId:number, score:number}|null}
+ */
+export function bestPerson(face, centroids, threshold) {
+  let best = null;
+  for (const c of centroids) {
+    const score = dot(face.bytes, c.bytes) * face.scale * c.scale;
+    if (score >= threshold && (!best || score > best.score)) {
+      best = { personId: c.personId, score };
+    }
+  }
+  return best;
+}
+
+/**
+ * File every ungrouped face in scope, in committed batches.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @param {object} [opts]
+ * @param {number[]|null} [opts.scopeIds] photo ids; `null` = the whole
+ *   library, `[]` = nothing (refused by the caller, never widened here).
+ * @param {number} [opts.threshold]
+ * @param {number} [opts.batchSize]
+ * @param {AbortSignal} [opts.signal]
+ * @param {(p: {done:number,total:number}) => void} [opts.onProgress]
+ * @param {(phase: string) => void} [opts.onPhase]
+ * @returns {Promise<{assigned:number, created:number, examined:number, remaining:number}>}
+ */
+export async function groupRemaining(
+  db,
+  model,
+  {
+    scopeIds = null,
+    threshold = SAME_PERSON_COSINE,
+    batchSize = GROUP_BATCH,
+    signal,
+    onProgress,
+    onPhase,
+  } = {}
+) {
+  const total = ungroupedFaceCount(db, model, scopeIds);
+  if (!total) {
+    return { assigned: 0, created: 0, examined: 0, remaining: 0 };
+  }
+
+  onPhase?.("Reading the people you already have");
+  // Frozen for the whole run — see the note at the top on drift.
+  const centroids = personCentroidVectors(db, model);
+
+  const insertPerson = db.prepare(
+    `INSERT INTO persons (name, cover_face_id, created_at) VALUES (NULL, ?, ?)`
+  );
+  const attach = db.prepare(
+    // `person_id IS NULL` is what makes a re-run safe: a face committed by an
+    // earlier batch is never touched again, so the same work is never done
+    // twice even if the caller replays a range.
+    `UPDATE photo_faces SET person_id = ?, person_source = 'model'
+      WHERE id = ? AND person_id IS NULL`
+  );
+
+  let assigned = 0;
+  let created = 0;
+  let examined = 0;
+  let sinceYield = 0;
+
+  onPhase?.("Filing faces");
+  for (;;) {
+    const batch = ungroupedFaceRows(db, model, {
+      limit: batchSize,
+      scopeIds,
+    });
+    if (!batch.length) break;
+
+    /** @type {Array<{faceId:number, personId:number}>} */
+    const pairs = [];
+    /** @type {Array<{id:number, bytes:Int8Array, scale:number}>} */
+    const leftovers = [];
+
+    for (const face of batch) {
+      const hit = bestPerson(face, centroids, threshold);
+      if (hit) pairs.push({ faceId: face.id, personId: hit.personId });
+      else leftovers.push(face);
+
+      sinceYield += centroids.length;
+      if (sinceYield >= YIELD_COMPARISONS) {
+        sinceYield = 0;
+        await breathe();
+        // Checked at the yield point, the one place the loop is not
+        // mid-comparison. A cancellation here keeps every committed batch —
+        // which is the whole point of this pass existing.
+        if (signal?.aborted) {
+          const e = new Error("canceled");
+          e.name = "AbortError";
+          throw e;
+        }
+      }
+    }
+
+    // The leftovers matched nobody. Group them among THEMSELVES so a face seen
+    // for the first time still becomes a person rather than being left
+    // homeless — the state the user is already drowning in.
+    const fresh = clusterLeftovers(leftovers, threshold);
+
+    db.transaction(() => {
+      for (const p of pairs)
+        assigned += attach.run(p.personId, p.faceId).changes;
+      for (const group of fresh) {
+        const cover = group[0];
+        const id = Number(
+          insertPerson.run(cover.id, Date.now()).lastInsertRowid
+        );
+        created++;
+        for (const f of group) assigned += attach.run(id, f.id).changes;
+        // A person made during this run joins the fixed set, so the rest of
+        // the batch can file into it. Its centroid is the first face's — good
+        // enough for a group of one or two, and frozen like every other.
+        centroids.push({
+          personId: id,
+          bytes: cover.bytes,
+          scale: cover.scale,
+        });
+      }
+    })();
+
+    examined += batch.length;
+    onProgress?.({ done: Math.min(examined, total), total });
+
+    await breathe();
+    if (signal?.aborted) {
+      const e = new Error("canceled");
+      e.name = "AbortError";
+      throw e;
+    }
+  }
+
+  return {
+    assigned,
+    created,
+    examined,
+    remaining: ungroupedFaceCount(db, model, scopeIds),
+  };
+}
+
+/**
+ * Single-link grouping WITHIN one batch, for the faces that matched nobody.
+ *
+ * Deliberately not the full `clusterFaces`: this runs on a few hundred faces,
+ * the union-find there is built for the whole library, and importing its
+ * yield/abort machinery for a 500-item loop would be more moving parts than
+ * the job needs.
+ *
+ * @param {Array<{id:number, bytes:Int8Array, scale:number}>} faces
+ * @param {number} threshold
+ * @returns {Array<Array<{id:number, bytes:Int8Array, scale:number}>>}
+ */
+export function clusterLeftovers(faces, threshold) {
+  const parent = faces.map((_, i) => i);
+  const find = (i) => {
+    while (parent[i] !== i) parent[i] = parent[(i = parent[i])];
+    return i;
+  };
+  for (let i = 0; i < faces.length; i++) {
+    for (let j = i + 1; j < faces.length; j++) {
+      const s =
+        dot(faces[i].bytes, faces[j].bytes) * faces[i].scale * faces[j].scale;
+      if (s >= threshold) {
+        const a = find(i);
+        const b = find(j);
+        if (a !== b) parent[a] = b;
+      }
+    }
+  }
+  /** @type {Map<number, Array>} */
+  const groups = new Map();
+  for (let i = 0; i < faces.length; i++) {
+    const root = find(i);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(faces[i]);
+  }
+  return [...groups.values()];
+}

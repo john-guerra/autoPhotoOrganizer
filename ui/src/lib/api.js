@@ -1274,11 +1274,27 @@ export async function retryFailedFaces(model) {
  * @param {number} [threshold]
  * @returns {Promise<{started: boolean, jobId: string, faces: number}>}
  */
-export async function clusterPeople(model, threshold) {
+/**
+ * Group faces into people.
+ *
+ * @param {string} model
+ * @param {number} [threshold]
+ * @param {{ids?: number[]|null, mode?: "remaining"|"regroup"}} [opts]
+ *   `ids` is the photo scope — `null`/omitted is the whole library, and an
+ *   empty array is refused by the server rather than widened to it (#235).
+ *   `mode` defaults to "remaining", which files whatever still has no person
+ *   in committed batches; "regroup" is the destructive whole-partition pass.
+ */
+export async function clusterPeople(model, threshold, { ids, mode } = {}) {
   const res = await fetch("/api/ml/faces/cluster", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model, threshold }),
+    body: JSON.stringify({
+      model,
+      threshold,
+      ...(ids === undefined ? {} : { ids }),
+      ...(mode ? { mode } : {}),
+    }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
