@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.9
+
+- No user-facing change. Adds a test fixture larger than one feed page, so
+  the bugs that only appear on a real library can be caught before you find
+  them (#245, #248).
+
 ## 2.19.8
 
 - **The scope you pick is now the scope it runs on.** "Visible" meant
