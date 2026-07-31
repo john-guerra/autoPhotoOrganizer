@@ -5,7 +5,16 @@ import {
   grid,
   mlPanel,
   faceSettings,
+  seedFaces,
+  clearFaces,
 } from "./helpers.js";
+
+/** Faces still waiting for a person, straight from the status endpoint. */
+async function ungroupedCount(page) {
+  const r = await page.request.get("/api/ml/faces?model=buffalo_s");
+  const d = await r.json();
+  return d.grouping?.pending ?? 0;
+}
 
 /**
  * FINDING FACES IN A SCOPE (#221).
@@ -185,6 +194,121 @@ test.describe("faces scope @p1", () => {
     await expect(
       page.getByTestId("ml-scope").locator('input[value="all"]')
     ).toBeChecked();
+    expect(errors).toEqual([]);
+  });
+});
+
+/**
+ * GROUPING IN A SCOPE (#235).
+ *
+ * Grouping was the last long operation with no scope at all: it read every
+ * face for the model, unconditionally. On a 118,371-face library that left one
+ * offer — do everything — and a cancelled run wrote nothing, so there was no
+ * way to work through it in chunks.
+ *
+ * Faces are seeded straight into the scratch index because the fixture is
+ * sharp-drawn rectangles and detection is unreachable in e2e (see seedFaces).
+ */
+test.describe("grouping scope @p1", () => {
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  });
+
+  test.beforeEach(async ({ page }) => {
+    // UNGROUPED on purpose: grouping only has something to do when faces
+    // have no person yet, which is the state a real library is in after a
+    // face scan.
+    await seedFaces(30, 2, { assign: false });
+    await page.route("**/api/ml/faces*", async (route, request) => {
+      if (request.method() !== "GET") return route.continue();
+      const real = await route.fetch();
+      const body = await real.json();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...body,
+          weights: { ready: true, missing: [], corrupt: [] },
+        }),
+      });
+    });
+  });
+
+  test.afterAll(async () => {
+    // Seeded people outlive this file and render extra toolbar controls; the
+    // toolbar folds by WIDTH, which breaks specs that have nothing to do with
+    // faces (docs/AGENT-NOTES.md).
+    await clearFaces();
+  });
+
+  test("offers grouping its OWN All / Visible / Selected", async ({ page }) => {
+    // Its own control, not detection's: "All" means a different quantity for
+    // each — faces without a person versus photos without a scan — and
+    // contract 1 says `allCount` is the operation's remaining work.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await mlPanel.open(page);
+
+    await expect(faceSettings.groupScope(page)).toBeVisible();
+    for (const key of ["selected", "visible", "all"]) {
+      await expect(faceSettings.groupScopeOption(page, key)).toHaveCount(1);
+    }
+    // ...and it is a SEPARATE radio group. Two groups sharing a name are one
+    // group to the browser, so choosing here would silently clear the other.
+    await expect(faceSettings.scope(page)).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("the button names how many faces it will actually group", async ({
+    page,
+  }) => {
+    // A bare "Group faces into people" is the shape contract 1 refuses: it
+    // does not say what it is about to do.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await mlPanel.open(page);
+
+    await expect(faceSettings.cluster(page)).toContainText(
+      /Group [\d,]+ faces/
+    );
+    expect(errors).toEqual([]);
+  });
+
+  test("an empty selection is offered but DISABLED, never widened", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await mlPanel.open(page);
+
+    await expect(
+      faceSettings.groupScopeOption(page, "selected")
+    ).toBeDisabled();
+    await expect(faceSettings.groupScopeOption(page, "all")).toBeChecked();
+    expect(errors).toEqual([]);
+  });
+
+  test("grouping runs and KEEPS its work, so a second run has less to do", async ({
+    page,
+  }) => {
+    // The heart of #235. docs/TESTING.md: click the button, do not merely
+    // assert that it renders — a control that looked right and did nothing is
+    // why this tier exists.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await mlPanel.open(page);
+
+    const before = await ungroupedCount(page);
+    expect(before).toBeGreaterThan(0);
+
+    await faceSettings.cluster(page).click();
+    await expect.poll(() => ungroupedCount(page), { timeout: 30_000 }).toBe(0);
+
+    // Everything now has a person, so the operation says so rather than
+    // offering a job that would finish instantly.
+    await page.reload();
+    await mlPanel.open(page);
+    await expect(faceSettings.cluster(page)).toBeDisabled();
     expect(errors).toEqual([]);
   });
 });

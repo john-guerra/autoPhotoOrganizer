@@ -521,6 +521,80 @@ export function namedPersonMembers(db, model, { perPerson = 64 } = {}) {
  * @param {string} model
  * @returns {Array<{id: number, scale: number, bytes: Int8Array}>}
  */
+/**
+ * The grouping worklist: ungrouped faces, optionally scoped to some photos
+ * (#235).
+ *
+ * This is what makes grouping RESUMABLE. The old pass read every face for the
+ * model and rewrote the whole partition in one transaction, so a cancelled run
+ * wrote nothing and re-running started from zero. Reading only what still
+ * needs a person means each committed batch shrinks the remaining work — and
+ * the query IS the resume point, exactly as `pendingEmbedRows` and
+ * `pendingFaceRows` are for their sweeps.
+ *
+ * `person_source = 'manual'` is excluded for the reason `unassignedFaces`
+ * gives: a face the user detached is a decision, not a gap to fill.
+ *
+ * @param {import("better-sqlite3").Database} db
+ * @param {string} model
+ * @param {{limit?: number, scopeIds?: number[]|null}} [opts]
+ * @returns {Array<{id:number, scale:number, bytes:Int8Array}>}
+ */
+export function ungroupedFaceRows(db, model, { limit = 2000, scopeIds } = {}) {
+  const ids = normalizeScope(scopeIds);
+  // An explicitly EMPTY scope means "these zero photos", never "all of them" —
+  // the distinction #206 keeps all the way into the SQL, because collapsing it
+  // turns an empty selection into a whole-library pass.
+  if (ids !== null && ids.length === 0) return [];
+  const scopeClause = scopeClauseFor(ids, "photo_faces.photo_id");
+  return db
+    .prepare(
+      `SELECT photo_faces.id, photo_faces.scale, photo_faces.vec
+         FROM photo_faces
+        WHERE photo_faces.model = @model
+          AND photo_faces.person_id IS NULL
+          AND (photo_faces.person_source IS NULL
+               OR photo_faces.person_source <> 'manual')
+          ${scopeClause}
+        ORDER BY photo_faces.id
+        LIMIT @limit`
+    )
+    .all({ model, limit })
+    .map((r) => ({
+      id: r.id,
+      scale: r.scale,
+      bytes: new Int8Array(r.vec.buffer, r.vec.byteOffset, r.vec.byteLength),
+    }));
+}
+
+/**
+ * How many faces the grouping pass still has to do — the job's `total`.
+ *
+ * Counted from the same predicate as `ungroupedFaceRows`, so the bar cannot
+ * disagree with the work. Contract 2 wants this set at `registry.create`, and
+ * it is the REMAINING count rather than the scope's size: a scope includes
+ * faces already grouped, so using `ids.length` would make the bar finish early
+ * and stop (#208's other half).
+ *
+ * @returns {number}
+ */
+export function ungroupedFaceCount(db, model, scopeIds = null) {
+  const ids = normalizeScope(scopeIds);
+  if (ids !== null && ids.length === 0) return 0;
+  const scopeClause = scopeClauseFor(ids, "photo_faces.photo_id");
+  return db
+    .prepare(
+      `SELECT COUNT(*) n
+         FROM photo_faces
+        WHERE photo_faces.model = @model
+          AND photo_faces.person_id IS NULL
+          AND (photo_faces.person_source IS NULL
+               OR photo_faces.person_source <> 'manual')
+          ${scopeClause}`
+    )
+    .get({ model }).n;
+}
+
 export function unassignedFaces(db, model) {
   return db
     .prepare(

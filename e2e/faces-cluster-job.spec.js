@@ -25,8 +25,13 @@ test.describe("faces cluster job @p1", () => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
   });
 
-  /** Report weights present and some faces already found, so the panel shows
-   *  the "Group faces into people" button at all. */
+  /**
+   * Report weights present, some faces found, and some of them still WITHOUT
+   * a person — the last part added with #235, because the button is now
+   * scoped and disables itself when there is nothing left to group. Without
+   * `grouping.pending` the stub describes a library where every face already
+   * belongs to someone, and the button correctly reads "Group 0 faces".
+   */
   async function stubReadyWithFaces(page) {
     await page.route("**/api/ml/faces*", async (route, request) => {
       if (request.method() !== "GET") return route.continue();
@@ -39,6 +44,13 @@ test.describe("faces cluster job @p1", () => {
           ...body,
           weights: { ready: true, missing: [], corrupt: [] },
           counts: { ...body.counts, scanned: 12, faces: 30, withFaces: 9 },
+          grouping: {
+            detected: 30,
+            grouped: 0,
+            ungrouped: 30,
+            people: 0,
+            pending: 30,
+          },
         }),
       });
     });
