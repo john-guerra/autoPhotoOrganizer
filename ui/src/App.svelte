@@ -175,6 +175,7 @@
     loadScope,
     persistScope,
   } from "./lib/scope.js";
+  import { timesCacheKey } from "./lib/timesKey.js";
   import {
     selectAll,
     selectNone,
@@ -562,7 +563,14 @@
     const { dateFrom, dateTo, ...rest } = displayFilter;
     return rest;
   });
-  let timesKey = $derived(JSON.stringify(timesFilter) + "|" + libraryVersion);
+  // `scopeVersion` is in the key because an ids scope CANNOT be seen in the
+  // filter: it projects to a constant `{keepScope: true}` whatever the working
+  // set, so two different keep-only sets stringify identically and the guard
+  // below suppresses the refetch (#246). See timesKey.js for why a counter
+  // rather than the ids themselves.
+  let timesKey = $derived(
+    timesCacheKey(timesFilter, libraryVersion, scopeVersion)
+  );
   let lastTimesKey = null;
   $effect(() => {
     if (timesKey !== lastTimesKey) {
@@ -873,6 +881,10 @@
   // full reset). The sidebars key their refetch on this so they always mirror
   // the real index, not just groupBy/filter changes.
   let libraryVersion = $state(0);
+  // Bumped whenever the WORKING SET is replaced. An ids scope is invisible to
+  // the filter (it projects to a constant flag — see timesKey.js), so this is
+  // the only thing that can tell one keep-only set from another (#246).
+  let scopeVersion = $state(0);
   let addFolderOpen = $state(false);
   let manageLibraryOpen = $state(false);
   let missingReviewOpen = $state(false);
@@ -1890,6 +1902,10 @@
       return; // scope unchanged — the UI still matches what the server holds
     }
     scope = next;
+    // Every scope change bumps it, folder scopes included. A folder carries a
+    // path that varies on its own and would not strictly need this, but a rule
+    // with an exception is a rule the next change gets wrong.
+    scopeVersion++;
     // The time-range brush is a pair of ABSOLUTE timestamps, meaningful only
     // relative to whatever domain the timeline was plotting when it was set.
     // A scope change re-plots that domain (a different working set), so a
