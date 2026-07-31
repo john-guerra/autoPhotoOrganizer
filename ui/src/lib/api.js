@@ -597,6 +597,29 @@ export async function setScope(ids) {
 }
 
 /**
+ * The "keep only" working set currently in force, read back from the server
+ * (#212). The server is the single source of truth for it, so a reload asks
+ * rather than remembering — a browser-side copy is exactly what let the two
+ * sides disagree.
+ *
+ * Never throws: a scope that cannot be read is reported as "no scope", which
+ * shows the whole library. That is the safe direction — the alternative is
+ * blocking the app's boot on a working-set query.
+ *
+ * @returns {Promise<number[]>}
+ */
+export async function getScope() {
+  try {
+    const res = await fetch("/api/scope");
+    if (!res.ok) return [];
+    const body = await res.json();
+    return Array.isArray(body?.ids) ? body.ids : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Copy the given photos into a new folder on disk (never moves/deletes).
  * @param {number[]} photoIds
  * @param {string} destParent existing parent directory

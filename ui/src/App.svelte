@@ -68,6 +68,7 @@
     fetchTimes,
     fetchFlatTree,
     setScope,
+    getScope,
     removeFolderByPath,
     removePhotosByIds,
     renameFolder,
@@ -435,9 +436,11 @@
 
   // The app's one working scope — "show me only this". Either a live folder-path
   // predicate or an explicit id set, never both (see lib/scope.js for why the two
-  // kinds stay distinct: a folder scope tracks photos scanned into it later and
-  // survives a reload, an id set is frozen and session-only). null = whole library.
-  // Write it ONLY through applyScope().
+  // kinds stay distinct: a folder scope tracks photos scanned into it later, an id
+  // set is frozen). null = whole library. BOTH kinds now survive a reload (#212),
+  // but by different routes: the folder path from localStorage synchronously here,
+  // the id set from the server in `bootFeed` below, because the server is where it
+  // lives. Write it ONLY through applyScope().
   let scope = $state(loadScope());
   $effect(() => {
     persistScope(scope);
@@ -1177,12 +1180,46 @@
     // both surfaces.
     document.title = `AutoGallery v${APP_VERSION}`;
     refreshLibrary();
-    loadInitialFeed();
-    refreshCounts();
+    bootFeed();
     refreshMissingCount();
     refreshSemanticTags();
     refreshPeople();
   });
+
+  /**
+   * Restore a "keep only" working set, then load the feed (#212).
+   *
+   * Keep-only used to vanish on reload while the SERVER still held it: the ids
+   * live in the keep_scope table, nothing read them back, and `loadScope()` can
+   * only return a folder scope. So the grid came back showing the whole library
+   * over a working set that was still in force — the two sides disagreeing,
+   * which is worse than either answer alone.
+   *
+   * The fix is to ask rather than remember. No second copy in localStorage, so
+   * there is nothing left that CAN diverge.
+   *
+   * Ordered before the first fetch on purpose. `displayFilter` derives from
+   * `scope`, so restoring afterwards would paint the whole library and then
+   * narrow it — and on a large library that flash is long enough to look like
+   * the scope was lost, which is the bug this fixes. One localhost round trip
+   * buys its absence.
+   */
+  async function bootFeed() {
+    // A folder scope came back from localStorage synchronously. The two kinds
+    // are mutually exclusive, so there is nothing to ask about.
+    if (!scope) {
+      const ids = await getScope();
+      if (ids.length) {
+        scope = idsScope(ids);
+        // `displayFilter` is derived and has not recomputed yet — the same
+        // flush applyScope() documents at length. Without it the first fetch
+        // reads the pre-restore filter and loads everything.
+        await tick();
+      }
+    }
+    loadInitialFeed();
+    refreshCounts();
+  }
 
   /** THE one guarded feed-window-replace transaction (issue #42). Every
    * function that discards `items` and rebuilds the window from scratch shares

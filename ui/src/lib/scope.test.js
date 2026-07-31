@@ -93,10 +93,21 @@ describe("persistence", () => {
     expect(loadScope()).toEqual({ kind: "folder", path: "/photos/trip" });
   });
 
-  it("never persists an ids scope (session-only, as keepIds was)", () => {
+  it("keeps NO browser-side copy of an ids scope (#212)", () => {
+    // Not because it is session-only — it survives a reload now — but because
+    // the server's keep_scope table is the single answer to "what is the
+    // working set". A second copy here is what let the two sides disagree.
+    // It must also leave no folder path behind: the kinds are mutually
+    // exclusive, and a stale path would be restored ahead of it on next boot.
     persistScope(idsScope([1, 2]));
     expect(loadScope()).toBeNull();
     expect(localStorage.getItem(LS_SCOPE_PATH)).toBeNull();
+  });
+
+  it("an ids scope CLEARS a folder path that was stored before it", () => {
+    persistScope(folderScope("/photos/trip"));
+    persistScope(idsScope([1, 2]));
+    expect(loadScope()).toBeNull();
   });
 
   it("clears the stored scope when unscoped", () => {

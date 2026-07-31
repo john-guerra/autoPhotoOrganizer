@@ -81,6 +81,22 @@ export async function resetRatings(page) {
 }
 
 /**
+ * Drop the "keep only" working set (#212).
+ *
+ * The scope lives in SQLite's keep_scope table and now SURVIVES a reload by
+ * design, which makes it global state in exactly the way ratings are: a spec
+ * that keeps 2 photos and does not clean up leaves every later spec running
+ * against a 2-photo library. That failure reads as a product bug and is not
+ * one. Call it in beforeEach/afterAll for any spec that scopes.
+ *
+ * Safe by construction, same as resetRatings: playwright.config.js points
+ * AUTOGALLERY_HOME at e2e/.tmp/home over generated fixture photos.
+ */
+export async function clearScope(page) {
+  await page.request.post("/api/scope", { data: { ids: [] } });
+}
+
+/**
  * Force the metadata sweep to completion — EXIF, dimensions, and (#154)
  * GPS/place — and wait for it to finish before looking at anything
  * metadata-derived.

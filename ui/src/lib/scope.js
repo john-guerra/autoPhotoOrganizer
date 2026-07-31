@@ -3,10 +3,11 @@
  * distinct underneath one UI concept.
  *
  * - `folder`: a live path predicate (one string). Stays correct across rescans
- *   — photos scanned into the folder later appear inside the scope — costs one
- *   WHERE over folders.abs_path, and survives a reload.
+ *   — photos scanned into the folder later appear inside the scope — and costs
+ *   one WHERE over folders.abs_path.
  * - `ids`: an explicit, frozen photo-id set, stored server-side in the
- *   keep_scope table (the filter carries only a flag, so it can be any size).
+ *   keep_scope table (the filter carries only a flag, so it can be any size),
+ *   and read back from there on boot so it survives a reload too (#212).
  *   Scoping a whole folder this way would mean materializing every id in it,
  *   so the two kinds are NOT interchangeable — see the design doc.
  *
@@ -64,9 +65,20 @@ export function scopeChip(scope) {
 }
 
 /**
- * Folder scope persists across a reload; an ids scope deliberately does not
- * (it never did — keepIds reset to null on load even though the server-side
- * keep_scope row outlives the page).
+ * Persist the FOLDER scope only — an ids scope has nothing to persist here.
+ *
+ * Both kinds survive a reload as of #212, but by different routes, and the
+ * asymmetry is the point: a folder scope is one string the browser can hold,
+ * while an ids scope already lives in the server's keep_scope table. Writing a
+ * browser-side copy of the latter would create a second answer to "what is the
+ * working set", and those two answers diverging is precisely the bug — the
+ * server kept the rows across a reload while the UI came back showing
+ * everything. The client asks the server instead (`getScope`, restored in
+ * App.svelte's `bootFeed`).
+ *
+ * Clearing LS_SCOPE_PATH for a non-folder scope is therefore not an oversight:
+ * the two kinds are mutually exclusive, so an ids scope must leave no folder
+ * path behind to be restored ahead of it on the next boot.
  * @param {Scope} scope
  */
 export function persistScope(scope) {
