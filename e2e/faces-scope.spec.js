@@ -10,6 +10,7 @@ import {
   statusBar,
   filterBar,
   clearScope,
+  resetRatings,
 } from "./helpers.js";
 import { TOTAL_PHOTOS } from "./fixture.mjs";
 
@@ -31,13 +32,20 @@ async function ungroupedCount(page) {
  * is readable with faces switched off, which is also what every new user sees.
  */
 test.describe("faces scope @p1", () => {
-  // This file now drives "Keep only" (#245), which writes the server's
-  // keep_scope table and — since #212 — outlives the page. `openApp` clears it
-  // for specs that call it, but `filmstripBurst.spec.js` runs after this one
-  // and never does. See docs/AGENT-NOTES.md.
+  // This file now writes TWO kinds of global state (#245), and both outlive it:
+  //
+  //  - the keep_scope table, from "Keep only" — since #212 that survives a
+  //    reload, and `filmstripBurst.spec.js` runs after this one without ever
+  //    calling `openApp`, which is what would otherwise clear it;
+  //  - RATINGS, from the overlap test, which needs one rated photo to make the
+  //    selection and the filter disagree. Ratings live in SQLite on purpose
+  //    (docs/TESTING.md), so a photo rated here is still rated when
+  //    people-view.spec.js asserts the first tile is unrated — a failure that
+  //    reads as a product bug in a file this one has never heard of.
   test.afterAll(async ({ browser }) => {
     const page = await browser.newPage();
     await clearScope(page);
+    await resetRatings(page);
     await page.close();
   });
 
