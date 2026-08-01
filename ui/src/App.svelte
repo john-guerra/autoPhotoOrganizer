@@ -989,11 +989,21 @@
   /** How many people the People view has asked for so far (#223). */
   let peopleLimit = $state(200);
   /** Everyone the server has, vs. the page we hold. */
+  // The LIBRARY total, deliberately NOT the scoped list length. It feeds
+  // `offerable`, which decides whether a view earns a permanent switcher slot
+  // — a property of the library, not of the current filter. Keyed on the
+  // scoped count the Face Map's button appeared and VANISHED as you filtered,
+  // and its e2e lost the button entirely the moment People started narrowing
+  // (#252). That is why listPersonsPage keeps `total` unscoped.
   let peopleTotal = $state(0);
   let peopleTruncated = $state(false);
 
   async function refreshPeople() {
-    const r = await fetchPeople(peopleLimit).catch(() => null);
+    // Scoped to what the view is showing (#252), the same way the Face Map
+    // narrows. Without it People listed everyone in the library while the
+    // grid beside it showed a keep-only set — two views disagreeing about who
+    // exists in the same photos.
+    const r = await fetchPeople(peopleLimit, displayFilter).catch(() => null);
     if (!r) {
       people = [];
       return;
@@ -6540,7 +6550,7 @@
     {globalViewMode}
     {viewId}
     {switchingViewId}
-    peopleCount={people.length}
+    peopleCount={peopleTotal}
     bind:zoom
     zoomMax={ZOOM_LEVELS.length - 1}
     bind:burstEnabled
@@ -6752,7 +6762,25 @@
           onremovegroup={(path, paths) => removeGroup(path, paths)}
           onopenphoto={(id, path) => openPhotoById(id, path)}
           ontileclick={(e, entry, i) => onTileClick(e, entry, i)}
-          ontoggleselect={(id) => toggleSelect(id)}
+          ontoggleselect={(id, e, i) => {
+            // Shift on the SELECT CIRCLE ranges, the same as shift on the tile
+            // (#253). It did not, and that is why "click a photo to select,
+            // then shift-click another" never worked: the circle is the only
+            // control that actually SELECTS (a plain tile click just focuses),
+            // so it is the one people reach for — and it was the one path that
+            // stopped the event before any modifier could be read.
+            if (e?.shiftKey && typeof i === "number") {
+              selectRange(selected, i);
+            } else {
+              toggleSelect(id);
+              // ...and move the ANCHOR here, which is the other half of the
+              // bug. Without it a range started from wherever the keyboard
+              // focus happened to be — usually photo 0 — so "select this one,
+              // shift-click that one" quietly took everything from the top of
+              // the feed instead of between the two photos you clicked.
+              if (typeof i === "number") selected = i;
+            }
+          }}
           ontilecontextmenu={(e, entry, i) => onTileContextMenu(e, entry, i)}
           onthumbattempt={handleThumbAttempt}
           onthumbsettled={handleThumbSettled}

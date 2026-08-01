@@ -369,7 +369,8 @@
             stacks.find((s) => s.id === entry.stackId)?.coverId ===
               entry.item.id}
           onclick={(e) => ontileclick?.(e, entry, i)}
-          ontoggleselect={() => ontoggleselect?.(resolvePhoto(entry)?.id)}
+          ontoggleselect={(e) =>
+            ontoggleselect?.(resolvePhoto(entry)?.id, e, i)}
           oncontextmenu={(e) => ontilecontextmenu?.(e, entry, i)}
           onattempt={onthumbattempt}
           onsettled={onthumbsettled}

@@ -6,6 +6,21 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.19
+
+- **People now shows only the people in the photos you are looking at**,
+  the way the Face Map already did. With a "Keep only" set or a filter in
+  force the two views used to disagree about who exists (#252).
+
+## 2.19.18
+
+- **Shift-click finally selects the photos in between.** Select one photo,
+  shift-click another, and the range is yours — including when you use the
+  selection circles, which is the way most people select and the one path
+  that never worked (#253).
+- **Closing the window from `electron:dev` now stops the whole thing**,
+  instead of leaving the server and Vite running until you Ctrl-C.
+
 ## 2.19.17
 
 - **Finding faces no longer waits for grouping to finish.** Asking for one
