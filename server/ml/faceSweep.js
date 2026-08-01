@@ -80,6 +80,8 @@ export async function sweepFaces({
   job,
   onProgress,
   scopeIds = null,
+  /** Preemption (#257); a no-op by default so existing callers are unchanged. */
+  checkpoint = async () => {},
 }) {
   if (inFlight)
     return {
@@ -104,6 +106,7 @@ export async function sweepFaces({
 
   async function drain() {
     const result = await runSweep(job, {
+      checkpoint,
       nextBatch: (limit) =>
         pendingFaceRows(db, modelId, limit ?? FACE_BATCH, scopeIds),
       folderOf: (row) => row.folder_abs_path,

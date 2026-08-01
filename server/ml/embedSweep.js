@@ -56,6 +56,8 @@ export async function embedAllPending(
     onProgress = null,
     scopeIds = null,
     device = "auto",
+    /** Preemption (#257); a no-op by default so existing callers are unchanged. */
+    checkpoint = async () => {},
   }
 ) {
   if (embedInFlight)
@@ -75,6 +77,7 @@ export async function embedAllPending(
     });
 
     const { done, failed, paused, pauseReason } = await runSweep(job, {
+      checkpoint,
       nextBatch: () => pendingEmbedRows(db, model, limit, scopeIds),
       process: async (rows) => {
         const buffers = [];
