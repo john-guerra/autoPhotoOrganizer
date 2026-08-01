@@ -18,6 +18,7 @@ import {
   purgeFaces,
   saveClusters,
   listPersons,
+  listPersonsPage,
   renamePerson,
   mergePersons,
   detachFace,
@@ -758,5 +759,72 @@ describe("saveClusters is scoped and deliberate", () => {
 
   it("refuses to run without a model rather than clearing everything", () => {
     expect(() => saveClusters(getDb(), [])).toThrow(/needs a model/);
+  });
+});
+
+/** Two people, one face each, on two different photos. @returns their ids */
+function seedTwoPeople(db) {
+  const [alicePhotoId, bobPhotoId] = seed(db, 2);
+  putFaces(db, {
+    photoId: alicePhotoId,
+    model: MODEL,
+    faces: [face([0, 0, 10, 10], 1)],
+  });
+  putFaces(db, {
+    photoId: bobPhotoId,
+    model: MODEL,
+    faces: [face([0, 0, 10, 10], 2)],
+  });
+  db.prepare(`INSERT INTO persons (id, name) VALUES (1, 'Alice')`).run();
+  db.prepare(`INSERT INTO persons (id, name) VALUES (2, 'Bob')`).run();
+  db.prepare(`UPDATE photo_faces SET person_id = 1 WHERE photo_id = ?`).run(
+    alicePhotoId
+  );
+  db.prepare(`UPDATE photo_faces SET person_id = 2 WHERE photo_id = ?`).run(
+    bobPhotoId
+  );
+  return { aliceId: 1, bobId: 2, alicePhotoId, bobPhotoId };
+}
+
+describe("listPersonsPage — narrowed to what the view shows (#252)", () => {
+  it("drops a person entirely when no face of theirs is in scope", () => {
+    // Not "shows them with 0 photos": the Face Map hides them, and two views
+    // looking at the same photos must not disagree about who exists.
+    const db = getDb();
+    const { aliceId, bobId, bobPhotoId } = seedTwoPeople(db);
+
+    const all = listPersonsPage(db, { limit: 50 });
+    expect(all.people.map((p) => p.id).sort()).toEqual([aliceId, bobId].sort());
+
+    // Rate only Bob's photo, then scope to rated.
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(bobPhotoId);
+    const scoped = listPersonsPage(db, {
+      limit: 50,
+      filterSql: "photos.rating >= @f0",
+      filterParams: { f0: 5 },
+    });
+    expect(scoped.people.map((p) => p.id)).toEqual([bobId]);
+  });
+
+  it("keeps `total` as the LIBRARY total, so a view can say what it is hiding", () => {
+    const db = getDb();
+    const { bobPhotoId } = seedTwoPeople(db);
+    db.prepare(`UPDATE photos SET rating = 5 WHERE id = ?`).run(bobPhotoId);
+    const scoped = listPersonsPage(db, {
+      limit: 50,
+      filterSql: "photos.rating >= @f0",
+      filterParams: { f0: 5 },
+    });
+    expect(scoped.people.length).toBe(1);
+    expect(scoped.total).toBe(2);
+  });
+
+  it("is unchanged when the filter narrows nothing", () => {
+    const db = getDb();
+    const { aliceId, bobId } = seedTwoPeople(db);
+    const wide = listPersonsPage(db, { limit: 50, filterSql: "1=1" });
+    expect(wide.people.map((p) => p.id).sort()).toEqual(
+      [aliceId, bobId].sort()
+    );
   });
 });

@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.19
+
+- **People now shows only the people in the photos you are looking at**,
+  the way the Face Map already did. With a "Keep only" set or a filter in
+  force the two views used to disagree about who exists (#252).
+
 ## 2.19.18
 
 - **Shift-click finally selects the photos in between.** Select one photo,

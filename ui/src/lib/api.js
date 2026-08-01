@@ -1356,9 +1356,16 @@ export async function clusterPeople(
  *
  * @param {number} [limit] omit for the server's default page; 0 for everyone.
  */
-export async function fetchPeople(limit) {
-  const q = limit === undefined ? "" : `?limit=${limit}`;
-  const res = await fetch(`/api/ml/people${q}`);
+export async function fetchPeople(limit, filter = null) {
+  // The optional filter narrows People to the photos the view is showing
+  // (#252). Sent through toQueryParam, the same encoding every other filtered
+  // endpoint uses, so a spec cannot mean one thing here and another there.
+  const params = new URLSearchParams();
+  if (limit !== undefined) params.set("limit", String(limit));
+  const fp = filter ? toQueryParam(filter) : null;
+  if (fp) params.set("filter", fp);
+  const q = params.toString();
+  const res = await fetch(`/api/ml/people${q ? `?${q}` : ""}`);
   if (!res.ok) throw new Error(`people failed (${res.status})`);
   return res.json();
 }

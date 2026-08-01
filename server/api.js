@@ -109,7 +109,7 @@ import {
 import { assignNewFaces } from "./ml/faceAssign.js";
 import { groupRemaining } from "./ml/faceGrouping.js";
 import { normalizeScope, resolveScope } from "./db/scopeIds.js";
-import { coverage } from "./pipeline/coverage.js";
+import { coverage, namedFilter } from "./pipeline/coverage.js";
 import { scheduler, PRIORITY } from "./pipeline/scheduler.js";
 import { runPipeline, totalWorkMs, MS_PER_PHOTO } from "./pipeline/run.js";
 import { STAGES } from "./pipeline/stages.js";
@@ -2458,16 +2458,24 @@ export function registerApi(app, { ml } = {}) {
   const DEFAULT_PEOPLE_PAGE = 200;
 
   /** Everyone found so far, largest first — the order naming wants. */
-  app.get("/api/ml/people", (req, res) =>
+  app.get("/api/ml/people", (req, res) => {
+    // An optional `filter` narrows People to the photos the view is showing
+    // (#252) — the Face Map already did this and People did not, so the two
+    // disagreed about who exists while looking at the same photos.
+    const { spec, error } = parseFilterParam(req);
+    if (error) return res.status(400).json({ error });
+    const { sql, params } = namedFilter(spec ?? {});
     res.json(
       listPersonsPage(getDb(), {
         // Bounded by default. `limit=0` asks for everything and is what the
         // toolbar's person picker would need if it ever wanted the full set —
         // the VIEW never asks for it.
         limit: Number(req.query.limit) || DEFAULT_PEOPLE_PAGE,
+        filterSql: sql,
+        filterParams: params,
       })
-    )
-  );
+    );
+  });
 
   /** Name a person (or clear the name with an empty string). */
   app.put("/api/ml/people/:id", (req, res) => {

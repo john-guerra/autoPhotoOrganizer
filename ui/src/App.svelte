@@ -993,7 +993,11 @@
   let peopleTruncated = $state(false);
 
   async function refreshPeople() {
-    const r = await fetchPeople(peopleLimit).catch(() => null);
+    // Scoped to what the view is showing (#252), the same way the Face Map
+    // narrows. Without it People listed everyone in the library while the
+    // grid beside it showed a keep-only set — two views disagreeing about who
+    // exists in the same photos.
+    const r = await fetchPeople(peopleLimit, displayFilter).catch(() => null);
     if (!r) {
       people = [];
       return;

@@ -684,24 +684,43 @@ export function listPersons(db) {
  * @param {{limit?: number|null}} [opts] null = every person (tests, internals)
  * @returns {{people: ReturnType<typeof listPersons>, total: number, truncated: boolean}}
  */
-export function listPersonsPage(db, { limit = null } = {}) {
+export function listPersonsPage(
+  db,
+  { limit = null, filterSql = null, filterParams = {} } = {}
+) {
   const total = db.prepare(`SELECT COUNT(*) n FROM persons`).get().n;
-  if (limit === null) {
+  if (limit === null && !filterSql) {
     const people = listPersons(db);
     return { people, total, truncated: false };
   }
+  // Narrow to the photos the current view is showing (#252). An INNER join
+  // when scoped and a LEFT join otherwise, which is the whole difference: a
+  // person with no face in scope should DISAPPEAR here, not appear with a
+  // count of zero. The Face Map already narrowed this way and People did not,
+  // so the two views disagreed about who exists.
+  const scoped = !!filterSql && filterSql !== "1=1";
+  const join = scoped
+    ? `JOIN photo_faces f ON f.person_id = p.id
+       JOIN photos ON photos.id = f.photo_id
+       JOIN folders ON folders.id = photos.folder_id`
+    : `LEFT JOIN photo_faces f ON f.person_id = p.id`;
+  const where = scoped ? `WHERE photos.stale = 0 AND (${filterSql})` : "";
   const people = db
     .prepare(
       `SELECT p.id, p.name, p.cover_face_id AS coverFaceId,
               COUNT(f.id) AS faces,
               COUNT(DISTINCT f.photo_id) AS photos
          FROM persons p
-         LEFT JOIN photo_faces f ON f.person_id = p.id
+         ${join}
+         ${where}
         GROUP BY p.id
         ORDER BY faces DESC, p.id
-        LIMIT @limit`
+        ${limit === null ? "" : "LIMIT @limit"}`
     )
-    .all({ limit });
+    .all({ ...filterParams, ...(limit === null ? {} : { limit }) });
+  // `total` stays the LIBRARY total on purpose: it is what "showing N of M"
+  // is measured against, and a scoped view needs to say how much it is NOT
+  // showing.
   return { people, total, truncated: people.length < total };
 }
 
