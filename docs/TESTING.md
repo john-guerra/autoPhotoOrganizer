@@ -85,13 +85,36 @@ that way.
   JPEGs with real EXIF capture dates.
 - `e2e/global-setup.mjs` builds the fixture, waits for `/api/health`, and scans.
 
-### Measuring performance on a big library
+### A library bigger than one feed page
 
-Set **`E2E_KEEP_FIXTURE=1`** and the setup reuses whatever is already in
-`e2e/.tmp/photos` instead of regenerating the small fixture — so you can drop
-10,000 generated photos in there and measure against them, still hermetically.
-That's how #97's "⌘A freezes for 15s" was retested (it came back at **20ms** on
-10k, on current code).
+`PAGE_SIZE` is **60** (`ui/src/App.svelte`) and the standard fixture is **19
+photos**. So in the normal suite the loaded feed window and the filter's whole
+result set are the SAME SET, and every bug living in the gap between them is
+invisible. That is not hypothetical — it is how #245 shipped: "Visible" took
+its count from `items` while meaning "what the filter matches", and reverting
+that fix does not turn the normal suite red.
+
+There is a generator and a spec for exactly this:
+
+```bash
+node e2e/bigFixture.mjs 500                 # standard fixture + 500 more (~0.6s)
+E2E_KEEP_FIXTURE=1 npm run test:e2e -- e2e/scale.spec.js
+```
+
+- **`e2e/bigFixture.mjs`** builds the standard fixture FIRST and adds a bulk
+  folder on top. Not just the bulk folder: every other spec asserts on Trip /
+  Party / Cards, so replacing them would turn the suite red for reasons that
+  have nothing to do with scale.
+- **`e2e/scale.spec.js`** holds the tests that need the divergence. It **skips
+  loudly** when the library is too small, printing the two commands above — a
+  silent skip on the only check that a count means anything is
+  indistinguishable from a pass.
+- **`E2E_KEEP_FIXTURE=1` is required.** Without it `global-setup.mjs` rebuilds
+  the small fixture and deletes the bulk folder before the first spec runs.
+
+Generation is cheap (500 photos in well under a second), so use a bigger number
+freely when measuring — that is how #97's "⌘A freezes for 15s" was retested
+against 10k (it came back at **20ms**).
 
 Two traps when generating a big fixture, both of which produced a meaningless
 measurement first time:
