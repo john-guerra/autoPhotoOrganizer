@@ -1,6 +1,7 @@
 // Shared with the embed worklist (#206/#221) — see scopeIds.js on why this
 // validator has its own module rather than a copy per stage.
 import { normalizeScope, scopeClauseFor } from "./scopeIds.js";
+import { pendingWhere, stageById } from "../pipeline/stages.js";
 
 /**
  * The faces data layer (#166).
@@ -160,16 +161,11 @@ export function pendingFaceRows(db, model, limit, scopeIds = null) {
               folders.abs_path AS folder_abs_path
          FROM photos
          JOIN folders ON folders.id = photos.folder_id
-        WHERE photos.stale = 0
-          AND photos.kind = 'image'
+        WHERE ${pendingWhere(stageById("faces"))}
           ${scopeClause}
-          AND NOT EXISTS (
-                SELECT 1 FROM ml_status s
-                 WHERE s.photo_id = photos.id
-                   AND s.stage = @stage AND s.model = @model)
         LIMIT @limit`
     )
-    .all({ stage: FACES_STAGE, model, limit });
+    .all({ faceModel: model, limit });
 }
 
 /**
@@ -185,10 +181,20 @@ export function faceCounts(db, model) {
   const total = db
     .prepare(`SELECT COUNT(*) n FROM photos WHERE stale = 0 AND kind = 'image'`)
     .get().n;
+  // JOIN photos and filter stale, which this query did NOT do (#261).
+  //
+  // `total` counts live photos while these counted ml_status rows for photos
+  // that may since have gone stale, so a caller deriving pending as
+  // `total - scanned - failed` could get a number that is too low — and with
+  // enough stale rows, NEGATIVE. `embedCounts` already joined and filtered, so
+  // the two disagreed about the same library.
   const states = db
     .prepare(
-      `SELECT state, COUNT(*) n FROM ml_status
-        WHERE stage = ? AND model = ? GROUP BY state`
+      `SELECT s.state, COUNT(*) n
+         FROM ml_status s
+         JOIN photos p ON p.id = s.photo_id
+        WHERE s.stage = ? AND s.model = ? AND p.stale = 0
+        GROUP BY s.state`
     )
     .all(FACES_STAGE, model);
   const byState = Object.fromEntries(states.map((r) => [r.state, r.n]));

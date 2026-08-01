@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.12
+
+- Two counting fixes with no visible symptom yet: the face panel could
+  under-report how many photos still need scanning once photos had gone
+  missing, and "clear failures" removed more than failures (#261).
+
 ## 2.19.11
 
 - **Coming back to the photo grid from People, Auto Albums or the Face Map

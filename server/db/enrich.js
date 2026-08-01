@@ -27,6 +27,7 @@
  */
 
 import { placeFor, PLACE_VERSION } from "../lib/place.js";
+import { pendingWhere, stageById } from "../pipeline/stages.js";
 
 /** The rows the sweep still owes work to.
  *
@@ -43,10 +44,7 @@ import { placeFor, PLACE_VERSION } from "../lib/place.js";
 // condition without anyone updating the index's WHERE clause to match, and
 // nothing failed loudly — the query just fell back to a full table scan. One
 // shared string can't drift from itself.
-export const PENDING_CONDITION = `photos.stale = 0
-    AND (photos.width IS NULL
-         OR (photos.kind = 'video' AND photos.video_codec IS NULL)
-         OR photos.gps_checked = 0)`;
+export const PENDING_CONDITION = pendingWhere(stageById("meta"));
 
 /** Photos that have never had their metadata read, oldest id first.
  * @param {import("better-sqlite3").Database} db
