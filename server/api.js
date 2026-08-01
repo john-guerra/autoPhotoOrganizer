@@ -109,6 +109,7 @@ import {
 import { assignNewFaces } from "./ml/faceAssign.js";
 import { groupRemaining } from "./ml/faceGrouping.js";
 import { normalizeScope, resolveScope } from "./db/scopeIds.js";
+import { coverage } from "./pipeline/coverage.js";
 import {
   clusterFaces,
   isClusterInFlight,
@@ -3736,6 +3737,45 @@ export function registerApi(app, { ml } = {}) {
   //
   // Answers the plain filtered count too when `ids` is absent, so a caller
   // needing both numbers makes one request instead of two.
+  // POST -> how many photos still need each stage, for every scope at once.
+  //
+  // Phase 1 of the unified scan pipeline (design §2.3), and useful on its own:
+  // it answers "how many photos am I missing" without any pipeline existing.
+  //
+  // ONE request rather than one per radio button. The scope control offers up
+  // to four choices, each needing a live count; four round trips can land out
+  // of order, which is how two panels come to show different numbers for the
+  // same library — the class of failure #245 was made of. Answering them
+  // together makes the numbers consistent by construction.
+  //
+  // POST because a selection is routinely thousands of ids, far past what a
+  // query string carries — the same reason /api/photos/count has a POST twin.
+  app.post("/api/pipeline/coverage", (req, res) => {
+    const db = getDb();
+    const rawIds = req.body?.ids;
+    if (rawIds !== undefined && rawIds !== null && !Array.isArray(rawIds)) {
+      return res.status(400).json({ error: "ids must be an array" });
+    }
+    // Default to the models actually in force, so a caller that does not care
+    // still gets counts for what a sweep would really run.
+    const { modelId } = readMlSettings();
+    const model =
+      typeof req.body?.model === "string" ? req.body.model : modelId;
+    const faceModel = faceModelIdOf(req.body?.faceModel);
+    try {
+      res.json({
+        scopes: coverage(db, req.body ?? {}, { model, faceModel }),
+        models: { embed: model, faces: faceModel },
+      });
+    } catch (e) {
+      // A malformed filter is the user's current view, so say what happened
+      // rather than 500ing an empty body at a live count.
+      res
+        .status(400)
+        .json({ error: `Couldn't count that scope: ${e.message}` });
+    }
+  });
+
   app.post("/api/photos/count", (req, res) => {
     const db = getDb();
     const filter = req.body?.filter ?? {};
