@@ -258,14 +258,18 @@
       aria-label={inSelection ? "Deselect photo" : "Select photo"}
       aria-pressed={inSelection}
       onclick={(e) => {
+        // stopPropagation is still right — the tile's own click must not also
+        // fire — but the EVENT has to travel, or a modifier is lost here and
+        // nothing downstream can ever see it (#253).
         e.stopPropagation();
-        ontoggleselect?.();
+        ontoggleselect?.(e);
       }}
       onkeydown={(e) => {
         e.stopPropagation();
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          ontoggleselect?.();
+          // Same event, so Shift+Enter ranges exactly like Shift+click.
+          ontoggleselect?.(e);
         }
       }}
     >

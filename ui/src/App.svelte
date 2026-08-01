@@ -6752,7 +6752,25 @@
           onremovegroup={(path, paths) => removeGroup(path, paths)}
           onopenphoto={(id, path) => openPhotoById(id, path)}
           ontileclick={(e, entry, i) => onTileClick(e, entry, i)}
-          ontoggleselect={(id) => toggleSelect(id)}
+          ontoggleselect={(id, e, i) => {
+            // Shift on the SELECT CIRCLE ranges, the same as shift on the tile
+            // (#253). It did not, and that is why "click a photo to select,
+            // then shift-click another" never worked: the circle is the only
+            // control that actually SELECTS (a plain tile click just focuses),
+            // so it is the one people reach for — and it was the one path that
+            // stopped the event before any modifier could be read.
+            if (e?.shiftKey && typeof i === "number") {
+              selectRange(selected, i);
+            } else {
+              toggleSelect(id);
+              // ...and move the ANCHOR here, which is the other half of the
+              // bug. Without it a range started from wherever the keyboard
+              // focus happened to be — usually photo 0 — so "select this one,
+              // shift-click that one" quietly took everything from the top of
+              // the feed instead of between the two photos you clicked.
+              if (typeof i === "number") selected = i;
+            }
+          }}
           ontilecontextmenu={(e, entry, i) => onTileContextMenu(e, entry, i)}
           onthumbattempt={handleThumbAttempt}
           onthumbsettled={handleThumbSettled}

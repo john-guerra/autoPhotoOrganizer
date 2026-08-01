@@ -148,7 +148,14 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // macOS convention is that closing the last window does NOT quit — the app
+  // stays in the dock and `activate` reopens it. Correct for a PACKAGED app,
+  // and wrong for `npm run electron:dev`: there is no dock icon to click, the
+  // terminal stays occupied by concurrently, and the only way out is Ctrl-C.
+  //
+  // So dev quits on close and packaged keeps the convention. The window IS the
+  // app when you launched it from a terminal.
+  if (isDev || process.platform !== "darwin") app.quit();
 });
 
 app.on("activate", () => {

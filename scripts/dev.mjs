@@ -42,9 +42,25 @@ console.log(`[dev] API server + Vite proxy on port ${apiPort}`);
 // concurrently runs each command string in its own shell, so the electron
 // command's `&&` works. We invoke concurrently via npx; shell:true on Windows
 // where npx is a .cmd shim.
+// `--kill-others-on-fail` is NOT enough, and the difference is the whole bug:
+// closing the Electron window exits that command with code 0, which is not a
+// failure — so the server and Vite kept running and the terminal stayed
+// occupied until Ctrl-C. `-k` (--kill-others) stops the rest whatever the exit
+// code, which is what "I closed the app" should mean.
+//
+// Only when Electron is in the mix: `npm run dev` has no window to close, and
+// killing the server because Vite restarted would be a regression.
 const child = spawn(
   "npx",
-  ["concurrently", "-n", names.join(","), "-c", colors.join(","), ...commands],
+  [
+    "concurrently",
+    ...(withElectron ? ["-k"] : []),
+    "-n",
+    names.join(","),
+    "-c",
+    colors.join(","),
+    ...commands,
+  ],
   { stdio: "inherit", env, shell: process.platform === "win32" }
 );
 
