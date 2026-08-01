@@ -989,6 +989,12 @@
   /** How many people the People view has asked for so far (#223). */
   let peopleLimit = $state(200);
   /** Everyone the server has, vs. the page we hold. */
+  // The LIBRARY total, deliberately NOT the scoped list length. It feeds
+  // `offerable`, which decides whether a view earns a permanent switcher slot
+  // — a property of the library, not of the current filter. Keyed on the
+  // scoped count the Face Map's button appeared and VANISHED as you filtered,
+  // and its e2e lost the button entirely the moment People started narrowing
+  // (#252). That is why listPersonsPage keeps `total` unscoped.
   let peopleTotal = $state(0);
   let peopleTruncated = $state(false);
 
@@ -6544,7 +6550,7 @@
     {globalViewMode}
     {viewId}
     {switchingViewId}
-    peopleCount={people.length}
+    peopleCount={peopleTotal}
     bind:zoom
     zoomMax={ZOOM_LEVELS.length - 1}
     bind:burstEnabled
