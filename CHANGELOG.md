@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.11
+
+- **Coming back to the photo grid from People, Auto Albums or the Face Map
+  shows your photos again.** It used to come back nearly empty until you
+  scrolled (#248).
+
 ## 2.19.10
 
 - No user-facing change. Adds a benchmark that records how fast each

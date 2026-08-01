@@ -6,6 +6,8 @@ import {
   mlPanel,
   faceSettings,
   statusBar,
+  views,
+  albums,
 } from "./helpers.js";
 
 /**
@@ -109,6 +111,42 @@ test.describe("@p1 scale — bigger than one feed page", () => {
     await expect(filteredRow).not.toContainText(
       new RegExp(`\\b${rendered}\\b`)
     );
+
+    expect(errors).toEqual([]);
+  });
+
+  test("returning from another view repaints the feed, with no scroll (#248)", async ({
+    page,
+  }) => {
+    // Invisible on the small fixture: 19 photos all fit, so there is no
+    // virtualization window to lose. Here the grid renders a slice, and
+    // leaving unmounts it — `updateVisibleRange` collapses the window to
+    // `renderStart = 0, renderEnd = -1` when `gridEl` is gone, and coming back
+    // finds `retainWindow` with nothing to retain. Measured before the fix:
+    // 33 tiles before leaving, **1** on return. Any scroll fixed it, which is
+    // exactly how it was reported.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+
+    // Scroll into the feed first: the report is about returning to a feed you
+    // were working in, not one sitting at the top.
+    await page.locator(".main-column").evaluate((el) => (el.scrollTop = 4000));
+    await expect
+      .poll(() => grid.tileCount(page), { timeout: 10000 })
+      .toBeGreaterThan(8);
+
+    await albums.open(page); // dismisses the first-run explainer
+    await expect(page.locator(".album-timeline")).toBeVisible();
+
+    await views.toGrid(page);
+
+    // The assertion that matters: tiles are THERE, without touching the
+    // scroller. A count of 1 is the collapse; anything at viewport scale is a
+    // real repaint.
+    await expect
+      .poll(() => grid.tileCount(page), { timeout: 10000 })
+      .toBeGreaterThan(1);
+    await expect(page.locator(".thumb").first()).toBeVisible();
 
     expect(errors).toEqual([]);
   });

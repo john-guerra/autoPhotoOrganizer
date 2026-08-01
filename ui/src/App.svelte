@@ -2882,6 +2882,41 @@
   });
 
   /**
+   * Re-measure the grid when it comes BACK (#248).
+   *
+   * Leaving the grid unmounts it, and `updateVisibleRange` answers a missing
+   * `gridEl` by collapsing the window to `renderStart = 0, renderEnd = -1`.
+   * Coming back then finds `retainWindow` with nothing to retain: the incoming
+   * measurement races the browser's first layout, so `visibleRange` is empty
+   * or nearly so, and the fallback lands on `selected` alone. Measured on a
+   * 519-photo library: 33 tiles before leaving, **1** on return — the exact
+   * "tears down to `selected` alone" collapse the comment in
+   * `updateVisibleRange` already describes. Any scroll fixed it, which is
+   * precisely how it was reported.
+   *
+   * The refresh that would normally save us is the `$effect.pre` on `boxes`,
+   * and it does not run: `boxes` is unchanged by a view switch, so nothing
+   * re-derives and nothing re-measures.
+   *
+   * Keyed on `viewId` rather than living in `switchView` for the reason the
+   * effect above gives: `onAlbumsMaterialized` assigns `viewId` directly, and
+   * one effect covers every assignment, present and future.
+   *
+   * `tick()` waits for the grid to be in the DOM; `requestAnimationFrame`
+   * waits for the browser to have laid it out — `tick()` alone only guarantees
+   * pending state reached the DOM, not that a layout pass happened, which is
+   * the same distinction `$effect.pre` documents. `untrack` keeps
+   * `updateVisibleRange`'s reads (items, boxes, the fetching flags) from
+   * becoming dependencies of this effect.
+   */
+  $effect(() => {
+    if (viewId !== GRID.id) return;
+    untrack(() => {
+      tick().then(() => requestAnimationFrame(() => updateVisibleRange()));
+    });
+  });
+
+  /**
    * Refuse an interaction the active view has DECLARED it cannot do, and say
    * so (#155).
    *
