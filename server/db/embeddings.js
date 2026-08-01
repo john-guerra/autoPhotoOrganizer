@@ -11,6 +11,7 @@
 // living here: it is what makes inlining ids into SQL safe, and a second copy
 // of that is how one copy drifts.
 import { normalizeScope, scopeClauseFor } from "./scopeIds.js";
+import { pendingWhere, stageById } from "../pipeline/stages.js";
 
 /** The sweep stage name recorded in ml_status. Faces (#166) will add its own. */
 export const EMBED_STAGE = "embed";
@@ -132,20 +133,11 @@ export function pendingEmbedRows(db, model, limit, scopeIds = null) {
               folders.abs_path AS folder_abs_path
          FROM photos
          JOIN folders ON folders.id = photos.folder_id
-        WHERE photos.stale = 0
-          AND photos.kind != 'raw'
+        WHERE ${pendingWhere(stageById("embed"))}
           ${scopeClause}
-          AND NOT EXISTS (
-                SELECT 1 FROM photo_embeddings e
-                 WHERE e.photo_id = photos.id AND e.model = @model)
-          AND NOT EXISTS (
-                SELECT 1 FROM ml_status s
-                 WHERE s.photo_id = photos.id
-                   AND s.stage = @stage AND s.model = @model
-                   AND s.state = 'failed')
         LIMIT @limit`
     )
-    .all({ model, stage: EMBED_STAGE, limit });
+    .all({ model, limit });
 }
 
 /**
@@ -259,8 +251,16 @@ export function markEmbedFailed(db, photoId, model, error) {
  * @returns {{cleared: number}}
  */
 export function clearEmbedFailures(db, model) {
+  // `AND state = 'failed'` (#261). Without it this deleted EVERY row for the
+  // stage regardless of state, contradicting its own docstring — and
+  // `clearFaceFailures` beside it has always filtered. Inert today because
+  // `failed` is the only state written for embed, which is exactly why it
+  // needed fixing BEFORE the pipeline introduces a second one and this
+  // silently discards completed work.
   const { changes } = db
-    .prepare(`DELETE FROM ml_status WHERE stage = ? AND model = ?`)
+    .prepare(
+      `DELETE FROM ml_status WHERE stage = ? AND model = ? AND state = 'failed'`
+    )
     .run(EMBED_STAGE, model);
   return { cleared: changes };
 }

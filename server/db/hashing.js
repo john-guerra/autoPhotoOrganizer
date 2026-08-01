@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { pendingWhere, stageById } from "../pipeline/stages.js";
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { whenIdle } from "../lib/interactive.js";
@@ -25,8 +26,7 @@ function pendingHashRows(db, limit) {
     .prepare(
       `SELECT photos.id, folders.abs_path AS folder_abs_path, photos.filename
          FROM photos JOIN folders ON folders.id = photos.folder_id
-        WHERE photos.content_hash IS NULL AND photos.hash_attempted = 0
-          AND photos.stale = 0
+        WHERE ${pendingWhere(stageById("hash"))}
         LIMIT ?`
     )
     .all(limit);
