@@ -325,9 +325,15 @@
       />
 
       <div class="actions">
+        <!-- No `clusterJob` in `disabled` any more (#258 Phase 4). Scanning and
+             grouping used to be mutually exclusive in the UI because nothing
+             ordered them on the server; now the scheduler does, so a scan
+             requested while a grouping runs QUEUES instead of being refused. A
+             disabled button is a worse answer than a queue — it makes the user
+             wait without telling them what for. -->
         <button
           class="primary"
-          disabled={!!busy || status.running || !!clusterJob || !activeScope?.n}
+          disabled={!!busy || status.running || !activeScope?.n}
           onclick={() =>
             act("scan", async () => {
               const r = await startFaceScan(modelId, scopeRequest);
@@ -422,14 +428,16 @@
             allCount={groupPending}
             allLabel="All remaining"
             emptyMessage="Every face here already belongs to someone."
-            disabled={!!busy || status.running || !!clusterJob}
+            disabled={!!busy || status.running}
             bind:choice={groupChoice}
           />
+          <!-- DEMOTED, not removed (#258 Phase 4). Finding faces now groups
+               them as part of the same pass, so this is the advanced "run
+               just this stage" affordance rather than a step the user has to
+               know about. `quiet` matches Regroup beside it. -->
           <button
-            disabled={!!busy ||
-              status.running ||
-              !!clusterJob ||
-              !activeGroupScope?.n}
+            class="quiet"
+            disabled={!!busy || status.running || !activeGroupScope?.n}
             onclick={() =>
               act("cluster", async () => {
                 await clusterPeople(modelId, undefined, groupScopeRequest);

@@ -2053,14 +2053,28 @@ export function registerApi(app, { ml } = {}) {
       mode: "remaining",
     });
 
+    // Through the scheduler too (#257, Phase 4). Grouping and scanning contend
+    // for the same CPU, so letting them overlap makes both slower and neither
+    // finish sooner — and once the scheduler ORDERS them, the client no longer
+    // has to disable the scan button while a grouping runs. That gating was
+    // the only thing stopping the two, and a disabled button is a worse answer
+    // than a queue: it makes the user wait without telling them for what.
     withClusterLatch(async () => {
-      const r = await groupRemaining(db, modelId, {
-        scopeIds,
-        ...(Number.isFinite(threshold) ? { threshold } : {}),
-        signal: job.controller.signal,
-        onPhase: (phase) => registry.update(job.id, { phase }),
-        onProgress: ({ done, total }) =>
-          registry.update(job.id, { done, total }),
+      const r = await scheduler.submit({
+        priority: scopeIds ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
+        onPause: () =>
+          registry.pause(job.id, "Waiting — a scoped request is running first"),
+        onResume: () => registry.resume(job.id),
+        body: ({ checkpoint }) =>
+          groupRemaining(db, modelId, {
+            scopeIds,
+            checkpoint,
+            ...(Number.isFinite(threshold) ? { threshold } : {}),
+            signal: job.controller.signal,
+            onPhase: (phase) => registry.update(job.id, { phase }),
+            onProgress: ({ done, total }) =>
+              registry.update(job.id, { done, total }),
+          }),
       });
       registry.finish(job.id, { ...r, mode: "remaining" });
     }).catch((e) => {

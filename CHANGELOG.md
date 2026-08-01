@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.17
+
+- **Finding faces no longer waits for grouping to finish.** Asking for one
+  while the other runs now queues it instead of greying out the button, and
+  "Group faces" steps back to being an advanced option rather than a step
+  you have to remember (#258).
+
 ## 2.19.16
 
 - **One "Scan my photos" pass**, on the server for now: it walks your photos
