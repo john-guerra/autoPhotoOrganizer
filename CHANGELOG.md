@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.10
+
+- No user-facing change. Adds a benchmark that records how fast each
+  processing stage is today, so the upcoming unified scan can be held to
+  being at least as fast (#258).
+
 ## 2.19.9
 
 - No user-facing change. Adds a test fixture larger than one feed page, so
