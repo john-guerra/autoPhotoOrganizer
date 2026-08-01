@@ -110,6 +110,7 @@ import { assignNewFaces } from "./ml/faceAssign.js";
 import { groupRemaining } from "./ml/faceGrouping.js";
 import { normalizeScope, resolveScope } from "./db/scopeIds.js";
 import { coverage } from "./pipeline/coverage.js";
+import { scheduler, PRIORITY } from "./pipeline/scheduler.js";
 import {
   clusterFaces,
   isClusterInFlight,
@@ -425,17 +426,36 @@ function kickEmbedSweep(
     };
     if (canStreamProgress) ml.on("progress", onDownloadProgress);
 
-    embedAllPending(db, {
-      ml,
-      processing,
-      model: modelId,
-      threads,
-      job,
-      scopeIds,
-      device,
-      onProgress: (counters) =>
-        registry.update(job.id, embedProgress(counters, pending)),
-    })
+    // Through the scheduler (#257). A SCOPED request — the user just asked for
+    // these photos — outranks the BACKGROUND backlog sweep, so an unscoped
+    // pass parks at its next batch boundary and resumes when this finishes.
+    //
+    // `key` coalesces only the background case: two backlog sweeps would
+    // recompute an identical worklist, while two scoped requests are two
+    // different asks and both must run.
+    scheduler
+      .submit({
+        priority: scopeIds ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
+        key: scopeIds ? undefined : "backlog:embed",
+        // Say WHY it stopped rather than leaving a bar that has not moved to
+        // be interpreted — starvation is legitimate here, silence is not.
+        onPause: () =>
+          registry.pause(job.id, "Waiting — a scoped request is running first"),
+        onResume: () => registry.resume(job.id),
+        body: ({ checkpoint }) =>
+          embedAllPending(db, {
+            ml,
+            processing,
+            model: modelId,
+            threads,
+            job,
+            scopeIds,
+            device,
+            checkpoint,
+            onProgress: (counters) =>
+              registry.update(job.id, embedProgress(counters, pending)),
+          }),
+      })
       .then((r) => {
         // Mirrors kickHashSweep above: "embed" is SELF_CLEARING, so finish()
         // (not dismiss()) is what actually removes a successful run's row.
@@ -1831,33 +1851,43 @@ export function registerApi(app, { ml } = {}) {
       readFile: (p) => fsp.readFile(p),
     });
     try {
-      const r = await sweepFaces({
-        db: getDb(),
-        modelId,
-        engine,
-        job,
-        scopeIds: ids ?? null,
-        // NOTE WHAT IS *NOT* PATCHED HERE: `total`.
-        //
-        // It is already correct on the job — `pendingInScope`, counted once
-        // above — and `registry.update` is an Object.assign, so re-sending it
-        // per batch overwrote the honest number with the wrong one after the
-        // first eight photos. Select 20 of which 15 are done and the bar was
-        // created 0/5, rewritten to 8/20, and finished at 5/20: "done"
-        // rendered as 25%, which is the exact failure the count above exists
-        // to prevent. kickEmbedSweep threads its up-front total through every
-        // tick for the same reason.
-        onProgress: ({ done, failed }) =>
-          registry.update(job.id, {
-            done,
-            // Keep the scope in the label too — replacing it with a bare
-            // "Finding faces" dropped the one word that said this was a
-            // scoped run.
-            label:
-              (ids
-                ? `Finding faces in ${pendingInScope.toLocaleString()} photos`
-                : "Finding faces") +
-              ` — ${done.toLocaleString()} scanned${failed ? `, ${failed} unreadable` : ""}`,
+      const r = await scheduler.submit({
+        priority: ids ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
+        key: ids ? undefined : "backlog:faces",
+        onPause: () =>
+          registry.pause(job.id, "Waiting — a scoped request is running first"),
+        onResume: () => registry.resume(job.id),
+        body: ({ checkpoint }) =>
+          sweepFaces({
+            db: getDb(),
+            modelId,
+            engine,
+            job,
+            checkpoint,
+            scopeIds: ids ?? null,
+            // NOTE WHAT IS *NOT* PATCHED HERE: `total`.
+            //
+            // It is already correct on the job — `pendingInScope`, counted
+            // once above — and `registry.update` is an Object.assign, so
+            // re-sending it per batch overwrote the honest number with the
+            // wrong one after the first eight photos. Select 20 of which 15
+            // are done and the bar was created 0/5, rewritten to 8/20, and
+            // finished at 5/20: "done" rendered as 25%, which is the exact
+            // failure the count above exists to prevent. kickEmbedSweep
+            // threads its up-front total through every tick for the same
+            // reason.
+            onProgress: ({ done, failed }) =>
+              registry.update(job.id, {
+                done,
+                // Keep the scope in the label too — replacing it with a bare
+                // "Finding faces" dropped the one word that said this was a
+                // scoped run.
+                label:
+                  (ids
+                    ? `Finding faces in ${pendingInScope.toLocaleString()} photos`
+                    : "Finding faces") +
+                  ` — ${done.toLocaleString()} scanned${failed ? `, ${failed} unreadable` : ""}`,
+              }),
           }),
       });
       // A PAUSE is not a success and must not be reported as one. The sweep

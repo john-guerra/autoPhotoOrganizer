@@ -350,3 +350,45 @@ describe("runSweep", () => {
     expect(result.done).toBe(1);
   });
 });
+
+describe("checkpoint — preemption's one seam (#257)", () => {
+  it("awaits the checkpoint before each batch, and never mid-batch", async () => {
+    // The whole promise of preemption in one assertion: a park can only ever
+    // cost the batch already in flight, because this is the only place the
+    // loop yields to the scheduler.
+    const order = [];
+    let n = 0;
+    await runSweep(liveJob(), {
+      nextBatch: () => (n++ < 2 ? [{ id: n }] : []),
+      process: async (rows) => {
+        order.push(`process:${rows[0].id}`);
+        return rows.length;
+      },
+      markFailed: () => {},
+      idle: async () => {},
+      checkpoint: async () => order.push("checkpoint"),
+    });
+    // checkpoint, batch, checkpoint, batch, checkpoint (the empty one that
+    // ends the loop) — never two batches between checkpoints.
+    expect(order).toEqual([
+      "checkpoint",
+      "process:1",
+      "checkpoint",
+      "process:2",
+      "checkpoint",
+    ]);
+  });
+
+  it("runs unchanged when no checkpoint is supplied", async () => {
+    // Defaulting to a no-op is what lets every existing caller stay untouched
+    // and keeps this file runnable with no scheduler at all.
+    let n = 0;
+    const r = await runSweep(liveJob(), {
+      nextBatch: () => (n++ < 1 ? [{ id: 1 }] : []),
+      process: async (rows) => rows.length,
+      markFailed: () => {},
+      idle: async () => {},
+    });
+    expect(r.done).toBe(1);
+  });
+});

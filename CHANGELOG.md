@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.15
+
+- **Asking to scan a folder or a selection now jumps the queue.** A
+  library-wide pass steps aside for it — finishing the batch it is on, never
+  losing work — says so in the jobs panel, and picks up again afterwards
+  (#257).
+
 ## 2.19.14
 
 - **An unplugged drive no longer looks like a failure.** A sweep that stops

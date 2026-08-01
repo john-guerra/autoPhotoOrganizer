@@ -117,6 +117,16 @@ export async function runSweep(
     isTransient = isTransientCode,
     idle = whenIdle,
     idOf = (row) => row.id,
+    /**
+     * Preemption (#257). Awaited at the TOP of the drain loop and nowhere
+     * else, so a park can never interrupt a batch in flight: the worst case
+     * is finishing the current one, ~2.5s for faces and well under a second
+     * for the rest, with nothing thrown away.
+     *
+     * Defaults to a no-op so every existing caller is unchanged and this file
+     * stays runnable with no scheduler at all.
+     */
+    checkpoint = async () => {},
   }
 ) {
   let done = 0;
@@ -155,6 +165,10 @@ export async function runSweep(
 
   for (;;) {
     abortIfCanceled();
+    // Park here if something higher-priority is waiting (#257). Deliberately
+    // BEFORE `idle()`: a preempted sweep should stand aside immediately rather
+    // than first waiting for the user to stop interacting.
+    await checkpoint();
     // Let the user go first. A full-library sweep will happily starve the
     // thumbnails the user is actually waiting on (measured: 15ms -> 90ms, tiles
     // abandoned mid-scroll). State-driven, not timer-driven — see
