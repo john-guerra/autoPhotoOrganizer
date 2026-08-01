@@ -169,6 +169,31 @@
   function summarize(job) {
     const r = job.result;
     if (!r) return "";
+    if (job.type === "pipeline") {
+      // Contract 2: a bare ✓ with no summary is an unfinished feature.
+      //
+      // Order: what the user asked about first, then what went wrong. A
+      // DISABLED stage contributes nothing rather than reporting zero —
+      // "0 faces" to someone who never turned faces on is a bug report waiting
+      // to be filed.
+      const n = (v) => Number(v ?? 0).toLocaleString();
+      const parts = [`${n(r.photos)} photos`];
+      for (const [id, c] of Object.entries(r.counts ?? {})) {
+        if (c?.done) parts.push(`${n(c.done)} ${id}`);
+      }
+      const failed = Object.values(r.counts ?? {}).reduce(
+        (sum, c) => sum + (c?.failed ?? 0),
+        0
+      );
+      if (failed) parts.push(`${n(failed)} unreadable`);
+      for (const st of r.stalled ?? []) {
+        parts.push(`${st.id} skipped: ${st.reason}`);
+      }
+      // A cancellation is an OUTCOME, not a failure (Finding 6) — and saying
+      // what was kept is what makes stopping safe to do.
+      if (r.canceled) parts.push("stopped early — everything above was kept");
+      return parts.join(" · ");
+    }
     if (job.type === "materialize") {
       const { moved, copied, skipped } = materializeTotals(r);
       const parts = [];
