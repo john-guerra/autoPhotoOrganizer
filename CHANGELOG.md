@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.13
+
+- Groundwork, not yet visible: one place to ask how many photos still need
+  each kind of processing, for the whole library, the current filter and
+  your selection at once (#258).
+
 ## 2.19.12
 
 - Two counting fixes with no visible symptom yet: the face panel could
