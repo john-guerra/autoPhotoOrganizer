@@ -120,7 +120,12 @@ export function waitForJob(id, onProgress) {
     unsub = jobs.subscribe((list) => {
       const job = list.find((j) => j.id === id);
       if (!job) return;
-      if (job.status === "running") {
+      // `paused` is NOT terminal (#260). Treating "not running" as "finished"
+      // would make every waiter behave as though the work completed the moment
+      // a job parks — including the progressive-render path this function
+      // exists for, which would stop filling the grid while the scan is only
+      // waiting for a drive to come back.
+      if (job.status === "running" || job.status === "paused") {
         onProgress?.(job);
         return;
       }

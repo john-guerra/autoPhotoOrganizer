@@ -69,6 +69,34 @@ describe("waitForJob", () => {
     expect(job.result.copied).toBe(3);
   });
 
+  it("does NOT resolve when a job PAUSES (#260)", async () => {
+    // The latent half of #260, and the worse half. waitForJob resolved on any
+    // status other than "running", so the moment a job parked every waiter
+    // would behave as though the work had FINISHED — including the
+    // progressive-render path this function exists for, which would stop
+    // filling the grid while the scan is merely waiting for a drive.
+    FakeEventSource.last.emit([{ id: "job-p", status: "running" }]);
+    const progress = [];
+    const promise = waitForJob("job-p", (j) => progress.push(j.status));
+    let resolved = false;
+    promise.then(() => (resolved = true));
+
+    FakeEventSource.last.emit([
+      { id: "job-p", status: "paused", pauseReason: "Drive not available" },
+    ]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    // ...and a pause is reported as progress, so a caller can say why it is
+    // waiting rather than sitting on a silent spinner.
+    expect(progress).toContain("paused");
+
+    // Resuming and finishing still resolves normally.
+    FakeEventSource.last.emit([{ id: "job-p", status: "done", result: {} }]);
+    const job = await promise;
+    expect(job.status).toBe("done");
+  });
+
   it("resolves immediately when the job is already terminal", async () => {
     FakeEventSource.last.emit([
       { id: "job-2", status: "failed", error: "boom" },

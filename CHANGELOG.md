@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.14
+
+- **An unplugged drive no longer looks like a failure.** A sweep that stops
+  because the drive went away now says it is paused, with the reason, in a
+  neutral colour — instead of a red "1 failed" about something that was
+  never wrong with your photos (#260).
+
 ## 2.19.13
 
 - Groundwork, not yet visible: one place to ask how many photos still need

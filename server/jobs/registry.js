@@ -48,6 +48,7 @@ class JobRegistry extends EventEmitter {
       done: 0,
       total,
       phase: "",
+      pauseReason: "",
       result: null,
       error: null,
       controller: new AbortController(),
@@ -96,14 +97,58 @@ class JobRegistry extends EventEmitter {
     j.error = String(error?.message ?? error);
     this.#emit();
   }
-  cancel(id) {
+  /**
+   * Park a job that is waiting on something, WITHOUT pretending it failed.
+   *
+   * There was no such status, so `kickHashSweep` and `kickEmbedSweep` faked one
+   * with `status: "failed", error: "paused — …"` — and the JobsPanel counts
+   * `failed` as broken, so an unmounted drive rendered a red "1 failed" (#260).
+   * A host condition says nothing about your photos, and that is precisely the
+   * Finding-6 mistake the panel's own comment condemns for cancellation.
+   *
+   * @param {string} id
+   * @param {string} reason shown to the user; say what to DO about it
+   */
+  pause(id, reason) {
     const j = this.#jobs.get(id);
     if (!j || j.status !== "running") return false;
+    j.status = "paused";
+    j.pauseReason = String(reason ?? "");
+    this.#emit();
+    return true;
+  }
+  resume(id) {
+    const j = this.#jobs.get(id);
+    if (!j || j.status !== "paused") return false;
+    j.status = "running";
+    j.pauseReason = "";
+    this.#emit();
+    return true;
+  }
+  cancel(id) {
+    const j = this.#jobs.get(id);
+    // `paused` too, or a paused job is UNCANCELLABLE — which fails contract 2
+    // outright ("a working Cancel"), and would land the moment #257 introduces
+    // a real pause. Cancelling a parked job is the most likely thing a user
+    // does with one.
+    if (!j || (j.status !== "running" && j.status !== "paused")) return false;
     j.controller.abort();
     return true;
   }
   dismiss(id) {
     const j = this.#jobs.get(id);
+    // Paused IS dismissable, and that is a correction to this issue's own
+    // first instinct (#260 originally said it should be refused, "it has not
+    // finished"). The evidence says otherwise: all three of today's pausers
+    // have already RETURNED from their sweep when they pause — the work
+    // stopped and will be re-kicked as a NEW job on the next scan — so
+    // refusing dismiss stranded rows forever. It showed up immediately as 41
+    // undismissable "Hashing library contents" rows in the api tests.
+    //
+    // A genuinely PARKED run (#257, where a live closure is waiting on a
+    // scheduler) is a different thing, and when it arrives it needs to keep
+    // its row. That distinction belongs to the phase that introduces it, not
+    // to a status flag guessed at in advance.
     if (!j || j.status === "running") return false;
     this.#jobs.delete(id);
     this.#emit();
