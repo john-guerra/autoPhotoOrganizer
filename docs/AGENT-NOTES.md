@@ -97,6 +97,17 @@ Keep this current: when one of these facts changes, update it in the same commit
     test that stubs a failure.
   - Note both were **unreproducible locally** (20+ clean runs each) — a green
     local run does not clear a CI-only flake in this file.
+- **Never edit `server/` while an e2e run is in flight.** The e2e web server is
+  `npm run dev`, whose server half runs under `node --watch --watch-path=server`
+  — so saving any file there RESTARTS it mid-suite, and whichever request lands
+  in that window fails with a proxy `ECONNREFUSED` and a 502. It reads as a
+  product bug in a spec that has nothing to do with what you were editing
+  (observed 2026-07-31: `ml-settings.spec.js` asserting 400, receiving 502,
+  while a pipeline route was being added in another window). The log gives it
+  away — `[server] Restarting 'server/index.js'` immediately before the failure
+  — but only if you look, and the obvious reading is that your change broke
+  something. Either wait for the run, or work on `ui/` (Vite HMR is fine).
+
 - **A test that never failed proves nothing.** Revert the fix, watch the test go
   red, restore. (Also in CLAUDE.md — repeated here because it's the most-skipped
   step.)

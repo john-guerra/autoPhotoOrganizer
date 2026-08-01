@@ -65,7 +65,7 @@ import {
   repointPhotoToFolder,
   renameFolderPath,
 } from "./db/photos.js";
-import { hashAllPending, hashProgress } from "./db/hashing.js";
+import { hashAllPending, hashProgress, hashFile } from "./db/hashing.js";
 import { runSweep } from "./ml/sweep.js";
 import {
   embedAllPending,
@@ -111,6 +111,8 @@ import { groupRemaining } from "./ml/faceGrouping.js";
 import { normalizeScope, resolveScope } from "./db/scopeIds.js";
 import { coverage } from "./pipeline/coverage.js";
 import { scheduler, PRIORITY } from "./pipeline/scheduler.js";
+import { runPipeline, totalWorkMs, MS_PER_PHOTO } from "./pipeline/run.js";
+import { STAGES } from "./pipeline/stages.js";
 import {
   clusterFaces,
   isClusterInFlight,
@@ -3782,6 +3784,148 @@ export function registerApi(app, { ml } = {}) {
   //
   // POST because a selection is routinely thousands of ids, far past what a
   // query string carries — the same reason /api/photos/count has a POST twin.
+  /**
+   * The real work behind each pipeline stage, bound to one database.
+   *
+   * This is the seam `runPipeline` takes as `runners`, and the reason that
+   * module is testable with no models, no ONNX and no weights on disk.
+   *
+   * Only `meta` and `hash` are wired here. `embed` and `faces` are NOT, and
+   * that is deliberate rather than unfinished: both need an explicit opt-in, a
+   * configured worker and (for faces) a 191 MB download, and the existing
+   * scoped routes already drive them correctly with their own consent checks,
+   * progress and refusals. Chaining them in belongs with the UI that offers
+   * the choice — the stage checklist — not ahead of it. A pipeline that
+   * quietly started a model download would be exactly the consent bug
+   * FaceSettings exists to prevent.
+   */
+  function pipelineRunners(db) {
+    return {
+      meta: async ({ ids }) => {
+        const rows = photosByIds(db, ids).filter((r) => r.path);
+        if (!rows.length) return { done: 0 };
+        const done = await enrichBatch(db, processing, rows);
+        return { done };
+      },
+      hash: async ({ ids }) => {
+        // Hash exactly this cohort, so the pipeline's progress is about the
+        // photos it said it was working on rather than the whole backlog.
+        const rows = db
+          .prepare(
+            `SELECT photos.id, folders.abs_path AS dir, photos.filename
+               FROM photos JOIN folders ON folders.id = photos.folder_id
+              WHERE photos.id IN (${ids.join(",")})
+                AND photos.content_hash IS NULL
+                AND photos.hash_attempted = 0`
+          )
+          .all();
+        let done = 0;
+        let failed = 0;
+        for (const row of rows) {
+          try {
+            const hash = await hashFile(join(row.dir, row.filename));
+            db.prepare(`UPDATE photos SET content_hash = ? WHERE id = ?`).run(
+              hash,
+              row.id
+            );
+            done += 1;
+          } catch {
+            // Mark attempted rather than retrying forever — the same sentinel
+            // hashAllPending uses, and what stops an unreadable file becoming
+            // an infinite loop.
+            db.prepare(`UPDATE photos SET hash_attempted = 1 WHERE id = ?`).run(
+              row.id
+            );
+            failed += 1;
+          }
+        }
+        return { done, failed };
+      },
+    };
+  }
+
+  // POST -> "Scan my photos": one process, every enabled stage, progressively.
+  //
+  // Phase 3 of the unified scan pipeline (design §1). Returns {jobId} and does
+  // the work after res.json() — turning an awaited request into a job is not a
+  // wrapper (contract 2), so the caller stops awaiting a result and watches the
+  // JobsPanel instead.
+  //
+  // Every refusal happens BEFORE registry.create, so a rejected request never
+  // leaves a row that appears and immediately fails.
+  app.post("/api/pipeline/run", async (req, res) => {
+    const db = getDb();
+    const scoped = scopeForRoute(db, req.body, { verb: "scan" });
+    if (scoped.error) {
+      return res.status(scoped.status).json({ error: scoped.error });
+    }
+
+    const { modelId } = readMlSettings();
+    const model =
+      typeof req.body?.model === "string" ? req.body.model : modelId;
+    const faceModel = faceModelIdOf(req.body?.faceModel);
+
+    // Which stages are enabled. Defaults to the two that need no model at all,
+    // because those are the only ones that can be assumed: embedding and faces
+    // require an explicit opt-in and a 191 MB download, and a "Scan my photos"
+    // that quietly started one would be the consent bug FaceSettings exists to
+    // prevent.
+    const wanted = Array.isArray(req.body?.stages)
+      ? req.body.stages
+      : ["meta", "hash"];
+    const stageIds = STAGES.filter((s) => wanted.includes(s.id)).map(
+      (s) => s.id
+    );
+    if (!stageIds.length) {
+      return res.status(400).json({
+        error: "No processing steps were selected, so there is nothing to do.",
+      });
+    }
+
+    // `total` up front, in MILLISECONDS of work, and set at registry.create —
+    // never revised. A total that arrives a batch late is an indeterminate bar
+    // at exactly the moment the user decides whether it hung (#208).
+    const cov = coverage(db, scoped.ids === null ? {} : { ids: scoped.ids }, {
+      model,
+      faceModel,
+    });
+    const scopeCov = scoped.ids === null ? cov.library : cov.selected;
+    const total = Math.round(totalWorkMs(scopeCov, stageIds));
+    if (!total) {
+      return res.json({ started: false, upToDate: true });
+    }
+
+    const job = registry.create("pipeline", {
+      label: scoped.label ? `Scanning ${scoped.label}` : "Scanning your photos",
+      total,
+    });
+    res.json({ started: true, jobId: job.id, total });
+
+    scheduler
+      .submit({
+        priority: scoped.ids ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
+        key: scoped.ids ? undefined : "pipeline:all",
+        onPause: () =>
+          registry.pause(job.id, "Waiting — a scoped request is running first"),
+        onResume: () => registry.resume(job.id),
+        body: ({ checkpoint }) =>
+          runPipeline({
+            db,
+            stageIds,
+            scopeIds: scoped.ids,
+            model,
+            faceModel,
+            checkpoint,
+            signal: job.controller.signal,
+            runners: pipelineRunners(db),
+            onProgress: ({ doneMs, phase }) =>
+              registry.update(job.id, { done: Math.round(doneMs), phase }),
+          }),
+      })
+      .then((r) => registry.finish(job.id, r))
+      .catch((e) => registry.fail(job.id, e));
+  });
+
   app.post("/api/pipeline/coverage", (req, res) => {
     const db = getDb();
     const rawIds = req.body?.ids;

@@ -145,6 +145,66 @@ async function main() {
     });
     note("hash", hashMs, paths.length);
 
+    // --- THE D2 GATE: pipeline vs the separate passes ---------------------
+    //
+    // The stage numbers above are inputs; THIS is the acceptance criterion.
+    // D2 says the unified pipeline must be at least as fast as running the
+    // passes separately, and the only way to know is to run both over the
+    // same photos on the same machine.
+    //
+    // Reset the marks first so the second run has the identical work to do —
+    // otherwise the pipeline "wins" by finding everything already done, which
+    // is the most flattering possible way to measure nothing.
+    const { runPipeline } = await import("../server/pipeline/run.js");
+    db.prepare(
+      `UPDATE photos
+          SET width = NULL, height = NULL, gps_checked = 0,
+              content_hash = NULL, hash_attempted = 0`
+    ).run();
+    // hashFile is already imported above, for the sequential measurement.
+    const [, pipeMs] = await timed(async () =>
+      runPipeline({
+        db,
+        stageIds: ["meta", "hash"],
+        model: "m",
+        faceModel: "fm",
+        runners: {
+          meta: async ({ ids }) => {
+            const rows = photosByIds(db, ids).filter((r) => r.path);
+            return { done: await enrichBatch(db, processing, rows) };
+          },
+          hash: async ({ ids }) => {
+            let done = 0;
+            for (const id of ids) {
+              const row = db
+                .prepare(
+                  `SELECT folders.abs_path AS dir, photos.filename
+                     FROM photos JOIN folders ON folders.id = photos.folder_id
+                    WHERE photos.id = ?`
+                )
+                .get(id);
+              const h = await hashFile(join(row.dir, row.filename));
+              db.prepare(`UPDATE photos SET content_hash = ? WHERE id = ?`).run(
+                h,
+                id
+              );
+              done += 1;
+            }
+            return { done };
+          },
+        },
+      })
+    );
+    const sequentialMs = metaMs + hashMs;
+    note("pipeline", pipeMs, COUNT);
+    results.push({
+      stage: "D2",
+      verdict:
+        pipeMs <= sequentialMs * 1.1
+          ? `PASS — pipeline ${pipeMs.toFixed(0)}ms vs separate ${sequentialMs.toFixed(0)}ms`
+          : `FAIL — pipeline ${pipeMs.toFixed(0)}ms vs separate ${sequentialMs.toFixed(0)}ms (D2 requires no slower)`,
+    });
+
     // --- the cohort query, at a size where the answer means something -----
     //
     // Measured against SYNTHETIC ROWS, not generated files, and the distinction
@@ -248,12 +308,14 @@ async function main() {
 function report(results, root) {
   console.log(`\nAutoGallery stage baseline — ${COUNT} photos`);
   console.log(`node ${process.version} · hermetic in ${root}\n`);
-  const rows = results.filter((r) => !r.plan);
+  const rows = results.filter((r) => !r.plan && !r.verdict);
   const w = Math.max(...rows.map((r) => r.stage.length));
   for (const r of rows) {
     const rate = r.stage.startsWith("cohort") ? r.extra : per(r.ms, r.n);
     console.log(`  ${r.stage.padEnd(w)}  ${fmt(r.ms).padStart(9)}   ${rate}`);
   }
+  const d2 = results.find((r) => r.verdict);
+  if (d2) console.log(`\n  D2 gate: ${d2.verdict}`);
   const planRow = results.find((r) => r.plan);
   if (planRow) console.log(`\n  cohort query plan: ${planRow.plan}`);
   const cohort = results.find((r) => r.stage === "cohort (last)");
@@ -291,13 +353,15 @@ async function save(results) {
     "| stage | total | per unit |",
     "| ----- | ----- | -------- |",
     ...results
-      .filter((r) => !r.plan)
+      .filter((r) => !r.plan && !r.verdict)
       .map(
         (r) =>
           `| \`${r.stage}\` | ${fmt(r.ms)} | ${r.stage.startsWith("cohort") ? r.extra : per(r.ms, r.n)} |`
       ),
     "",
     `**Cohort query plan:** \`${results.find((r) => r.plan)?.plan ?? "n/a"}\``,
+    "",
+    `**D2 gate:** ${results.find((r) => r.verdict)?.verdict ?? "not measured"}`,
     "",
     process.env.ML_INTEGRATION
       ? ""

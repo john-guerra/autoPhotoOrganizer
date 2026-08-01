@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.16
+
+- **One "Scan my photos" pass**, on the server for now: it walks your photos
+  in slabs sized to about twenty seconds of work each, carries every slab
+  through each step you have switched on, and reports what it found. Stopping
+  it keeps everything it had already finished (#258).
+
 ## 2.19.15
 
 - **Asking to scan a folder or a selection now jumps the queue.** A
