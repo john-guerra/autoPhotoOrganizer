@@ -138,6 +138,22 @@ export async function groupRemaining(
     signal,
     onProgress,
     onPhase,
+    /**
+     * Preemption (#257). Awaited at the SAME yield point the abort check uses
+     * — the one place this O(n²) loop is not mid-comparison — so parking here
+     * costs at most the comparisons since the last yield, and every batch
+     * already committed stays committed.
+     *
+     * A no-op by default, so this module still runs with no scheduler at all.
+     */
+    checkpoint = async () => {},
+    /**
+     * How many comparisons between yields. Injectable ONLY so a test can reach
+     * the yield point without seeding ~6,000 faces: the real threshold is
+     * tuned for a 125k-photo library, and a unit test that had to build one
+     * would be a unit test nobody runs.
+     */
+    yieldEvery = YIELD_COMPARISONS,
   } = {}
 ) {
   const total = ungroupedFaceCount(db, model, scopeIds);
@@ -184,9 +200,12 @@ export async function groupRemaining(
       else leftovers.push(face);
 
       sinceYield += centroids.length;
-      if (sinceYield >= YIELD_COMPARISONS) {
+      if (sinceYield >= yieldEvery) {
         sinceYield = 0;
         await breathe();
+        // Stand aside for anything higher-priority, at the same point and for
+        // the same reason the abort check is here (#257).
+        await checkpoint();
         // Checked at the yield point, the one place the loop is not
         // mid-comparison. A cancellation here keeps every committed batch —
         // which is the whole point of this pass existing.

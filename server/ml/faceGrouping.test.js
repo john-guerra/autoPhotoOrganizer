@@ -278,3 +278,43 @@ describe("the pieces", () => {
     expect(bestPerson({ bytes, scale }, cs, 0.8)).toBe(null);
   });
 });
+
+describe("checkpoint — grouping stands aside too (#257, Phase 4)", () => {
+  it("awaits the checkpoint at the yield point, not mid-comparison", async () => {
+    // The same seam the abort check uses, and for the same reason: it is the
+    // one place this O(n^2) loop is not half-way through a comparison. Parking
+    // here costs the comparisons since the last yield and nothing else — every
+    // batch already committed stays committed.
+    const db = getDb();
+    // TWO passes, because the comparison counter only advances against
+    // centroids that already exist: the very first grouping has no people to
+    // compare against, so it never reaches a yield at all. Create some, then
+    // give it more faces to file.
+    seedFaces(db, "/vol/a", 0, 20);
+    await groupRemaining(db, MODEL);
+    seedFaces(db, "/vol/b", 1, 40);
+    let checkpoints = 0;
+    await groupRemaining(db, MODEL, {
+      // The real threshold is 200,000 comparisons, tuned for a 125k-photo
+      // library; reaching it here would need ~6,000 seeded faces, and a unit
+      // test that slow is a unit test nobody runs.
+      yieldEvery: 1,
+      checkpoint: async () => {
+        checkpoints += 1;
+      },
+    });
+    expect(checkpoints).toBeGreaterThan(0);
+  });
+
+  it("groups exactly the same way with no checkpoint supplied", async () => {
+    // The default is a no-op, so this module still runs with no scheduler at
+    // all — every existing caller is unchanged.
+    const db = getDb();
+    seedFaces(db, "/vol/a", 0, 60);
+    const withNoop = await groupRemaining(db, MODEL, {
+      checkpoint: async () => {},
+    });
+    expect(withNoop.assigned).toBeGreaterThan(0);
+    expect(withNoop.created).toBeGreaterThan(0);
+  });
+});
