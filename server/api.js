@@ -313,10 +313,13 @@ function kickHashSweep(db) {
       if (r.alreadyRunning)
         return registry.finish(job.id, { alreadyRunning: true });
       if (r.paused) {
-        return registry.update(job.id, {
-          status: "failed",
-          error: "paused — drive not available; resumes on the next scan",
-        });
+        // A real paused status now (#260). This used to be `failed`, so an
+        // unmounted drive rendered a red "1 failed" about a condition that
+        // says nothing whatsoever about your photos.
+        return registry.pause(
+          job.id,
+          "Drive not available — resumes on the next scan"
+        );
       }
       registry.finish(job.id, { hashed: r.hashed, failed: r.failed });
     })
@@ -446,12 +449,11 @@ function kickEmbedSweep(
           // to check their drive would be both wrong and unactionable.
           // "Nothing was marked" is stated outright because it is the part
           // that matters: no photo was written off.
-          return registry.update(job.id, {
-            status: "failed",
-            error:
-              `paused — ${r.pauseReason ?? "drive not available"}. ` +
-              "No photo was marked as failed; it resumes on the next scan.",
-          });
+          return registry.pause(
+            job.id,
+            `${r.pauseReason ?? "Drive not available"}. ` +
+              "No photo was marked as failed; it resumes on the next scan."
+          );
         }
         registry.finish(job.id, { embedded: r.embedded, failed: r.failed });
         // Vectors just changed, so the grouping computed from them is stale.
@@ -1270,10 +1272,10 @@ export function registerApi(app, { ml } = {}) {
           // resumption that never happens, which this project's usability
           // rule (CLAUDE.md, "specific over generic") forbids. Tell the user
           // what to actually do instead.
-          registry.update(job.id, {
-            status: "failed",
-            error: "paused — drive not available; reconnect it and run again",
-          });
+          registry.pause(
+            job.id,
+            "Drive not available — reconnect it and run again"
+          );
           return;
         }
         registry.finish(job.id, {

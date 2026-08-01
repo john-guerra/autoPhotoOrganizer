@@ -47,27 +47,49 @@
    */
   let broken = $derived($jobs.filter((j) => j.status === "failed"));
   let stopped = $derived($jobs.filter((j) => j.status === "canceled"));
-  let finished = $derived($jobs.filter((j) => j.status !== "running"));
+  // Paused is WAITING, not broken and not finished (#260). It used to arrive
+  // here as `failed` — the sweeps had no other status to use — so an unmounted
+  // drive rendered a red "1 failed" about a condition that says nothing
+  // whatsoever about your photos.
+  let paused = $derived($jobs.filter((j) => j.status === "paused"));
+  let finished = $derived(
+    $jobs.filter((j) => j.status !== "running" && j.status !== "paused")
+  );
 
   // What the pill says, in priority order: something is wrong > something is
   // working > something is waiting to be acknowledged. Only ONE line, because the
   // whole point is that it stays small.
+  // Priority: broken > running > PAUSED > stopped > done (#260). Paused sits
+  // above stopped because it is outstanding work the user may need to act on —
+  // a drive to plug back in — and below running because something actually
+  // moving is the more useful thing to name.
   let pill = $derived(
     broken.length
       ? { kind: "err", icon: "✗", text: `${broken.length} failed` }
-      : stopped.length && !running.length
-        ? // Neutral, not red: nothing went wrong, something was stopped.
-          { kind: "idle", icon: "◼", text: `${stopped.length} stopped` }
-        : running.length
-          ? {
-              kind: "busy",
-              icon: "◐",
-              text:
-                running.length === 1
-                  ? running[0].label
-                  : `${running.length} jobs running`,
-            }
-          : { kind: "ok", icon: "✓", text: `${finished.length} done` }
+      : !running.length && paused.length
+        ? // Neutral, and it names the reason when there is only one: "paused"
+          // alone invites the user to go hunting for why.
+          {
+            kind: "idle",
+            icon: "⏸",
+            text:
+              paused.length === 1 && paused[0].pauseReason
+                ? paused[0].pauseReason
+                : `${paused.length} paused`,
+          }
+        : stopped.length && !running.length
+          ? // Neutral, not red: nothing went wrong, something was stopped.
+            { kind: "idle", icon: "◼", text: `${stopped.length} stopped` }
+          : running.length
+            ? {
+                kind: "busy",
+                icon: "◐",
+                text:
+                  running.length === 1
+                    ? running[0].label
+                    : `${running.length} jobs running`,
+              }
+            : { kind: "ok", icon: "✓", text: `${finished.length} done` }
   );
 
   // A single bar for everything in flight. Jobs that can't count their own work
@@ -298,6 +320,7 @@
               class="job-row"
               class:failed={job.status === "failed"}
               class:canceled={job.status === "canceled"}
+              class:paused={job.status === "paused"}
             >
               <span class="job-label">{job.label}</span>
 
@@ -327,6 +350,31 @@
                     >{/if}
                   {job.phase}
                 </span>
+                <button class="job-btn" onclick={() => handleCancel(job)}
+                  >Cancel</button
+                >
+              {:else if job.status === "paused"}
+                <!-- PAUSED: waiting, not broken (#260). Before this it fell to
+                     the {:else} below and rendered a red ✗ with `job.error`,
+                     for an unmounted drive or a model that has not downloaded —
+                     conditions that say nothing about your photos.
+
+                     The bar is FROZEN at its last value, never made
+                     indeterminate. The numbers are known, so showing them is
+                     the truth; an indeterminate bar reads as a hang, which is
+                     the #208 mistake at exactly the moment the user is deciding
+                     whether to wait. -->
+                <span class="job-icon paused" aria-hidden="true">⏸</span>
+                {#if job.total}
+                  <progress
+                    class="job-progress"
+                    value={job.done ?? 0}
+                    max={job.total}
+                  ></progress>
+                {/if}
+                <span class="job-summary">{job.pauseReason || "Paused"}</span>
+                <!-- Cancel, because a paused job is the one you are most likely
+                     to want rid of, and contract 2 requires it to work. -->
                 <button class="job-btn" onclick={() => handleCancel(job)}
                   >Cancel</button
                 >
@@ -555,6 +603,11 @@
   }
   .job-icon.err {
     color: #ff8a80;
+  }
+  /* Neutral, deliberately. The whole point of #260 is that a paused job is not
+     an alarm — it is work waiting on a condition the user can usually fix. */
+  .job-icon.paused {
+    color: #cbb26a;
   }
   .job-btn {
     flex: 0 0 auto;

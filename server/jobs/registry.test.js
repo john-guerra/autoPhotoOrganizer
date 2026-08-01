@@ -262,3 +262,70 @@ describe("JobRegistry", () => {
     expect(fresh.find((j) => j.id === "job-fake")).toBeUndefined();
   });
 });
+
+describe("paused jobs (#260)", () => {
+  it("pauses without pretending the job failed", () => {
+    // There was no `paused` status, so the sweeps faked one with
+    // `status: "failed"` — and the JobsPanel counts failed as broken, so an
+    // unmounted drive rendered a red "1 failed" about a condition that says
+    // nothing about your photos.
+    const job = registry.create("hash", { label: "Hashing", total: 100 });
+    registry.update(job.id, { done: 40 });
+    expect(registry.pause(job.id, "Drive not available")).toBe(true);
+
+    const got = registry.list().find((j) => j.id === job.id);
+    expect(got.status).toBe("paused");
+    expect(got.pauseReason).toBe("Drive not available");
+    // The numbers survive, so the bar can freeze at a true value rather than
+    // going indeterminate — an indeterminate bar reads as a hang (#208).
+    expect(got.done).toBe(40);
+    expect(got.total).toBe(100);
+  });
+
+  it("CANCELS a paused job — contract 2 requires a working Cancel", () => {
+    // The latent failure this issue is really about: cancel() gated on
+    // `status === "running"`, so the moment #257 introduces a real pause, a
+    // parked job would have been uncancellable. Cancelling a parked job is the
+    // most likely thing a user does with one.
+    const job = registry.create("embed");
+    registry.pause(job.id, "waiting");
+    expect(registry.cancel(job.id)).toBe(true);
+    expect(job.controller.signal.aborted).toBe(true);
+  });
+
+  it("CAN be dismissed — all of today's pausers have already stopped", () => {
+    // A correction to this issue's own first instinct, which said dismiss
+    // should be refused because a paused job "has not finished". Every one of
+    // today's three pausers has RETURNED from its sweep by the time it pauses:
+    // the work stopped and gets re-kicked as a NEW job on the next scan. So
+    // refusing dismiss strands the row forever — it surfaced at once as 41
+    // undismissable "Hashing library contents" rows in the api tests.
+    const job = registry.create("embed");
+    registry.pause(job.id, "Drive not available");
+    expect(registry.dismiss(job.id)).toBe(true);
+    expect(registry.list().some((j) => j.id === job.id)).toBe(false);
+  });
+
+  it("is cleared by Dismiss all, like anything else that has stopped", () => {
+    registry.dismissAll();
+    const parked = registry.create("hash");
+    registry.pause(parked.id, "waiting");
+    registry.dismissAll();
+    expect(registry.list().some((j) => j.id === parked.id)).toBe(false);
+  });
+
+  it("resumes back to running, clearing the reason", () => {
+    const job = registry.create("embed");
+    registry.pause(job.id, "Drive not available");
+    expect(registry.resume(job.id)).toBe(true);
+    const got = registry.list().find((j) => j.id === job.id);
+    expect(got.status).toBe("running");
+    expect(got.pauseReason).toBe("");
+  });
+
+  it("refuses to pause anything that is not running", () => {
+    const job = registry.create("scan");
+    registry.finish(job.id, {});
+    expect(registry.pause(job.id, "nope")).toBe(false);
+  });
+});
