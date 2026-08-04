@@ -12,9 +12,12 @@ const WORKER_URL = new URL("./worker.js", import.meta.url);
  * A ceiling that turns an OOM into a catchable job failure rather than a
  * process crash.
  *
- * Measured peaks: 824 MB at the default `minFaces: 2` (5,499 people) and
- * 1,825 MB with singletons included (25,758). 3 GB leaves room for a library
- * several times larger while still failing before the machine starts swapping.
+ * Measured peaks: 824 MB at `minFaces: 2` (5,499 people) and 1,825 MB with
+ * singletons included (25,758). Both were measured when 2 was the default; it
+ * is 5 now (#255), which selects strictly fewer members, so the real peak is
+ * below the lower figure and this ceiling is if anything more generous than
+ * when it was chosen. 3 GB leaves room for a library several times larger
+ * while still failing before the machine starts swapping.
  * Without it, an over-large library takes the whole server down with nothing
  * reported anywhere; with it, `ERR_WORKER_OUT_OF_MEMORY` reaches the user as a
  * sentence telling them to raise the minimum-faces filter.

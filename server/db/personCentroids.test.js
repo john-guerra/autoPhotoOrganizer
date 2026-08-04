@@ -106,8 +106,10 @@ describe("personCentroids (#232)", () => {
   it("minFaces excludes singletons, and minFaces 1 includes them", () => {
     // 20,259 of 25,758 persons in a real library are singletons — a stranger
     // in the background of one photo, and not a merge candidate. That is why
-    // the default is 2, and why it must be a RUN parameter rather than a
-    // filter applied after the layout.
+    // there is a floor at all, and why it must be a RUN parameter rather than
+    // a filter applied after the layout. The floor's DEFAULT is
+    // `DEFAULT_MIN_FACES` (5 since #255); this test passes the values it means
+    // explicitly, so it is about the filter, not about the default.
     const db = getDb();
     makePerson(db, 10, [axisFace(0), axisFace(1)]);
     makePerson(db, 11, [axisFace(2)]);

@@ -576,6 +576,7 @@
             <button
               class="chip"
               data-testid="tray-chip"
+              data-person={p.personId}
               title={`Remove ${p.name || "this person"} from the selection`}
               onclick={() => dropFromTray([...selected][i])}
             >

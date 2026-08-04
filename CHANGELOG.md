@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.22
+
+- **Nothing changes for you** — this is review follow-up on 2.19.20's Face Map
+  work (#255): the shift-lasso test could no longer tell "adds to the
+  selection" from "replaces it", the "N people are left off" line in the empty
+  state had no test at all, and two comments still called 2 the default.
+
 ## 2.19.20
 
 - **The Face Map now starts at 5 faces per person instead of 2**, so it opens on
