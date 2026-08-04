@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.32
+
+- **Finding faces now files them into people, in the same run.** Grouping was
+  a second button you had to know about, and skipping it left a pile of face
+  boxes that did nothing. The scan job now shows a "Filing faces into people"
+  phase and reports how many it filed. It groups only the photos it scanned,
+  so a small scoped scan can't trigger a library-wide pass; Group is still
+  there for whatever is left over, and Regroup is unchanged (#250).
+
 ## 2.19.31
 
 - **A library you reset stays reset when you reopen the app.** Quitting and
