@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.30
+
+- **Nothing changes for you** — a packaging test that pins the one thing the
+  coming background-work rewrite depends on: the database engine loading
+  correctly inside a packaged build's worker thread. It would otherwise only
+  have been discovered by a released app failing to start (#282).
+
 ## 2.19.29
 
 - **Resetting the library works again.** It failed outright with `FOREIGN KEY

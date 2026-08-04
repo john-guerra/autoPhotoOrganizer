@@ -7,6 +7,7 @@ import {
   writeFileSync,
   rmSync,
   existsSync,
+  cpSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -329,6 +330,166 @@ describe("worker_threads resolves from inside an asar (#232)", () => {
       }
     },
     60_000
+  );
+});
+
+describe("better-sqlite3 opens from inside a WORKER in an asar (#282 step 4)", () => {
+  /**
+   * The one link the whole writer migration rests on, and the one nothing
+   * tested.
+   *
+   * Three separate things were already verified and none of them is this:
+   * the ML worker is a SPAWNED `ELECTRON_RUN_AS_NODE` child (a plain Node
+   * process, #203); the projection worker probe above is a `worker_threads`
+   * isolate but pure JS; and better-sqlite3 itself is only ever loaded on the
+   * MAIN thread. Step 4 needs all three at once — a native addon, resolved
+   * from inside an asar, from a worker isolate — and the asar redirect to
+   * `app.asar.unpacked` is a runtime patch Electron installs, so "it works on
+   * the main thread" is not evidence it works in a fresh isolate.
+   *
+   * `require("better-sqlite3")` is NOT the check: it only loads the JS
+   * wrapper. The native binding is not touched until `new Database()`, and
+   * reading "it loads fine" as "the ABI is right" already cost a wrong
+   * diagnosis once (docs/AGENT-NOTES.md, 2026-07-28). So this OPENS a database
+   * and runs a statement.
+   */
+  const binary = electronBinary();
+  // better-sqlite3 plus the two packages it REQUIRES at runtime. They are
+  // hoisted to the top level of node_modules in a real install, so copying
+  // only better-sqlite3 produces "Cannot find module 'bindings'" — a probe
+  // failure that looks exactly like the thing being tested and is not.
+  // (`prebuild-install` is a dependency but an install-time one; nothing
+  // requires it at runtime.)
+  const NEEDED = ["better-sqlite3", "bindings", "file-uri-to-path"];
+  const srcOf = (name) =>
+    new URL(`../../node_modules/${name}`, import.meta.url).pathname;
+  const haveAll = NEEDED.every((n) => existsSync(srcOf(n)));
+
+  if (!binary) {
+    console.warn(
+      "[asarPackaging] SKIPPED the better-sqlite3-in-a-worker probe — the " +
+        "Electron binary is not installed."
+    );
+  }
+  if (binary && !haveAll) {
+    console.warn(
+      "[asarPackaging] SKIPPED the better-sqlite3-in-a-worker probe — one of " +
+        `${NEEDED.join(", ")} is missing from node_modules (run \`npm ci\`).`
+    );
+  }
+
+  const live = binary && haveAll ? it : it.skip;
+
+  live(
+    "runs a statement on a real connection opened in the worker",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "autogallery-asar-db-"));
+      try {
+        const app = join(root, "app");
+        const dir = join(app, "server", "workers");
+        mkdirSync(dir, { recursive: true });
+        mkdirSync(join(app, "node_modules"), { recursive: true });
+        for (const name of NEEDED) {
+          cpSync(srcOf(name), join(app, "node_modules", name), {
+            recursive: true,
+          });
+        }
+        writeFileSync(
+          join(app, "package.json"),
+          JSON.stringify({ name: "probe", version: "1.0.0", type: "module" })
+        );
+
+        // An ESM worker reaching a CommonJS native module, which is exactly
+        // how `server/db/connection.js` reaches it today.
+        writeFileSync(
+          join(dir, "worker.js"),
+          [
+            'import { parentPort } from "node:worker_threads";',
+            "let out;",
+            "try {",
+            '  const { default: Database } = await import("better-sqlite3");',
+            '  const db = new Database(":memory:");',
+            '  db.prepare("CREATE TABLE t (a INTEGER)").run();',
+            '  db.prepare("INSERT INTO t (a) VALUES (?)").run(41);',
+            '  const row = db.prepare("SELECT a + 1 AS a FROM t").get();',
+            "  out = { ok: true, a: row.a };",
+            "} catch (e) {",
+            "  out = { ok: false, message: String(e && e.message ? e.message : e) };",
+            "}",
+            "parentPort.postMessage(out);",
+            "",
+          ].join("\n")
+        );
+        writeFileSync(
+          join(dir, "parent.js"),
+          [
+            'import { Worker } from "node:worker_threads";',
+            'const w = new Worker(new URL("./worker.js", import.meta.url));',
+            'w.on("message", (m) => {',
+            "  process.stdout.write(JSON.stringify(m));",
+            "  w.terminate();",
+            "});",
+            'w.on("error", (e) => {',
+            "  process.stderr.write(String(e && e.stack ? e.stack : e));",
+            "  process.exit(3);",
+            "});",
+            "",
+          ].join("\n")
+        );
+
+        const archive = join(root, "app.asar");
+        const asar = await import("@electron/asar");
+        // `unpack` is the whole point: a .node file CANNOT be loaded from
+        // inside an archive however it was built, so the real build leaves it
+        // in app.asar.unpacked and Electron redirects. This reproduces that
+        // arrangement rather than assuming it.
+        await asar.createPackageWithOptions(app, archive, {
+          unpack: "*.node",
+        });
+        expect(existsSync(`${archive}.unpacked`)).toBe(true);
+
+        const { code, stdout, stderr } = await run(binary, [
+          join(archive, "server", "workers", "parent.js"),
+        ]);
+
+        expect(code, `electron exited ${code}\n${stderr}`).toBe(0);
+        const got = JSON.parse(stdout);
+
+        // TWO failure modes, and only one of them is this probe's business.
+        //
+        // The ABI is a property of the local INSTALL, not of the packaging:
+        // `npm ci` builds better-sqlite3 for Node's NODE_MODULE_VERSION, and
+        // Electron's is different. A packaged build runs `rebuild:electron`
+        // first, so it ships the right one — but this test tree must not,
+        // because that rebuild is a ONE-WAY SWITCH that leaves every other
+        // test in the repo unable to open a database (docs/AGENT-NOTES.md).
+        //
+        // So an ABI mismatch skips LOUDLY. What it does NOT do is hide the
+        // link under test: reaching dlopen at all means the worker isolate
+        // resolved a bare CJS import from inside the archive AND followed the
+        // app.asar.unpacked redirect to a real file on disk. That is the part
+        // step 4 depends on, and it is asserted below either way.
+        const abiMismatch =
+          !got.ok && /NODE_MODULE_VERSION/.test(got.message ?? "");
+        if (abiMismatch) {
+          console.warn(
+            "[asarPackaging] better-sqlite3 loaded from app.asar.unpacked in a " +
+              "worker, but this checkout is built for Node's ABI, not " +
+              "Electron's — so the OPEN half is unverified here. Run it " +
+              "against a packaged build, or `npm run rebuild:electron` then " +
+              "`npm run rebuild:node`. Resolution half: PASSED."
+          );
+          // The redirect: the module was found OUTSIDE the archive.
+          expect(got.message).toMatch(/app\.asar\.unpacked/);
+          expect(got.message).not.toMatch(/Cannot find module/);
+          return;
+        }
+        expect(got, JSON.stringify(got)).toEqual({ ok: true, a: 42 });
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    180_000
   );
 });
 
