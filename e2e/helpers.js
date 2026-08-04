@@ -276,12 +276,27 @@ export const faceMap = {
   members: (page) => page.locator('[data-testid="map-members"]'),
   /** How many people the minimum-faces threshold is leaving off (#255). */
   hidden: (page) => page.locator('[data-testid="map-hidden"]'),
+  /** The same disclosure in the empty state, before a map has been built. */
+  hiddenEmpty: (page) => page.locator('[data-testid="map-hidden-empty"]'),
   build: (page) => page.locator('[data-testid="map-build-empty"]'),
   rebuild: (page) => page.locator('[data-testid="map-build"]'),
   count: (page) => page.locator('[data-testid="map-count"]'),
   tray: (page) => page.locator('[data-testid="map-tray"]'),
   trayCount: (page) => page.locator('[data-testid="tray-count"]'),
   chips: (page) => page.locator('[data-testid="tray-chip"]'),
+  /**
+   * WHICH people are in the tray, as person ids.
+   *
+   * A count alone cannot tell shift-ADD from shift-REPLACE whenever the second
+   * lasso is a superset of the first — both leave the same number of chips.
+   * Identity can (#255 review).
+   */
+  chipIds: async (page) =>
+    (
+      await faceMap
+        .chips(page)
+        .evaluateAll((els) => els.map((e) => e.getAttribute("data-person")))
+    ).sort(),
   name: (page) => page.locator('[data-testid="tray-name"]'),
   merge: (page) => page.locator('[data-testid="tray-merge"]'),
   conflict: (page) => page.locator('[data-testid="tray-conflict"]'),
@@ -345,14 +360,22 @@ export const faceMap = {
  *
  * @param {number} people how many persons to create
  * @param {number} facesEach faces per person
- * @param {{assign?: boolean}} [opts] `assign: false` leaves every face WITHOUT
- *   a person — which is what the grouping pass exists to fix, and the only
- *   state in which it has anything to do (#235).
+ * @param {{assign?: boolean, below?: number, belowFaces?: number}} [opts]
+ *   `assign: false` leaves every face WITHOUT a person — which is what the
+ *   grouping pass exists to fix, and the only state in which it has anything
+ *   to do (#235).
+ *
+ *   `below` adds that many EXTRA people carrying `belowFaces` faces each, so a
+ *   fixture can hold a population the Face Map's minimum-faces threshold
+ *   EXCLUDES (#255). Without it every seeded person clears the threshold,
+ *   `hiddenByThreshold` is 0 in every test, and the "N people are left off"
+ *   disclosure never renders at all — the element cannot be asserted on
+ *   because it does not exist.
  */
 export async function seedFaces(
   people = 24,
   facesEach = 2,
-  { assign = true } = {}
+  { assign = true, below = 0, belowFaces = 1 } = {}
 ) {
   const { default: Database } = await import("better-sqlite3");
   const db = new Database(
@@ -386,26 +409,34 @@ export async function seedFaces(
        VALUES (?, ?, 0, 0, 10, 10, 0.9, ?, ?, ?, ?, 'model', ?)`
     );
 
-    db.transaction(() => {
-      for (let p = 1; p <= people; p++) {
-        if (assign) insPerson.run(p, null, 1000 + p);
-        for (let f = 0; f < facesEach; f++) {
-          // A distinct direction per person, wobbled per face, so the
-          // projection has real structure rather than coincident points.
-          const bytes = new Int8Array(DIM);
-          for (let i = 0; i < DIM; i++) {
-            bytes[i] = Math.round(Math.sin(i * 0.7 + p * 1.3 + f * 0.05) * 100);
-          }
-          insFace.run(
-            photos[(p * facesEach + f) % photos.length],
-            model,
-            DIM,
-            0.01,
-            Buffer.from(bytes.buffer),
-            assign ? p : null,
-            Date.now()
-          );
+    /** One person and their faces. Shared by both cohorts below. */
+    const seedPerson = (p, n) => {
+      if (assign) insPerson.run(p, null, 1000 + p);
+      for (let f = 0; f < n; f++) {
+        // A distinct direction per person, wobbled per face, so the
+        // projection has real structure rather than coincident points.
+        const bytes = new Int8Array(DIM);
+        for (let i = 0; i < DIM; i++) {
+          bytes[i] = Math.round(Math.sin(i * 0.7 + p * 1.3 + f * 0.05) * 100);
         }
+        insFace.run(
+          photos[(p * n + f) % photos.length],
+          model,
+          DIM,
+          0.01,
+          Buffer.from(bytes.buffer),
+          assign ? p : null,
+          Date.now()
+        );
+      }
+    };
+
+    db.transaction(() => {
+      for (let p = 1; p <= people; p++) seedPerson(p, facesEach);
+      // The under-the-threshold cohort, numbered after the main one so the
+      // first `people` ids keep meaning what every other helper assumes.
+      for (let p = people + 1; p <= people + below; p++) {
+        seedPerson(p, belowFaces);
       }
     })();
   } finally {

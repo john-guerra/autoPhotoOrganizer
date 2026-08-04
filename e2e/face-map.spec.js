@@ -171,6 +171,34 @@ test.describe("face map @p1", () => {
     expect(errors).toEqual([]);
   });
 
+  test("says how many people the minimum is leaving off, BEFORE you build", async ({
+    page,
+  }) => {
+    // #255's third acceptance criterion, and the half of it that had no test:
+    // the gear's version is covered above, but the EMPTY STATE version is what
+    // a first-time visitor reads, and it is the moment the threshold is least
+    // obvious — you have not opened the settings yet.
+    //
+    // It needs a mixed population. With every seeded person at exactly the
+    // default, nobody is hidden, the element never renders, and a test
+    // asserting on it would be asserting on nothing.
+    const HIDDEN = 30;
+    await seedFaces(PEOPLE, FACES_EACH, { below: HIDDEN, belowFaces: 1 });
+
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+
+    await expect(faceMap.empty(page)).toBeVisible();
+    await expect(faceMap.hiddenEmpty(page)).toContainText(String(HIDDEN));
+    // Named, not just counted: it has to say what the threshold IS, or the
+    // number is unactionable.
+    await expect(faceMap.hiddenEmpty(page)).toContainText(String(FACES_EACH));
+    // And the members line still reports only the people who clear it.
+    await expect(faceMap.empty(page)).toContainText(String(PEOPLE));
+    expect(errors).toEqual([]);
+  });
+
   test("lasso, drop one, merge, undo @p1", async ({ page }) => {
     const errors = trackPageErrors(page);
     await openApp(page);
@@ -222,35 +250,53 @@ test.describe("face map @p1", () => {
     await views.show(page, "face-map");
     await faceMap.build_(page);
 
-    // A region, then EVERYTHING — deliberately nested rather than two
-    // side-by-side halves with a gap between them. The old version lassoed
-    // x<0.45 then x>0.55, which assumed the layout has points on both sides
-    // and none in the 0.45–0.55 band. UMAP decides that, not the test: with a
-    // blob centred on x=0.5 the second lasso adds nobody and the assertion
-    // fails while shift-add is working perfectly. Nesting makes the expected
-    // relation true for ANY layout in which the first lasso is not already
-    // everyone.
+    // TWO DISJOINT HALVES, and the assertion is on IDENTITY, not on a count.
+    //
+    // Both halves of that matter, and each fixes a different way this test has
+    // already been wrong:
+    //
+    // - The regions must not NEST. A second lasso that contains the first
+    //   leaves `selected ∪ lasso2 == lasso2`, which is byte-identical to what
+    //   a broken shift that REPLACED the selection would produce. The test
+    //   then passes no matter which behaviour is wired up, and only fails if
+    //   shift-lasso does nothing whatsoever.
+    // - They must not leave a GAP either. Splitting at x<0.45 / x>0.55 assumed
+    //   UMAP puts nobody in the middle band; when the fixture got denser it
+    //   put most of the map there, the right-hand lasso caught nobody, and the
+    //   test failed while shift-add worked perfectly.
+    //
+    // Meeting exactly at 0.5 satisfies both: disjoint, and between them they
+    // cover the canvas, so neither side can be empty unless the whole layout
+    // has collapsed — which is worth failing for.
     await faceMap.lasso(page, [
-      [0.05, 0.05],
-      [0.5, 0.05],
-      [0.5, 0.95],
-      [0.05, 0.95],
+      [0.02, 0.02],
+      [0.5, 0.02],
+      [0.5, 0.98],
+      [0.02, 0.98],
     ]);
-    const first = await faceMap.chips(page).count();
-    expect(first).toBeGreaterThan(0);
-    expect(first).toBeLessThan(PEOPLE);
+    const left = await faceMap.chipIds(page);
+    expect(left.length).toBeGreaterThan(0);
+    expect(left.length).toBeLessThan(PEOPLE);
 
     await faceMap.lasso(
       page,
       [
-        [0.02, 0.02],
+        [0.5, 0.02],
         [0.98, 0.02],
         [0.98, 0.98],
-        [0.02, 0.98],
+        [0.5, 0.98],
       ],
       { shift: true }
     );
-    expect(await faceMap.chips(page).count()).toBeGreaterThan(first);
+
+    const after = await faceMap.chipIds(page);
+    // Everyone from the LEFT lasso is still selected. This is the assertion
+    // that can tell add from replace: the right-hand lasso does not contain
+    // them, so a shift that replaced would have dropped every one.
+    for (const id of left) expect(after).toContain(id);
+    // And the right-hand lasso genuinely contributed somebody new, so the
+    // check above is not vacuously true against an unchanged tray.
+    expect(after.length).toBeGreaterThan(left.length);
     expect(errors).toEqual([]);
   });
 
