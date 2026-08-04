@@ -416,6 +416,16 @@ export async function resetLibrary(
       // the rest are still indexed. Report it rather than implying a wipe.
       return { folders: 0, photos: deleted, canceled: true };
     }
+    // The connection can go away UNDER a chunked reset in a way it never could
+    // under the single transaction this replaced: the loop now spans many
+    // macrotasks, and the process may be shutting down in one of them
+    // (Electron quitting mid-reset, a test tearing its DB down). Treat it as
+    // a cancellation, because that is what it is — some rows went, the rest
+    // did not, and throwing here would surface as an unhandled rejection with
+    // nothing able to catch it.
+    if (!db.open) {
+      return { folders: 0, photos: deleted, canceled: true };
+    }
     const n = runChunk.immediate();
     if (!n) break;
     deleted += n;

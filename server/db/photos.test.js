@@ -556,3 +556,33 @@ describe("resetLibrary is interruptible and chunked (#281)", () => {
     expect(left).toBeLessThan(30);
   });
 });
+
+describe("resetLibrary survives the connection going away mid-run (#281)", () => {
+  it("reports a cancellation rather than throwing into nothing", async () => {
+    // Chunking made this reachable in a way the single transaction never was:
+    // the loop now spans many macrotasks, and the process can be shutting down
+    // in one of them. Throwing there surfaces as an unhandled rejection with
+    // no caller left to catch it — which is precisely how it showed up, as a
+    // CI failure under a suite that reported all 1,898 tests passing.
+    const db = getDb();
+    upsertScan(
+      db,
+      "/vol/closing",
+      1,
+      Array.from({ length: 30 }, (_, i) => ({
+        name: `c${i}.jpg`,
+        size: 10,
+        mtimeMs: 2000 + i,
+        kind: "image",
+      }))
+    );
+    const r = await resetLibrary(db, {
+      chunk: 5,
+      onProgress: ({ done }) => {
+        if (done >= 10) db.close();
+      },
+    });
+    expect(r.canceled).toBe(true);
+    expect(r.photos).toBeGreaterThan(0);
+  });
+});
