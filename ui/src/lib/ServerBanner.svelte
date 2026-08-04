@@ -8,12 +8,34 @@
    */
   import {
     serverStatus,
+    serverBusyWith,
     reconnectAttempts,
     retryServerNow,
   } from "./serverHealth.js";
+
+  /** "Resetting the library" / "Resetting the library and 2 more". */
+  const busyLabel = (running) =>
+    running.length === 0
+      ? "Something long-running"
+      : running.length === 1
+        ? running[0]
+        : `${running[0]} and ${running.length - 1} more`;
 </script>
 
-{#if $serverStatus === "down"}
+<!-- BUSY is not an error, and must not look like one (#282). Amber, no
+     alert role, no "Retry now" — there is nothing to retry and nothing is
+     wrong; the server is doing what it was asked. Telling the user it is
+     coming back is the entire content. -->
+{#if $serverStatus === "busy"}
+  <div class="server-busy" role="status">
+    <span class="dot busy-dot" aria-hidden="true"></span>
+    <span class="msg">
+      <strong>{busyLabel($serverBusyWith)} is still running.</strong>
+      The app will catch up on its own — nothing is lost, and you can watch or stop
+      it in the jobs panel.
+    </span>
+  </div>
+{:else if $serverStatus === "down"}
   <div class="server-down" role="alert">
     <span class="dot" aria-hidden="true"></span>
     <span class="msg">
@@ -29,6 +51,7 @@
 {/if}
 
 <style>
+  .server-busy,
   .server-down {
     position: fixed;
     top: 0;
@@ -43,6 +66,15 @@
     border-bottom: 1px solid #a33;
     color: #ffd7d7;
     font-size: 0.82rem;
+  }
+  /* Amber, not red: this is information, not a fault. */
+  .server-busy {
+    background: #4a3a12;
+    border-bottom: 1px solid #8a6d1f;
+    color: #ffeec2;
+  }
+  .busy-dot {
+    background: #e9b949;
   }
   .dot {
     flex: 0 0 auto;

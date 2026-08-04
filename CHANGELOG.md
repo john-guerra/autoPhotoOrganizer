@@ -6,6 +6,18 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.26
+
+- **"Lost the connection" is no longer said about a server that is simply
+  busy.** While a long job is running the banner is amber and names the work —
+  "Resetting the library is still running" — instead of red and telling you the
+  backend is gone. A server that really has gone still says so (#282).
+- **Stop now works on a job that is waiting its turn**, which was the one job
+  you were most likely to want to stop. And a waiting job can no longer be
+  dismissed out of the panel while its work is still queued to resume.
+- **A waiting job says what it is waiting for** — "Waiting for “Finding faces”
+  to finish" — rather than only that it is waiting.
+
 ## 2.19.25
 
 - **Resetting your library actually resets it, and tells you it is doing so.**

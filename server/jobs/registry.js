@@ -131,14 +131,27 @@ class JobRegistry extends EventEmitter {
    * A host condition says nothing about your photos, and that is precisely the
    * Finding-6 mistake the panel's own comment condemns for cancellation.
    *
+   * ## Two kinds of paused, and only one may be dismissed
+   *
+   * `parked: true` means a LIVE CLOSURE is sitting on a checkpoint waiting for
+   * the scheduler (#257). Its row must survive, because the work resumes into
+   * that same job — dismissing it makes running work invisible.
+   *
+   * The default, `parked: false`, is a sweep that has already RETURNED: it
+   * stopped, and the next scan re-kicks it as a NEW job. Those must stay
+   * dismissable, and this is not theoretical — refusing them stranded 41
+   * undismissable "Hashing library contents" rows in the api tests.
+   *
    * @param {string} id
    * @param {string} reason shown to the user; say what to DO about it
+   * @param {{parked?: boolean}} [opts]
    */
-  pause(id, reason) {
+  pause(id, reason, { parked = false } = {}) {
     const j = this.#jobs.get(id);
     if (!j || j.status !== "running") return false;
     j.status = "paused";
     j.pauseReason = String(reason ?? "");
+    j.parked = parked;
     this.#emit();
     return true;
   }
@@ -147,6 +160,7 @@ class JobRegistry extends EventEmitter {
     if (!j || j.status !== "paused") return false;
     j.status = "running";
     j.pauseReason = "";
+    j.parked = false;
     this.#emit();
     return true;
   }
@@ -174,7 +188,12 @@ class JobRegistry extends EventEmitter {
     // scheduler) is a different thing, and when it arrives it needs to keep
     // its row. That distinction belongs to the phase that introduces it, not
     // to a status flag guessed at in advance.
-    if (!j || j.status === "running") return false;
+    //
+    // IT HAS NOW ARRIVED, and `j.parked` is the distinction. A parked job is
+    // running work that happens to be waiting its turn; dismissing it would
+    // delete the only thing telling the user that work still exists, and it
+    // would come back on resume with no row to update.
+    if (!j || j.status === "running" || j.parked) return false;
     this.#jobs.delete(id);
     this.#emit();
     return true;
@@ -186,7 +205,11 @@ class JobRegistry extends EventEmitter {
   dismissAll() {
     let dismissed = 0;
     for (const [id, j] of this.#jobs) {
-      if (j.status === "running") continue;
+      // Same rule as `dismiss`: a parked run is work in progress that is
+      // merely waiting its turn, so a sweep of the finished rows must not
+      // take it. Missing this here would make "Dismiss all" the back door
+      // into exactly the state `dismiss` refuses.
+      if (j.status === "running" || j.parked) continue;
       this.#jobs.delete(id);
       dismissed += 1;
     }

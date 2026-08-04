@@ -6,6 +6,8 @@ import { createRequire } from "node:module";
 import { registerApi } from "./api.js";
 import { getDb } from "./db/connection.js";
 import { migrateLegacyJsonIfNeeded } from "./migrateLegacyJson.js";
+import { registry } from "./jobs/registry.js";
+import { interactiveInFlight } from "./lib/interactive.js";
 
 // sharp/libvips offloads decode+resize work to libuv's threadpool, which
 // defaults to just 4 threads regardless of CPU core count — a jump or
@@ -50,9 +52,32 @@ export function createApp({ ml } = {}) {
   // `pid` is the restart signal: if it changes between two successful polls the
   // server was replaced under us (crash, or `node --watch` reloading a server
   // edit) and the client must refetch. no-store so a cache can't fake liveness.
+  //
+  // It also reports WHAT IS RUNNING (#282). John reset his library, the server
+  // spent up to a minute unable to answer anything, and the UI concluded
+  // "Lost the connection to the AutoGallery server. Reconnecting… (attempt 4)"
+  // — about a process that was alive and busy doing exactly what he asked.
+  // The client cannot tell "busy" from "dead" by silence alone, so it needs to
+  // have been TOLD, before the silence, that work was in flight.
+  //
+  // Still no DB work: the registry is an in-memory Map and `interactiveInFlight`
+  // is an integer.
   app.get("/api/health", (_req, res) => {
     res.set("Cache-Control", "no-store");
-    res.json({ status: "ok", version, pid: process.pid });
+    const running = registry
+      .list()
+      .filter((j) => j.status === "running" || j.status === "paused")
+      .map((j) => j.label)
+      .filter(Boolean);
+    res.json({
+      status: "ok",
+      version,
+      pid: process.pid,
+      // `busy` is deliberately coarse — the client only needs to know whether
+      // silence would be EXPLICABLE, not to reproduce the jobs panel.
+      busy: running.length > 0 || interactiveInFlight() > 0,
+      running,
+    });
   });
 
   // v0.1 culling API: scan, thumbnails, full images, ratings.
