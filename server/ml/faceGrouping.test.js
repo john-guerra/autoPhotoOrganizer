@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, _resetDbForTest } from "../db/connection.js";
+import { expectNoBlockOver } from "../lib/expectNoBlockOver.js";
 import { upsertScan } from "../db/photos.js";
 import {
   putFaces,
@@ -15,6 +16,7 @@ import {
   clusterLeftovers,
   personCentroidVectors,
   bestPerson,
+  bestPersonYielding,
 } from "./faceGrouping.js";
 
 const MODEL = "buffalo_s";
@@ -243,12 +245,12 @@ describe("groupRemaining (#235)", () => {
 });
 
 describe("the pieces", () => {
-  it("clusterLeftovers groups by similarity and keeps strangers apart", () => {
+  it("clusterLeftovers groups by similarity and keeps strangers apart", async () => {
     const f = (axis, id) => {
       const { scale, bytes } = quantize(vec(axis));
       return { id, bytes, scale };
     };
-    const groups = clusterLeftovers([f(0, 1), f(0, 2), f(9, 3)], 0.8);
+    const groups = await clusterLeftovers([f(0, 1), f(0, 2), f(9, 3)], 0.8);
     expect(groups).toHaveLength(2);
     expect(groups.map((g) => g.length).sort()).toEqual([1, 2]);
   });
@@ -316,5 +318,198 @@ describe("checkpoint — grouping stands aside too (#257, Phase 4)", () => {
     });
     expect(withNoop.assigned).toBeGreaterThan(0);
     expect(withNoop.created).toBeGreaterThan(0);
+  });
+});
+
+describe("T1 — the SHIPPED yield budget, in milliseconds (#231)", () => {
+  /**
+   * WHY THIS FIXTURE IS BUILT BY HAND, and why the obvious version of this
+   * test is worthless.
+   *
+   * My first attempt used the ordinary `seedFaces` helper — a dozen people,
+   * 32-dimension vectors — and it PASSED with the old 200,000 constant still
+   * in place. That is the identical failure this test exists to correct: at a
+   * dozen centroids the loop needs ~16,000 faces before the budget is even
+   * reachable, so nothing yields, nothing blocks, and the assertion proves
+   * nothing about the number.
+   *
+   * The cost that hurts on a real library is `centroids.length x dim` per
+   * face. John's has ~25,758 people at 512 dimensions. To reproduce the SHAPE
+   * of that cheaply: many people, realistic dimension, few faces to file.
+   * 800 people x 512-d means one face is ~410,000 multiply-adds, so a handful
+   * of faces is tens of milliseconds of real work — enough that a loop which
+   * refuses to yield holds the timer, and one that yields does not.
+   *
+   * With the OLD constant those faces total well under 200,000 comparisons, so
+   * the loop yields ZERO times and blocks for the whole run. That is what makes
+   * this test discriminating rather than decorative.
+   */
+  const BIG_DIM = 512;
+  const PEOPLE = 800;
+  const NEW_FACES = 60;
+
+  /** A unit-ish vector pointing along `axis`, at BIG_DIM. */
+  function bigVec(axis) {
+    const v = new Float32Array(BIG_DIM);
+    v[axis % BIG_DIM] = 1;
+    v[(axis * 7 + 3) % BIG_DIM] = 0.3;
+    return v;
+  }
+
+  /** `PEOPLE` persons each owning one face, then `NEW_FACES` still unfiled. */
+  function seedManyPeople(db) {
+    const photos = upsertScan(
+      db,
+      "/vol/big",
+      1,
+      Array.from({ length: PEOPLE + NEW_FACES }, (_, i) => ({
+        name: `B_${i}.jpg`,
+        size: 10 + i,
+        mtimeMs: 1700000000000 + i,
+        kind: "image",
+      }))
+    ).map((r) => r.id);
+
+    const insPerson = db.prepare(
+      `INSERT INTO persons (id, name) VALUES (?, ?)`
+    );
+    const insFace = db.prepare(
+      `INSERT INTO photo_faces
+         (photo_id, model, box_x, box_y, box_w, box_h, det_score,
+          dim, scale, vec, created_at, person_id)
+       VALUES (?, ?, 0, 0, 10, 10, 0.9, ?, ?, ?, 0, ?)`
+    );
+    db.transaction(() => {
+      for (let i = 0; i < PEOPLE; i++) {
+        insPerson.run(i + 1, `P${i}`);
+        const { scale, bytes } = quantize(bigVec(i));
+        insFace.run(
+          photos[i],
+          MODEL,
+          BIG_DIM,
+          scale,
+          Buffer.from(bytes.buffer),
+          i + 1
+        );
+      }
+      // Unfiled faces, deliberately unlike every existing person so each one
+      // is compared against ALL of them before being given up on.
+      for (let i = 0; i < NEW_FACES; i++) {
+        const { scale, bytes } = quantize(bigVec(PEOPLE + i * 13));
+        insFace.run(
+          photos[PEOPLE + i],
+          MODEL,
+          BIG_DIM,
+          scale,
+          Buffer.from(bytes.buffer),
+          null
+        );
+      }
+    })();
+  }
+
+  it("never holds the event loop for more than 55ms at a time", async () => {
+    // No `yieldEvery` override. That is the entire point — the existing
+    // coverage injects its own budget and would pass if the shipped constant
+    // were a hundred million.
+    //
+    // THE BUDGET LIVES IN A MEASURED WINDOW, and both bounds are real:
+    //
+    //   lower  ~26 ms  worst observed for the CORRECT code on GitHub's
+    //                  runners. (This shipped at 25 ms — "headroom over the
+    //                  ~1 ms this produces locally" — and went red at 26.4 ms
+    //                  on the first CI run. The measurement is OS descheduling
+    //                  on a shared box, not this function.)
+    //   upper  ~64 ms  what the OLD constant (200,000 comparisons) cost
+    //                  LOCALLY, per `docs/ARCHITECTURE-REVIEW-2026-08-04.md`.
+    //                  On a CI runner the same regression costs far more.
+    //
+    // 55 ms sits inside it: ~2x the noise floor, still under the cheapest
+    // possible regression. Widen it only with a new measurement of BOTH
+    // bounds — a budget above 64 ms stops catching the bug it exists for.
+    const db = getDb();
+    seedManyPeople(db);
+
+    const worst = await expectNoBlockOver(55, () => groupRemaining(db, MODEL), {
+      label: "groupRemaining, shipped budget, 800 people x 512-d",
+    });
+    expect(worst).toBeLessThanOrEqual(55);
+  });
+
+  it("yields MID-FACE — bestPersonYielding breaks up ONE face's comparisons", async () => {
+    /**
+     * Tested DIRECTLY on `bestPersonYielding` rather than through
+     * `groupRemaining`, and the reason is worth recording: at unit scale the
+     * difference is invisible end-to-end.
+     *
+     * Mid-face and per-face accounting yield the SAME number of times over a
+     * batch (the total comparison count is identical), and one face at 800
+     * centroids is ~1 ms — well inside any sane latency budget. The property
+     * only changes the outcome when a SINGLE face costs more than the budget,
+     * which is John's ~25,758 people, not anything a unit test should build.
+     *
+     * So assert the property itself: given more centroids than the budget, one
+     * face must be interruptible part-way through. I confirmed this test is
+     * discriminating by reverting to `bestPerson` + one yield per face — it
+     * goes red, where the latency test above does not.
+     */
+    const CENTROIDS = 3000;
+    const face = {
+      bytes: quantize(new Float32Array(512).fill(0.01)).bytes,
+      scale: 1,
+    };
+    const centroids = Array.from({ length: CENTROIDS }, (_, i) => ({
+      personId: i + 1,
+      bytes: quantize(new Float32Array(512).fill(0.01)).bytes,
+      scale: 1,
+    }));
+
+    let chunks = 0;
+    let compared = 0;
+    await bestPersonYielding(face, centroids, 99, {
+      chunk: 512,
+      onChunk: async (n) => {
+        chunks += 1;
+        compared += n;
+      },
+    });
+
+    // Six chunks for 3,000 centroids at 512 — i.e. the loop handed control
+    // back five times BEFORE this face was finished.
+    expect(chunks).toBe(Math.ceil(CENTROIDS / 512));
+    expect(compared).toBe(CENTROIDS);
+  });
+
+  /**
+   * A GAP, stated rather than hidden.
+   *
+   * These tests guard two things: that the shipped constant keeps the loop
+   * under a latency budget, and that `bestPersonYielding` really does break up
+   * one face. What NOTHING here guards is that `groupRemaining` actually calls
+   * it — swap the call site back to plain `bestPerson` plus one yield per face
+   * and every test in this file still passes. I checked; it does.
+   *
+   * Discriminating that needs a single face to cost more than the whole
+   * latency budget, which means ~25,000 centroids at 512 dimensions — John's
+   * library, not a unit test. The review's harness
+   * (`docs/ARCHITECTURE-REVIEW-2026-08-04.md` §1) builds exactly that fixture
+   * and is the right home for it.
+   *
+   * Recorded because an unguarded change that looks guarded is how #231
+   * shipped a test that would have passed at a hundred million.
+   */
+
+  it("bestPersonYielding returns exactly what bestPerson returns", async () => {
+    // The yielding variant must not change the answer — it exists for
+    // scheduling, not for arithmetic.
+    const mk = (axis) => ({
+      bytes: quantize(bigVec(axis)).bytes,
+      scale: quantize(bigVec(axis)).scale,
+    });
+    const centroids = [0, 5, 9].map((a) => ({ personId: a + 1, ...mk(a) }));
+    const face = mk(5);
+    const sync = bestPerson(face, centroids, 0.5);
+    const async_ = await bestPersonYielding(face, centroids, 0.5, { chunk: 1 });
+    expect(async_).toEqual(sync);
   });
 });

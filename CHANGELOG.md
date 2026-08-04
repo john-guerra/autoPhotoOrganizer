@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.24
+
+- **Grouping faces no longer makes the app stop responding.** It now steps
+  aside roughly a hundred times more often, including part-way through a
+  single face — which is what was needed on a library with tens of thousands
+  of people (#231).
+
 ## 2.19.22
 
 - **Nothing changes for you** — this is review follow-up on 2.19.20's Face Map

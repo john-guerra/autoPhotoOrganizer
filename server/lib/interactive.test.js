@@ -64,3 +64,23 @@ describe("whenIdle", () => {
     await expect(all).resolves.toHaveLength(3);
   });
 });
+
+describe("whenIdle actually yields (#231, architecture review M11)", () => {
+  it("reaches the MACROTASK queue, not just the microtask queue", async () => {
+    // The bug in one assertion. `Promise.resolve()` awaits as a microtask, and
+    // microtasks run to exhaustion BEFORE the loop reaches timers or I/O — so
+    // a sweep whose only yield was `await idle()` handed control to nobody.
+    // Measured before the fix: 10.9M awaits, 0 macrotasks.
+    _resetInteractiveForTest();
+    let timerFired = false;
+    setTimeout(() => {
+      timerFired = true;
+    }, 0);
+
+    // A tight loop of the kind a sweep runs. If `whenIdle` only yields a
+    // microtask, the timer above cannot possibly fire before this finishes.
+    for (let i = 0; i < 50; i++) await whenIdle();
+
+    expect(timerFired).toBe(true);
+  });
+});
