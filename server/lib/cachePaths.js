@@ -65,23 +65,11 @@ export function videoProxiesDir() {
   return dir;
 }
 
-/** @returns {string} Absolute path to the ratings JSON file. */
-export function ratingsFile() {
-  mkdirSync(cacheRoot(), { recursive: true });
-  return join(cacheRoot(), "ratings.json");
-}
-
-/** @returns {string} Absolute path to the manual cover-choices JSON file. */
-export function coverChoicesFile() {
-  mkdirSync(cacheRoot(), { recursive: true });
-  return join(cacheRoot(), "coverChoices.json");
-}
-
-/** @returns {string} Absolute path to the library (recent-folders) JSON file. */
-export function libraryFile() {
-  mkdirSync(cacheRoot(), { recursive: true });
-  return join(cacheRoot(), "library.json");
-}
+// `ratingsFile()`, `coverChoicesFile()` and `libraryFile()` were removed with
+// the legacy JSON importer (#295). Their only caller was
+// `migrateLegacyJsonIfNeeded`; leaving them behind would advertise a store the
+// app no longer reads, which is how `perceptual_hash` sat in the schema for two
+// releases looking like a feature. The FILES are untouched on disk.
 
 /** @returns {string} Absolute path to the SQLite index database file. */
 export function indexDbFile() {

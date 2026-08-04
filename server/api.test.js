@@ -404,10 +404,10 @@ describe("POST /api/scan", () => {
     // (settingsFile()'s mkdirSync) that CAN throw (EACCES/EROFS/EMFILE).
     // Reproducing THAT exact failure means breaking the shared cache root
     // (AUTOGALLERY_HOME) — but createApp() itself needs a working cache root
-    // just to start (migrateLegacyJsonIfNeeded -> ratingsFile() does the
-    // same mkdirSync on the same directory), so that specific line can't be
-    // broken in isolation without also breaking server startup, which would
-    // prove nothing about kickEmbedSweep specifically. Instead, inject a
+    // just to start (getDb() -> indexDbFile() does the same mkdirSync on the
+    // same directory), so that specific line can't be broken in isolation
+    // without also breaking server startup, which would prove nothing about
+    // kickEmbedSweep specifically. Instead, inject a
     // synchronous throw at a DIFFERENT line inside kickEmbedSweep's SAME
     // try-block — `ml.on()`, called right after `getMl()` once `enabled` and
     // job-creation have already succeeded — to prove the general claim: once
