@@ -1,3 +1,4 @@
+import { expectNoBlockOver } from "./expectNoBlockOver.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -95,8 +96,9 @@ describe("clearCache", () => {
     await writeFile(join(dir, "a.jpg"), Buffer.alloc(10));
     await writeFile(join(dir, "b.jpg"), Buffer.alloc(20));
 
-    const result = clearCache();
-    expect(result).toEqual({ freedBytes: 30, freedFiles: 2 });
+    const result = await clearCache();
+    // `canceled` joins the shape now that this is interruptible (#281).
+    expect(result).toEqual({ freedBytes: 30, freedFiles: 2, canceled: false });
     expect(getCacheStats()).toEqual({ totalBytes: 0, totalFiles: 0 });
   });
 });
@@ -123,5 +125,58 @@ describe("pruneOrphanedCache", () => {
 
     const remaining = getCacheStats();
     expect(remaining).toEqual({ totalBytes: 10, totalFiles: 1 });
+  });
+});
+
+describe("clearCache does not wedge the server (#281)", () => {
+  it("never holds the loop for a frame, at the SHIPPED batch size", async () => {
+    // The measurement this guards: 8.42 s of unyielded syscalls for 125,000
+    // files, during which /api/health did not answer and the client declared
+    // the server dead. `docs/ARCHITECTURE-REVIEW-2026-08-04.md` §2.
+    //
+    // No options are passed, deliberately — a test that injects its own batch
+    // size proves the loop honours the injected budget and nothing about the
+    // shipped one (the #231 mistake, review §9). 8,000 files is enough for the
+    // old shape to be plainly visible; the budget has CI headroom.
+    const dir = join(cacheDir, "cache", "thumbs");
+    await mkdir(dir, { recursive: true });
+    await Promise.all(
+      Array.from({ length: 8000 }, (_, i) =>
+        writeFile(join(dir, `t${i}.jpg`), Buffer.alloc(8))
+      )
+    );
+    // BUDGET: 400ms, and the number is measured, not hoped for. Under the
+    // full suite (8 parallel vitest workers on 8 cores) the correct
+    // implementation measures ~143ms worst — that is OS descheduling, not this
+    // function, whose 8,000 syscalls total ~40ms. In isolation it is under
+    // 20ms. 400 clears the noise floor with room and still fails hard on a
+    // regression: with the yield removed the probe does not fire AT ALL, which
+    // `expectNoBlockOver` reports as total starvation whatever the budget says.
+    const worst = await expectNoBlockOver(400, () => clearCache(), {
+      label: "clearCache at 8k thumbnails",
+    });
+    expect(worst).toBeLessThan(400);
+    expect(getCacheStats().totalFiles).toBe(0);
+  }, 60_000);
+
+  it("stops when cancelled, and says how much it got through", async () => {
+    // Half a cache is a perfectly good cache, so stopping is always safe —
+    // but the summary must not imply a full clear.
+    const dir = join(cacheDir, "cache", "thumbs");
+    await mkdir(dir, { recursive: true });
+    for (let i = 0; i < 1200; i++) {
+      await writeFile(join(dir, `c${i}.jpg`), Buffer.alloc(4));
+    }
+    const controller = new AbortController();
+    const r = await clearCache({
+      batch: 100,
+      signal: controller.signal,
+      onProgress: ({ done }) => {
+        if (done >= 300) controller.abort();
+      },
+    });
+    expect(r.canceled).toBe(true);
+    expect(r.freedFiles).toBeGreaterThan(0);
+    expect(getCacheStats().totalFiles).toBeGreaterThan(0);
   });
 });

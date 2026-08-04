@@ -90,6 +90,31 @@ class JobRegistry extends EventEmitter {
       this.#recent.delete(id);
     }
   }
+  /**
+   * A COOPERATIVE cancel: the work stopped when asked and RETURNED what it got
+   * through, rather than throwing.
+   *
+   * There was no way to record that, and the two existing workarounds each
+   * lose half of it. Throwing `new Error("canceled")` (four call sites) gets
+   * the status right and discards the partial counts; `finish(id, {cancelled:
+   * true})` (one call site) keeps the counts and reports the job as ✓ done,
+   * which is the Finding-6 mistake in the other direction — telling someone
+   * who pressed Stop that it completed.
+   *
+   * Both halves matter for a destructive action: "stopped after removing
+   * 40,000 of 125,000 photos" is what tells the user the library is now in a
+   * partial state, and it is exactly what a bare ✗ or ✓ withholds.
+   *
+   * @param {string} id
+   * @param {object} [result] whatever the work did manage to do
+   */
+  stopped(id, result) {
+    const j = this.#jobs.get(id);
+    if (!j) return;
+    j.status = "canceled";
+    j.result = result ?? null;
+    this.#emit();
+  }
   fail(id, error) {
     const j = this.#jobs.get(id);
     if (!j) return;

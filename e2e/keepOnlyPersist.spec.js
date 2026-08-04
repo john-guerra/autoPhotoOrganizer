@@ -42,7 +42,11 @@ test.describe("@p1 keep-only persistence", () => {
     // is a real subset of the library — the point is that the library does not
     // come back, so the scope must be smaller than everything.
     await page.keyboard.press("Meta+a");
-    await expect(statusBar.root(page)).toContainText(/\d+ selected/);
+    // `[1-9]\d*`, not `\d+`: select-all fetches its ids from the server, and
+    // the status bar reads "0 selected" until they land — which `\d+` happily
+    // matches, so the wait returned immediately and the assertion below failed
+    // with 0 under load. Same bug, same fix, in `faces-scope.spec.js`.
+    await expect(statusBar.root(page)).toContainText(/[1-9]\d* selected/);
     const kept = Number(
       (await statusBar.root(page).textContent()).match(/(\d+) selected/)[1]
     );

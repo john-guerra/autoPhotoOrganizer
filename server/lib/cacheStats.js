@@ -1,6 +1,7 @@
 import { existsSync, statSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { thumbsDir, thumbCacheKey, THUMB_BUCKETS } from "./cachePaths.js";
+import { whenIdle } from "./interactive.js";
 
 /**
  * @param {{path:string, mtime:number, size:number}} photo
@@ -105,17 +106,76 @@ function cacheFileSizes() {
   return sizeByKey;
 }
 
-/** @returns {{freedBytes:number, freedFiles:number}} */
-export function clearCache() {
+/**
+ * How many thumbnails are cached, without stating a single one.
+ *
+ * `getCacheStats` also returns this, but it `statSync`s every file to total the
+ * bytes — on a real cache that is hundreds of thousands of syscalls, which is
+ * the very thing #281 was about. A caller that only needs a job's `total`
+ * wants the directory listing and nothing else.
+ * @returns {number}
+ */
+export function countCachedThumbnails() {
+  try {
+    return readdirSync(thumbsDir()).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Empty the thumbnail cache, in batches, without wedging the server.
+ *
+ * MEASURED (`docs/ARCHITECTURE-REVIEW-2026-08-04.md` §2): the synchronous
+ * version this replaces took **8.42 s** for 125,000 files — two syscalls each,
+ * none of them yielding — and a real library holds roughly five of these per
+ * photo (`THUMB_BUCKETS`), so the felt cost was closer to 42 s. For all of it
+ * the server answered nothing: no thumbnails, no feed, not even `/api/health`.
+ * That is what John saw as "nothing happened" followed by
+ * "Lost the connection to the AutoGallery server" (#281) — the reset had not
+ * failed, it had eaten the event loop, and the client's 4 s health timeout
+ * concluded the process was dead.
+ *
+ * `statSync`/`unlinkSync` stay synchronous on purpose: an individual syscall is
+ * microseconds, and the async variants would cost a promise per file for no
+ * latency gain. What was missing is a yield BETWEEN batches, which is the
+ * difference between 8 s of deafness and 8 s of a responsive app doing work.
+ *
+ * @param {{batch?: number, onProgress?: (p: {done: number, total: number}) => void,
+ *          signal?: AbortSignal, idle?: () => Promise<void>}} [opts]
+ * @returns {Promise<{freedBytes:number, freedFiles:number, canceled:boolean}>}
+ */
+export async function clearCache({
+  batch = 500,
+  onProgress,
+  signal,
+  idle = whenIdle,
+} = {}) {
   const dir = thumbsDir();
   const files = readdirSync(dir);
   let freedBytes = 0;
+  let done = 0;
   for (const f of files) {
+    if (signal?.aborted) {
+      // Half a cache is a perfectly good cache — every missing thumbnail is
+      // simply regenerated on demand. So stopping costs nothing but time.
+      return { freedBytes, freedFiles: done, canceled: true };
+    }
     const p = join(dir, f);
-    freedBytes += statSync(p).size;
-    unlinkSync(p);
+    try {
+      freedBytes += statSync(p).size;
+      unlinkSync(p);
+    } catch {
+      // Raced with a prune, or a thumbnail written and removed mid-pass.
+    }
+    done += 1;
+    if (done % batch === 0) {
+      await idle();
+      onProgress?.({ done, total: files.length });
+    }
   }
-  return { freedBytes, freedFiles: files.length };
+  onProgress?.({ done, total: files.length });
+  return { freedBytes, freedFiles: done, canceled: false };
 }
 
 /**

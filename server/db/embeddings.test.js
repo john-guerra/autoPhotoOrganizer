@@ -486,7 +486,7 @@ describe("ON DELETE CASCADE from photos (#161 fix round 1)", () => {
     ).toBeUndefined();
   });
 
-  it("resetLibrary succeeds with embeddings and sentinels present, and empties both tables", () => {
+  it("resetLibrary succeeds with embeddings and sentinels present, and empties both tables", async () => {
     const db = getDb();
     const ids = seed(db, 2);
     putEmbedding(db, {
@@ -497,7 +497,12 @@ describe("ON DELETE CASCADE from photos (#161 fix round 1)", () => {
     });
     markEmbedFailed(db, ids[1], SIGLIP, new Error("nope"));
 
-    expect(() => resetLibrary(db)).not.toThrow();
+    // AWAITED. `resetLibrary` became async and chunked here in #281, so an
+    // un-awaited call keeps deleting after the test returns and the loop then
+    // meets a closed connection during teardown. Vitest reports that as an
+    // "Unhandled Error" while STILL printing every test as passed — which is
+    // exactly how it read as green locally and failed CI.
+    await expect(resetLibrary(db)).resolves.toMatchObject({ canceled: false });
     expect(
       db.prepare(`SELECT COUNT(*) AS n FROM photo_embeddings`).get().n
     ).toBe(0);

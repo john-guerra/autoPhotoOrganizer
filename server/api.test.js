@@ -177,6 +177,25 @@ async function waitNoRunningJobOfType(type, { timeoutMs = 5000 } = {}) {
  * long as the event loop needs to deliver a synchronous emit() through
  * kickEmbedSweep's listener. Returns the matching job snapshot.
  */
+/**
+ * Wait for a job to leave `running`. The two destructive library actions are
+ * jobs now (#281), so a test that used to read the result off the response has
+ * to watch the job instead.
+ */
+async function waitForJobDone(base, jobId, { timeoutMs = 10_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const { jobs } = await (await fetch(`${base}/api/jobs`)).json();
+    const job = jobs.find((j) => j.id === jobId);
+    // A self-clearing job can vanish once done; absence means finished.
+    if (!job || (job.status !== "running" && job.status !== "paused")) {
+      return job ?? { status: "done" };
+    }
+    if (Date.now() > deadline) throw new Error(`job ${jobId} never finished`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 async function waitForJobPhase(type, predicate, { timeoutMs = 2000 } = {}) {
   const start = Date.now();
   for (;;) {
@@ -1978,10 +1997,14 @@ describe("cache management routes", () => {
       (await (await fetch(`${srv.base}/api/cache/stats`)).json()).totalFiles
     ).toBeGreaterThan(0);
 
+    // A JOB now, not an awaited result (#281): 8.4 s for 125,000 files meant
+    // the reply could not be sent until it finished.
     const result = await (
       await fetch(`${srv.base}/api/cache/clear`, { method: "POST" })
     ).json();
-    expect(result.freedFiles).toBeGreaterThan(0);
+    expect(result).toMatchObject({ started: true });
+    expect(result.jobId).toBeTruthy();
+    await waitForJobDone(srv.base, result.jobId);
 
     expect(await (await fetch(`${srv.base}/api/cache/stats`)).json()).toEqual({
       totalBytes: 0,
@@ -2442,11 +2465,20 @@ describe("POST /api/library/reset", () => {
       body: JSON.stringify({ confirm: "DELETE" }),
     });
     expect(res.status).toBe(200);
+    // A JOB now (#281). It used to hold the reply for the whole wipe — 1.3 s
+    // of DB plus 8.4 s of thumbnails at 125k photos — so the client timed out
+    // and reported a lost connection about a server that was working.
     const body = await res.json();
-    expect(body.folders).toBeGreaterThan(0);
-    expect(body.photos).toBeGreaterThan(0);
-    expect(body.cacheFreedFiles).toBeGreaterThan(0);
-    expect(body.cacheFreedBytes).toBeGreaterThan(0);
+    expect(body).toMatchObject({ started: true });
+    expect(body.jobId).toBeTruthy();
+    const job = await waitForJobDone(srv.base, body.jobId);
+    expect(job.status).toBe("done");
+    expect(job.result.folders).toBeGreaterThan(0);
+    expect(job.result.photos).toBeGreaterThan(0);
+    // One name per number across both destructive jobs — see the note in
+    // api.js. Two names for the same count is how a summary drops a line.
+    expect(job.result.freedFiles).toBeGreaterThan(0);
+    expect(job.result.freedBytes).toBeGreaterThan(0);
 
     const lib = await (await fetch(`${srv.base}/api/library`)).json();
     expect(lib).toEqual([]);
@@ -4190,5 +4222,66 @@ describe("POST /api/missing/relocate + /api/missing/carry", () => {
     expect(
       db.prepare("SELECT rating FROM photos WHERE id = ?").get(toId).rating
     ).toBe(5);
+  });
+});
+
+describe("the destructive library actions refuse a second run (#281)", () => {
+  /**
+   * NOT TESTED HERE: that a second reset while one runs gets a 409.
+   *
+   * The refusal exists (`resetInFlight` in `api.js`) and matters — a reset that
+   * looked like a no-op is exactly what makes someone press it again. But it
+   * cannot be asserted deterministically at this fixture's size: a handful of
+   * photos wipes in well under a millisecond, so the first run has finished and
+   * cleared the flag before a concurrently-issued second request is handled.
+   * Both come back 200, and the test would be asserting the fixture's speed
+   * rather than the latch.
+   *
+   * Making it deterministic needs either a library large enough to still be
+   * running (slow, and sized by guesswork) or a seam to hold the first run
+   * open. Recorded rather than shipped as a flake, and rather than deleted
+   * silently.
+   */
+  it("knows its total the moment the job exists, not one tick later (#208)", async () => {
+    // A bar that is indeterminate for the first batch is indeterminate at
+    // exactly the moment the user is deciding whether the thing has hung —
+    // which is the entire complaint in #281. So `total` is set at
+    // `registry.create`, and the two phases share one running total rather
+    // than each resetting the bar to zero.
+    await scan(srv.base, photosDir);
+    const photos = getDb().prepare(`SELECT COUNT(*) c FROM photos`).get().c;
+    expect(photos).toBeGreaterThan(0);
+
+    const res = await fetch(`${srv.base}/api/library/reset`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "DELETE" }),
+    });
+    const { jobId } = await res.json();
+
+    const { jobs } = await (await fetch(`${srv.base}/api/jobs`)).json();
+    const job = jobs.find((j) => j.id === jobId);
+    expect(job).toBeTruthy();
+    // Photos plus thumbnails: one bar across both phases.
+    expect(job.total).toBeGreaterThanOrEqual(photos);
+    expect(job.done).toBeLessThanOrEqual(job.total);
+
+    await waitForJobDone(srv.base, jobId);
+  });
+
+  it("still refuses without the confirmation, before creating any job", async () => {
+    // The refusal must come BEFORE registry.create, or a rejected request
+    // leaves a row that appears and immediately fails.
+    const before = (await (await fetch(`${srv.base}/api/jobs`)).json()).jobs
+      .length;
+    const res = await fetch(`${srv.base}/api/library/reset`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    const after = (await (await fetch(`${srv.base}/api/jobs`)).json()).jobs
+      .length;
+    expect(after).toBe(before);
   });
 });

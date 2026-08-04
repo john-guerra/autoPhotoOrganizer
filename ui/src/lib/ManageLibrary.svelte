@@ -7,6 +7,7 @@
     pruneCache,
     resetLibrary,
   } from "./api.js";
+  import { waitForJob } from "./jobs.js";
   import Modal from "./Modal.svelte";
   import MlSettings from "./MlSettings.svelte";
 
@@ -78,13 +79,18 @@
     }
     busy = true;
     try {
-      const result = await clearCache();
-      message = `Cleared ${result.freedFiles} file(s), freed ${formatBytes(result.freedBytes)}.`;
+      const { jobId } = await clearCache();
+      // The request returns as soon as the job exists; the work happens after.
+      // So this stops reporting a result it no longer receives, and instead
+      // says where the user can watch it and walk away (#281, contract 2).
+      message = "Clearing the thumbnail cache — follow it in the Jobs panel.";
+      busy = false;
+      const job = await waitForJob(jobId);
+      message = jobOutcome(job, "Cache clear");
       breakdown = null;
       await loadStats();
     } catch (e) {
       message = e.message;
-    } finally {
       busy = false;
     }
   }
@@ -107,15 +113,54 @@
     if (resetConfirm !== RESET_WORD) return;
     busy = true;
     try {
-      const result = await resetLibrary();
-      message = `Library reset — removed ${result.folders} folder(s), ${result.photos} photo(s), and cleared the thumbnail cache. Photos on disk are untouched.`;
+      const { jobId } = await resetLibrary();
+      message =
+        "Resetting the library — follow it in the Jobs panel. " +
+        "Photos on disk are untouched.";
       resetConfirm = "";
-      onlibraryReset?.(result);
+      busy = false;
+      // The library is only actually gone when the JOB is, so the parent is
+      // told then. Telling it now was the bug John hit from the other side:
+      // the UI claimed a reset that had not happened yet (#281).
+      const job = await waitForJob(jobId);
+      message = jobOutcome(job, "Library reset");
+      if (job.status === "done") onlibraryReset?.(job.result ?? {});
     } catch (e) {
       message = e.message;
-    } finally {
       busy = false;
     }
+  }
+
+  /**
+   * One sentence for a finished job. A CANCELLATION IS AN OUTCOME, not a
+   * failure (contract 2) — saying "reset failed" to someone who pressed Stop
+   * is the mistake this repo already made once.
+   * @param {{status: string, error?: string, result?: object}} job
+   * @param {string} what
+   */
+  function jobOutcome(job, what) {
+    if (job.status === "canceled") {
+      const r = job.result ?? {};
+      const got = [
+        r.photos != null && `${r.photos.toLocaleString()} photo(s)`,
+        r.freedFiles != null && `${r.freedFiles.toLocaleString()} thumbnail(s)`,
+      ].filter(Boolean);
+      return got.length
+        ? `${what} stopped — ${got.join(" and ")} were already removed, and stay removed.`
+        : `${what} stopped before it removed anything.`;
+    }
+    if (job.status !== "done") {
+      return `${what} failed: ${job.error || "unknown error"}`;
+    }
+    const r = job.result ?? {};
+    const parts = [
+      r.folders != null && `${r.folders.toLocaleString()} folder(s)`,
+      r.photos != null && `${r.photos.toLocaleString()} photo(s)`,
+      r.freedFiles != null && `${r.freedFiles.toLocaleString()} thumbnail(s)`,
+    ].filter(Boolean);
+    return parts.length
+      ? `${what} complete — removed ${parts.join(", ")}. Photos on disk are untouched.`
+      : `${what} complete.`;
   }
 </script>
 

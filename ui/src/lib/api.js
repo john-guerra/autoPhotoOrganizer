@@ -348,10 +348,18 @@ export async function fetchCacheBreakdown() {
   return res.json();
 }
 
-/** @returns {Promise<{freedBytes:number, freedFiles:number}>} */
+/**
+ * Emptying the cache is a JOB, not an awaited request (#281): on a real
+ * library it deletes hundreds of thousands of files. Watch it in the Jobs
+ * panel, or `waitForJob` on the id.
+ * @returns {Promise<{started: true, jobId: string}>}
+ */
 export async function clearCache() {
   const res = await fetch("/api/cache/clear", { method: "POST" });
-  if (!res.ok) throw new Error(`cache clear failed (${res.status})`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `cache clear failed (${res.status})`);
+  }
   return res.json();
 }
 
@@ -731,7 +739,11 @@ export async function materializeAlbums(destParent, albums) {
 /**
  * Danger zone: wipe the entire index + thumbnail cache. Requires the literal
  * confirmation string "DELETE". Source photos on disk are never touched.
- * @returns {Promise<{folders:number, photos:number, cacheFreedFiles:number, cacheFreedBytes:number}>}
+ *
+ * A JOB since #281 — it wipes the index AND the thumbnail cache, which on a
+ * real library took the better part of a minute with the server answering
+ * nothing. The counts arrive on the finished job, not from this call.
+ * @returns {Promise<{started: true, jobId: string}>}
  */
 export async function resetLibrary() {
   const res = await fetch("/api/library/reset", {
