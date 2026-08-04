@@ -38,6 +38,7 @@ import {
   getCacheStats,
   getCacheBreakdown,
   clearCache,
+  countCachedThumbnails,
   pruneOrphanedCache,
 } from "./lib/cacheStats.js";
 import { safeResolve } from "./lib/safeResolve.js";
@@ -3363,8 +3364,45 @@ export function registerApi(app, { ml } = {}) {
     }
   });
 
+  // A JOB, not an awaited request (#281). Measured at 8.42 s for 125,000 files
+  // — two syscalls each — and with five THUMB_BUCKETS that extrapolates to
+  // ~42 s. Awaiting that meant the reply could not be sent until it finished,
+  // so the client timed out and reported a lost connection about a server that
+  // was working perfectly.
+  // Single-flight for the two destructive, long-running library actions. Not
+  // the scheduler's job: these are refusals the USER should see, not work to
+  // be queued behind other work.
+  let cacheClearInFlight = false;
+  let resetInFlight = false;
+
   app.post("/api/cache/clear", (_req, res) => {
-    res.json(clearCache());
+    if (cacheClearInFlight) {
+      return res.status(409).json({
+        error:
+          "The cache is already being cleared — watch it in the jobs panel.",
+      });
+    }
+    cacheClearInFlight = true;
+    // Total at create, not on the first tick (#208) — see the note on
+    // /api/library/reset.
+    const job = registry.create("cache-clear", {
+      label: "Clearing thumbnails",
+      total: countCachedThumbnails(),
+      done: 0,
+    });
+    res.json({ started: true, jobId: job.id });
+    clearCache({
+      signal: job.controller.signal,
+      onProgress: ({ done }) =>
+        registry.update(job.id, { done, phase: "Deleting thumbnails" }),
+    })
+      .then((r) =>
+        r.canceled ? registry.stopped(job.id, r) : registry.finish(job.id, r)
+      )
+      .catch((e) => registry.fail(job.id, e))
+      .finally(() => {
+        cacheClearInFlight = false;
+      });
   });
 
   app.post("/api/cache/prune", (_req, res) => {
@@ -4052,14 +4090,73 @@ export function registerApi(app, { ml } = {}) {
     if (req.body?.confirm !== "DELETE") {
       return res.status(400).json({ error: "confirmation required" });
     }
+    // Refused SPECIFICALLY rather than queued (#281). A second Reset is what a
+    // user does when the first one looked like it did nothing — which is
+    // exactly what happened — and two concurrent wipes is the one outcome
+    // worth being careful about.
+    if (resetInFlight) {
+      return res.status(409).json({
+        error:
+          "A reset is already running — watch it in the jobs panel. Pressing it again would not make it faster.",
+      });
+    }
+    resetInFlight = true;
     const db = getDb();
-    const cleared = resetLibrary(db);
-    const cacheResult = clearCache();
-    res.json({
-      ...cleared,
-      cacheFreedFiles: cacheResult.freedFiles,
-      cacheFreedBytes: cacheResult.freedBytes,
+    // BOTH totals up front, and `total` set at `registry.create` — not on the
+    // first progress tick (#208). A total that arrives a beat late is an
+    // indeterminate bar at exactly the moment the user is deciding whether the
+    // thing has hung, which is the whole complaint in #281.
+    //
+    // Counting costs one `COUNT(*)` (indexed) and one `readdir`. Tens of
+    // milliseconds even at 600k thumbnails — three orders of magnitude below
+    // the 8.4 s stat+unlink pass this route used to do on the event loop.
+    //
+    // The two phases share ONE running total, so the bar fills once instead of
+    // filling, resetting, and filling again. Units are files, unweighted: a
+    // real library holds ~5 thumbnails per photo (THUMB_BUCKETS) and a
+    // thumbnail delete costs ~6x a row delete, so counting files already puts
+    // roughly the right share of the bar on each phase.
+    const photoTotal = db.prepare(`SELECT COUNT(*) AS c FROM photos`).get().c;
+    const thumbTotal = countCachedThumbnails();
+    const job = registry.create("library-reset", {
+      label: "Resetting the library",
+      total: photoTotal + thumbTotal,
+      done: 0,
     });
+    res.json({ started: true, jobId: job.id });
+
+    (async () => {
+      const cleared = await resetLibrary(db, {
+        signal: job.controller.signal,
+        onProgress: ({ done }) =>
+          registry.update(job.id, { done, phase: "Clearing the index" }),
+      });
+      const cacheResult = await clearCache({
+        signal: job.controller.signal,
+        onProgress: ({ done }) =>
+          registry.update(job.id, {
+            done: photoTotal + done,
+            phase: "Deleting thumbnails",
+          }),
+      });
+      return {
+        ...cleared,
+        // `freedFiles`/`freedBytes` deliberately, NOT `cacheFreed*`: the panel
+        // and the modal summarize both this job and the cache-clear job with
+        // one function, and two names for one number is how a summary
+        // silently drops a line.
+        freedFiles: cacheResult.freedFiles,
+        freedBytes: cacheResult.freedBytes,
+        canceled: cleared.canceled || cacheResult.canceled,
+      };
+    })()
+      .then((r) =>
+        r.canceled ? registry.stopped(job.id, r) : registry.finish(job.id, r)
+      )
+      .catch((e) => registry.fail(job.id, e))
+      .finally(() => {
+        resetInFlight = false;
+      });
   });
 
   // --- Export selected photos into a new folder -----------------------------

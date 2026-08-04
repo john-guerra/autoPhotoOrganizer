@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.25
+
+- **Resetting your library actually resets it, and tells you it is doing so.**
+  It runs as a job in the Jobs panel now, with a progress bar and a working
+  Stop, instead of freezing the whole app for up to a minute with no message
+  and then reporting a lost connection. Emptying the thumbnail cache works the
+  same way. Stopping either one is safe: what was already removed stays
+  removed, and the summary says how far it got (#281).
+
 ## 2.19.24
 
 - **Grouping faces no longer makes the app stop responding.** It now steps

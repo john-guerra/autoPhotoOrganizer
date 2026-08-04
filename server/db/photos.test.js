@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { expectNoBlockOver } from "../lib/expectNoBlockOver.js";
 import { getDb, _resetDbForTest } from "./connection.js";
 import {
   upsertScan,
@@ -429,7 +430,7 @@ describe("deletePhotosByIds", () => {
 });
 
 describe("resetLibrary", () => {
-  it("clears every table and returns pre-delete counts", () => {
+  it("clears every table and returns pre-delete counts", async () => {
     const db = getDb();
     upsertScan(db, "/a", 1, [
       { name: "1.jpg", size: 10, mtimeMs: 1, kind: "image" },
@@ -449,8 +450,9 @@ describe("resetLibrary", () => {
       `INSERT INTO photo_tags (photo_id, tag_id, source) VALUES (1, 1, 'manual')`
     ).run();
 
-    const result = resetLibrary(db);
-    expect(result).toEqual({ folders: 2, photos: 3 });
+    const result = await resetLibrary(db);
+    // `canceled` joins the shape now that this is interruptible (#281).
+    expect(result).toEqual({ folders: 2, photos: 3, canceled: false });
 
     for (const table of [
       "volumes",
@@ -475,9 +477,82 @@ describe("resetLibrary", () => {
     const filePath = join(cacheDir, "untouched.jpg");
     await wf(filePath, "not a real image");
 
-    resetLibrary(db);
+    await resetLibrary(db);
 
     const { existsSync } = await import("node:fs");
     expect(existsSync(filePath)).toBe(true);
+  });
+});
+
+describe("resetLibrary is interruptible and chunked (#281)", () => {
+  /** `n` photos in one folder. */
+  function seedMany(db, n) {
+    return upsertScan(
+      db,
+      "/vol/many",
+      1,
+      Array.from({ length: n }, (_, i) => ({
+        name: `m${i}.jpg`,
+        size: 10,
+        mtimeMs: 1000 + i,
+        kind: "image",
+      }))
+    ).length;
+  }
+
+  it("deletes in chunks, yielding between them", async () => {
+    // The property that lets the server answer while a reset runs. One
+    // transaction over 125,000 photos measured at 1.3 s with nothing able to
+    // interrupt it; chunked, each hold is milliseconds.
+    const db = getDb();
+    seedMany(db, 25);
+    const seen = [];
+    const r = await resetLibrary(db, {
+      chunk: 5,
+      onProgress: (p) => seen.push(p.done),
+    });
+    expect(r.photos).toBe(25);
+    // Five chunks of five, reported as it went — not one silent block.
+    expect(seen.length).toBeGreaterThanOrEqual(5);
+    expect(seen.at(-1)).toBe(25);
+    expect(db.prepare(`SELECT COUNT(*) c FROM photos`).get().c).toBe(0);
+  });
+
+  it("never holds the loop for a frame, at the SHIPPED chunk size", async () => {
+    // The lesson of `docs/ARCHITECTURE-REVIEW-2026-08-04.md` §9, and the
+    // reason the two tests above are not enough: they inject `chunk: 5`, so
+    // they assert that the loop honours AN INJECTED budget and would pass
+    // identically if the shipped default were a million. That is precisely the
+    // shape of the #231 test that failed to catch #231.
+    //
+    // This one passes no options at all and measures MILLISECONDS, which is
+    // what the user experiences. 20,000 photos is enough that a single
+    // transaction would be plainly visible; the budget has CI headroom.
+    const db = getDb();
+    seedMany(db, 20_000);
+    const worst = await expectNoBlockOver(120, () => resetLibrary(db), {
+      label: "resetLibrary at 20k photos",
+    });
+    expect(worst).toBeLessThan(120);
+    expect(db.prepare(`SELECT COUNT(*) c FROM photos`).get().c).toBe(0);
+  }, 60_000);
+
+  it("stops when cancelled, and what it deleted stays deleted", async () => {
+    // A partial reset is a coherent state: the rows that went are gone and the
+    // rest are still indexed. It must say so rather than implying a full wipe.
+    const db = getDb();
+    seedMany(db, 30);
+    const controller = new AbortController();
+    const r = await resetLibrary(db, {
+      chunk: 5,
+      signal: controller.signal,
+      onProgress: ({ done }) => {
+        if (done >= 10) controller.abort();
+      },
+    });
+    expect(r.canceled).toBe(true);
+    const left = db.prepare(`SELECT COUNT(*) c FROM photos`).get().c;
+    expect(left).toBeGreaterThan(0);
+    expect(left).toBeLessThan(30);
   });
 });

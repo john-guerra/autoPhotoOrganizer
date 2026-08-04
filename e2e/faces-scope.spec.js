@@ -124,6 +124,11 @@ test.describe("faces scope @p1", () => {
 
     // Keep a real subset, so the scope is narrower than the library.
     await page.keyboard.press("Meta+a");
+    // Select-all asks the SERVER for the id list, so the count lands a tick
+    // later. Reading the status bar straight after the keystroke passed on an
+    // idle laptop and failed under the full suite, where eight workers share
+    // the cores — "0 selected", which reads like select-all is broken.
+    await expect(statusBar.root(page)).toContainText(/[1-9]\d* selected/);
     const kept = Number(
       (await statusBar.root(page).textContent()).match(/(\d+) selected/)[1]
     );

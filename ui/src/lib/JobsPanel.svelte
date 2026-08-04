@@ -169,6 +169,24 @@
   function summarize(job) {
     const r = job.result;
     if (!r) return "";
+    if (job.type === "library-reset" || job.type === "cache-clear") {
+      // Naming what went is the point (#281). A destructive action that ends
+      // with a bare tick is the same silent-action problem that made this look
+      // like a no-op in the first place — and after a STOP it is the only
+      // thing telling the user the library is now in a partial state.
+      const mb = (r.freedBytes ?? 0) / 1024 / 1024;
+      const size =
+        mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+      const parts = [];
+      if (r.photos != null) {
+        parts.push(`cleared ${r.photos.toLocaleString()} photos`);
+      }
+      parts.push(
+        `${(r.freedFiles ?? 0).toLocaleString()} thumbnails (${size})`
+      );
+      if (r.canceled) parts.push("stopped early — what went stays gone");
+      return parts.join(" · ");
+    }
     if (job.type === "pipeline") {
       // Contract 2: a bare ✓ with no summary is an unfinished feature.
       //

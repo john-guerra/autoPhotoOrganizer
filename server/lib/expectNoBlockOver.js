@@ -51,7 +51,8 @@
 export async function measureBlocking(ms, fn, { tickMs = 5 } = {}) {
   let worst = 0;
   let ticks = 0;
-  let last = performance.now();
+  const started = performance.now();
+  let last = started;
   const timer = setInterval(() => {
     const now = performance.now();
     const late = now - last - tickMs;
@@ -63,7 +64,12 @@ export async function measureBlocking(ms, fn, { tickMs = 5 } = {}) {
   timer.unref?.();
   try {
     const result = await fn();
-    return { worstMs: worst, ticks, result };
+    return {
+      worstMs: worst,
+      ticks,
+      result,
+      elapsedMs: performance.now() - started,
+    };
   } finally {
     clearInterval(timer);
   }
@@ -76,12 +82,28 @@ export async function measureBlocking(ms, fn, { tickMs = 5 } = {}) {
  * @param {{tickMs?: number, label?: string}} [opts]
  */
 export async function expectNoBlockOver(ms, fn, { tickMs = 5, label } = {}) {
-  const { worstMs, ticks } = await measureBlocking(ms, fn, { tickMs });
+  const { worstMs, ticks, elapsedMs } = await measureBlocking(ms, fn, {
+    tickMs,
+  });
+  // `ticks === 0` has TWO causes and they are opposites, so the message has to
+  // tell them apart or it sends the reader the wrong way. Found the hard way:
+  // the deliberately-unyielded version of `clearCache` starved the probe
+  // completely and the helper reported "finished too fast to measure", which
+  // reads like the fixture is too small when in fact it is the worst possible
+  // result. Elapsed time is what distinguishes them.
+  if (ticks === 0 && elapsedMs > tickMs * 2) {
+    throw new Error(
+      `expectNoBlockOver${label ? ` (${label})` : ""}: the probe NEVER FIRED in ` +
+        `${elapsedMs.toFixed(0)}ms — the work starved the event loop from start ` +
+        `to finish. This is total blocking, not a small overrun: nothing inside ` +
+        `yields at all.`
+    );
+  }
   if (ticks === 0) {
     throw new Error(
-      `expectNoBlockOver${label ? ` (${label})` : ""}: the probe never fired — ` +
-        `the work finished too fast to measure, so this proves nothing. ` +
-        `Use a bigger fixture.`
+      `expectNoBlockOver${label ? ` (${label})` : ""}: the probe never fired and ` +
+        `the work took only ${elapsedMs.toFixed(1)}ms — it finished too fast to ` +
+        `measure, so this proves nothing. Use a bigger fixture.`
     );
   }
   if (worstMs > ms) {

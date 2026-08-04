@@ -1,4 +1,5 @@
 import { join, dirname, basename, sep } from "node:path";
+import { whenIdle } from "../lib/interactive.js";
 import { volumeRootForPath, upsertVolume } from "./volumes.js";
 import { normalizeFolderPath } from "../lib/normalizeFolderPath.js";
 import { clearMlArtifactsFor } from "./embeddings.js";
@@ -372,18 +373,60 @@ export function deletePhotosByIds(db, ids) {
  * @returns {{folders: number, photos: number}} row counts as of just before
  *   the delete.
  */
-export function resetLibrary(db) {
-  const tx = db.transaction(() => {
-    const folders = db.prepare(`SELECT COUNT(*) AS c FROM folders`).get().c;
-    const photos = db.prepare(`SELECT COUNT(*) AS c FROM photos`).get().c;
+export async function resetLibrary(
+  db,
+  { chunk = 1000, onProgress, signal, idle = whenIdle } = {}
+) {
+  // CHUNKED AND ASYNC (#281). This was one transaction deleting every photo,
+  // which cascades into photo_faces and ml_status — measured at 1.3 s for
+  // 125,000 photos with nothing able to interrupt it.
+  //
+  // 1.3 s is not the headline (that is clearCache, at 8.4 s) but it is still
+  // ten times a frame, and it is the half that holds a WRITE lock. Chunking it
+  // means the loop and any other writer both get a look in.
+  //
+  // `.immediate()` on every transaction, not the default DEFERRED: a deferred
+  // transaction takes its read lock lazily and fails with
+  // SQLITE_BUSY_SNAPSHOT if another connection wrote in between
+  // (architecture review §2 M12). It has not bitten yet only because nothing
+  // else writes concurrently — which is exactly what the worker migration
+  // changes.
+  const folders = db.prepare(`SELECT COUNT(*) AS c FROM folders`).get().c;
+  const photos = db.prepare(`SELECT COUNT(*) AS c FROM photos`).get().c;
+
+  // The small tables go first and in one go — they are bounded by album and
+  // tag counts, not by library size.
+  db.transaction(() => {
     db.prepare(`DELETE FROM photo_tags`).run();
     db.prepare(`DELETE FROM tags`).run();
     db.prepare(`DELETE FROM photo_album`).run();
     db.prepare(`DELETE FROM albums`).run();
-    db.prepare(`DELETE FROM photos`).run();
+  }).immediate();
+
+  // Photos in chunks: this is the one that cascades.
+  const deleteChunk = db.prepare(
+    `DELETE FROM photos
+        WHERE id IN (SELECT id FROM photos ORDER BY id LIMIT @chunk)`
+  );
+  const runChunk = db.transaction(() => deleteChunk.run({ chunk }).changes);
+  let deleted = 0;
+  for (;;) {
+    if (signal?.aborted) {
+      // A partial reset is a coherent state — the rows that went are gone and
+      // the rest are still indexed. Report it rather than implying a wipe.
+      return { folders: 0, photos: deleted, canceled: true };
+    }
+    const n = runChunk.immediate();
+    if (!n) break;
+    deleted += n;
+    onProgress?.({ done: deleted, total: photos });
+    await idle();
+  }
+
+  db.transaction(() => {
     db.prepare(`DELETE FROM folders`).run();
     db.prepare(`DELETE FROM volumes`).run();
-    return { folders, photos };
-  });
-  return tx();
+  }).immediate();
+
+  return { folders, photos, canceled: false };
 }
