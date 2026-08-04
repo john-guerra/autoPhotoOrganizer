@@ -30,6 +30,7 @@
     fetchPeople,
   } from "./api.js";
   import { jobs, takeNewlyFinished } from "./jobs.js";
+  import { faceClusterSummary } from "./faceClusterSummary.js";
   import ScopeControl from "./ScopeControl.svelte";
   import {
     buildScopes,
@@ -207,10 +208,11 @@
         error = job.error ?? "Grouping failed.";
       } else {
         const r = job.result ?? {};
-        onnotice?.(
-          `Grouped ${n(r.assigned)} faces into ${n(r.people)} people` +
-            (r.keptManual ? `, keeping ${n(r.keptManual)} you set by hand` : "")
-        );
+        // `r.people` only exists on the REGROUP result; the incremental pass
+        // returns `created`, and `n()`'s `?? 0` rendered the missing field as
+        // a confident "0 people" (#293). Same two shapes JobsPanel.summarize
+        // has to tell apart.
+        onnotice?.(`Grouping finished — ${faceClusterSummary(r)}.`);
       }
       refresh();
     }

@@ -9,6 +9,7 @@ import {
   thumbCacheKey,
   THUMB_BUCKETS,
   thumbsDir,
+  cacheRoot,
 } from "./cachePaths.js";
 
 let cacheDir;
@@ -113,5 +114,35 @@ describe("tmpCachePath", () => {
     expect(tmp.startsWith(cachePath)).toBe(true);
     expect(tmp.endsWith(".tmp")).toBe(true);
     expect(basename(tmp).endsWith(".jpg")).toBe(false);
+  });
+});
+
+describe("the real library is unreachable from a test run", () => {
+  /**
+   * Asked by John, and the honest answer at the time was "yes, but only by
+   * convention". Every destructive test set AUTOGALLERY_HOME in a
+   * `beforeEach`; nothing enforced it, and `cacheRoot()` fell back to the real
+   * `~/.autogallery` when it was missing. A new test file that forgot the
+   * hook — or any `getDb()` at module scope, which runs BEFORE any hook —
+   * would have pointed `resetLibrary` at his actual index.
+   */
+  it("refuses to resolve ~/.autogallery when the override is missing", async () => {
+    const saved = process.env.AUTOGALLERY_HOME;
+    delete process.env.AUTOGALLERY_HOME;
+    try {
+      expect(() => cacheRoot()).toThrow(/AUTOGALLERY_HOME is not set/);
+    } finally {
+      process.env.AUTOGALLERY_HOME = saved;
+    }
+  });
+
+  it("still honours an explicit override", () => {
+    const saved = process.env.AUTOGALLERY_HOME;
+    process.env.AUTOGALLERY_HOME = "/tmp/ag-somewhere";
+    try {
+      expect(cacheRoot()).toBe("/tmp/ag-somewhere");
+    } finally {
+      process.env.AUTOGALLERY_HOME = saved;
+    }
   });
 });

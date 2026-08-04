@@ -6,6 +6,27 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.29
+
+- **Resetting the library works again.** It failed outright with `FOREIGN KEY
+constraint failed` on any library holding a manual burst stack — and so did
+  removing a folder, removing a subtree, and removing photos by selection.
+  All four are fixed at the constraint, so a fifth can't get it wrong (#293).
+- **A reset now really does wipe the index.** It used to leave the "keep only"
+  working set behind — which, since that survives a reload, scoped the app to
+  photos that no longer existed and showed an empty feed with no explanation —
+  and to leave every person in place with no faces (#293).
+- **Face grouping says what it actually did.** "Grouped 327 faces into 0
+  people" was a wrong field name, not a failed run; it now reports the faces
+  filed, the people created, anything left to do, and any empty people it
+  tidied up (#293).
+- **The grouping progress bar moves.** It reported once per batch of 500, so a
+  job smaller than that sat at zero and then jumped to done — indistinguishable
+  from a hang (#293).
+- **People with no faces are cleaned up as grouping runs.** They accumulated
+  whenever photos were removed or re-scanned; one library had 1,053 people of
+  which 974 were empty. People you have NAMED are always kept (#293).
+
 ## 2.19.28
 
 - **Groundwork, nothing visible yet** — background jobs that need the same

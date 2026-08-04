@@ -240,7 +240,13 @@ describe("groupRemaining (#235)", () => {
   it("does nothing, cheaply, when there is nothing to do", async () => {
     const db = getDb();
     const r = await groupRemaining(db, MODEL);
-    expect(r).toEqual({ assigned: 0, created: 0, examined: 0, remaining: 0 });
+    expect(r).toEqual({
+      assigned: 0,
+      created: 0,
+      examined: 0,
+      removedEmpty: 0,
+      remaining: 0,
+    });
   });
 });
 
@@ -511,5 +517,102 @@ describe("T1 — the SHIPPED yield budget, in milliseconds (#231)", () => {
     const sync = bestPerson(face, centroids, 0.5);
     const async_ = await bestPersonYielding(face, centroids, 0.5, { chunk: 1 });
     expect(async_).toEqual(sync);
+  });
+});
+
+describe("what a grouping run REPORTS (#293)", () => {
+  it("moves the bar within a single batch, not once at the end", async () => {
+    // John's 327-face job sat at 0 through ~344,000 comparisons and then
+    // jumped to done, because GROUP_BATCH is 500 and onProgress fired once
+    // per batch. One batch WAS the whole job, so there was no progress at all
+    // — indistinguishable from a hang, which is what he reported.
+    const db = getDb();
+    seedFaces(db, "/vol/a", 0, 40);
+
+    /** @type {number[]} */
+    const seen = [];
+    await groupRemaining(db, MODEL, {
+      batchSize: 500, // larger than the library: exactly John's shape
+      onProgress: ({ done }) => seen.push(done),
+    });
+
+    // Many updates, not one. The precise count is an implementation detail;
+    // "more than a handful" is the property the user can perceive.
+    expect(seen.length).toBeGreaterThan(10);
+    // Monotonic, and it actually arrives.
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
+    expect(seen.at(-1)).toBe(40);
+    // And it started near the beginning rather than at the end.
+    expect(seen[0]).toBeLessThan(10);
+  });
+
+  it("bounds the number of updates on a big run", async () => {
+    // Per-face reporting reaches registry.update, which pushes to every SSE
+    // subscriber. Unbounded, a 125,000-face library would send 125,000
+    // messages to redraw a 400-pixel bar.
+    const db = getDb();
+    seedFaces(db, "/vol/a", 0, 600);
+
+    let updates = 0;
+    await groupRemaining(db, MODEL, {
+      batchSize: 500,
+      onProgress: () => updates++,
+    });
+
+    expect(updates).toBeLessThanOrEqual(210); // ~200 + the final exact hit
+    expect(updates).toBeGreaterThan(50); // ...but still smooth
+  });
+
+  it("reports how many people it CREATED, under a name the caller reads", async () => {
+    // The panel rendered `r.people`, which this function has never returned;
+    // `?? 0` turned the missing field into a confident "Grouped 327 faces into
+    // 0 people" for a run that had just made dozens.
+    const db = getDb();
+    seedFaces(db, "/vol/ana", 0, 5);
+    seedFaces(db, "/vol/bob", 10, 5);
+
+    const r = await groupRemaining(db, MODEL);
+
+    expect(r.created).toBeGreaterThan(0);
+    expect(r.created).toBe(personCount(db));
+    expect(r.assigned).toBe(10);
+  });
+
+  it("sweeps people left with no faces, and keeps the ones you named", async () => {
+    // 974 of John's 1,053 people were empty and unnamed — 92% of the People
+    // view was rows with nothing in them. They accumulate because photo_faces
+    // cascades when a photo is deleted and persons does not.
+    const db = getDb();
+    seedFaces(db, "/vol/ana", 0, 4);
+    await groupRemaining(db, MODEL);
+
+    // Orphan every existing person the way a photo deletion does, then add
+    // one the user has NAMED and one they have not.
+    db.prepare(`UPDATE photo_faces SET person_id = NULL`).run();
+    db.prepare(
+      `INSERT INTO persons (name, cover_face_id, created_at) VALUES ('Ana', NULL, 0)`
+    ).run();
+    const before = personCount(db);
+    expect(before).toBeGreaterThan(1);
+
+    const r = await groupRemaining(db, MODEL);
+
+    expect(r.removedEmpty).toBeGreaterThan(0);
+    const names = db
+      .prepare(`SELECT name FROM persons WHERE name IS NOT NULL`)
+      .all()
+      .map((p) => p.name);
+    // Naming is an assertion by the user; an empty NAMED person survives.
+    expect(names).toContain("Ana");
+    // Every unnamed empty is gone: the only unnamed people left are the ones
+    // this run just filled.
+    const emptyUnnamed = db
+      .prepare(
+        `SELECT COUNT(*) n FROM persons p
+          WHERE (p.name IS NULL OR p.name = '')
+            AND NOT EXISTS (SELECT 1 FROM photo_faces f WHERE f.person_id = p.id)`
+      )
+      .get().n;
+    expect(emptyUnnamed).toBe(0);
   });
 });

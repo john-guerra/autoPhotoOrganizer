@@ -17,6 +17,7 @@
    * with Dismiss all.
    */
   import { jobs, undoFailureMessage } from "./jobs.js";
+  import { faceClusterSummary } from "./faceClusterSummary.js";
   import { cancelJob, dismissJob, dismissAllJobs, undoMove } from "./api.js";
 
   let open = $state(false);
@@ -273,19 +274,9 @@
       if (r.failed) parts.push(`${r.failed} unreadable`);
       return parts.join(" · ");
     }
-    if (job.type === "face-cluster") {
-      // What the user asked for: how many people they now have. `keptManual`
-      // is the reassuring half — a regrouping deliberately does NOT touch the
-      // people you named or the faces you moved by hand, and saying so is what
-      // makes the button safe to press twice.
-      const parts = [
-        `${(r.people ?? 0).toLocaleString()} ${r.people === 1 ? "person" : "people"}`,
-        `from ${(r.faces ?? 0).toLocaleString()} face${r.faces === 1 ? "" : "s"}`,
-      ];
-      if (r.keptManual)
-        parts.push(`${r.keptManual.toLocaleString()} kept as you set them`);
-      return parts.join(" · ");
-    }
+    // Shared with FaceSettings' notice, because the two copies of this had
+    // already drifted into the same wrong field name (#293).
+    if (job.type === "face-cluster") return faceClusterSummary(r);
     if (job.type === "face-download") {
       const got = r.downloaded?.length ?? 0;
       return got

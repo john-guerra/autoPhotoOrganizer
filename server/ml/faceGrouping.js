@@ -190,9 +190,11 @@ export async function bestPersonYielding(
  * @param {number} [opts.threshold]
  * @param {number} [opts.batchSize]
  * @param {AbortSignal} [opts.signal]
- * @param {(p: {done:number,total:number}) => void} [opts.onProgress]
+ * @param {(p: {done:number,total:number}) => void} [opts.onProgress] called as
+ *   each FACE is decided, not once per batch — see the note at the call site.
  * @param {(phase: string) => void} [opts.onPhase]
- * @returns {Promise<{assigned:number, created:number, examined:number, remaining:number}>}
+ * @returns {Promise<{assigned:number, created:number, examined:number,
+ *   remaining:number, removedEmpty:number}>}
  */
 export async function groupRemaining(
   db,
@@ -224,7 +226,13 @@ export async function groupRemaining(
 ) {
   const total = ungroupedFaceCount(db, model, scopeIds);
   if (!total) {
-    return { assigned: 0, created: 0, examined: 0, remaining: 0 };
+    return {
+      assigned: 0,
+      created: 0,
+      examined: 0,
+      removedEmpty: 0,
+      remaining: 0,
+    };
   }
 
   onPhase?.("Reading the people you already have");
@@ -246,6 +254,28 @@ export async function groupRemaining(
   let created = 0;
   let examined = 0;
   let sinceYield = 0;
+  /** Faces this pass has decided, including ones not yet committed. */
+  let decided = 0;
+  /** The `done` value last handed to `onProgress`, so repeats are cheap. */
+  let lastReported = -1;
+
+  /**
+   * Emit progress at most ~200 times over the whole run.
+   *
+   * Per-face reporting is what makes the bar move at all, but every call
+   * reaches `registry.update`, which emits to every SSE subscriber. On a
+   * 125,000-face library that is 125,000 pushes down the wire to redraw a bar
+   * that is 400 pixels wide. A step of `total/200` keeps the bar visibly
+   * smooth (a pixel or two per update) and bounds the traffic regardless of
+   * library size. Small jobs get `step = 1` and report every face.
+   */
+  const step = Math.max(1, Math.floor(total / 200));
+  const reportProgress = () => {
+    const done = Math.min(decided, total);
+    if (done !== total && done - lastReported < step) return;
+    lastReported = done;
+    onProgress?.({ done, total });
+  };
 
   onPhase?.("Filing faces");
   for (;;) {
@@ -293,6 +323,20 @@ export async function groupRemaining(
       });
       if (hit) pairs.push({ faceId: face.id, personId: hit.personId });
       else leftovers.push(face);
+      // PER FACE, not per batch (#293). `onProgress` used to fire once the
+      // whole batch had been decided, and GROUP_BATCH is 500 — so John's
+      // 327-face job reported progress exactly ONCE, at the end. The bar sat
+      // at zero through ~344,000 comparisons and then jumped to done, which
+      // is indistinguishable from a hang and is the "no progressive task"
+      // half of his report.
+      //
+      // `decided` counts faces this pass has made a decision about; the
+      // commit still happens per batch, so a cancellation mid-batch loses
+      // those decisions and the bar is very slightly ahead of what is durable.
+      // That is the right way round: a bar that lags what has been decided
+      // reads as stuck, which is the bug being fixed.
+      decided += 1;
+      reportProgress();
     }
 
     // The leftovers matched nobody. Group them among THEMSELVES so a face seen
@@ -324,7 +368,10 @@ export async function groupRemaining(
     })();
 
     examined += batch.length;
-    onProgress?.({ done: Math.min(examined, total), total });
+    // `decided` and `examined` agree here (every face in the batch was decided
+    // above); this keeps them from drifting if a future batch short-circuits.
+    decided = examined;
+    reportProgress();
 
     await breathe();
     if (signal?.aborted) {
@@ -334,10 +381,35 @@ export async function groupRemaining(
     }
   }
 
+  // Sweep the people who have no faces left (#293).
+  //
+  // John's library held 1,053 persons of which 974 were EMPTY and unnamed —
+  // 92% of the People view was rows with nothing in them, which is most of
+  // why face grouping read as not working. They accumulate because
+  // `photo_faces` cascades away when a photo is deleted or re-scanned while
+  // `persons` is left behind, and nothing ever collected them.
+  //
+  // `saveClusters` has done exactly this on Regroup since faces shipped; the
+  // incremental pass never did, so the only way to clean up was the
+  // destructive button. Same predicate, deliberately: a NAMED person survives
+  // even with no faces, because naming is an assertion by the user and
+  // deleting it would throw away their work rather than the model's.
+  const removedEmpty = db
+    .prepare(
+      `DELETE FROM persons
+        WHERE (name IS NULL OR name = '')
+          AND id NOT IN (
+            SELECT DISTINCT person_id FROM photo_faces
+             WHERE person_id IS NOT NULL
+          )`
+    )
+    .run().changes;
+
   return {
     assigned,
     created,
     examined,
+    removedEmpty,
     remaining: ungroupedFaceCount(db, model, scopeIds),
   };
 }

@@ -10,10 +10,42 @@ import { createHash } from "node:crypto";
  * folders are strictly read-only; nothing is ever written back to them.
  *
  * Overridable via AUTOGALLERY_HOME so tests can point at a temp dir.
+ *
+ * ## Under a test runner the override is REQUIRED, not optional
+ *
+ * The suite is full of genuinely destructive tests — `resetLibrary` empties
+ * every table, `clearCache` unlinks every thumbnail — and the only thing
+ * keeping them off the user's real `~/.autogallery` was a `beforeEach` in each
+ * file setting AUTOGALLERY_HOME. That is a convention, and a convention that
+ * FAILS SILENTLY: forget it in a new file, call `getDb()` at module scope
+ * (which runs before any `beforeEach`), or land in the window after an
+ * `afterEach` has deleted the variable, and this function cheerfully returns
+ * the real library. The first symptom would be a developer's own index gone.
+ *
+ * So under vitest (`VITEST` is set by the runner itself) an unset
+ * AUTOGALLERY_HOME is a hard error rather than a fallback. The failure mode
+ * flips from "silently destroyed the real database" to "one test threw with a
+ * message saying exactly what to add", which is the trade every time.
+ *
  * @returns {string} Absolute path to the cache root.
  */
 export function cacheRoot() {
-  return process.env.AUTOGALLERY_HOME || join(homedir(), ".autogallery");
+  const override = process.env.AUTOGALLERY_HOME;
+  if (override) return override;
+  if (process.env.VITEST) {
+    throw new Error(
+      "AUTOGALLERY_HOME is not set, and this is a test run — refusing to " +
+        "resolve the REAL cache root (~/.autogallery), because tests in this " +
+        "suite reset the library and delete the thumbnail cache. Point it at " +
+        "a temp dir first:\n" +
+        "  beforeEach(async () => {\n" +
+        "    cacheDir = await mkdtemp(join(tmpdir(), 'ag-'));\n" +
+        "    process.env.AUTOGALLERY_HOME = cacheDir;\n" +
+        "    _resetDbForTest();\n" +
+        "  });"
+    );
+  }
+  return join(homedir(), ".autogallery");
 }
 
 /** @returns {string} Absolute path to the thumbnail cache dir (created if missing). */

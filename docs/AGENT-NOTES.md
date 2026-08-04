@@ -81,6 +81,28 @@ Keep this current: when one of these facts changes, update it in the same commit
   `~/.autogallery/`. Playwright already points `AUTOGALLERY_HOME` at `e2e/.tmp/home`
   over generated fixtures (see `playwright.config.js`), which is why `resetRatings`
   in `e2e/helpers.js` is safe by construction.
+
+  **This is now ENFORCED for vitest, and it had to be (#293).** The rule above
+  was a convention held up by one `beforeEach` per file, and `cacheRoot()`
+  fell back to the real `~/.autogallery` whenever the variable was missing —
+  silently, returning a valid path. Three ways to miss it, all of them quiet:
+  a new test file that forgets the hook; a `getDb()` at module scope, which
+  runs before any hook; or the window after an `afterEach` has deleted the
+  variable, since vitest reuses a worker across files. Whether a given run
+  touched the real database came down to **file execution order**.
+
+  `cacheRoot()` now THROWS when `process.env.VITEST` is set and
+  `AUTOGALLERY_HOME` is not, with the `beforeEach` to copy in the message.
+  Turning it on immediately found a live instance: `server/index.test.js`
+  (added by #282, 2.19.26) called `createApp()` with no scratch root, so every
+  `npm test` had been running `applySchema` and `migrateLegacyJsonIfNeeded`
+  against the developer's real index. Nothing ever failed — which is the
+  entire problem, and the reason a convention was not good enough.
+
+  **Corollary: never add a schema migration and assume tests cannot reach a
+  real library.** Before this guard, a `DROP TABLE` in a migration plus one
+  test file missing its hook was all it took.
+
 - **`e2e/albums.spec.js` flakes were CI-only, and both causes are now fixed**
   (2.18.23). Kept here because the two mechanisms recur elsewhere:
   - _Album-count precondition._ Album detection gap-clusters on
