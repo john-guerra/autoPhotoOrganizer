@@ -29,6 +29,18 @@ import {
  */
 const PEOPLE = 120;
 
+/**
+ * Faces per seeded person, and it must CLEAR the product default.
+ *
+ * `minFaces` defaults to 5 (#255), so a fixture seeding 2 faces each puts
+ * nobody on the map: every test below would then drive an empty map and fail
+ * for a reason that has nothing to do with what it is testing. Seed at the
+ * default rather than lowering the threshold per test — a spec that has to
+ * reconfigure the product to see anything is testing a configuration no user
+ * has.
+ */
+const FACES_EACH = 5;
+
 /** Rate every photo that the first `n` seeded people appear in. */
 async function ratePhotosOfFirstPeople(page, n) {
   const r = await page.request.post("/api/e2e-rate-people", {
@@ -104,7 +116,7 @@ test.describe("face map @p1", () => {
     // next test inherits them. "Nothing is rated, so this filter matches
     // nobody" then quietly becomes false and the test fails for a reason that
     // has nothing to do with the map (docs/TESTING.md's rule 2).
-    await seedFaces(PEOPLE, 2);
+    await seedFaces(PEOPLE, FACES_EACH);
     await clearRatings();
   });
 
@@ -136,19 +148,26 @@ test.describe("face map @p1", () => {
     await views.show(page, "face-map");
     await faceMap.gear(page).click();
 
+    // Everyone clears the default of 5 (#255), so the gear opens on everyone.
     await expect(faceMap.members(page)).toContainText(String(PEOPLE));
     await faceMap
       .gearPanel(page)
       .locator('input[type="number"]')
       .first()
-      .fill("3");
+      .fill(String(FACES_EACH + 1));
     await faceMap
       .gearPanel(page)
       .locator('input[type="number"]')
       .first()
       .blur();
-    // Nobody has 3 faces in the fixture, so the honest answer is zero.
-    await expect(faceMap.members(page)).toContainText("0");
+    // Nobody has that many faces in the fixture, so the honest answer is zero.
+    // "0 people", not "0" — `toContainText("0")` also matches "120 people",
+    // which is the answer this assertion exists to rule out.
+    await expect(faceMap.members(page)).toContainText("0 people");
+    // And the threshold SAYS what it is hiding rather than just shrinking the
+    // count — a filter that silently removes everyone reads as data loss
+    // (#255).
+    await expect(faceMap.hidden(page)).toContainText(String(PEOPLE));
     expect(errors).toEqual([]);
   });
 
@@ -203,22 +222,31 @@ test.describe("face map @p1", () => {
     await views.show(page, "face-map");
     await faceMap.build_(page);
 
+    // A region, then EVERYTHING — deliberately nested rather than two
+    // side-by-side halves with a gap between them. The old version lassoed
+    // x<0.45 then x>0.55, which assumed the layout has points on both sides
+    // and none in the 0.45–0.55 band. UMAP decides that, not the test: with a
+    // blob centred on x=0.5 the second lasso adds nobody and the assertion
+    // fails while shift-add is working perfectly. Nesting makes the expected
+    // relation true for ANY layout in which the first lasso is not already
+    // everyone.
     await faceMap.lasso(page, [
       [0.05, 0.05],
-      [0.45, 0.05],
-      [0.45, 0.95],
+      [0.5, 0.05],
+      [0.5, 0.95],
       [0.05, 0.95],
     ]);
     const first = await faceMap.chips(page).count();
     expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(PEOPLE);
 
     await faceMap.lasso(
       page,
       [
-        [0.55, 0.05],
-        [0.95, 0.05],
-        [0.95, 0.95],
-        [0.55, 0.95],
+        [0.02, 0.02],
+        [0.98, 0.02],
+        [0.98, 0.98],
+        [0.02, 0.98],
       ],
       { shift: true }
     );
@@ -296,7 +324,7 @@ test.describe("face map @p1", () => {
     // hide the VIEW. "An un-offered view is reachable, just not advertised,
     // and its empty state explains how to fill it" — registry.js.
     const errors = trackPageErrors(page);
-    await seedFaces(4, 2);
+    await seedFaces(4, FACES_EACH);
     await openApp(page);
     await expect(views.switchBtn(page, "face-map")).toHaveCount(0);
 
@@ -326,8 +354,12 @@ test.describe("face map @p1", () => {
     await faceMap.build_(page);
     await expect(faceMap.count(page)).toContainText(String(PEOPLE));
 
-    // Rate the photos of a handful of people, then filter to rated.
-    const rated = await ratePhotosOfFirstPeople(page, 3);
+    // Rate the photos of ONE person, then filter to rated. One, not three:
+    // `seedFaces` puts each person's faces in `FACES_EACH` consecutive photos
+    // (mod the fixture's 19), so three people's photos now cover 15 of 19 and
+    // the "narrowed" set is the whole library — the assertion below would fail
+    // with the filter working perfectly.
+    const rated = await ratePhotosOfFirstPeople(page, 1);
     expect(rated).toBeGreaterThan(0);
 
     await page.reload();

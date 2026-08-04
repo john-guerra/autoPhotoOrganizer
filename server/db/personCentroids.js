@@ -13,6 +13,9 @@
  */
 
 import { dequantize } from "../ml/quantize.js";
+// The one number, so this fallback cannot disagree with the schema the gear
+// renders (#255). `algorithms.js` is pure constants — no cycle.
+import { DEFAULT_MIN_FACES } from "../projection/algorithms.js";
 
 /**
  * @param {import("better-sqlite3").Database} db
@@ -22,11 +25,13 @@ import { dequantize } from "../ml/quantize.js";
  *   load-bearing: a projection of a subset is not a subset of the projection.
  *   Hiding dots after the layout would leave the survivors' positions still
  *   shaped by every point that was hidden — which is exactly the artifact the
- *   filter exists to avoid. Default 2, because 20,259 of 25,758 persons in a
- *   real library are singletons: a stranger in the background of one photo,
- *   who cannot by definition be "one person split across groups". Measured,
- *   that default also turns umap-js's 14.1s unyieldable initializeFit into
- *   2.1s and peak RSS from 1,825MB into 824MB.
+ *   filter exists to avoid. Defaults to `DEFAULT_MIN_FACES` (5 since #255,
+ *   previously 2), because 20,259 of 25,758 persons in a real library are
+ *   singletons: a stranger in the background of one photo, who cannot by
+ *   definition be "one person split across groups". Even at 2 the map is
+ *   mostly two-face noise, which is what raising it to 5 fixes. Measured, the
+ *   old default already turned umap-js's 14.1s unyieldable initializeFit into
+ *   2.1s and peak RSS from 1,825MB into 824MB; 5 is cheaper still.
  * @returns {{ids: Int32Array, dim: number, data: Float32Array, faceCounts: Int32Array}}
  *   `data` is `ids.length * dim` floats, ROW-MAJOR — flat rather than an array
  *   of arrays for the reason `faceVectors` gives: at production size the
@@ -38,7 +43,11 @@ import { dequantize } from "../ml/quantize.js";
  *   an unstable member order would make two runs the cache calls identical
  *   produce different maps with nothing reporting the difference.
  */
-export function personCentroids(db, model, { minFaces = 2 } = {}) {
+export function personCentroids(
+  db,
+  model,
+  { minFaces = DEFAULT_MIN_FACES } = {}
+) {
   const floor = Math.max(1, Math.trunc(Number(minFaces) || 1));
 
   const rows = db

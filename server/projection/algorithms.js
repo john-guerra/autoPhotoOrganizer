@@ -47,6 +47,18 @@ export const TSNE_MAX_MEMBERS = 6000;
 export const MAX_EPOCHS = 2000;
 
 /**
+ * How many faces a person needs before they are worth a dot (#255).
+ *
+ * Exported so the server's own fallbacks (`personCentroids`, `runStaleness`)
+ * cannot drift from the schema the gear renders. The UI cannot import it —
+ * `ui/` never imports `server/` — so the two client literals seed the FIRST
+ * request only and are then overwritten by `paramSpecs[].default` off
+ * `/api/projections/options`. Change this and both follow; change it and
+ * forget the client and the first fetch of a session disagrees with the gear.
+ */
+export const DEFAULT_MIN_FACES = 5;
+
+/**
  * `minFaces` belongs to the RUN, not to an algorithm — it decides who is on
  * the map at all, and every algorithm projects the same members.
  */
@@ -57,8 +69,14 @@ export const MEMBER_PARAMS = Object.freeze([
     min: 1,
     max: 50,
     step: 1,
-    default: 2,
-    help: "People with fewer faces than this are left off the map. Most people seen once are strangers in the background of a single photo.",
+    // 5, not 2 (#255). Small groups dominate the map BY COUNT while carrying
+    // almost no information — most are detection noise or a stranger in the
+    // background of one photo — so at 2 the people you actually came to find
+    // and merge are crowded out by thousands of dots you will never name.
+    // The threshold is the map's one scope dimension, so raising it also makes
+    // the default run cheaper; the gear lowers it whenever you want the tail.
+    default: DEFAULT_MIN_FACES,
+    help: "People with fewer faces than this are left off the map. Most people seen once or twice are strangers in the background of a photo.",
   }),
 ]);
 

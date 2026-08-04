@@ -2715,7 +2715,12 @@
   let mapLoading = $state(false);
   let mapNotice = $state("");
   let mapParams = $state({
-    minFaces: 2,
+    // Mirrors `DEFAULT_MIN_FACES` in server/projection/algorithms.js (#255).
+    // `ui/` never imports `server/`, so this literal seeds the FIRST request of
+    // a session and the schema takes over once /api/projections/options answers
+    // — the two must be kept the same by hand, or the map you get before you
+    // open the gear disagrees with the number the gear shows.
+    minFaces: 5,
     nNeighbors: 15,
     minDist: 0.1,
     algorithm: "umap",

@@ -14,6 +14,9 @@
  */
 import { createHash } from "node:crypto";
 import { buildFilter } from "./filters.js";
+// One number for "how many faces earns a dot" (#255), so this fallback cannot
+// drift from the schema the gear renders. Pure constants — no cycle.
+import { DEFAULT_MIN_FACES } from "../projection/algorithms.js";
 
 /**
  * A stable digest of a params object.
@@ -223,7 +226,7 @@ export function personIdsMatchingFilter(db, model, filterSpec) {
  *
  * @returns {{peopleOnMap:number, peopleNow:number, missing:number}}
  */
-export function runStaleness(db, runId, { minFaces = 2 } = {}) {
+export function runStaleness(db, runId, { minFaces = DEFAULT_MIN_FACES } = {}) {
   const peopleOnMap = db
     .prepare(
       `SELECT COUNT(*) n FROM projection_point pp
