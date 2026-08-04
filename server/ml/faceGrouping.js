@@ -42,7 +42,34 @@ export const GROUP_BATCH = 500;
 
 /** Yield to the event loop every this many comparisons. Same reasoning, and
  *  the same units, as #231: comparisons, never rows. */
-export const YIELD_COMPARISONS = 200_000;
+/**
+ * Comparisons between yields.
+ *
+ * **Measured, not guessed** (`docs/ARCHITECTURE-REVIEW-2026-08-04.md` §2 M1/M5):
+ * the previous value of 200,000 cost **64–91 ms of unyieldable CPU** between
+ * yields, which took `/api/health` from 5 ms to 210 ms while grouping ran. At
+ * 2,000 the same request answers in 5 ms. The exchange rate is real and worth
+ * stating: this costs about **35% of grouping throughput** while the user is
+ * browsing, and buys roughly **40× better latency**. Idle, it costs nothing —
+ * the yield itself is free (M6); what it gives up is the chance to hog.
+ *
+ * Do not tune this without a test that fails when it is wrong. The test written
+ * for #231 injected its own budget and would have passed if this were a hundred
+ * million — see `expectNoBlockOver` in the test file.
+ */
+export const YIELD_COMPARISONS = 2_000;
+
+/**
+ * Centroids compared before the loop is willing to yield MID-FACE.
+ *
+ * Without this the budget above is unreachable. `bestPerson` compares one face
+ * against EVERY centroid in a single synchronous call, so the old accounting
+ * (`sinceYield += centroids.length`) could only yield between faces — a
+ * granularity of one face. On John's library that is ~25,758 people ≈ 12 ms
+ * per face **whatever the budget says**, so lowering the constant alone looks
+ * right on a small library and does nothing on a real one.
+ */
+export const CENTROID_CHUNK = 512;
 
 const breathe = () => new Promise((r) => setImmediate(r));
 
@@ -109,6 +136,45 @@ export function bestPerson(face, centroids, threshold) {
     if (score >= threshold && (!best || score > best.score)) {
       best = { personId: c.personId, score };
     }
+  }
+  return best;
+}
+
+/**
+ * `bestPerson`, but able to stand aside part-way through a face.
+ *
+ * Identical arithmetic and identical result — the only difference is that it
+ * calls `onChunk` every `chunk` centroids, giving the caller somewhere to
+ * yield. That is what makes a comparison budget mean anything: the synchronous
+ * version's smallest unit is one whole face, which at 25,758 people is ~12 ms
+ * no matter what budget the caller asked for.
+ *
+ * Indices rather than `slice()`: a slice per chunk would allocate ~50 arrays
+ * per face on a real library, for nothing.
+ *
+ * @param {{bytes:Int8Array, scale:number}} face
+ * @param {Array<{personId:number, bytes:Int8Array, scale:number}>} centroids
+ * @param {number} threshold
+ * @param {{chunk?:number, onChunk?:(compared:number)=>Promise<void>}} [opts]
+ * @returns {Promise<{personId:number, score:number}|null>}
+ */
+export async function bestPersonYielding(
+  face,
+  centroids,
+  threshold,
+  { chunk = CENTROID_CHUNK, onChunk } = {}
+) {
+  let best = null;
+  for (let i = 0; i < centroids.length; i += chunk) {
+    const end = Math.min(i + chunk, centroids.length);
+    for (let j = i; j < end; j++) {
+      const c = centroids[j];
+      const score = dot(face.bytes, c.bytes) * face.scale * c.scale;
+      if (score >= threshold && (!best || score > best.score)) {
+        best = { personId: c.personId, score };
+      }
+    }
+    await onChunk?.(end - i);
   }
   return best;
 }
@@ -194,33 +260,47 @@ export async function groupRemaining(
     /** @type {Array<{id:number, bytes:Int8Array, scale:number}>} */
     const leftovers = [];
 
+    /**
+     * The yield point, now reachable MID-FACE.
+     *
+     * `compared` is the real number of dot products just done, so the budget
+     * is honoured in comparisons rather than in faces. The old accounting
+     * added `centroids.length` after a whole face had already been compared —
+     * it counted work that had finished, so the loop could overshoot by an
+     * entire face (~12 ms at 25,758 people) before it noticed.
+     */
+    const maybeYield = async (compared) => {
+      sinceYield += compared;
+      if (sinceYield < yieldEvery) return;
+      sinceYield = 0;
+      await breathe();
+      // Stand aside for anything higher-priority, at the same point and for
+      // the same reason the abort check is here (#257).
+      await checkpoint();
+      // Checked at the yield point, the one place the loop is not
+      // mid-comparison. A cancellation here keeps every committed batch —
+      // which is the whole point of this pass existing.
+      if (signal?.aborted) {
+        const e = new Error("canceled");
+        e.name = "AbortError";
+        throw e;
+      }
+    };
+
     for (const face of batch) {
-      const hit = bestPerson(face, centroids, threshold);
+      const hit = await bestPersonYielding(face, centroids, threshold, {
+        onChunk: maybeYield,
+      });
       if (hit) pairs.push({ faceId: face.id, personId: hit.personId });
       else leftovers.push(face);
-
-      sinceYield += centroids.length;
-      if (sinceYield >= yieldEvery) {
-        sinceYield = 0;
-        await breathe();
-        // Stand aside for anything higher-priority, at the same point and for
-        // the same reason the abort check is here (#257).
-        await checkpoint();
-        // Checked at the yield point, the one place the loop is not
-        // mid-comparison. A cancellation here keeps every committed batch —
-        // which is the whole point of this pass existing.
-        if (signal?.aborted) {
-          const e = new Error("canceled");
-          e.name = "AbortError";
-          throw e;
-        }
-      }
     }
 
     // The leftovers matched nobody. Group them among THEMSELVES so a face seen
     // for the first time still becomes a person rather than being left
     // homeless — the state the user is already drowning in.
-    const fresh = clusterLeftovers(leftovers, threshold);
+    const fresh = await clusterLeftovers(leftovers, threshold, {
+      onChunk: maybeYield,
+    });
 
     db.transaction(() => {
       for (const p of pairs)
@@ -274,7 +354,17 @@ export async function groupRemaining(
  * @param {number} threshold
  * @returns {Array<Array<{id:number, bytes:Int8Array, scale:number}>>}
  */
-export function clusterLeftovers(faces, threshold) {
+export async function clusterLeftovers(faces, threshold, { onChunk } = {}) {
+  // ASYNC, and it yields per outer row (#231 / architecture review §2 M10).
+  //
+  // This sits INSIDE the function that advertises itself as yielding, and did
+  // not yield at all. It is O(n^2) over a batch of up to GROUP_BATCH faces —
+  // 500 leftovers is 124,750 comparisons in one unyieldable block, which on
+  // its own exceeds the entire per-yield budget the caller is trying to keep.
+  //
+  // Per outer row rather than per comparison: `i` bounds the inner loop at
+  // `faces.length`, so one row is at most a few hundred dot products, and the
+  // check costs one `await` per row instead of one per pair.
   const parent = faces.map((_, i) => i);
   const find = (i) => {
     while (parent[i] !== i) parent[i] = parent[(i = parent[i])];
@@ -290,6 +380,7 @@ export function clusterLeftovers(faces, threshold) {
         if (a !== b) parent[a] = b;
       }
     }
+    if (faces.length - i - 1 > 0) await onChunk?.(faces.length - i - 1);
   }
   /** @type {Map<number, Array>} */
   const groups = new Map();

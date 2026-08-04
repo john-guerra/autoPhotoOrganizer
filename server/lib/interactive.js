@@ -39,10 +39,36 @@ function release() {
   }
 }
 
-/** Resolves once no interactive request is in flight (immediately, if none is).
- * @returns {Promise<void>} */
+/**
+ * Resolves once no interactive request is in flight.
+ *
+ * ## The idle path yields a MACROTASK, and that is the whole point
+ *
+ * This used to `return Promise.resolve()` when nothing was in flight, which
+ * awaits as a **microtask** — and microtasks run to exhaustion *before* the
+ * event loop reaches timers or I/O. So a sweep whose only yield was
+ * `await idle()` handed control to nobody: measured at 10.9 million awaits
+ * producing **zero** macrotasks (`docs/ARCHITECTURE-REVIEW-2026-08-04.md` §2
+ * M11).
+ *
+ * That is why "let the user go first" did not work, and why adding this gate
+ * to a loop that lacked it would have changed nothing while looking like a
+ * fix. `nearDupeSweep` and `backfillPlaces` both relied on it as their only
+ * yield.
+ *
+ * `setImmediate` is the cheap macrotask — it runs after I/O callbacks in the
+ * current turn, so a pending request is served before the caller resumes. The
+ * cost is one loop turn per call, which is what a yield is supposed to cost.
+ *
+ * Fixed HERE rather than at each call site so a future sweep cannot get it
+ * wrong by writing the obvious thing.
+ *
+ * @returns {Promise<void>}
+ */
 export function whenIdle() {
-  if (inFlight === 0) return Promise.resolve();
+  if (inFlight === 0) {
+    return new Promise((resolve) => setImmediate(resolve));
+  }
   return new Promise((resolve) => waiters.push(resolve));
 }
 
