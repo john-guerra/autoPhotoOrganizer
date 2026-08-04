@@ -186,7 +186,10 @@
     if (changed) draft = next;
   });
 
-  const minFaces = $derived(draft.minFaces ?? 2);
+  // Same number as `DEFAULT_MIN_FACES` on the server (#255); reached only
+  // before `paramSpecs` arrives, since the seeding effect above then supplies
+  // `spec.default`.
+  const minFaces = $derived(draft.minFaces ?? 5);
 
   const currentParams = () => ({ ...draft, algorithm: algo });
 
@@ -196,6 +199,18 @@
   const algoLabel = $derived(algoRow?.label ?? "This projection");
   /** The algorithm's own knobs — `minFaces` has its own control above. */
   const tunables = $derived(specs.filter((s) => s.key !== "minFaces"));
+  /**
+   * How many people the threshold is leaving off the map (#255).
+   *
+   * `coverage.people` is every person with a face for this model; `members` is
+   * the subset clearing `minFaces`. The default is 5, and on a real library
+   * that hides the large majority — 20,259 of 25,758 persons are singletons.
+   * A filter that quietly removes most of the data is the kind of thing that
+   * later reads as data loss, so the number is stated rather than implied.
+   */
+  const hiddenByThreshold = $derived(
+    Math.max(0, (coverage?.people ?? 0) - (options?.members ?? 0))
+  );
   /** ~4s at 5,499 members, ~20s at 25,758 — measured, so the estimate is real. */
   const estimateSeconds = $derived(
     Math.max(2, Math.round(((options?.members ?? 0) / 5499) * 4))
@@ -375,6 +390,11 @@
       </label>
       <span class="members" data-testid="map-members">
         {n(options?.members)} people · about {estimateSeconds}s
+        {#if hiddenByThreshold > 0}
+          <span class="hidden-count" data-testid="map-hidden">
+            · {n(hiddenByThreshold)} with fewer faces left off
+          </span>
+        {/if}
       </span>
 
       <fieldset>
@@ -487,7 +507,12 @@
         the groups that are really one person and merge them in one go.
         {#if options}
           {n(options.members)} people have {minFaces} or more faces — about {estimateSeconds}
-          seconds.
+          seconds.{#if hiddenByThreshold > 0}
+            <span data-testid="map-hidden-empty">
+              {n(hiddenByThreshold)} more have fewer than {minFaces} and are left
+              off; lower the minimum in map settings to include them.
+            </span>
+          {/if}
         {/if}
       </p>
       <button class="primary" data-testid="map-build-empty" onclick={applyGear}>
@@ -743,6 +768,10 @@
     font-size: 0.8rem;
     color: #888;
     align-self: center;
+  }
+  /* Dimmer than the count it qualifies: it is a caveat, not a headline. */
+  .hidden-count {
+    color: #6f6f6f;
   }
   fieldset {
     border: 1px solid #2a2a2a;

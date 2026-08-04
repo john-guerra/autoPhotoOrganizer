@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.20
+
+- **The Face Map now starts at 5 faces per person instead of 2**, so it opens on
+  the people you might actually name rather than on thousands of two-face groups
+  that are noise or a stranger in the background of one photo (#255). The gear
+  still lowers it whenever you want the tail.
+- **The map says how many people the threshold is leaving off** — in the gear
+  next to the member count, and in the empty state before you build. A filter
+  that quietly removes most of your people should not have to be inferred (#255).
+
 ## 2.19.19
 
 - **People now shows only the people in the photos you are looking at**,

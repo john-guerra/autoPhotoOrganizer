@@ -274,6 +274,8 @@ export const faceMap = {
   gear: (page) => page.locator('[data-testid="map-gear"]'),
   gearPanel: (page) => page.locator('[data-testid="map-gear-panel"]'),
   members: (page) => page.locator('[data-testid="map-members"]'),
+  /** How many people the minimum-faces threshold is leaving off (#255). */
+  hidden: (page) => page.locator('[data-testid="map-hidden"]'),
   build: (page) => page.locator('[data-testid="map-build-empty"]'),
   rebuild: (page) => page.locator('[data-testid="map-build"]'),
   count: (page) => page.locator('[data-testid="map-count"]'),

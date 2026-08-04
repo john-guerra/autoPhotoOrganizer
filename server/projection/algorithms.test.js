@@ -7,6 +7,7 @@ import {
   defaultParams,
   allParamSpecs,
   paramsFor,
+  DEFAULT_MIN_FACES,
 } from "./algorithms.js";
 
 describe("offerableAlgorithms (#232)", () => {
@@ -152,10 +153,24 @@ describe("per-algorithm parameters (#237)", () => {
 });
 
 describe("defaultParams", () => {
-  it("defaults minFaces to 2 — the measured default that makes the map cheap", () => {
-    // 5,499 members instead of 25,758: initializeFit 14.1s -> 2.1s and peak
-    // RSS 1,825MB -> 824MB.
-    expect(defaultParams().minFaces).toBe(2);
+  it("defaults minFaces to 5 — the map is for people you can name (#255)", () => {
+    // Not a tuning knob picked for speed. At 2, a real library's map is
+    // dominated BY COUNT by two-face groups that are detection noise or a
+    // stranger in the background, and they crowd out the people you came to
+    // find and merge. (Cheapness follows: at 2 it was already 5,499 members
+    // instead of 25,758, initializeFit 14.1s -> 2.1s, peak RSS 1,825MB ->
+    // 824MB; 5 is cheaper still.)
+    expect(defaultParams().minFaces).toBe(5);
+    expect(DEFAULT_MIN_FACES).toBe(5);
+  });
+
+  it("is the SAME number the gear renders, not a second copy", () => {
+    // The gear seeds every control from `paramSpecs[].default`, so a spec
+    // default that drifted from `DEFAULT_MIN_FACES` would show one number and
+    // run another, with nothing failing.
+    const spec = allParamSpecs("umap").find((s) => s.key === "minFaces");
+    expect(spec.default).toBe(DEFAULT_MIN_FACES);
+    expect(defaultParams().minFaces).toBe(spec.default);
   });
 
   it("names nEpochs EXPLICITLY rather than leaving it to umap-js's heuristic", () => {
