@@ -5,7 +5,6 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { registerApi } from "./api.js";
 import { getDb } from "./db/connection.js";
-import { migrateLegacyJsonIfNeeded } from "./migrateLegacyJson.js";
 import { registry } from "./jobs/registry.js";
 import { interactiveInFlight } from "./lib/interactive.js";
 
@@ -44,7 +43,27 @@ export function createApp({ ml } = {}) {
   // and the request 413s (undo silently failed — see #89).
   app.use(express.json({ limit: "50mb" }));
 
-  migrateLegacyJsonIfNeeded(getDb());
+  // The pre-SQLite JSON stores are NO LONGER IMPORTED (#295).
+  //
+  // `migrateLegacyJsonIfNeeded` used to run here on every start, guarded only
+  // by `SELECT COUNT(*) FROM photos == 0` and documented as "safe to call
+  // unconditionally". It was, right up until a reset could actually succeed:
+  // #293 fixed the FOREIGN KEY failure that had been stopping resets from
+  // emptying `photos` at all, and an emptied table is byte-for-byte the state
+  // a fresh install has. So John reset his library, quit, reopened, and got
+  // five folders back out of `library.json` — two of them on an external
+  // volume — plus the ratings and cover choices, as photo stubs.
+  //
+  // A row count cannot distinguish "never imported" from "just wiped", and no
+  // second guard fixes that class of mistake: the next piece of state that
+  // looks like a fresh install fools it the same way. The import is a one-time
+  // migration from a generation superseded in 2026-07 and every live library
+  // has long since been through it, so it is deleted rather than re-gated.
+  //
+  // The JSON files are left untouched on disk. Nothing is destroyed, and the
+  // import could be reintroduced deliberately if it ever turned out to be
+  // needed.
+  getDb();
 
   // Health check — proves the dev loop end to end, AND is the liveness probe the
   // UI's connection watchdog polls (ui/src/lib/serverHealth.js). Deliberately

@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.31
+
+- **A library you reset stays reset when you reopen the app.** Quitting and
+  relaunching used to bring the whole thing back — folders you never re-added,
+  along with old ratings — replayed out of the pre-SQLite `library.json`. That
+  one-time import is gone; the files it read are untouched on disk (#295).
+
 ## 2.19.30
 
 - **Nothing changes for you** — a packaging test that pins the one thing the
