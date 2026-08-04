@@ -191,3 +191,163 @@ describe("the #161 fix-round-2 ML table cascade migration", () => {
     ).toBeDefined();
   });
 });
+
+/**
+ * Recreate `photo_album`, `photo_tags` and `manual_stacks` exactly as they
+ * shipped before #293 — plain `REFERENCES photos(id)`, no cascade — and roll
+ * user_version back to 4, the version immediately before the repair. This is
+ * every database in the wild up to 2.19.28.
+ * @param {import("better-sqlite3").Database} db
+ */
+function makePreJunctionCascadeDb(db) {
+  db.exec(`
+    DROP TABLE photo_album;
+    DROP TABLE photo_tags;
+    DROP TABLE manual_stacks;
+    CREATE TABLE photo_album (
+      photo_id INTEGER REFERENCES photos(id),
+      album_id INTEGER REFERENCES albums(id),
+      PRIMARY KEY (photo_id, album_id)
+    );
+    CREATE TABLE photo_tags (
+      photo_id INTEGER REFERENCES photos(id),
+      tag_id INTEGER REFERENCES tags(id),
+      source TEXT NOT NULL,
+      PRIMARY KEY (photo_id, tag_id)
+    );
+    CREATE TABLE manual_stacks (
+      photo_id INTEGER PRIMARY KEY REFERENCES photos(id),
+      group_id INTEGER NOT NULL
+    );
+  `);
+  db.pragma("user_version = 4");
+}
+
+/** @returns {string[]} tables whose FK to photos still blocks a delete. */
+function blockingTables(db) {
+  return ["photo_album", "photo_tags", "manual_stacks"].filter((t) =>
+    db
+      .pragma(`foreign_key_list(${t})`)
+      .some((fk) => fk.table === "photos" && fk.on_delete !== "CASCADE")
+  );
+}
+
+describe("the #293 junction-table cascade migration", () => {
+  /** A photo with a manual stack, a tag and an album membership on it. */
+  function seedEncumberedPhoto(db) {
+    addPhoto(db, { filename: "STACKED.JPG" });
+    const photoId = db
+      .prepare(`SELECT id FROM photos WHERE filename = ?`)
+      .get("STACKED.JPG").id;
+    db.prepare(`INSERT INTO albums (id, name) VALUES (7, 'Trip')`).run();
+    db.prepare(
+      `INSERT INTO tags (id, dimension_name, value) VALUES (3, 'camera', 'R6')`
+    ).run();
+    db.prepare(`INSERT INTO photo_album VALUES (?, 7)`).run(photoId);
+    db.prepare(`INSERT INTO photo_tags VALUES (?, 3, 'exif')`).run(photoId);
+    db.prepare(`INSERT INTO manual_stacks VALUES (?, 99)`).run(photoId);
+    return photoId;
+  }
+
+  it("lets a photo carrying a manual stack be deleted at all", () => {
+    // THE bug: John reset a library with 11 manual burst stacks and the job
+    // died with `FOREIGN KEY constraint failed`. Every delete path in the app
+    // hit this, not only reset.
+    const db = new Database(":memory:");
+    applySchema(db);
+    makePreJunctionCascadeDb(db);
+    const photoId = seedEncumberedPhoto(db);
+
+    // Precondition: the pre-#293 schema really does refuse.
+    expect(() =>
+      db.prepare(`DELETE FROM photos WHERE id = ?`).run(photoId)
+    ).toThrow(/FOREIGN KEY/i);
+
+    applySchema(db); // the migration under test
+
+    expect(blockingTables(db)).toEqual([]);
+    expect(() =>
+      db.prepare(`DELETE FROM photos WHERE id = ?`).run(photoId)
+    ).not.toThrow();
+    // ...and the junction rows went WITH it rather than being left dangling.
+    for (const t of ["photo_album", "photo_tags", "manual_stacks"]) {
+      expect(
+        db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c,
+        `${t} should have cascaded`
+      ).toBe(0);
+    }
+  });
+
+  it("PRESERVES the rows it rebuilds — a manual stack is user work", () => {
+    // The user_version 2 step above could DROP its tables because nothing had
+    // ever been written to them. These hold stacks John built by hand, so a
+    // rebuild that lost them would be a worse bug than the one being fixed.
+    const db = new Database(":memory:");
+    applySchema(db);
+    makePreJunctionCascadeDb(db);
+    const photoId = seedEncumberedPhoto(db);
+
+    applySchema(db);
+
+    expect(
+      db
+        .prepare(`SELECT group_id FROM manual_stacks WHERE photo_id = ?`)
+        .get(photoId)?.group_id
+    ).toBe(99);
+    expect(
+      db
+        .prepare(`SELECT album_id FROM photo_album WHERE photo_id = ?`)
+        .get(photoId)?.album_id
+    ).toBe(7);
+    expect(
+      db
+        .prepare(`SELECT source FROM photo_tags WHERE photo_id = ?`)
+        .get(photoId)?.source
+    ).toBe("exif");
+  });
+
+  it("recreates the index the rebuild dropped", () => {
+    // DROP TABLE takes its indexes with it, and SCHEMA_SQL's
+    // `CREATE INDEX IF NOT EXISTS` already ran earlier in the same call — so
+    // the migration has to put this back itself or the lookup silently
+    // full-scans until the next process start.
+    const db = new Database(":memory:");
+    applySchema(db);
+    makePreJunctionCascadeDb(db);
+    applySchema(db);
+
+    expect(
+      db
+        .prepare(`SELECT 1 FROM sqlite_master WHERE type='index' AND name=?`)
+        .get("idx_manual_stacks_group")
+    ).toBeDefined();
+  });
+
+  it("leaves foreign-key enforcement ON afterwards", () => {
+    // The rebuild turns it off, and it has to come back — otherwise this
+    // migration silently disables every other cascade in the schema for the
+    // life of the process.
+    const db = new Database(":memory:");
+    applySchema(db);
+    makePreJunctionCascadeDb(db);
+    applySchema(db);
+
+    expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
+  });
+
+  it("runs exactly once and is idempotent", () => {
+    const db = new Database(":memory:");
+    applySchema(db);
+    const photoId = seedEncumberedPhoto(db);
+
+    applySchema(db);
+    applySchema(db);
+
+    expect(blockingTables(db)).toEqual([]);
+    expect(
+      db
+        .prepare(`SELECT group_id FROM manual_stacks WHERE photo_id = ?`)
+        .get(photoId)?.group_id
+    ).toBe(99);
+  });
+});

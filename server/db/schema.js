@@ -44,9 +44,15 @@ CREATE TABLE IF NOT EXISTS albums (
   start_at INTEGER,
   end_at INTEGER
 );
+-- ON DELETE CASCADE on both, for the reason spelled out at photo_embeddings
+-- below and re-learned the hard way in #293: better-sqlite3 enables
+-- PRAGMA foreign_keys by default, so a junction row with a plain REFERENCES
+-- makes every DELETE FROM photos path throw. Cleaning up per-site does not
+-- work — there are five such sites and only ONE of them cleared all three
+-- junction tables.
 CREATE TABLE IF NOT EXISTS photo_album (
-  photo_id INTEGER REFERENCES photos(id),
-  album_id INTEGER REFERENCES albums(id),
+  photo_id INTEGER REFERENCES photos(id) ON DELETE CASCADE,
+  album_id INTEGER REFERENCES albums(id) ON DELETE CASCADE,
   PRIMARY KEY (photo_id, album_id)
 );
 
@@ -57,8 +63,8 @@ CREATE TABLE IF NOT EXISTS tags (
   UNIQUE(dimension_name, value)
 );
 CREATE TABLE IF NOT EXISTS photo_tags (
-  photo_id INTEGER REFERENCES photos(id),
-  tag_id INTEGER REFERENCES tags(id),
+  photo_id INTEGER REFERENCES photos(id) ON DELETE CASCADE,
+  tag_id INTEGER REFERENCES tags(id) ON DELETE CASCADE,
   source TEXT NOT NULL,
   PRIMARY KEY (photo_id, tag_id)
 );
@@ -74,7 +80,7 @@ CREATE TABLE IF NOT EXISTS keep_scope (
 -- override (dissolve) is the photos.no_auto_stack column. See
 -- docs/superpowers/specs/2026-07-11-manual-burst-override-design.md.
 CREATE TABLE IF NOT EXISTS manual_stacks (
-  photo_id INTEGER PRIMARY KEY REFERENCES photos(id),
+  photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
   group_id INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_manual_stacks_group ON manual_stacks(group_id);
@@ -290,6 +296,109 @@ export function applySchema(db) {
       );
     }
     db.pragma("user_version = 4");
+  }
+  if (dataVersion < 5) {
+    // #293: `photo_album`, `photo_tags` and `manual_stacks` shipped with a
+    // plain `REFERENCES photos(id)`. better-sqlite3 enables PRAGMA
+    // foreign_keys by default, so a single row in any of them makes a
+    // `DELETE FROM photos` throw `FOREIGN KEY constraint failed` — and there
+    // are FIVE delete paths: resetLibrary, deleteFolder, deleteFolderSubtree,
+    // deletePhotosByIds and missing.js's relocate.
+    //
+    // Every one of them was broken, in a different combination:
+    //
+    //   deleteFolder / deleteFolderSubtree   cleared NONE of the three
+    //   missing.js relocate                  cleared NONE of the three
+    //   deletePhotosByIds                    cleared tags + album, not stacks
+    //   resetLibrary                         cleared tags + album, not stacks
+    //
+    // John hit it on reset with 11 manual burst stacks. That is the argument
+    // for fixing the CONSTRAINT rather than adding a fourth and fifth cleanup
+    // call: per-site cleanup is what produced four different wrong answers,
+    // and photo_embeddings' own comment predicted exactly this ("a SIXTH
+    // delete site added later can't silently reintroduce the same throw").
+    //
+    // Data-preserving, unlike the user_version 2 DROP above — these hold real
+    // user work (a manual stack is something John built by hand), so this is
+    // the full SQLite rebuild: create, copy, drop, rename.
+    const needsCascade = (table) =>
+      db
+        .pragma(`foreign_key_list(${table})`)
+        .some((fk) => fk.table === "photos" && fk.on_delete !== "CASCADE");
+
+    if (
+      needsCascade("photo_album") ||
+      needsCascade("photo_tags") ||
+      needsCascade("manual_stacks")
+    ) {
+      // Must be OUTSIDE the transaction: `PRAGMA foreign_keys` is a silent
+      // no-op inside one, so a rebuild that trusted it would enforce the very
+      // constraint it is trying to replace and fail at the DROP.
+      db.pragma("foreign_keys = OFF");
+      try {
+        db.transaction(() => {
+          // The `WHERE ... IN (SELECT id FROM photos)` filters are not
+          // paranoia about today — they are what keeps `foreign_key_check`
+          // clean if a row ever outlived its parent (a database restored from
+          // a partial copy, or written by a build where enforcement was off).
+          // An orphaned junction row describes a photo that does not exist;
+          // carrying it across would fail the check and abort the migration.
+          db.exec(`
+            CREATE TABLE photo_album_new (
+              photo_id INTEGER REFERENCES photos(id) ON DELETE CASCADE,
+              album_id INTEGER REFERENCES albums(id) ON DELETE CASCADE,
+              PRIMARY KEY (photo_id, album_id)
+            );
+            INSERT INTO photo_album_new SELECT photo_id, album_id
+              FROM photo_album
+             WHERE photo_id IN (SELECT id FROM photos)
+               AND album_id IN (SELECT id FROM albums);
+            DROP TABLE photo_album;
+            ALTER TABLE photo_album_new RENAME TO photo_album;
+
+            CREATE TABLE photo_tags_new (
+              photo_id INTEGER REFERENCES photos(id) ON DELETE CASCADE,
+              tag_id INTEGER REFERENCES tags(id) ON DELETE CASCADE,
+              source TEXT NOT NULL,
+              PRIMARY KEY (photo_id, tag_id)
+            );
+            INSERT INTO photo_tags_new SELECT photo_id, tag_id, source
+              FROM photo_tags
+             WHERE photo_id IN (SELECT id FROM photos)
+               AND tag_id IN (SELECT id FROM tags);
+            DROP TABLE photo_tags;
+            ALTER TABLE photo_tags_new RENAME TO photo_tags;
+
+            CREATE TABLE manual_stacks_new (
+              photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+              group_id INTEGER NOT NULL
+            );
+            INSERT INTO manual_stacks_new SELECT photo_id, group_id
+              FROM manual_stacks
+             WHERE photo_id IN (SELECT id FROM photos);
+            DROP TABLE manual_stacks;
+            ALTER TABLE manual_stacks_new RENAME TO manual_stacks;
+          `);
+          // DROP TABLE takes the table's indexes with it, and SCHEMA_SQL's
+          // `CREATE INDEX IF NOT EXISTS` already ran further up this same
+          // call — so without this line the manual-stack lookup silently
+          // full-scans until the next process start.
+          db.exec(
+            `CREATE INDEX IF NOT EXISTS idx_manual_stacks_group
+               ON manual_stacks(group_id)`
+          );
+          const violations = db.pragma("foreign_key_check");
+          if (violations.length) {
+            throw new Error(
+              `foreign_key_check found ${violations.length} violation(s) after the #293 rebuild`
+            );
+          }
+        })();
+      } finally {
+        db.pragma("foreign_keys = ON");
+      }
+    }
+    db.pragma("user_version = 5");
   }
 
   // --- ML artifacts (#161) --------------------------------------------------

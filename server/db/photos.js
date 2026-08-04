@@ -249,8 +249,13 @@ export function renameFolderPath(db, oldAbsPath, newAbsPath) {
 /**
  * Remove a folder and its photos from the index. Real files on disk are
  * never touched — this only affects the `folders`/`photos` rows.
- * photo_album/tags aren't cleaned up here: album clustering (GH #3) isn't
- * implemented yet and those tables have no rows today.
+ *
+ * The junction rows (photo_album, photo_tags, manual_stacks) go with the
+ * photos via ON DELETE CASCADE. They were NOT cleaned up here before #293,
+ * under a comment claiming album clustering "isn't implemented yet and those
+ * tables have no rows today" — true when written, false for a long time, and
+ * it made this function throw `FOREIGN KEY constraint failed` on any folder
+ * holding a manually stacked photo.
  * @param {import("better-sqlite3").Database} db
  * @param {number} folderId
  * @returns {boolean} true if the folder existed and was removed
@@ -396,11 +401,28 @@ export async function resetLibrary(
 
   // The small tables go first and in one go — they are bounded by album and
   // tag counts, not by library size.
+  //
+  // The junction rows now cascade with their photos (#293), so those two
+  // DELETEs are no longer load-bearing — but `tags` and `albums` are PARENT
+  // tables that nothing cascades from, and emptying a junction before its
+  // parent is free. Kept.
+  //
+  // `keep_scope` and `persons` are the two the reset used to LEAVE BEHIND,
+  // and the UI promises to "wipe the entire index":
+  //
+  //   keep_scope  has no foreign key at all, so its rows outlived the photos
+  //               they named. Since #212 made the working set survive a
+  //               reload, that left the app scoped to N photos that no longer
+  //               exist — an empty feed with no way to see why.
+  //   persons     survives because `photo_faces` cascades and `persons` does
+  //               not. A reset therefore left every person in place with zero
+  //               faces; John had 1,053 of them.
   db.transaction(() => {
     db.prepare(`DELETE FROM photo_tags`).run();
     db.prepare(`DELETE FROM tags`).run();
     db.prepare(`DELETE FROM photo_album`).run();
     db.prepare(`DELETE FROM albums`).run();
+    db.prepare(`DELETE FROM keep_scope`).run();
   }).immediate();
 
   // Photos in chunks: this is the one that cascades.
@@ -436,6 +458,13 @@ export async function resetLibrary(
   db.transaction(() => {
     db.prepare(`DELETE FROM folders`).run();
     db.prepare(`DELETE FROM volumes`).run();
+    // AFTER the photos, deliberately. `photo_faces.person_id` is
+    // ON DELETE SET NULL, so clearing `persons` while the faces still existed
+    // would rewrite every face row — a full-table UPDATE on the widest table
+    // in the schema, in one unyielded transaction, which is precisely the
+    // stall #281 was fixing. By here the faces have cascaded away with their
+    // photos and this is a delete with nothing to cascade to.
+    db.prepare(`DELETE FROM persons`).run();
   }).immediate();
 
   return { folders, photos, canceled: false };

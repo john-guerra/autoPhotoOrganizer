@@ -586,3 +586,119 @@ describe("resetLibrary survives the connection going away mid-run (#281)", () =>
     expect(r.photos).toBeGreaterThan(0);
   });
 });
+
+describe("the #293 delete paths: a photo you have touched can still be removed", () => {
+  /**
+   * Put a photo in every state that a junction table records: a manual burst
+   * stack, an album, a tag, and the "keep only" working set.
+   *
+   * One fixture for all four delete paths, deliberately — the bug was that
+   * each path cleaned up a DIFFERENT subset, so a per-path fixture is exactly
+   * what would let the next one be wrong again.
+   */
+  function encumber(db, photoId) {
+    db.prepare(
+      `INSERT OR IGNORE INTO albums (id, name) VALUES (77, 'Trip')`
+    ).run();
+    db.prepare(
+      `INSERT OR IGNORE INTO tags (id, dimension_name, value)
+       VALUES (33, 'camera', 'R6')`
+    ).run();
+    db.prepare(`INSERT OR IGNORE INTO photo_album VALUES (?, 77)`).run(photoId);
+    db.prepare(`INSERT OR IGNORE INTO photo_tags VALUES (?, 33, 'exif')`).run(
+      photoId
+    );
+    db.prepare(`INSERT OR IGNORE INTO manual_stacks VALUES (?, 99)`).run(
+      photoId
+    );
+    db.prepare(`INSERT OR IGNORE INTO keep_scope VALUES (?)`).run(photoId);
+  }
+
+  /** @returns {number[]} the photo ids just written. */
+  function seed(db, folder = "/lib/cam") {
+    upsertScan(db, folder, 1, [
+      { name: "1.jpg", size: 10, mtimeMs: 1, kind: "image" },
+      { name: "2.jpg", size: 20, mtimeMs: 2, kind: "image" },
+    ]);
+    const ids = db
+      .prepare(`SELECT id FROM photos ORDER BY id`)
+      .all()
+      .map((r) => r.id);
+    for (const id of ids) encumber(db, id);
+    return ids;
+  }
+
+  it("resetLibrary survives a manual burst stack", async () => {
+    // John's report, exactly: 11 manual stacks, and the reset job died with
+    // `FOREIGN KEY constraint failed` before removing anything.
+    const db = getDb();
+    seed(db);
+
+    const r = await resetLibrary(db);
+
+    expect(r.canceled).toBe(false);
+    expect(r.photos).toBe(2);
+    expect(db.prepare(`SELECT COUNT(*) c FROM photos`).get().c).toBe(0);
+    expect(db.prepare(`SELECT COUNT(*) c FROM manual_stacks`).get().c).toBe(0);
+  });
+
+  it("resetLibrary clears the working set, so the feed is not scoped to nothing", async () => {
+    // `keep_scope` has no foreign key, so its rows outlived the photos they
+    // named. Since #212 made the working set survive a reload, a reset left
+    // the app scoped to photos that no longer exist — an empty feed, with
+    // nothing on screen explaining why.
+    const db = getDb();
+    seed(db);
+    expect(db.prepare(`SELECT COUNT(*) c FROM keep_scope`).get().c).toBe(2);
+
+    await resetLibrary(db);
+
+    expect(db.prepare(`SELECT COUNT(*) c FROM keep_scope`).get().c).toBe(0);
+  });
+
+  it("resetLibrary forgets the people too", async () => {
+    // `photo_faces` cascades and `persons` does not, so every person survived
+    // a full reset with zero faces. The UI promises to "wipe the entire
+    // index"; 1,053 empty people is not that.
+    const db = getDb();
+    seed(db);
+    db.prepare(
+      `INSERT INTO persons (name, cover_face_id, created_at) VALUES ('Ana', NULL, 0)`
+    ).run();
+
+    await resetLibrary(db);
+
+    expect(db.prepare(`SELECT COUNT(*) c FROM persons`).get().c).toBe(0);
+  });
+
+  it("deleteFolder survives it", () => {
+    // This path cleaned up NONE of the three junction tables, under a comment
+    // saying those tables "have no rows today".
+    const db = getDb();
+    seed(db);
+    const folderId = db.prepare(`SELECT id FROM folders`).get().id;
+
+    expect(() => deleteFolder(db, folderId)).not.toThrow();
+    expect(db.prepare(`SELECT COUNT(*) c FROM photos`).get().c).toBe(0);
+  });
+
+  it("deleteFolderSubtree survives it", () => {
+    const db = getDb();
+    seed(db, "/lib/cam");
+
+    expect(() => deleteFolderSubtree(db, "/lib/cam")).not.toThrow();
+    expect(db.prepare(`SELECT COUNT(*) c FROM photos`).get().c).toBe(0);
+  });
+
+  it("deletePhotosByIds survives it", () => {
+    // This one cleared photo_tags and photo_album but not manual_stacks —
+    // the third of four different wrong answers, which is the argument for
+    // fixing the constraint instead of the call sites.
+    const db = getDb();
+    const ids = seed(db);
+
+    expect(() => deletePhotosByIds(db, ids)).not.toThrow();
+    expect(db.prepare(`SELECT COUNT(*) c FROM photos`).get().c).toBe(0);
+    expect(db.prepare(`SELECT COUNT(*) c FROM manual_stacks`).get().c).toBe(0);
+  });
+});

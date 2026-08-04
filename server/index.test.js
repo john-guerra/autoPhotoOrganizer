@@ -1,13 +1,33 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import express from "express";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { listenOnOpenPort } from "./index.js";
+import { _resetDbForTest } from "./db/connection.js";
+
+// A SCRATCH cache root, and this file had none (#293). `createApp()` opens the
+// index — so the /api/health tests below were running applySchema and
+// migrateLegacyJsonIfNeeded against the developer's REAL ~/.autogallery on
+// every `npm test`. Nothing failed, which is exactly why it went unnoticed
+// from 2.19.26 until cacheRoot() started refusing to resolve the real path
+// under vitest.
+let cacheDir;
+beforeEach(async () => {
+  cacheDir = await mkdtemp(join(tmpdir(), "ag-index-"));
+  process.env.AUTOGALLERY_HOME = cacheDir;
+  _resetDbForTest();
+});
 
 // Track opened servers so each test tears its listeners down.
 const opened = [];
 const track = (r) => (opened.push(r.server), r);
-afterEach(() => {
+afterEach(async () => {
   for (const s of opened) s.close();
   opened.length = 0;
+  _resetDbForTest();
+  await rm(cacheDir, { recursive: true, force: true });
+  delete process.env.AUTOGALLERY_HOME;
 });
 
 describe("listenOnOpenPort (issue #64)", () => {
