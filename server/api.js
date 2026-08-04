@@ -1947,15 +1947,96 @@ export function registerApi(app, { ml } = {}) {
           )
         );
       } else {
-        // New faces join the people who already have NAMES, without a
-        // re-cluster. This is the everyday import case #167 names: the
-        // alternative is re-running the whole O(n^2) pass to file six photos.
+        // ---- PHASE 2: file the faces into people (#250) -------------------
+        //
+        // "Nobody wants a pile of ungrouped face boxes." Detection and
+        // grouping were two buttons, which is the app exposing its own
+        // pipeline stages: the second pass had to be known about, and omitting
+        // it left the first one's output inert.
+        //
+        // TWO matchers, in this order, and both earn their place:
+        //
+        //   assignNewFaces  compares a face against EVERY MEMBER of a NAMED
+        //                   person. Better for someone photographed in
+        //                   different light or at a different angle, and it
+        //                   is why this is not folded into the pass below.
+        //   groupRemaining  compares against each person's MEAN, and creates
+        //                   new people for whatever matched nobody.
+        //
+        // assignNewFaces alone was already here — and was INERT for anyone who
+        // has named nobody, because it returns early on an empty named-person
+        // list. That is why the second button was effectively mandatory rather
+        // than optional.
         const assigned = assignNewFaces(getDb(), modelId);
+
+        // SCOPE-ONLY (John's call). Grouping runs over exactly the photos the
+        // scan looked at, never wider, so a 200-photo scan cannot trigger a
+        // library-wide pass — measured at ~20 minutes on a library with
+        // ~25,000 people. The cost is that faces from an earlier cancelled
+        // scan stay behind; `grouping.pending` is what makes that visible
+        // rather than silent.
+        //
+        // THE BAR RECALIBRATES ONCE, HERE, and that is deliberate. The two
+        // phases have different units and phase 2's total cannot be known
+        // until phase 1 finishes — you cannot count faces before detecting
+        // them. `/api/library/reset` keeps ONE running total across its two
+        // phases, but only because both are countable up front; copying that
+        // here would mean a total that arrives late, which is #208. So the
+        // `phase` changes at the same instant the bar resets, and the label is
+        // what explains the reset to the user.
+        const groupTotal = ungroupedFaceCount(getDb(), modelId, ids ?? null);
+        let grouped = { assigned: 0, created: 0, removedEmpty: 0 };
+        if (groupTotal > 0) {
+          registry.update(job.id, {
+            phase: "Filing faces into people",
+            label: `Filing ${groupTotal.toLocaleString()} faces into people`,
+            done: 0,
+            total: groupTotal,
+          });
+          // The same latch the manual Group takes, so the two can never
+          // overlap — one of them would otherwise file faces the other had
+          // already claimed and report a count for work it did not do.
+          try {
+            grouped = await withClusterLatch(() =>
+              groupRemaining(getDb(), modelId, {
+                scopeIds: ids ?? null,
+                signal: job.controller.signal,
+                onProgress: ({ done, total }) =>
+                  registry.update(job.id, { done, total }),
+              })
+            );
+          } catch (e) {
+            if (e?.name !== "AbortError") throw e;
+            // A STOP during phase 2 is an outcome, not a failure, and it is
+            // not even a loss: the detection is committed and every grouping
+            // batch that finished is committed. Letting this reach the catch
+            // below would report "Face detection stopped: canceled" — which
+            // blames the phase that actually succeeded, and throws away the
+            // counts. `stopped()` exists for exactly this (#293).
+            registry.stopped(job.id, {
+              scanned: r.done,
+              faces: r.faces,
+              failed: r.failed,
+              ...assigned,
+              grouped: { assigned: 0, created: 0, removedEmpty: 0 },
+              stoppedWhileGrouping: true,
+            });
+            return;
+          }
+        }
         registry.finish(job.id, {
           scanned: r.done,
           faces: r.faces,
           failed: r.failed,
           ...assigned,
+          // Namespaced, because `assigned` means two different things: how
+          // many faces joined a NAMED person (above) and how many this pass
+          // filed in total. Merging them would make the summary lie.
+          grouped: {
+            assigned: grouped.assigned,
+            created: grouped.created,
+            removedEmpty: grouped.removedEmpty,
+          },
         });
       }
     } catch (e) {

@@ -271,6 +271,16 @@
         parts.push(
           `${r.assigned} added to ${r.people} ${r.people === 1 ? "person" : "people"}`
         );
+      // Phase 2 (#250). Finding faces now files them, so the summary has to
+      // say so — otherwise the job reports a pile of face boxes and the user
+      // has no way to know the people already exist.
+      const g = r.grouped;
+      if (g?.assigned)
+        parts.push(
+          `${g.assigned.toLocaleString()} filed into ${g.created.toLocaleString()} new ${g.created === 1 ? "person" : "people"}`
+        );
+      if (r.stoppedWhileGrouping)
+        parts.push("stopped before filing them into people");
       if (r.failed) parts.push(`${r.failed} unreadable`);
       return parts.join(" · ");
     }
