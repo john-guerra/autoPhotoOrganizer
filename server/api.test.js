@@ -3492,6 +3492,58 @@ describe("jobs endpoints", () => {
     }
   });
 
+  it("POST /api/jobs/:id/cancel STOPS a paused job (#282)", async () => {
+    // The route gated on `status === "running"` while `registry.cancel` had
+    // already been widened to accept `paused`. So the button existed, the
+    // registry was ready, and the route in between answered 409 "not running"
+    // — a Cancel that does nothing, on precisely the job a user is most
+    // likely to want stopped, because it is the one visibly not moving.
+    const job = registry.create("pipeline", { label: "Scanning" });
+    try {
+      registry.pause(job.id, "Waiting for something", { parked: true });
+      const res = await fetch(`${srv.base}/api/jobs/${job.id}/cancel`, {
+        method: "POST",
+      });
+      expect(res.status).toBe(200);
+      expect(job.controller.signal.aborted).toBe(true);
+    } finally {
+      registry.fail(job.id, new Error("test cleanup"));
+      registry.dismiss(job.id);
+    }
+  });
+
+  it("POST /api/jobs/:id/dismiss refuses a PARKED job, and says why", async () => {
+    // A parked job is running work waiting its turn. Hiding its row deletes
+    // the only sign that the work still exists — and it resumes into a job
+    // with no row to update.
+    const job = registry.create("pipeline", { label: "Scanning" });
+    try {
+      registry.pause(
+        job.id,
+        "Waiting for \u201cFinding faces\u201d to finish",
+        {
+          parked: true,
+        }
+      );
+      const res = await fetch(`${srv.base}/api/jobs/${job.id}/dismiss`, {
+        method: "POST",
+      });
+      expect(res.status).toBe(409);
+      const { error } = await res.json();
+      // Specific over generic: it names the state AND the way out.
+      expect(error).toMatch(/waiting its turn/i);
+      expect(error).toMatch(/Finding faces/);
+      expect(error).toMatch(/stop it/i);
+      // Still there.
+      const { jobs } = await (await fetch(`${srv.base}/api/jobs`)).json();
+      expect(jobs.some((j) => j.id === job.id)).toBe(true);
+    } finally {
+      registry.cancel(job.id);
+      registry.fail(job.id, new Error("test cleanup"));
+      registry.dismiss(job.id);
+    }
+  });
+
   it("POST /api/jobs/:id/cancel 404s for an unknown id", async () => {
     const res = await fetch(`${srv.base}/api/jobs/job-does-not-exist/cancel`, {
       method: "POST",

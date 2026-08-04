@@ -329,3 +329,53 @@ describe("paused jobs (#260)", () => {
     expect(registry.pause(job.id, "nope")).toBe(false);
   });
 });
+
+describe("a PARKED job is not a finished one (#257/#282)", () => {
+  // `paused` covers two opposite situations, and #260 could only see one of
+  // them. A sweep that hit an unmounted drive has RETURNED — dismissing its
+  // row is right, and refusing left 41 undismissable "Hashing" rows. A run
+  // parked on a scheduler checkpoint is a LIVE CLOSURE that will resume into
+  // this same job; dismissing that one deletes the only sign the work exists.
+  it("refuses dismiss while parked, and allows it once resumed", () => {
+    const job = registry.create("pipeline", { label: "Scanning" });
+    registry.pause(job.id, "Waiting for “Finding faces” to finish", {
+      parked: true,
+    });
+    expect(registry.dismiss(job.id)).toBe(false);
+    expect(registry.list().find((j) => j.id === job.id)).toBeTruthy();
+
+    registry.resume(job.id);
+    // Resuming must clear the flag, or the job is undismissable forever after
+    // its first park.
+    expect(registry.list().find((j) => j.id === job.id).parked).toBe(false);
+  });
+
+  it("still dismisses a STOOD-DOWN pause, which is the common case", () => {
+    const job = registry.create("hash", { label: "Hashing" });
+    registry.pause(job.id, "Drive not available — resumes on the next scan");
+    expect(registry.dismiss(job.id)).toBe(true);
+  });
+
+  it("dismissAll skips a parked job — it is not the back door", () => {
+    // Missing the same rule here would make "Dismiss all" do exactly what
+    // `dismiss` refuses, which is the more likely button of the two.
+    const parked = registry.create("pipeline", { label: "Scanning" });
+    const stood = registry.create("hash", { label: "Hashing" });
+    const done = registry.create("embed", { label: "Embedding" });
+    registry.pause(parked.id, "waiting its turn", { parked: true });
+    registry.pause(stood.id, "Drive not available");
+    registry.finish(done.id, {});
+
+    expect(registry.dismissAll()).toBe(2);
+    const left = registry.list().map((j) => j.id);
+    expect(left).toContain(parked.id);
+    expect(left).not.toContain(stood.id);
+  });
+
+  it("a parked job is STILL cancellable — that is the whole point of parking", () => {
+    const job = registry.create("pipeline", { label: "Scanning" });
+    registry.pause(job.id, "waiting its turn", { parked: true });
+    expect(registry.cancel(job.id)).toBe(true);
+    expect(job.controller.signal.aborted).toBe(true);
+  });
+});

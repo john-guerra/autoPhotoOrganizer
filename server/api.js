@@ -296,6 +296,26 @@ import {
   carryMetadata,
 } from "./db/missing.js";
 
+/**
+ * What a parked job says about why it is parked.
+ *
+ * Every scheduler pause used to read "Waiting — a scoped request is running
+ * first", which tells the user the one thing they can already see (it is not
+ * moving) and withholds the one thing they cannot (what it is waiting FOR, and
+ * therefore roughly how long). A bar that has not moved in ten minutes with no
+ * named cause is indistinguishable from a hang, which is the whole of #208.
+ *
+ * `blockedBy` is null when the run ahead carries no label — say "another
+ * request" rather than inventing a name for it.
+ *
+ * @param {string|null} blockedBy
+ */
+function waitingFor(blockedBy) {
+  return blockedBy
+    ? `Waiting for “${blockedBy}” to finish — it resumes on its own.`
+    : "Waiting for another request to finish — it resumes on its own.";
+}
+
 /** Kick the background hasher with a JobsPanel entry, so hours of full-file
  * SHA-1 on a 114k library are visible and cancelable rather than invisible.
  * Fire-and-forget: it must never block a scan's response. */
@@ -440,10 +460,11 @@ function kickEmbedSweep(
       .submit({
         priority: scopeIds ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
         key: scopeIds ? undefined : "backlog:embed",
+        label: job.label,
         // Say WHY it stopped rather than leaving a bar that has not moved to
         // be interpreted — starvation is legitimate here, silence is not.
-        onPause: () =>
-          registry.pause(job.id, "Waiting — a scoped request is running first"),
+        onPause: (blockedBy) =>
+          registry.pause(job.id, waitingFor(blockedBy), { parked: true }),
         onResume: () => registry.resume(job.id),
         body: ({ checkpoint }) =>
           embedAllPending(db, {
@@ -985,8 +1006,16 @@ export function registerApi(app, { ml } = {}) {
   app.post("/api/jobs/:id/cancel", (req, res) => {
     const j = registry.get(req.params.id);
     if (!j) return res.status(404).json({ error: "no such job" });
-    if (j.status !== "running")
-      return res.status(409).json({ error: "not running" });
+    // `paused` too. A parked job is the one a user is MOST likely to want to
+    // stop — it is the one sitting there not moving — and refusing here made
+    // Cancel a button that did nothing, which fails contract 2's "genuinely
+    // cancellable" outright. `registry.cancel` already accepted both; this
+    // route was the gate that never opened.
+    if (j.status !== "running" && j.status !== "paused") {
+      return res.status(409).json({
+        error: `This job is already ${j.status} — there is nothing left to stop.`,
+      });
+    }
     registry.cancel(req.params.id);
     res.json({ ok: true });
   });
@@ -1000,8 +1029,20 @@ export function registerApi(app, { ml } = {}) {
   app.post("/api/jobs/:id/dismiss", (req, res) => {
     const j = registry.get(req.params.id);
     if (!j) return res.status(404).json({ error: "no such job" });
-    if (j.status === "running")
-      return res.status(409).json({ error: "still running" });
+    if (j.status === "running") {
+      return res.status(409).json({
+        error: "This job is still running — stop it first, or let it finish.",
+      });
+    }
+    // A PARKED job is running work waiting its turn, not a finished row.
+    // Hiding it would delete the only sign that the work still exists.
+    if (j.parked) {
+      return res.status(409).json({
+        error:
+          `This job is waiting its turn, not finished` +
+          `${j.pauseReason ? ` (${j.pauseReason})` : ""} — stop it if you do not want it to run.`,
+      });
+    }
     registry.dismiss(req.params.id);
     res.json({ ok: true });
   });
@@ -1857,8 +1898,9 @@ export function registerApi(app, { ml } = {}) {
       const r = await scheduler.submit({
         priority: ids ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
         key: ids ? undefined : "backlog:faces",
-        onPause: () =>
-          registry.pause(job.id, "Waiting — a scoped request is running first"),
+        label: job.label,
+        onPause: (blockedBy) =>
+          registry.pause(job.id, waitingFor(blockedBy), { parked: true }),
         onResume: () => registry.resume(job.id),
         body: ({ checkpoint }) =>
           sweepFaces({
@@ -2063,8 +2105,9 @@ export function registerApi(app, { ml } = {}) {
     withClusterLatch(async () => {
       const r = await scheduler.submit({
         priority: scopeIds ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
-        onPause: () =>
-          registry.pause(job.id, "Waiting — a scoped request is running first"),
+        label: job.label,
+        onPause: (blockedBy) =>
+          registry.pause(job.id, waitingFor(blockedBy), { parked: true }),
         onResume: () => registry.resume(job.id),
         body: ({ checkpoint }) =>
           groupRemaining(db, modelId, {
@@ -3965,8 +4008,9 @@ export function registerApi(app, { ml } = {}) {
       .submit({
         priority: scoped.ids ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
         key: scoped.ids ? undefined : "pipeline:all",
-        onPause: () =>
-          registry.pause(job.id, "Waiting — a scoped request is running first"),
+        label: job.label,
+        onPause: (blockedBy) =>
+          registry.pause(job.id, waitingFor(blockedBy), { parked: true }),
         onResume: () => registry.resume(job.id),
         body: ({ checkpoint }) =>
           runPipeline({

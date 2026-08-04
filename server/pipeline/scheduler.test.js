@@ -241,3 +241,56 @@ describe("Scheduler — a scoped request preempts the sweep (#257)", () => {
     expect(s.liveCount).toBe(0);
   });
 });
+
+describe("a park says WHAT it is waiting for (#282)", () => {
+  it("hands onPause the label of the run ahead", async () => {
+    // Every scheduler pause read "Waiting — a scoped request is running
+    // first", which tells the user the one thing they can already see (the bar
+    // is not moving) and withholds the one thing they cannot: what it is
+    // waiting for, and so roughly how long. An unexplained frozen bar is
+    // indistinguishable from a hang (#208).
+    const s = new Scheduler();
+    const log = [];
+    const blockedBy = [];
+
+    const bg = s.submit({
+      priority: PRIORITY.BACKGROUND,
+      label: "Scanning your photos",
+      onPause: (who) => blockedBy.push(who),
+      body: fakeSweep("bg", 4, log),
+    });
+    await settle();
+    await settle();
+    const scoped = s.submit({
+      priority: PRIORITY.SCOPED,
+      label: "Finding faces in 20 photos",
+      body: fakeSweep("sc", 2, log),
+    });
+
+    await Promise.all([bg, scoped]);
+    expect(blockedBy).toEqual(["Finding faces in 20 photos"]);
+  });
+
+  it("says null rather than inventing a name when the blocker has none", async () => {
+    // The caller renders "another request" for this. Guessing a name would be
+    // worse than the generic line it replaced.
+    const s = new Scheduler();
+    const log = [];
+    const blockedBy = [];
+
+    const bg = s.submit({
+      priority: PRIORITY.BACKGROUND,
+      onPause: (who) => blockedBy.push(who),
+      body: fakeSweep("bg", 4, log),
+    });
+    await settle();
+    await settle();
+    const scoped = s.submit({
+      priority: PRIORITY.SCOPED,
+      body: fakeSweep("sc", 2, log),
+    });
+
+    await Promise.all([bg, scoped]);
+    expect(blockedBy).toEqual([null]);
+  });
+});

@@ -50,7 +50,11 @@ export const PRIORITY = Object.freeze({ SCOPED: 1, BACKGROUND: 2 });
  * @property {number} priority
  * @property {string} [key] coalescing key; a second submission with a key
  *   already queued is dropped, because it would recompute the same worklist
- * @property {() => void} [onPause] called when this run parks
+ * @property {string} [label] what this run IS, in the user's words ("Finding
+ *   faces"). Passed to whatever it blocks, so a parked job can say what it is
+ *   waiting FOR rather than only that it is waiting.
+ * @property {(blockedBy: string|null) => void} [onPause] called when this run
+ *   parks; `blockedBy` is the label of the run ahead, or null if it had none
  * @property {() => void} [onResume] called when it is let go
  */
 
@@ -69,10 +73,29 @@ export class Scheduler {
    * and keep the worker for another batch.
    */
   #higherPending(run) {
+    return this.#blocker(run) !== undefined;
+  }
+
+  /**
+   * WHICH run is ahead of this one, not merely whether one is.
+   *
+   * The distinction is the whole of "a pause reason names the blocker": a
+   * parked job could always say it was waiting, and never what for. Returns
+   * `undefined` when nothing outranks it — deliberately distinct from a run
+   * that outranks it but has no label.
+   *
+   * @param {Run} run
+   * @returns {Run|undefined}
+   */
+  #blocker(run) {
+    let best;
     for (const other of this.#live) {
-      if (other !== run && other.priority < run.priority) return true;
+      if (other === run || other.priority >= run.priority) continue;
+      // The most urgent one, so the message names what will actually finish
+      // first rather than whichever the Set happened to yield.
+      if (!best || other.priority < best.priority) best = other;
     }
-    return false;
+    return best;
   }
 
   /** Let every parked checkpoint re-evaluate. Cheap: they re-check and re-park. */
@@ -104,10 +127,12 @@ export class Scheduler {
 
     let parked = false;
     const checkpoint = async () => {
-      while (this.#higherPending(run)) {
+      for (;;) {
+        const blocker = this.#blocker(run);
+        if (!blocker) break;
         if (!parked) {
           parked = true;
-          run.onPause?.();
+          run.onPause?.(blocker.label ?? null);
         }
         await new Promise((resolve) => this.#waiters.push(resolve));
       }
