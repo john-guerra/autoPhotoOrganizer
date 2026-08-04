@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.28
+
+- **Groundwork, nothing visible yet** — background jobs that need the same
+  resource (the database writer, the ML process) now take turns through the
+  scheduler instead of each route refusing the second request. The refusals
+  themselves come out next; this is the part that makes removing them safe
+  (#279).
+
 ## 2.19.26
 
 - **"Lost the connection" is no longer said about a server that is simply

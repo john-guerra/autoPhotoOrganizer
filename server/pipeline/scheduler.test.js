@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Scheduler, PRIORITY } from "./scheduler.js";
+import { Scheduler, PRIORITY, RESOURCE } from "./scheduler.js";
 
 /** Resolve on the next macrotask, so parked promises get a chance to settle. */
 const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -292,5 +292,137 @@ describe("a park says WHAT it is waiting for (#282)", () => {
 
     await Promise.all([bg, scoped]);
     expect(blockedBy).toEqual([null]);
+  });
+});
+
+describe("a lease per resource class — the mutual exclusion (#279)", () => {
+  /**
+   * The scheduler's header claimed "exactly one runnable at a time" long
+   * before anything enforced it. Priority parking only ever parked a run of
+   * STRICTLY LOWER priority, so two runs of EQUAL priority both proceeded.
+   * Six `inFlight` booleans in api.js were doing the real work, each refusing
+   * its own route with a 409 — which is why asking for two things told you no
+   * instead of queueing the second.
+   */
+  it("keeps two same-resource runs of EQUAL priority from interleaving", async () => {
+    const s = new Scheduler();
+    const log = [];
+    await Promise.all([
+      s.submit({
+        priority: PRIORITY.BACKGROUND,
+        resource: RESOURCE.DB_WRITE,
+        label: "Hashing",
+        body: fakeSweep("a", 3, log),
+      }),
+      s.submit({
+        priority: PRIORITY.BACKGROUND,
+        resource: RESOURCE.DB_WRITE,
+        label: "Enriching",
+        body: fakeSweep("b", 3, log),
+      }),
+    ]);
+
+    // Every batch of one, then every batch of the other. Interleaving is what
+    // this test exists to forbid.
+    const firstOwner = log[0][0];
+    const boundary = log.findIndex((e) => e[0] !== firstOwner);
+    expect(boundary).toBeGreaterThan(0);
+    expect(log.slice(0, boundary).every((e) => e[0] === firstOwner)).toBe(true);
+    expect(log.slice(boundary).every((e) => e[0] !== firstOwner)).toBe(true);
+    expect(log).toHaveLength(6);
+  });
+
+  it("lets DIFFERENT resource classes overlap, which is the point of classes", async () => {
+    // One global mutex would serialise these for nothing: hashing is IO and
+    // SHA-1, a face scan is a separate process. Forcing them to alternate
+    // would halve throughput and buy no latency.
+    const s = new Scheduler();
+    const log = [];
+    await Promise.all([
+      s.submit({
+        priority: PRIORITY.BACKGROUND,
+        resource: RESOURCE.DB_WRITE,
+        body: fakeSweep("db", 3, log),
+      }),
+      s.submit({
+        priority: PRIORITY.BACKGROUND,
+        resource: RESOURCE.ONNX,
+        body: fakeSweep("ml", 3, log),
+      }),
+    ]);
+    const firstThree = log.slice(0, 3).map((e) => e.slice(0, 2));
+    expect(new Set(firstThree).size).toBe(2); // genuinely interleaved
+    expect(log).toHaveLength(6);
+  });
+
+  it("a run with NO resource never waits on a lease", async () => {
+    const s = new Scheduler();
+    const log = [];
+    await Promise.all([
+      s.submit({
+        priority: PRIORITY.BACKGROUND,
+        resource: RESOURCE.DB_WRITE,
+        body: fakeSweep("held", 3, log),
+      }),
+      s.submit({
+        priority: PRIORITY.BACKGROUND,
+        body: fakeSweep("free", 3, log),
+      }),
+    ]);
+    expect(new Set(log.slice(0, 3).map((e) => e.slice(0, 4))).size).toBe(2);
+  });
+
+  it("RELEASES the lease while parked, or a parked writer deadlocks the rest", async () => {
+    // The failure this forbids: a BACKGROUND run holding `db-write` parks for
+    // a SCOPED run that also needs `db-write`. If parking kept the lease, the
+    // scoped run waits on the background run, which waits on the scoped run —
+    // and both hang with no error anywhere.
+    const s = new Scheduler();
+    const log = [];
+    const bg = s.submit({
+      priority: PRIORITY.BACKGROUND,
+      resource: RESOURCE.DB_WRITE,
+      label: "Hashing",
+      body: fakeSweep("bg", 4, log),
+    });
+    await settle();
+    await settle();
+    const scoped = s.submit({
+      priority: PRIORITY.SCOPED,
+      resource: RESOURCE.DB_WRITE,
+      label: "Your folder",
+      body: fakeSweep("sc", 2, log),
+    });
+
+    // The real assertion is that this resolves at all.
+    await Promise.all([bg, scoped]);
+    expect(log.filter((e) => e.startsWith("sc"))).toHaveLength(2);
+    expect(log.filter((e) => e.startsWith("bg"))).toHaveLength(4);
+    // ...and the scoped run got in before the background one finished.
+    expect(log.lastIndexOf("sc1")).toBeLessThan(log.lastIndexOf("bg3"));
+  });
+
+  it("frees the lease when a run THROWS, not just when it returns", async () => {
+    // A leaked lease is permanent: every later run of that class waits on a
+    // holder that no longer exists, and the app quietly stops hashing forever.
+    const s = new Scheduler();
+    await expect(
+      s.submit({
+        priority: PRIORITY.BACKGROUND,
+        resource: RESOURCE.DB_WRITE,
+        body: async ({ checkpoint }) => {
+          await checkpoint();
+          throw new Error("boom");
+        },
+      })
+    ).rejects.toThrow("boom");
+
+    const log = [];
+    await s.submit({
+      priority: PRIORITY.BACKGROUND,
+      resource: RESOURCE.DB_WRITE,
+      body: fakeSweep("after", 2, log),
+    });
+    expect(log).toEqual(["after0", "after1"]);
   });
 });

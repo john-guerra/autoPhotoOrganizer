@@ -26,9 +26,17 @@
  *
  * ## Rules, and the behaviours that fall out of them
  *
- * - **Exactly one runnable at a time.** They contend for CPU, the ONNX worker,
- *   libvips and one libuv pool; running two makes both slower and neither
- *   finishes sooner.
+ * - **One runnable at a time PER RESOURCE CLASS.** They contend for the ONNX
+ *   worker, the SQLite writer and libvips; two of them on the same resource
+ *   makes both slower and neither finishes sooner.
+ *
+ *   This rule was WRITTEN DOWN BEFORE IT WAS TRUE. Priority parking only ever
+ *   parked a run of strictly LOWER priority, so two runs of equal priority —
+ *   two scoped requests, or two background sweeps — both proceeded, and
+ *   nothing here stopped them. What actually kept them apart was six
+ *   hand-rolled `inFlight` booleans in `api.js`, each refusing its own route
+ *   with a 409. The lease below is what lets those go (#279): a second request
+ *   WAITS instead of being told no.
  * - **`checkpoint()` parks unless nothing of strictly higher priority is
  *   outstanding.** SCOPED (1) beats BACKGROUND (2).
  * - **Equal priority does not preempt — FIFO.** So "two scoped requests in a
@@ -46,8 +54,28 @@
 export const PRIORITY = Object.freeze({ SCOPED: 1, BACKGROUND: 2 });
 
 /**
+ * What a run needs exclusively, so two runs needing the same thing take turns.
+ *
+ * Named CLASSES rather than one global mutex, because they genuinely do not
+ * conflict: hashing (`db-write`) and a face scan (`onnx`) can overlap all day
+ * — one is IO and SHA-1, the other is a separate process — and making them
+ * alternate would halve throughput for nothing. A run with no `resource` takes
+ * no lease and never waits for one.
+ */
+export const RESOURCE = Object.freeze({
+  /** The ONNX child: one model loaded, one queue. */
+  ONNX: "onnx",
+  /** The SQLite writer. WAL allows exactly one. */
+  DB_WRITE: "db-write",
+  /** sharp/libvips and the libuv threadpool it shares. */
+  VIPS: "vips",
+});
+
+/**
  * @typedef {object} Run
  * @property {number} priority
+ * @property {string} [resource] a RESOURCE class this run needs exclusively.
+ *   Omitted means it contends for nothing.
  * @property {string} [key] coalescing key; a second submission with a key
  *   already queued is dropped, because it would recompute the same worklist
  * @property {string} [label] what this run IS, in the user's words ("Finding
@@ -63,6 +91,8 @@ export class Scheduler {
   #live = new Set();
   /** @type {Array<() => void>} parked checkpoints waiting to be re-checked */
   #waiters = [];
+  /** @type {Map<string, Run>} resource class -> the run holding it */
+  #leases = new Map();
 
   /**
    * Is anything of strictly higher priority than `run` outstanding?
@@ -98,6 +128,31 @@ export class Scheduler {
     return best;
   }
 
+  /**
+   * Who holds the resource `run` needs, if anyone else does.
+   * @param {Run} run
+   * @returns {Run|undefined}
+   */
+  #leaseHolder(run) {
+    if (!run.resource) return undefined;
+    const holder = this.#leases.get(run.resource);
+    return holder && holder !== run ? holder : undefined;
+  }
+
+  /** @param {Run} run */
+  #take(run) {
+    if (run.resource) this.#leases.set(run.resource, run);
+  }
+
+  /** Give up the lease if this run holds it, and let the waiters look again.
+   * @param {Run} run */
+  #release(run) {
+    if (!run.resource) return;
+    if (this.#leases.get(run.resource) !== run) return;
+    this.#leases.delete(run.resource);
+    this.#wake();
+  }
+
   /** Let every parked checkpoint re-evaluate. Cheap: they re-check and re-park. */
   #wake() {
     const waiters = this.#waiters;
@@ -127,8 +182,15 @@ export class Scheduler {
 
     let parked = false;
     const checkpoint = async () => {
+      // RELEASE FIRST, before any chance of waiting. A run parked while holding
+      // `db-write` blocks every other writer for as long as it stays parked —
+      // and by design it can stay parked indefinitely. Holding a lease across
+      // an await that may never resolve is the deadlock.
+      this.#release(run);
       for (;;) {
-        const blocker = this.#blocker(run);
+        // Two reasons to wait, one loop: someone more urgent is outstanding, or
+        // someone else holds the resource this run needs.
+        const blocker = this.#blocker(run) ?? this.#leaseHolder(run);
         if (!blocker) break;
         if (!parked) {
           parked = true;
@@ -136,6 +198,11 @@ export class Scheduler {
         }
         await new Promise((resolve) => this.#waiters.push(resolve));
       }
+      // NO AWAIT between the check above and the take below, and that is the
+      // whole of the mutual exclusion. JavaScript is single-threaded, so two
+      // runs cannot both observe a free lease and both take it — but only for
+      // as long as nothing yields in between. Do not add an await here.
+      this.#take(run);
       if (parked) {
         parked = false;
         run.onResume?.();
@@ -146,6 +213,7 @@ export class Scheduler {
       return await run.body({ checkpoint });
     } finally {
       this.#live.delete(run);
+      this.#release(run);
       // Whatever was waiting on this one may now be free.
       this.#wake();
     }
