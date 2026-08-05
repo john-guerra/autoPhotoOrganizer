@@ -274,6 +274,10 @@ export const faceMap = {
   gear: (page) => page.locator('[data-testid="map-gear"]'),
   gearPanel: (page) => page.locator('[data-testid="map-gear-panel"]'),
   members: (page) => page.locator('[data-testid="map-members"]'),
+  /** One tuning control in the gear, by parameter name — `nNeighbors`, `minFaces`, … */
+  param: (page, key) => page.locator(`[data-testid="map-param-${key}"]`),
+  /** The minimum-faces threshold, which sits above the algorithm's own knobs. */
+  minFaces: (page) => page.locator('[data-testid="map-param-minFaces"]'),
   /** How many people the minimum-faces threshold is leaving off (#255). */
   hidden: (page) => page.locator('[data-testid="map-hidden"]'),
   /** The same disclosure in the empty state, before a map has been built. */

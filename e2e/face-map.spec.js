@@ -171,6 +171,46 @@ test.describe("face map @p1", () => {
     expect(errors).toEqual([]);
   });
 
+  test("the gear opens on the SERVER's defaults, not a copy of them", async ({
+    page,
+  }) => {
+    // #307 shipped a new default for `nNeighbors` (15 → 50, chosen off a
+    // screenshot of a 254-person library) and the user still saw 15.
+    //
+    // The default was never reachable. App held its own literal copy of every
+    // parameter and put it in the query; `/api/projections/options` answers
+    // with `defaultParams({ ...req.query })`, so the client's copy came
+    // straight back and the gear seeded from that. The server's number was
+    // overwritten by the client's on every request.
+    //
+    // The assertion is deliberately NOT `toHaveValue("50")`: a second literal
+    // in a second file is the bug again, one indirection along. What has to
+    // hold is that the gear and the server AGREE — so ask the server what it
+    // thinks the default is, and compare.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.gear(page).click();
+
+    const serverDefaults = await page.evaluate(async () => {
+      const r = await fetch("/api/projections/options?algorithm=umap");
+      return (await r.json()).params;
+    });
+
+    for (const key of ["nNeighbors", "minDist"]) {
+      await expect(faceMap.param(page, key)).toHaveValue(
+        String(serverDefaults[key])
+      );
+    }
+    // `minFaces` has its own control above the tunables, and it is the one
+    // parameter the user is most likely to change — worth pinning too.
+    await expect(faceMap.minFaces(page)).toHaveValue(
+      String(serverDefaults.minFaces)
+    );
+
+    expect(errors).toEqual([]);
+  });
+
   test("says how many people the minimum is leaving off, BEFORE you build", async ({
     page,
   }) => {
