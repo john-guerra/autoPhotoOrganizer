@@ -1,4 +1,5 @@
 <script>
+  import { faceCropUrl } from "../faceCropUrl.js";
   /**
    * PEOPLE — browsing and naming the people the face pass found (#223).
    *
@@ -161,7 +162,7 @@
               <!-- `loading="lazy"`: a library with 300 people is 300 crops,
                    each a full decode server-side on first request. -->
               <img
-                src={`/api/ml/faces/${p.coverFaceId}/crop?size=160`}
+                src={faceCropUrl(p.coverFaceId)}
                 alt=""
                 loading="lazy"
                 onerror={(e) => (e.currentTarget.style.display = "none")}

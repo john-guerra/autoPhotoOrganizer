@@ -4922,6 +4922,47 @@
     if (finished.length) refreshPeople();
   });
 
+  /**
+   * People appear WHILE the scan runs, not only when it ends.
+   *
+   * > "can we make the People view update dynamically as new faces are
+   * > coming in?"
+   *
+   * Event-driven rather than polled: the jobs store is SSE-backed and already
+   * emits on every `registry.update`, so this rides the progress ticks that
+   * exist anyway. No timer, nothing to tune, and it stops on its own when the
+   * job does.
+   *
+   * THROTTLED BY PROGRESS, not by time. A refresh is a `listPersonsPage` query
+   * plus a re-render, and a tick can arrive per photo — on a 125,000-photo scan
+   * that would be 125,000 queries competing with the very scan the user is
+   * watching. Every ~20 units of progress keeps the view visibly live while
+   * costing a fraction of that.
+   *
+   * `lastPeopleProgress` is a plain `let`, deliberately: the effect must not
+   * depend on its own write. It reads `$jobs` (tracked) and writes only
+   * untracked state, exactly like `handledUndoJobs` above.
+   */
+  const PEOPLE_REFRESH_EVERY = 20;
+  let lastPeopleProgress = -Infinity;
+  $effect(() => {
+    const running = $jobs.find(
+      (j) =>
+        (j.type === "faces" || j.type === "face-cluster") &&
+        j.status === "running"
+    );
+    if (!running) {
+      // Re-arm, so the next job starts refreshing from its first tick rather
+      // than inheriting the last one's high-water mark.
+      lastPeopleProgress = -Infinity;
+      return;
+    }
+    const done = running.done ?? 0;
+    if (done - lastPeopleProgress < PEOPLE_REFRESH_EVERY) return;
+    lastPeopleProgress = done;
+    refreshPeople();
+  });
+
   /** After AlbumsView materializes (move/copy) album folders to disk, scan
    * the destination so the newly-created nested folders index and show up
    * in the sidebar tree right away, instead of waiting for the user to
