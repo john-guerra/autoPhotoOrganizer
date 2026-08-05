@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.41
+
+- **People appear while a face scan is running**, instead of all at once when
+  it finishes. Faces are filed into people as they are found, and how often
+  scales with the size of your library so a big scan is not slowed down (#304).
+
 ## 2.19.40
 
 - **Scrubbing past videos no longer buries the one you stopped on.** Landing on
@@ -33,8 +39,9 @@ user-facing — what you can now do, not how it's built.
   before the reset — the crop cache was keyed on a face id, and those ids get
   reused once the table is emptied. Crops already cached by the browser are
   stepped around too, so the fix takes effect without clearing anything (#302).
-- **People appear while a face scan is running**, rather than all at once when
-  it finishes (#304).
+- **The People view refreshes when a face scan finishes**, instead of staying
+  empty until you reopened a panel. (It did NOT yet fill in DURING a scan —
+  grouping still ran only at the end. See 2.19.41 for that half.) (#304)
 
 ## 2.19.34
 

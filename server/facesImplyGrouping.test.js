@@ -49,6 +49,15 @@ const DIM = 512;
  * the chain being tested.
  */
 let faceSeq = 0;
+/**
+ * Faces the mock detector reports per photo.
+ *
+ * Adjustable so a test can cross the route's 500-face grouping threshold
+ * (#304) with a handful of photos instead of 500 generated JPEGs. The
+ * THRESHOLD itself is never injected — that is the trap #310 was about — only
+ * how fast the fixture reaches it.
+ */
+let facesPerPhoto = 1;
 vi.mock("./ml/faceEngine.js", () => ({
   createFaceEngine: () => ({
     // The real engine returns `{faces: [{box, score, vector}]}` and the SWEEP
@@ -58,10 +67,14 @@ vi.mock("./ml/faceEngine.js", () => ({
     // 2 correctly had nothing to file — the tests failed for a reason that had
     // nothing to do with the chain.
     detect: async () => {
-      const identity = faceSeq++ % 3;
-      const vector = new Float32Array(DIM);
-      vector[identity] = 1;
-      return { faces: [{ box: [0, 0, 10, 10], score: 0.95, vector }] };
+      const faces = [];
+      for (let i = 0; i < facesPerPhoto; i++) {
+        const identity = faceSeq++ % 3;
+        const vector = new Float32Array(DIM);
+        vector[identity] = 1;
+        faces.push({ box: [0, 0, 10, 10], score: 0.95, vector });
+      }
+      return { faces };
     },
     close: async () => {},
   }),
@@ -296,4 +309,73 @@ describe("a face scan files what it finds into people (#250)", () => {
         .get().c
     ).toBe(stranded);
   });
+});
+
+describe("people appear WHILE the scan runs (#304)", () => {
+  it("files faces into people mid-sweep, not only at the end", async () => {
+    // John, validating #250:
+    //
+    //   "#304 worked but only once the whole scan finished, not progressively,
+    //    I guess you were grouping only after finding all the faces."
+    //
+    // Exactly right: #250's phase 2 runs after `scheduler.submit` RESOLVES,
+    // i.e. after the whole sweep, so nobody existed until the very end and the
+    // live People view had nothing to show.
+    //
+    // Observed through the JOB'S PHASE rather than by polling `persons`, which
+    // would race the sweep. The route sets "Filing faces into people" each time
+    // it groups; interim passes plus the final one means MORE THAN ONE
+    // transition into that phase. Without progressive grouping there is
+    // exactly one — phase 2's.
+    const db = getDb();
+    const dir = join(photosRoot, "many");
+    // 200 faces a photo, so the route's shipped 500-face threshold is crossed
+    // after three photos rather than after 500. The threshold is NOT injected.
+    facesPerPhoto = 200;
+    try {
+      upsertScan(db, dir, 1, await makePhotos(dir, 12, "M"));
+
+      // Keyed BY JOB ID, and that is not incidental: earlier tests in this
+      // file leave their own finished `faces` jobs in the registry, so
+      // `list.find(x => x.type === "faces")` returns the OLDEST one — whose
+      // phase never changes again. This spec reported one filing instead of
+      // three until that was fixed, i.e. it was reading a stale job.
+      /** @type {Array<{id: string, phase: string}>} */
+      const events = [];
+      const onChange = (list) => {
+        for (const j of list) {
+          if (j.type !== "faces") continue;
+          const last = events.filter((e) => e.id === j.id).at(-1);
+          if (last?.phase !== j.phase)
+            events.push({ id: j.id, phase: j.phase });
+        }
+      };
+      registry.on("change", onChange);
+      let body;
+      try {
+        body = await (await post("/api/ml/faces")).json();
+        expect(body.started).toBe(true);
+        await settle(body.jobId);
+      } finally {
+        registry.off("change", onChange);
+      }
+
+      const filings = events.filter(
+        (e) => e.id === body.jobId && e.phase === "Filing faces into people"
+      );
+      expect(
+        filings.length,
+        `entered the filing phase ${filings.length} time(s) — progressive grouping should file several times before the end`
+      ).toBeGreaterThan(1);
+
+      // And it really did the work: nothing left ungrouped in scope.
+      expect(
+        db
+          .prepare(`SELECT COUNT(*) c FROM photo_faces WHERE person_id IS NULL`)
+          .get().c
+      ).toBe(0);
+    } finally {
+      facesPerPhoto = 1;
+    }
+  }, 60_000);
 });
