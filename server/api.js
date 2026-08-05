@@ -2528,12 +2528,22 @@ export function registerApi(app, { ml } = {}) {
     if (!photo) return res.status(404).end();
 
     const px = Math.min(512, Math.max(48, Number(req.query.size) || 128));
-    const cachePath = join(
-      faceCropsDir(),
-      `${faceCropKey(photo, faceId, px)}.jpg`
-    );
+    const key = faceCropKey(photo, face, px);
+    const cachePath = join(faceCropsDir(), `${key}.jpg`);
 
-    res.set("Cache-Control", "public, max-age=31536000, immutable");
+    // NOT `immutable`, and not a year (#302). `immutable` is a promise that
+    // the bytes at this URL never change, and this URL is keyed by a REUSABLE
+    // rowid: after a reset and rescan, /api/ml/faces/7/crop is a different
+    // person's face. The browser held the old one for a year and the People
+    // view showed faces from the previous library.
+    //
+    // Revalidation instead, with the content key as the ETag. On a loopback
+    // server a 304 costs a fraction of a millisecond, and it is the only way
+    // this endpoint can be honest about what it is serving.
+    const etag = `"${key}"`;
+    res.set("Cache-Control", "no-cache");
+    res.set("ETag", etag);
+    if (req.headers["if-none-match"] === etag) return res.status(304).end();
     res.type("image/jpeg");
     if (existsSync(cachePath)) {
       res.set("X-Cache", "hit");
