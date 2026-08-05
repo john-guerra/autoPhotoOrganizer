@@ -16,7 +16,7 @@
  * different" case — then measure the 2-D rank of each half's twin:
  *
  *   t-SNE   62.5% nearest   93.1% top-5    (74s at 4,072 points, O(n^2))
- *   UMAP    27.8% nearest   58.3% top-5    (3.9s)
+ *   UMAP    27.8% nearest   58.3% top-5    (3.9s, at nNeighbors=15)
  *   MDS      2.8% nearest   11.1% top-5
  *   PCA      2.8% nearest    6.9% top-5    (0.8s)
  *   SQDMDS   0.0% nearest    0.0% top-5    (median rank 1822)
@@ -109,7 +109,19 @@ export const ALGORITHMS = Object.freeze([
         min: 2,
         max: 200,
         step: 1,
-        default: 15,
+        // 50, not 15, from looking at the real thing (#307). John compared the
+        // two on a 254-person library and 50 gives visibly tighter, more
+        // lassoable per-identity clusters — which is what this map is FOR.
+        //
+        // That is evidence and the theory was not: "high values favour the
+        // overall shape" argues for a LOW default, and it lost to a
+        // screenshot.
+        //
+        // Worth knowing it is a RATIO he validated, not an absolute. 50 of 254
+        // points is ~20%; on the 25,758-person library cited above it is 0.2%,
+        // a different regime entirely. A default derived from the point count
+        // would preserve what he actually saw — see #307.
+        default: 50,
         help: "How much of the neighbourhood each point is fitted to. Low values keep tight local groups; high values favour the overall shape.",
       }),
       Object.freeze({

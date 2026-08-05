@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import {
   ALGORITHMS,
@@ -210,5 +211,32 @@ describe("defaultParams", () => {
     expect(Object.keys(p).sort()).toEqual(
       ["minDist", "minFaces", "nEpochs", "nNeighbors", "seed"].sort()
     );
+  });
+});
+
+describe("UMAP's default neighbourhood (#307)", () => {
+  it("defaults to 50, which is what was validated on real data", () => {
+    // Pinned because it was chosen by LOOKING, not by theory. John compared 15
+    // against 50 on a 254-person library and 50 gave visibly tighter,
+    // lassoable per-identity clusters — which is the whole job of this map.
+    // The theory ("high values favour the overall shape") argued for a low
+    // default and lost to a screenshot.
+    const umap = ALGORITHMS.find((a) => a.id === "umap");
+    const n = umap.params.find((p) => p.key === "nNeighbors");
+    expect(n.default).toBe(50);
+    expect(n.default).toBeGreaterThanOrEqual(n.min);
+    expect(n.default).toBeLessThanOrEqual(n.max);
+  });
+
+  it("keeps the measured note honest about WHICH setting it measured", () => {
+    // The 58.3% top-5 figure was measured at nNeighbors=15 and is no longer
+    // the default. A measured number attached to the wrong configuration is
+    // worse than no number — this repo has been bitten twice this week by
+    // comments describing states that do not exist (#250, #279).
+    const src = readFileSync(
+      new URL("./algorithms.js", import.meta.url),
+      "utf8"
+    );
+    expect(src).toMatch(/58\.3% top-5.*nNeighbors=15/);
   });
 });
