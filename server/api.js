@@ -288,6 +288,7 @@ import { sampleOffsets } from "./db/sampleGroup.js";
 import { setKeepScope, keepScopeIds } from "./db/keepScope.js";
 import { createManualStack, dissolveStack } from "./db/manualStacks.js";
 import { registry } from "./jobs/registry.js";
+import { createSemaphore } from "./lib/semaphore.js";
 import {
   classifyMissing,
   listMissing,
@@ -1889,8 +1890,8 @@ export function registerApi(app, { ml } = {}) {
     });
 
     /**
-     * How many NEW faces are worth a grouping pass (#304) — ADAPTIVE, because a
-     * fixed number is wrong at one end or the other.
+     * How many NEW faces are worth a grouping pass (#304) — ADAPTIVE, and it
+     * DOUBLES, because a fixed number is wrong at one end or the other.
      *
      * A pass costs one centroid rebuild, and that rebuild scales with the
      * library. Measured, rebuilding from the assigned face rows:
@@ -1904,20 +1905,33 @@ export function registerApi(app, { ml } = {}) {
      * ~400 ms — about 90 s added to a scan, ~10% of its runtime. That is
      * "materially worse", which the issue rules out.
      *
-     * At a flat 25,000, John's library (1,104 faces in total) would never
-     * group until the end — exactly the complaint that opened this issue.
+     * A FLOOR of 500 was the first attempt and John caught it immediately:
      *
-     * So the interval tracks the thing that makes the pass expensive: the
-     * number of people already known. A small library groups every 500 faces
-     * and fills in visibly; a 25,000-person library groups every 25,000 and
-     * pays a handful of rebuilds across the whole scan.
+     *   "the jobs panel said that it had scanned 950+ but all the faces
+     *    remained in 0. It updated once it reached 1000+"
      *
-     * `COUNT(*)` on `persons` is an indexed count of a small table — cheap
-     * enough to ask once per batch, unlike the rebuild it is protecting.
+     * His library averages ~0.5 faces per photo, so 500 faces is ~1,000
+     * photos — one update, at the very end of his scan. Not progressive.
+     *
+     * It also keyed on `persons`, and that was the wrong quantity: the rebuild
+     * scans every ASSIGNED FACE, so its cost tracks faces filed, not people.
+     * Ten thousand faces on five people is an expensive rebuild.
+     *
+     * So the interval is the number of faces filed so far, floored at 50. That
+     * DOUBLES: file 50, next pass at 100, then 200, 400... Which means
+     *
+     *   - the first people appear after ~50 faces (~100 photos for John),
+     *   - passes get rarer exactly as they get more expensive,
+     *   - a 118,000-face library takes ~11 passes, not 236,
+     *
+     * and the total rebuild cost is bounded by roughly twice the final one —
+     * under a second, against a scan measured in minutes. No query needed:
+     * `groupRemaining` reports what it filed.
      */
-    const groupEveryFaces = () =>
-      Math.max(500, getDb().prepare(`SELECT COUNT(*) c FROM persons`).get().c);
+    const groupEveryFaces = () => Math.max(50, groupedSoFar);
     let facesAtLastGrouping = 0;
+    /** Faces filed so far by the interim passes — see `groupEveryFaces`. */
+    let groupedSoFar = 0;
 
     const engine = createFaceEngine({
       modelId,
@@ -1973,12 +1987,13 @@ export function registerApi(app, { ml } = {}) {
               // repeatedly. The PHASE line says what is happening instead.
               registry.update(job.id, { phase: "Filing faces into people" });
               try {
-                await withClusterLatch(() =>
+                const filed = await withClusterLatch(() =>
                   groupRemaining(getDb(), modelId, {
                     scopeIds: ids ?? null,
                     signal: job.controller.signal,
                   })
                 );
+                groupedSoFar += filed?.assigned ?? 0;
               } finally {
                 registry.update(job.id, { phase: "" });
               }
@@ -3011,6 +3026,21 @@ export function registerApi(app, { ml } = {}) {
     return { codec: meta?.videoCodec ?? null, pixFmt: meta?.pixFmt ?? null };
   }
 
+  /**
+   * How many videos may convert at once (#305).
+   *
+   * TWO, not one: a single slot makes the common case (watch a clip, step to
+   * the next) wait for a conversion the user has already left behind, and the
+   * withdrawal cannot always land first. Two keeps a spare for the clip you
+   * are actually on.
+   *
+   * Not `cores - 1`: ffmpeg's x264 already uses every core per process, so the
+   * cap is about how many multi-core jobs contend, not about filling cores.
+   * Two oversubscribes by ~2x, which the OS absorbs; twenty did not.
+   */
+  const TRANSCODE_SLOTS = 2;
+  const transcodeSlots = createSemaphore(TRANSCODE_SLOTS);
+
   app.get("/api/video/:id", interactiveRoute, async (req, res) => {
     const db = getDb();
     const it = getPhotoById(db, Number(req.params.id));
@@ -3082,15 +3112,44 @@ export function registerApi(app, { ml } = {}) {
 
       (async () => {
         try {
-          await processing.transcodeForPlayback(it.path, proxy, {
-            signal: job.controller.signal,
-            onProgress: (seconds) => {
-              // Clamp: ffmpeg can overshoot the probed duration by a frame or two,
-              // and a bar that reads 101% looks broken.
-              registry.update(job.id, {
-                done: total ? Math.min(Math.round(seconds), total) : 0,
-              });
-            },
+          // AT MOST `TRANSCODE_SLOTS` ffmpeg processes at once (#305).
+          //
+          // Without this the loupe could start one per arrow keypress: the
+          // client cancels the ones you navigate past, but cancelling is a
+          // round-trip and starting is not, so holding the arrow key spawned
+          // conversions faster than they could be withdrawn. `libx264` uses
+          // every core by default, so N of them oversubscribe the CPU ~N×,
+          // Node's event loop is starved, `/api/health` misses the client's
+          // 4 s timeout, and the app reports the server LOST — which is what
+          // John saw, and is CPU starvation rather than a crash.
+          //
+          // Waiting is visible rather than silent: contract 2 says a job that
+          // is not progressing must say why.
+          if (transcodeSlots.active() >= TRANSCODE_SLOTS) {
+            registry.update(job.id, {
+              phase: "Waiting for another conversion to finish",
+            });
+          }
+          await transcodeSlots.run(async () => {
+            // Checked AFTER the wait, not before: the user may well have
+            // navigated away while this sat in the queue, and the whole point
+            // of the withdrawal is that we then do not spend a core on it.
+            if (job.controller.signal.aborted) {
+              const e = new Error("canceled");
+              e.name = "AbortError";
+              throw e;
+            }
+            registry.update(job.id, { phase: reason });
+            return processing.transcodeForPlayback(it.path, proxy, {
+              signal: job.controller.signal,
+              onProgress: (seconds) => {
+                // Clamp: ffmpeg can overshoot the probed duration by a frame
+                // or two, and a bar that reads 101% looks broken.
+                registry.update(job.id, {
+                  done: total ? Math.min(Math.round(seconds), total) : 0,
+                });
+              },
+            });
           });
           registry.finish(job.id, { url: `/api/video/${it.id}/file` });
         } catch (e) {
