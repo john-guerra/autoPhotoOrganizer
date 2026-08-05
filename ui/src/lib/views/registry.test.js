@@ -286,13 +286,16 @@ describe("FACE_MAP (#232)", () => {
     expect(FACE_MAP.dataSource).toBe("working-set");
   });
 
-  it("EARNS its toolbar slot rather than taking one unconditionally", () => {
-    // The toolbar folds by width and this is the fourth view; #223 hit that at
-    // 1280px, CI-only, with 151/151 green locally. A map of three people is
-    // useless anyway.
-    expect(FACE_MAP.offerable({ peopleCount: 3 })).toBe(false);
-    expect(FACE_MAP.offerable({ peopleCount: 99 })).toBe(false);
-    expect(FACE_MAP.offerable({ peopleCount: 5000 })).toBe(true);
+  it("is offered as soon as ANY people exist, and never before", () => {
+    // The threshold was `>= 100` and is now `> 0`, at John's explicit request
+    // (#300): he reset his library, ran a scan, and could not find either face
+    // view. The 100 was not arbitrary — the toolbar folds by WIDTH and a
+    // fourth always-on button is what pushed `.group-by` and `.seg-toggle`
+    // into an overflow popover at 1280px in #223, CI-red while 151/151 passed
+    // locally. Pinned here so lowering it again is a deliberate act.
+    expect(FACE_MAP.offerable({ peopleCount: 0 })).toBe(false);
+    expect(FACE_MAP.offerable({ peopleCount: 1 })).toBe(true);
+    expect(FACE_MAP.offerable({ peopleCount: 3 })).toBe(true);
   });
 });
 

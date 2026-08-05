@@ -4891,6 +4891,37 @@
     }
   });
 
+  /**
+   * The People and Face Map buttons appear when people EXIST (#300).
+   *
+   * `peopleTotal` gates both `offerable` predicates, and the only thing that
+   * set it ran on mount, on entering the People view, when the ML panel
+   * closed, and after a merge or rename — never when a face job FINISHED. So
+   * the everyday sequence left it stale: open the panel, start Find faces,
+   * close the panel (refresh fires HERE, with nothing found yet), then the
+   * scan runs for minutes and App never learns that people now exist. Both
+   * buttons stayed hidden until a reload.
+   *
+   * #250 is what made this reachable. Before it, people appeared only after an
+   * explicitly-pressed Group, and the panel-close refresh happened to cover
+   * it; now they appear at the end of a long background job.
+   *
+   * Both job types, because both produce people: `faces` files them as its
+   * second phase, `face-cluster` is the manual pass. Edge-detected per job by
+   * the same `takeNewlyFinished` set the undo-move effect above uses, so it
+   * cannot loop on its own write.
+   */
+  let handledPeopleJobs = new Set();
+  $effect(() => {
+    const finished = [
+      ...takeNewlyFinished($jobs, "faces", handledPeopleJobs),
+      ...takeNewlyFinished($jobs, "face-cluster", handledPeopleJobs),
+    ];
+    // Cancelled and failed count too: a stopped grouping still filed every
+    // batch it committed, so the count moved and the buttons should follow.
+    if (finished.length) refreshPeople();
+  });
+
   /** After AlbumsView materializes (move/copy) album folders to disk, scan
    * the destination so the newly-created nested folders index and show up
    * in the sidebar tree right away, instead of waiting for the user to

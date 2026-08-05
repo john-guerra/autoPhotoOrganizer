@@ -242,7 +242,17 @@ export const FACE_MAP = {
   // learned that once; #223 hit it again at 1280px — CI-only, with 151/151
   // green locally. A map of three people is useless anyway, so earn the slot
   // rather than taking one unconditionally. `V` still cycles here.
-  offerable: ({ peopleCount }) => peopleCount >= 100,
+  // WAS `>= 100`, lowered to "any people at all" at John's explicit request
+  // (#300), after he reset his library, ran a scan, and could not find either
+  // face view.
+  //
+  // Recorded because the threshold was not arbitrary and this has bitten
+  // twice: THE TOOLBAR FOLDS BY WIDTH. A fourth always-on button is exactly
+  // what pushed `.group-by` and `.seg-toggle` into an overflow popover at
+  // 1280px in #223 — CI-red while 151/151 passed locally. If
+  // `toolbarControls.spec.js` fails at the narrowest supported width, this is
+  // the cause, not a flake.
+  offerable: ({ peopleCount }) => peopleCount > 0,
   component: FaceMapView,
 };
 
