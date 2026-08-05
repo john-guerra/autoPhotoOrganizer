@@ -18,7 +18,7 @@
  *
  * ## What this must never do
  *
- * Be the problem. It batches, it never blocks, it drops rather than growing,
+ * Be the problem. It batches, it rate-limits, it drops rather than growing,
  * and a failed send is forgotten rather than retried — a retry queue during a
  * connection outage is exactly the wrong behaviour, since the outage is what
  * we are trying to record around.
@@ -29,6 +29,20 @@ const FLUSH_MS = 2000;
 const FLUSH_AT = 25;
 /** Beyond this the oldest go: a queue that grows during an outage is a leak. */
 const QUEUE_MAX = 200;
+/**
+ * Never send more often than this.
+ *
+ * Without it the "drops rather than growing" promise was empty: `flushAt` (25)
+ * is below `max` (200) and `flush()` empties unconditionally, so the queue
+ * could never reach the cap and the tracer simply SENT, without limit. An
+ * `$effect` loop that throws — the trap CLAUDE.md documents at length — fires
+ * `window.onerror` continuously, and every 25 of those became another POST
+ * into the very event loop this thing exists to measure.
+ *
+ * With a floor on the interval, a storm is bounded to one request per second
+ * and the overflow is dropped and COUNTED instead.
+ */
+const MIN_SEND_MS = 1000;
 
 /**
  * @param {object} [o]
@@ -44,16 +58,26 @@ export function createTracer({
   flushMs = FLUSH_MS,
   flushAt = FLUSH_AT,
   max = QUEUE_MAX,
+  minSendMs = MIN_SEND_MS,
 } = {}) {
   /** @type {any[]} */
   let queue = [];
   let timer = null;
   let dropped = 0;
+  let lastSend = -Infinity;
 
   function flush() {
     clearTimeout(timer);
     timer = null;
     if (!queue.length) return;
+    // Too soon: keep queuing (bounded by `max`) and come back. Without this
+    // the tracer answers an error storm with a request storm.
+    const wait = minSendMs - (now() - lastSend);
+    if (wait > 0) {
+      timer = setTimeout(flush, wait);
+      return;
+    }
+    lastSend = now();
     const batch = queue;
     queue = [];
     if (dropped) {

@@ -187,9 +187,10 @@
     if (changed) draft = next;
   });
 
-  // Same number as `DEFAULT_MIN_FACES` on the server (#255); reached only
-  // before `paramSpecs` arrives, since the seeding effect above then supplies
-  // `spec.default`.
+  // A display fallback for the instant before `paramSpecs` arrives — NOT a
+  // second copy of the default. Nothing is sent to the server from it: the
+  // client states no opinion it does not have (#307), so an unedited gear
+  // sends no `minFaces` at all and the server fills in its own.
   const minFaces = $derived(draft.minFaces ?? 5);
 
   const currentParams = () => ({ ...draft, algorithm: algo });

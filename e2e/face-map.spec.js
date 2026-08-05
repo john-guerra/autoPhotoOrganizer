@@ -202,8 +202,10 @@ test.describe("face map @p1", () => {
         String(serverDefaults[key])
       );
     }
-    // `minFaces` has its own control above the tunables, and it is the one
-    // parameter the user is most likely to change — worth pinning too.
+    // `minFaces` has its own control above the tunables. Worth pinning, but be
+    // clear about what it proves: the old client literal and the server
+    // default are BOTH 5, so this assertion passes with or without the fix.
+    // `nNeighbors` above (15 vs 50) is the one that goes red on revert.
     await expect(faceMap.minFaces(page)).toHaveValue(
       String(serverDefaults.minFaces)
     );

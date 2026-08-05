@@ -1,6 +1,11 @@
 import { existsSync, statSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { thumbsDir, thumbCacheKey, THUMB_BUCKETS } from "./cachePaths.js";
+import {
+  thumbsDir,
+  thumbCacheKey,
+  THUMB_BUCKETS,
+  cacheRoot,
+} from "./cachePaths.js";
 import { whenIdle } from "./interactive.js";
 
 /**
@@ -20,6 +25,35 @@ export function getCacheStats() {
     totalBytes += statSync(join(dir, f)).size;
   }
   return { totalBytes, totalFiles: files.length };
+}
+
+/**
+ * Size of `~/.autogallery/logs` — the trace log (#314).
+ *
+ * Deliberately NOT folded into `getCacheStats`: that shape is the cache
+ * screen's contract, the logs are not thumbnails, and the thumbnail sweeps do
+ * not clear them. Surfacing this in the UI is its own small piece of work
+ * (#320) rather than a shape change smuggled into a fix release.
+ *
+ * The log is bounded now regardless — MAX_BYTES x KEEP_FILES in
+ * `server/lib/trace.js`, ~40 MB — so this is for reporting, not for safety.
+ *
+ * Never throws: an absent directory is 0.
+ */
+export function getLogStats() {
+  const dir = join(cacheRoot(), "logs");
+  if (!existsSync(dir)) return { logBytes: 0, logFiles: 0 };
+  let logBytes = 0;
+  let logFiles = 0;
+  for (const f of readdirSync(dir)) {
+    try {
+      logBytes += statSync(join(dir, f)).size;
+      logFiles++;
+    } catch {
+      // Rotated out from under us mid-read; it does not exist, so it is 0.
+    }
+  }
+  return { logBytes, logFiles };
 }
 
 /**
