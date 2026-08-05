@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.43
+
+- **The Face Map's Neighbours setting really does start at 50 now** (#307). The
+  higher default shipped two versions ago but the gear kept showing 15: the app
+  was sending its own copy of every setting with each request, so the server's
+  answer was always overwritten by the client's. There is now one default per
+  setting, in one place.
+
 ## 2.19.42
 
 - **Arrowing through a folder of videos no longer wedges the app.** Each clip

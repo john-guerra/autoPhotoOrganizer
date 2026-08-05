@@ -2714,25 +2714,41 @@
   let mapOptions = $state(null);
   let mapLoading = $state(false);
   let mapNotice = $state("");
-  let mapParams = $state({
-    // Mirrors `DEFAULT_MIN_FACES` in server/projection/algorithms.js (#255).
-    // `ui/` never imports `server/`, so this literal seeds the FIRST request of
-    // a session and the schema takes over once /api/projections/options answers
-    // — the two must be kept the same by hand, or the map you get before you
-    // open the gear disagrees with the number the gear shows.
-    minFaces: 5,
-    nNeighbors: 15,
-    minDist: 0.1,
-    algorithm: "umap",
-  });
+  /**
+   * The run parameters, and ONLY the ones the user has actually chosen (#307).
+   *
+   * This started life as a full mirror of the server's defaults —
+   * `minFaces: 5, nNeighbors: 15, minDist: 0.1` — on the reasoning that the
+   * first request of a session happens before the schema arrives. It is worse
+   * than a stale copy: `/api/projections/options` answers with
+   * `defaultParams({ ...req.query })`, so whatever we send comes straight back,
+   * and the gear seeds from that. The client's copy therefore WAS the default,
+   * and the server's could never be reached. Raising `nNeighbors` to 50 in
+   * `server/projection/algorithms.js` shipped, tested green, and changed
+   * nothing the user could see.
+   *
+   * So the client states no opinion it does not have. An unset parameter is
+   * absent from the query, `defaultParams` fills it, and there is one default
+   * per parameter in one file.
+   */
+  let mapParams = $state({ algorithm: "umap" });
 
-  const mapQuery = (p) =>
-    new URLSearchParams({
-      minFaces: String(p.minFaces),
-      nNeighbors: String(p.nNeighbors),
-      minDist: String(p.minDist),
-      algorithm: String(p.algorithm),
-    }).toString();
+  /**
+   * Serialize only the keys that carry a value.
+   *
+   * `defaultParams` would in fact survive `"undefined"` — it reads every
+   * parameter through `Number.isFinite` and falls back to the spec's default —
+   * but relying on that makes the query say something false and puts the
+   * correct behaviour one refactor away from being lost. An absent key is how
+   * you say "you decide".
+   */
+  const mapQuery = (p) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(p)) {
+      if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
+    }
+    return q.toString();
+  };
 
   async function loadFaceMap(params = mapParams) {
     mapParams = { ...params };
