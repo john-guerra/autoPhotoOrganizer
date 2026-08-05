@@ -15,6 +15,14 @@ user-facing — what you can now do, not how it's built.
   and is never sent anywhere. Settings (`,`) → Diagnostics → **Copy log
   location**, and paste that into a bug report.
 
+## 2.19.43
+
+- **The Face Map's Neighbours setting really does start at 50 now** (#307). The
+  higher default shipped two versions ago but the gear kept showing 15: the app
+  was sending its own copy of every setting with each request, so the server's
+  answer was always overwritten by the client's. There is now one default per
+  setting, in one place.
+
 ## 2.19.42
 
 - **Arrowing through a folder of videos no longer wedges the app.** Each clip

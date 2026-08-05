@@ -379,6 +379,7 @@
         Minimum faces
         <input
           type="number"
+          data-testid="map-param-minFaces"
           min="1"
           max="50"
           value={minFaces}
