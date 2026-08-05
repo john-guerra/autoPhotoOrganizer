@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.35
+
+- **Face thumbnails are the right faces again.** After resetting the library
+  and re-adding the same folder, the People view showed crops left over from
+  before the reset — the crop cache was keyed on a face id, and those ids get
+  reused once the table is emptied. Crops already cached by the browser are
+  stepped around too, so the fix takes effect without clearing anything (#302).
+- **People appear while a face scan is running**, rather than all at once when
+  it finishes (#304).
+
 ## 2.19.34
 
 - **People and the Face Map come back on their own after a face scan.** Both

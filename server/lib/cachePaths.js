@@ -120,19 +120,49 @@ export function faceCropsDir() {
 }
 
 /**
- * The face-crop cache key. Keyed on the PHOTO's identity as well as the face
- * id: face rows are re-created wholesale by `putFaces` on every re-scan, so an
- * id alone would serve a stale crop from a photo that has since changed on
- * disk — the same reason thumbCacheKey folds in mtime and size.
+ * The face-crop cache key: the PHOTO's identity, the face's BOX, and the size.
+ *
+ * Those three things are exactly what determines the pixels, which is the
+ * whole point — a cache key that is not a function of the content is a wrong
+ * answer waiting for a collision.
+ *
+ * ## It used to key on the face ID, and that collided (#302)
+ *
+ * The old key was `face:${faceId}:${photo.path}:${photo.mtime}:${photo.size}`,
+ * and its comment had already reasoned half way there: it folded in the photo
+ * "so an id alone would serve a stale crop from a photo that has since changed
+ * on disk". True, and not enough — it left the case where the photo has NOT
+ * changed and the id means something different.
+ *
+ * `photo_faces.id` is `INTEGER PRIMARY KEY`, i.e. a rowid. Delete every row
+ * and the counter restarts at 1, so **ids are reused**. John reset his
+ * library, re-added the same folder, and recomputed faces: the photo half of
+ * the key was identical by design (path + mtime + size is the repo's identity
+ * rule and the files had not changed), so a DIFFERENT face at a REUSED id
+ * hashed to the SAME path and the People view served last week's crops.
+ *
+ * Reset is not the only way in. Removing a folder and re-adding it, "forget
+ * all face data", or any re-scan that clears the rows reuses ids the same way.
+ *
+ * The box makes it content-addressed: the same region of the same bytes always
+ * hits, a different region always misses, and a re-scan that finds the same
+ * face in the same place correctly REUSES the cached crop instead of
+ * recomputing it.
+ *
+ * Fixed precision on the box so a float that round-trips through SQLite as
+ * 12.300000000000001 cannot mint a second cache entry for the same crop.
  *
  * @param {{id: number, path: string, mtime: number, size: number}} photo
- * @param {number} faceId
+ * @param {{x: number, y: number, w: number, h: number}} box the face's
+ *   bounding box, as stored — NOT the face id, which is not stable
  * @param {number} px
  * @returns {string} bare 40-char SHA1 hex digest
  */
-export function faceCropKey(photo, faceId, px) {
+export function faceCropKey(photo, box, px) {
+  const n = (v) => Number(v).toFixed(4);
+  const region = `${n(box.x)},${n(box.y)},${n(box.w)},${n(box.h)}`;
   return createHash("sha1")
-    .update(`face:${faceId}:${photo.path}:${photo.mtime}:${photo.size}:${px}`)
+    .update(`face:${region}:${photo.path}:${photo.mtime}:${photo.size}:${px}`)
     .digest("hex");
 }
 

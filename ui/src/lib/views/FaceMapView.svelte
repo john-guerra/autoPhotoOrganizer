@@ -17,6 +17,7 @@
    * The map itself is `ScatterCanvas`, which knows nothing about people. All
    * the domain lives here.
    */
+  import { faceCropUrl } from "../faceCropUrl.js";
   import ScatterCanvas from "../scatter/ScatterCanvas.svelte";
   import {
     DEFAULT_MIN_RADIUS,
@@ -298,8 +299,7 @@
   }
 
   let scatter = $state(null);
-  const crop = (p) =>
-    p?.coverFaceId ? `/api/ml/faces/${p.coverFaceId}/crop?size=160` : null;
+  const crop = (p) => faceCropUrl(p?.coverFaceId);
 </script>
 
 <svelte:window onkeydown={onKey} />

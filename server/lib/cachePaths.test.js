@@ -10,6 +10,7 @@ import {
   THUMB_BUCKETS,
   thumbsDir,
   cacheRoot,
+  faceCropKey,
 } from "./cachePaths.js";
 
 let cacheDir;
@@ -144,5 +145,55 @@ describe("the real library is unreachable from a test run", () => {
     } finally {
       process.env.AUTOGALLERY_HOME = saved;
     }
+  });
+});
+
+describe("faceCropKey is addressed by what determines the pixels (#302)", () => {
+  const photo = {
+    id: 1,
+    path: "/vol/trip/IMG_1.jpg",
+    mtime: 1700000000000,
+    size: 12345,
+  };
+  const box = { x: 10, y: 20, w: 100, h: 100 };
+
+  it("gives two DIFFERENT boxes in the same photo different keys", () => {
+    // The bug, exactly. The key used to fold in the face's rowid instead of
+    // its box — and `photo_faces.id` restarts at 1 once the table is emptied,
+    // so after a reset and rescan a different face carried a reused id. The
+    // photo half of the key was identical by design (path + mtime + size is
+    // the repo's identity rule and the file had not changed), so the crop
+    // cache served last week's face.
+    const a = faceCropKey(photo, box, 160);
+    const b = faceCropKey(photo, { x: 300, y: 400, w: 80, h: 80 }, 160);
+    expect(a).not.toBe(b);
+  });
+
+  it("gives the SAME box in the same photo the same key, across a rescan", () => {
+    // The other half, and the reason this is a fix rather than a cache-buster:
+    // a rescan that finds the same face in the same place must REUSE the
+    // cached crop. Two calls with no shared object identity, as two separate
+    // requests would make them.
+    const a = faceCropKey({ ...photo }, { ...box }, 160);
+    const b = faceCropKey({ ...photo }, { ...box }, 160);
+    expect(a).toBe(b);
+  });
+
+  it("is not fooled by float noise from a SQLite round-trip", () => {
+    // REAL columns come back as doubles; 10 and 10.00000000000001 are the same
+    // crop and must not mint two cache entries.
+    const a = faceCropKey(photo, box, 160);
+    const b = faceCropKey(photo, { ...box, x: 10.000000000001 }, 160);
+    expect(a).toBe(b);
+  });
+
+  it("still separates sizes, and still separates changed photo bytes", () => {
+    expect(faceCropKey(photo, box, 160)).not.toBe(faceCropKey(photo, box, 320));
+    expect(faceCropKey(photo, box, 160)).not.toBe(
+      faceCropKey({ ...photo, mtime: photo.mtime + 1 }, box, 160)
+    );
+    expect(faceCropKey(photo, box, 160)).not.toBe(
+      faceCropKey({ ...photo, size: photo.size + 1 }, box, 160)
+    );
   });
 });
