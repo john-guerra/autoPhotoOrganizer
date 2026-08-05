@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.36
+
+- **The Face Map groups duplicates better out of the box.** UMAP's neighbourhood
+  now defaults to 50 instead of 15 — chosen by comparing both on a real
+  254-person library, where 50 gives visibly tighter clusters to lasso (#307).
+
 ## 2.19.35
 
 - **Face thumbnails are the right faces again.** After resetting the library
