@@ -369,8 +369,14 @@ test.describe("face map @p1", () => {
     // `offerable` hides the BUTTON when a map would be useless; it must not
     // hide the VIEW. "An un-offered view is reachable, just not advertised,
     // and its empty state explains how to fill it" — registry.js.
+    //
+    // The un-offered state used to be "fewer than 100 people" and is now "no
+    // people at all" (#300 lowered the gate at John's request). So this seeds
+    // NOBODY rather than four. The property under test is unchanged — an
+    // un-offered view is still reachable by keyboard — only the way to reach
+    // the un-offered state has moved.
     const errors = trackPageErrors(page);
-    await seedFaces(4, FACES_EACH);
+    await clearFaces();
     await openApp(page);
     await expect(views.switchBtn(page, "face-map")).toHaveCount(0);
 

@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.34
+
+- **People and the Face Map come back on their own after a face scan.** Both
+  buttons were gated on a count the app only refreshed when you opened a panel,
+  so a scan could file hundreds of faces and neither view would appear until
+  you reloaded (#300).
+- **The Face Map is offered as soon as you have any people at all**, instead of
+  waiting for 100 (#300).
+
 ## 2.19.33
 
 - **Grouping faces no longer fights the app for the CPU.** It now stands aside
