@@ -6,6 +6,27 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.20.0
+
+First packaged build since 2.18.2, and a big one: fifty versions of work.
+
+- **Faces became a real feature.** Find faces, have them filed into people as
+  the scan runs, browse and name those people, and fix the inevitable
+  duplicates in bulk on the new **Face Map** — lasso the blobs that are
+  obviously one person and merge them in one undoable action.
+- **Resetting your library works, and stays reset.** It no longer fails on a
+  library with burst stacks, no longer blocks the app while it runs, and no
+  longer comes back when you reopen the app.
+- **Every long operation now says what it is acting on** — All, Keep only,
+  Filtered or Selected, with live counts and a cost estimate that tracks your
+  choice. Asking to find faces in 1,557 photos no longer quietly does 175.
+- **Videos behave.** Arrowing through a folder of clips no longer wedges
+  playback or the connection, and the one you stop on is not buried by the ones
+  you passed.
+- **AutoGallery keeps a diagnostic log**, so a stall can be diagnosed from
+  evidence instead of guesswork. Settings → Diagnostics → Copy log location.
+- **Shift-click selects the photos in between.**
+
 ## 2.19.46
 
 - Internal: the video-connection trap behind #305 is written down where the
