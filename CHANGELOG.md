@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.33
+
+- **Grouping faces no longer fights the app for the CPU.** It now stands aside
+  whenever you are being served — scrolling the grid, opening a photo — the
+  same way scanning already did, so a whole-library grouping stops making the
+  window unresponsive (#279).
+
 ## 2.19.32
 
 - **Finding faces now files them into people, in the same run.** Grouping was

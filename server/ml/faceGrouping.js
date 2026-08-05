@@ -35,6 +35,7 @@
 import { dot } from "./quantize.js";
 import { SAME_PERSON_COSINE } from "./faceClusters.js";
 import { ungroupedFaceRows, ungroupedFaceCount } from "../db/faces.js";
+import { whenIdle } from "../lib/interactive.js";
 
 /** Faces per committed batch. Small enough that stopping loses little, big
  *  enough that the transaction overhead disappears. */
@@ -71,7 +72,25 @@ export const YIELD_COMPARISONS = 2_000;
  */
 export const CENTROID_CHUNK = 512;
 
-const breathe = () => new Promise((r) => setImmediate(r));
+/**
+ * The yield, and it must wait for the USER — not merely for the event loop
+ * (#279).
+ *
+ * This was `setImmediate`, which hands control back for exactly one tick and
+ * then takes it again. The sweeps have never done that: `runSweep` takes
+ * `idle = whenIdle` and waits until nothing interactive is in flight, which is
+ * why scanning does not fight the thumbnails you are scrolling past. Grouping
+ * did fight them, and "the UI becomes unresponsive during a whole-library
+ * grouping" is that difference.
+ *
+ * `whenIdle()` is a strict superset: with nothing in flight it IS
+ * `setImmediate`, so this costs nothing on an idle server and only ever
+ * defers when the user is actually being served. State-driven, so there is no
+ * settle window to tune and nothing fires early on a slow disk.
+ *
+ * Injectable so a test can drive the yield point without an HTTP server.
+ */
+const breatheDefault = whenIdle;
 
 /**
  * Every person's centroid, as int8 plus a scale, so the fast `dot` path works.
@@ -222,6 +241,11 @@ export async function groupRemaining(
      * would be a unit test nobody runs.
      */
     yieldEvery = YIELD_COMPARISONS,
+    /**
+     * How this pass gets out of the way. Defaults to `whenIdle`, so grouping
+     * stands aside for interactive requests exactly as the sweeps do.
+     */
+    idle = breatheDefault,
   } = {}
 ) {
   const total = ungroupedFaceCount(db, model, scopeIds);
@@ -303,7 +327,7 @@ export async function groupRemaining(
       sinceYield += compared;
       if (sinceYield < yieldEvery) return;
       sinceYield = 0;
-      await breathe();
+      await idle();
       // Stand aside for anything higher-priority, at the same point and for
       // the same reason the abort check is here (#257).
       await checkpoint();
@@ -373,7 +397,7 @@ export async function groupRemaining(
     decided = examined;
     reportProgress();
 
-    await breathe();
+    await idle();
     if (signal?.aborted) {
       const e = new Error("canceled");
       e.name = "AbortError";

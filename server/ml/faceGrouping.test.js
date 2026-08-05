@@ -616,3 +616,61 @@ describe("what a grouping run REPORTS (#293)", () => {
     expect(emptyUnnamed).toBe(0);
   });
 });
+
+describe("grouping gets out of the USER's way (#279)", () => {
+  it("waits for interactive requests, not merely for the event loop", async () => {
+    // > "If I start a group faces in the whole library, the ui disconnects
+    // > from the backend."
+    //
+    // The sweeps have always taken `idle = whenIdle` and waited until nothing
+    // interactive is in flight — that is why scanning does not fight the
+    // thumbnails you are scrolling past. Grouping used a bare `setImmediate`,
+    // which hands control back for exactly one tick and then takes it again,
+    // so a browsing user competed with it for the whole run.
+    //
+    // Asserted through the REAL `interactive` module rather than a stub,
+    // because the bug was grouping using the wrong yield primitive — a stub
+    // would prove only that some function got called.
+    const { interactiveInFlight, whenIdle } =
+      await import("../lib/interactive.js");
+    const db = getDb();
+    seedFaces(db, "/vol/a", 0, 40);
+
+    // Stand in for a request the user is waiting on.
+    const { interactiveRoute } = await import("../lib/interactive.js");
+    const fakeRes = {
+      handlers: {},
+      once(ev, fn) {
+        this.handlers[ev] = fn;
+      },
+      close() {
+        this.handlers.close?.();
+      },
+    };
+    interactiveRoute({}, fakeRes, () => {});
+    expect(interactiveInFlight()).toBe(1);
+
+    let finished = false;
+    const run = groupRemaining(db, MODEL, { yieldEvery: 1 }).then(() => {
+      finished = true;
+    });
+
+    // Give it every chance to barge ahead: many macrotasks pass, and the
+    // grouping must still be parked at its first yield because the user's
+    // request has not completed.
+    for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+    expect(
+      finished,
+      "grouping ran to completion while an interactive request was in flight"
+    ).toBe(false);
+
+    // Release the user's request; now it may proceed.
+    fakeRes.close();
+    expect(interactiveInFlight()).toBe(0);
+    await run;
+    expect(finished).toBe(true);
+    // And it did the work, rather than having been starved into doing nothing.
+    expect(grouped(db)).toBe(40);
+    await whenIdle();
+  });
+});
