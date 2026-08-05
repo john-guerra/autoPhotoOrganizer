@@ -1,4 +1,5 @@
 import { writable, get } from "svelte/store";
+import { uiTrace } from "./trace.js";
 
 /**
  * Connection watchdog for the local API server.
@@ -72,14 +73,37 @@ let ticking = false;
 async function ping(timeoutMs = 4000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  // How long the CLIENT waited, which is not the same as how long the server
+  // took. When the two disagree — the server answered in 3 ms and the browser
+  // waited 4 s — the request spent that time queued in the browser, and the
+  // fault is not on the server at all (#314, and the open question in #305).
+  const started = performance.now();
   try {
     const res = await fetch("/api/health", {
       cache: "no-store",
       signal: ctrl.signal,
     });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
+    const ms = Math.round(performance.now() - started);
+    if (!res.ok) {
+      uiTrace("ping-refused", { ms, status: res.status }, "health");
+      return null;
+    }
+    const body = await res.json();
+    // Only the slow ones. A line every 5 s for a healthy app is a log made of
+    // heartbeats, and the heartbeat is never the evidence.
+    if (ms > 1000) uiTrace("ping-slow", { ms, busy: body?.busy }, "health");
+    return body;
+  } catch (e) {
+    uiTrace(
+      "ping-failed",
+      {
+        ms: Math.round(performance.now() - started),
+        // `AbortError` means WE gave up at the timeout; anything else means the
+        // browser could not complete the request. Different diagnoses.
+        why: e?.name === "AbortError" ? "timeout" : String(e?.message ?? e),
+      },
+      "health"
+    );
     return null; // network error, abort, or server gone
   } finally {
     clearTimeout(t);
@@ -121,6 +145,7 @@ async function tickOnce() {
       // moment would be a self-inflicted stampede.
       if (pidChanged || !wasBusyNotDown) serverRestarted.update((n) => n + 1);
     }
+    if (wasDown) uiTrace("recovered", { pidChanged }, "health");
     serverStatus.set("up");
     wasBusyNotDown = false;
     schedule(HEARTBEAT_MS);
@@ -136,12 +161,14 @@ async function tickOnce() {
   if (recentlyBusy) {
     // Keep polling at the normal cadence rather than backing off: busy work
     // ends, and the point is to notice the moment it does.
+    uiTrace("busy", { attempt, running: lastRunning.length }, "health");
     serverStatus.set("busy");
     wasBusyNotDown = true;
     schedule(HEARTBEAT_MS);
     return;
   }
   // Down: back off, but keep trying — a `node --watch` restart is back in ~1s.
+  uiTrace("down", { attempt }, "health");
   serverStatus.set("down");
   serverBusyWith.set([]);
   wasBusyNotDown = false;

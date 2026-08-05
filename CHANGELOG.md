@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.44
+
+- **AutoGallery now keeps a diagnostic log** (#314). When something stalls or
+  the app says it lost the server, there is finally a record of what both the
+  app and the server were doing at that moment — requests, video conversions,
+  jobs, and any period the server could not respond. It stays on your machine
+  and is never sent anywhere. Settings (`,`) → Diagnostics → **Copy log
+  location**, and paste that into a bug report.
+
 ## 2.19.43
 
 - **The Face Map's Neighbours setting really does start at 50 now** (#307). The

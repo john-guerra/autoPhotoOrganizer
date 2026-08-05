@@ -131,6 +131,7 @@
   } from "./lib/foldPaths.js";
   import ServerBanner from "./lib/ServerBanner.svelte";
   import { startServerWatchdog, serverRestarted } from "./lib/serverHealth.js";
+  import { startUiTrace } from "./lib/trace.js";
   import TreeSidebar from "./lib/TreeSidebar.svelte";
   import {
     buildTokenStats,
@@ -3722,6 +3723,10 @@
   // it's back — instead of silently sitting on data from a server that's gone.
   let seenRestart = 0; // plain guard (edge-detect; never read reactively)
   startServerWatchdog();
+  // The browser's half of the flight recorder (#314): uncaught errors, the
+  // health watchdog's verdicts, and the loupe's video requests, shipped to the
+  // server so both sides sit on one timeline.
+  onMount(startUiTrace);
   // Reads the $serverRestarted store (tracked) + seenRestart (plain guard);
   // writes only the plain guard, so it can't loop.
   $effect(() => {

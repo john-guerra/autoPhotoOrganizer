@@ -5,6 +5,7 @@
   import LoupeDetails from "./LoupeDetails.svelte";
   import LoupeFilmstrip from "./LoupeFilmstrip.svelte";
   import { loadVideoPrefs, saveVideoPrefs } from "./videoPrefs.js";
+  import { uiTrace } from "./trace.js";
 
   /**
    * @type {{
@@ -156,6 +157,7 @@
   function withdrawConversions(keep) {
     for (const [id, jobId] of startedConversions) {
       if (keep.has(id)) continue;
+      uiTrace("withdraw", { id, jobId }, "video");
       startedConversions.delete(id);
       // Forget the hint too, so coming back re-asks. The server is idempotent
       // and an already-converted clip answers from cache.
@@ -215,8 +217,27 @@
 
   async function loadVideo(id, { transcode = false } = {}) {
     videoState = null;
+    // Every video the loupe ASKS for, whether or not it ends up playing one
+    // (#314). Arrowing through a folder of clips is the sequence #305 is
+    // about, and there was no record of how many requests one keypress run
+    // produced — which is the first thing you want to know.
+    const asked = performance.now();
+    uiTrace("ask", { id, transcode }, "video");
     try {
       const r = await prepareVideo(id, { transcode });
+      uiTrace(
+        "answer",
+        {
+          id,
+          ms: Math.round(performance.now() - asked),
+          ready: !!r?.ready,
+          jobId: r?.jobId,
+          // Did we land on the clip we asked about, or has the user already
+          // moved on? The second is the case that leaks work.
+          stale: item?.id !== id,
+        },
+        "video"
+      );
       if (item?.id !== id) {
         // Navigated away while we asked — and THIS is the case that produced
         // twenty concurrent ffmpeg processes (#305). The old code returned
@@ -263,6 +284,7 @@
         };
       }
     } catch (e) {
+      uiTrace("failed", { id, msg: String(e?.message ?? e) }, "video");
       if (item?.id !== id) return;
       videoState = { status: "error", message: e.message };
     }

@@ -404,6 +404,57 @@ tail -6` never terminates (the server never closes the pipe), so the Bash tool
 - **The Library tree must load fully expanded for EVERY grouping** (including
   folder-only). This gate has regressed at least once.
 
+## There is a trace log. READ IT before theorising (#314)
+
+The app records what it and the server were doing, always on, on the user's
+disk and sent nowhere. Reach for it FIRST on any "it stalled" / "it lost the
+server" / "this is slow" report — it exists because #305 survived two fixes
+aimed at causes nobody had measured.
+
+```bash
+curl -s 'http://127.0.0.1:4321/api/debug/trace?limit=2000' | jq .   # live
+ls -t ~/.autogallery/logs/                                          # past runs
+```
+
+- **Channels**: `http` (one line per request, on socket CLOSE — so `aborted`
+  means the BROWSER gave up, `done` means we answered), `loop` (event-loop
+  delay), `proc` (child spawns, with a live count), `job`, `app`, and `ui:*`
+  for anything the browser recorded.
+- **`?since=` is a SEQUENCE number, not a timestamp.** Two events routinely
+  share a millisecond.
+- Off under vitest unless `AUTOGALLERY_TRACE=1`; `AUTOGALLERY_TRACE=0` disables
+  it anywhere.
+- The user gets the path from Settings (`,`) → Diagnostics → Copy log location,
+  which flushes the pending batch first.
+
+**The one measurement that pays for the whole thing** is `loop.maxMs`. "Lost
+the connection to the AutoGallery server" is a CLIENT verdict — `/api/health`
+did not answer within 4 s — and it has two causes that look identical: the
+server could not get round to answering, or the browser never sent the
+request. If the loop was late it is the server; if the loop was fine through
+the whole outage, no amount of server-side capping will ever help. Nothing
+recorded that number before #314, which is exactly how #305 got two fixes
+aimed at the wrong half of the system.
+
+**A long-lived stream is logged only when it ENDS**, since the line is written
+on close. A video playing for ten minutes is invisible for ten minutes — read
+`inflight` on neighbouring lines to see it, not the absence of its own.
+
+## Not every video transcodes, and the ones that don't are a different bug
+
+`playbackPlan` (`server/lib/videoPlayback.js`) returns **`direct`** for
+`.mp4/.m4v/.mov/.webm` carrying h264 4:2:0 — the loupe is then pointed at
+`/api/image/:id`, the original file, and **no job, no ffmpeg, and no
+`TRANSCODE_SLOTS` are involved at all**. Screen recordings are all like this:
+`2025_09Sep_12_WebDev_Online_Lectures` is 75 `.mov / h264 / yuv420p` files,
+several of them 400–750 MB.
+
+So a fix to the transcode path is inert for that entire class of library. Both
+of #305's first two fixes were, and the trace log is what showed it: eleven
+`ui:video ask` events in 50 ms, every one answered `ready: true`, zero
+transcode jobs. **Check which branch of `playbackPlan` the reported files take
+before touching the conversion machinery.**
+
 ## Where the deep context lives
 
 - Invariants, Svelte/DOM traps, feed-window transactions, usability & testing
