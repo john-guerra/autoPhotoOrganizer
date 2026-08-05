@@ -378,4 +378,79 @@ describe("people appear WHILE the scan runs (#304)", () => {
       facesPerPhoto = 1;
     }
   }, 60_000);
+
+  it("files the FIRST people early, not after a thousand photos", async () => {
+    // The bug John found in the first attempt:
+    //
+    //   "the jobs panel said that it had scanned 950+ but all the faces
+    //    remained in 0. It updated once it reached 1000+"
+    //
+    // The interval had a floor of 500 FACES, and his library averages ~0.5
+    // faces per photo — so the first pass landed after ~1,000 photos, i.e. at
+    // the end of his scan. Progressive in principle, invisible in practice.
+    //
+    // This pins the property that matters to the user: people exist while
+    // there is still a lot of scanning left to do.
+    const db = getDb();
+    const dir = join(photosRoot, "early");
+    // One face per photo, so "faces" and "photos" are the same axis and the
+    // assertion reads in the units John reported.
+    facesPerPhoto = 1;
+    upsertScan(db, dir, 1, await makePhotos(dir, 120, "E"));
+
+    // Per JOB ID, like the test above — and for the same reason, which I had
+    // to relearn: earlier tests in this file leave their own finished `faces`
+    // jobs in the registry, so a single shared `lastPhase` is clobbered by an
+    // old job on every emit and no transition is ever detected. This reported
+    // ZERO interim passes while the feature was demonstrably running them.
+    /** @type {Array<{id: string, phase: string, label: string, done: number}>} */
+    const events = [];
+    const onChange = (list) => {
+      for (const j of list) {
+        if (j.type !== "faces") continue;
+        const last = events.filter((e) => e.id === j.id).at(-1);
+        if (last?.phase !== j.phase) {
+          events.push({
+            id: j.id,
+            phase: j.phase,
+            label: String(j.label ?? ""),
+            done: j.done ?? 0,
+          });
+        }
+      }
+    };
+    registry.on("change", onChange);
+    let body;
+    try {
+      body = await (await post("/api/ml/faces")).json();
+      expect(body.started).toBe(true);
+      await settle(body.jobId);
+    } finally {
+      registry.off("change", onChange);
+    }
+
+    // INTERIM passes only. Phase 2 enters the same phase at the END and resets
+    // `done` to 0, so counting it made an earlier version of this test pass
+    // with the old 500-face floor reinstated. It is told apart by the LABEL:
+    // phase 2 rewrites it, an interim pass leaves detection's label alone.
+    const filedAt = events
+      .filter(
+        (e) =>
+          e.id === body.jobId &&
+          e.phase === "Filing faces into people" &&
+          !e.label.startsWith("Filing")
+      )
+      .map((e) => e.done);
+
+    expect(
+      filedAt.length,
+      "no interim filing pass ran at all — people would only appear at the end"
+    ).toBeGreaterThan(0);
+    // The FIRST pass runs well before the end. 120 photos here; a floor of 500
+    // would have produced nothing until the final phase-2 pass.
+    expect(
+      filedAt[0],
+      `first filing happened after ${filedAt[0]} of 120 photos — it should be early`
+    ).toBeLessThan(60);
+  }, 60_000);
 });

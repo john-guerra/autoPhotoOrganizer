@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.42
+
+- **Arrowing through a folder of videos no longer wedges the app.** Each clip
+  you passed started its own conversion, and enough of them at once starved the
+  server until the app reported the connection lost. At most two convert at a
+  time now, and one that is waiting says so (#305).
+- **People start appearing much earlier in a face scan.** The first ones used
+  to need about a thousand photos; now they arrive after roughly a hundred, and
+  the pass gets rarer as it gets more expensive (#304).
+
 ## 2.19.41
 
 - **People appear while a face scan is running**, instead of all at once when
