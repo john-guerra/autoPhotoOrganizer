@@ -18,7 +18,7 @@ test("@p2 the app records what it was doing, and says where", async ({
   context,
 }) => {
   // The panel copies the path, and headless Chromium refuses clipboard writes
-  // without this. The refusal path has its own assertion below.
+  // without this. The refusal path is covered by its own test below.
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const errors = trackPageErrors(page);
   await openApp(page);
@@ -29,13 +29,18 @@ test("@p2 the app records what it was doing, and says where", async ({
     return r.json();
   });
   expect(before.enabled).toBe(true);
-  expect(before.path).toMatch(/logs\/trace-\d{8}-\d{6}\.ndjson$/);
+  // HHMMSS plus milliseconds: two dev-server restarts inside one second used
+  // to share a filename and append into the same file.
+  expect(before.path).toMatch(/logs\/trace-\d{8}-\d{9}\.ndjson$/);
   // Requests are recorded with a verb, a URL and a status — the three things
   // that make a line worth having.
   const http = before.entries.filter((e) => e.ch === "http");
   expect(http.length).toBeGreaterThan(0);
+  // A verb, a URL and a status — all three, since the URL is the field that
+  // makes a line worth having and it was the one not being asserted.
   expect(http[0]).toMatchObject({
     m: expect.any(String),
+    u: expect.stringContaining("/api/"),
     s: expect.any(Number),
   });
 
@@ -68,6 +73,44 @@ test("@p2 the app records what it was doing, and says where", async ({
   // The path shown is the file the SERVER actually opened, not a guess
   // assembled in the client.
   await expect(page.getByTestId("diag-path")).toHaveText(before.path);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * A refused clipboard must still leave the user the path (#314).
+ *
+ * The first version set `diagError` and rendered it with `{#if diagError}
+ * {:else if logPath}` — so the message "the path is above, select it by hand"
+ * appeared with nothing above it. The one feature whose entire job is handing
+ * you a path handed you nothing, in exactly the situation where you needed it.
+ * Caught in review, not by this suite, because the suite granted the
+ * permission and never exercised the refusal.
+ */
+test("@p2 a refused clipboard still shows the log path", async ({ page }) => {
+  const errors = trackPageErrors(page);
+  await openApp(page);
+
+  // Break the clipboard the way a permissions policy or a non-Chromium engine
+  // would, BEFORE the app reads it.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: () => Promise.reject(new Error("NotAllowedError")),
+      },
+    });
+  });
+
+  await page.keyboard.press(",");
+  await page.getByTestId("diag-copy").click();
+
+  // Both: the specific message AND the thing it refers to.
+  await expect(page.getByTestId("diag-error")).toBeVisible();
+  await expect(page.getByTestId("diag-path")).toBeVisible();
+  await expect(page.getByTestId("diag-path")).toHaveText(
+    /trace-\d+.*\.ndjson$/
+  );
 
   expect(errors).toEqual([]);
 });

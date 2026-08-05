@@ -50,11 +50,14 @@ export const MAX_EPOCHS = 2000;
  * How many faces a person needs before they are worth a dot (#255).
  *
  * Exported so the server's own fallbacks (`personCentroids`, `runStaleness`)
- * cannot drift from the schema the gear renders. The UI cannot import it —
- * `ui/` never imports `server/` — so the two client literals seed the FIRST
- * request only and are then overwritten by `paramSpecs[].default` off
- * `/api/projections/options`. Change this and both follow; change it and
- * forget the client and the first fetch of a session disagrees with the gear.
+ * cannot drift from the schema the gear renders.
+ *
+ * There is no longer a client copy to keep in step. `ui/` never imports
+ * `server/`, and it used to hold literals for `minFaces`/`nNeighbors`/
+ * `minDist` and send them with every request — which meant the client's copy
+ * WAS the default and this one was unreachable (#307). The client now sends
+ * only the parameters the user has actually chosen, so this is the single
+ * source and changing it takes effect.
  */
 export const DEFAULT_MIN_FACES = 5;
 

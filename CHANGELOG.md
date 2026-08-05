@@ -6,6 +6,22 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.20.1
+
+- **Your existing Face Map needs rebuilding once.** 2.20.0 raised the default
+  Neighbours setting from 15 to 50, and a map is stored under the settings it
+  was built with — so the Face Map will open empty the first time and offer to
+  rebuild it (about 20 seconds on a large library). Only once (#307).
+- **"Copy log location" now captures the last few seconds too.** It was
+  flushing only the server's half of the diagnostic log, so the events closest
+  to whatever went wrong — the ones you opened the panel for — were still
+  sitting in the browser (#314).
+- **If copying the path fails, the path is now shown** instead of a message
+  telling you to select something that wasn't there (#314).
+- **The diagnostic log can no longer grow without limit**, and says plainly
+  that it records the folders and files you browsed and anything you searched
+  for — worth knowing before attaching it to a public bug report (#314).
+
 ## 2.20.0
 
 First packaged build since 2.18.2, and a big one: fifty versions of work.

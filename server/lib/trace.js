@@ -53,6 +53,17 @@ const FLUSH_MS = 250;
 const FLUSH_AT = 400;
 /** How many previous runs' logs to keep. */
 const KEEP_FILES = 5;
+/**
+ * Roll to a new file past this many bytes.
+ *
+ * Rotation used to happen ONLY at startup, by file count — which is no bound
+ * at all for the packaged app, whose whole point is being left open. Every
+ * request writes a line, thumbnails included, so a session that scrolls 100k
+ * tiles wrote ~20 MB into one file that nothing would ever roll. 8 MB is a few
+ * hundred thousand lines: comfortably more than any one incident needs, and
+ * `KEEP_FILES` then bounds the total at ~40 MB rather than at infinity.
+ */
+const MAX_BYTES = 8 * 1024 * 1024;
 /** Truncate any single string field to this, so one huge value can't bloat the log. */
 const MAX_STR = 500;
 
@@ -71,6 +82,10 @@ let flushTimer = null;
 let writeChain = Promise.resolve();
 /** @type {string|null} */
 let filePath = null;
+/** Bytes written to the current file, so rotation does not need to stat it. */
+let bytesWritten = 0;
+/** @type {string|null} */
+let logDir = null;
 let fileBroken = false;
 let enabled = false;
 let started = false;
@@ -102,9 +117,14 @@ export function traceEnabled() {
 const pad = (n) => String(n).padStart(2, "0");
 
 function fileNameFor(d) {
+  // Milliseconds, not seconds: `node --watch` restarts the dev server on every
+  // `server/` edit, and two starts inside one second shared a filename — so
+  // two runs appended into one file and `KEEP_FILES` evicted the session you
+  // were actually investigating.
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
   return (
     `trace-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
-    `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.ndjson`
+    `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}${ms}.ndjson`
   );
 }
 
@@ -123,10 +143,11 @@ export async function startTrace(opts = {}) {
   if (!enabled || started) return filePath;
   started = true;
   try {
-    const dir = opts.dir ?? join(cacheRoot(), "logs");
-    await mkdir(dir, { recursive: true });
-    filePath = join(dir, fileNameFor(new Date()));
-    await pruneOldLogs(dir);
+    logDir = opts.dir ?? join(cacheRoot(), "logs");
+    await mkdir(logDir, { recursive: true });
+    filePath = join(logDir, fileNameFor(new Date()));
+    bytesWritten = 0;
+    await pruneOldLogs(logDir);
   } catch {
     // No disk sink — the ring still works, and a diagnostic that refuses to
     // start because it cannot write is worse than one that records less.
@@ -210,8 +231,18 @@ export function flushTrace() {
   const batch = pending;
   pending = [];
   const text = batch.map((e) => JSON.stringify(e)).join("\n") + "\n";
+  bytesWritten += Buffer.byteLength(text);
+  const target = filePath;
+  const rolling = bytesWritten >= MAX_BYTES && logDir;
+  if (rolling) {
+    // Roll BEFORE the write lands, so the next batch already has the new
+    // path; the current batch finishes in the file it was sized against.
+    filePath = join(logDir, fileNameFor(new Date()));
+    bytesWritten = 0;
+  }
   writeChain = writeChain
-    .then(() => appendFile(filePath, text))
+    .then(() => appendFile(target, text))
+    .then(() => (rolling ? pruneOldLogs(logDir) : undefined))
     .catch(() => {
       // A log that throws into a request handler would be a self-inflicted
       // outage. Give up on the file and keep the ring.
@@ -259,7 +290,13 @@ export function ingestClientTrace(entries, max = 200) {
   let n = 0;
   for (const raw of entries.slice(0, max)) {
     if (!raw || typeof raw !== "object") continue;
-    const { ev, t, ch, ...rest } = raw;
+    // `seq` is stripped, not just unused. It is the poller's cursor
+    // (`?since=`), and `trace()` spreads these fields on AFTER assigning it —
+    // so a client sending `seq: 999999999` would land in the ring above every
+    // real entry and permanently blind anyone polling from the last seq they
+    // saw. Same for `t`, which orders the file: the client's own clock is
+    // kept as `ct` instead.
+    const { ev, t, ch, seq: _seq, ...rest } = raw;
     trace(typeof ch === "string" ? `ui:${ch}` : "ui", String(ev ?? "event"), {
       ...rest,
       ct: typeof t === "number" ? t : undefined,
@@ -271,6 +308,8 @@ export function ingestClientTrace(entries, max = 200) {
 
 /** Test-only: forget everything, including which file we were writing. */
 export function _resetTraceForTest() {
+  bytesWritten = 0;
+  logDir = null;
   ring = new Array(RING_SIZE);
   head = 0;
   filled = 0;

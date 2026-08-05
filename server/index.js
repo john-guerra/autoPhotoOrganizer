@@ -49,20 +49,29 @@ const HOST = "127.0.0.1";
  */
 export function createApp({ ml } = {}) {
   const app = express();
+  // The flight recorder (#314), and it must be FIRST — ahead of the body
+  // parser, not after it.
+  //
+  // `express.json` short-circuits what it rejects (a 413 on an oversized
+  // body, a 400 on malformed JSON) straight into the error handler, so a
+  // request it refuses never reaches a middleware mounted below it. The
+  // recorder would show NO LINE AT ALL for that request, which reads as "the
+  // browser never sent it" — the precise wrong diagnosis this feature exists
+  // to prevent, and #89 was exactly a silent 413 on an oversized undo
+  // manifest.
+  //
+  // `inflight` and `procs` ride along on every line because the interesting
+  // question about a slow request is never the request — it is what else was
+  // happening while it was slow. Note `inflight` INCLUDES the request being
+  // logged (this handler's `close` listener is registered before
+  // `interactiveRoute`'s), so `1` means "nothing else was in flight".
+  const probes = { inflight: interactiveInFlight, procs: liveChildren };
+  app.use(traceHttp(probes));
+
   // 50mb: materialize/undo POST an album's full photo-id list and the move
   // manifest ({id,from,to} per file); a big album blows the default 100kb limit
   // and the request 413s (undo silently failed — see #89).
   app.use(express.json({ limit: "50mb" }));
-
-  // The flight recorder (#314), FIRST so it sees every request including the
-  // ones that 404. It records on the socket closing, so it costs a listener
-  // per request and nothing else.
-  //
-  // `inflight` and `procs` ride along on every line because the interesting
-  // question about a slow request is never the request — it is what else was
-  // happening while it was slow.
-  const probes = { inflight: interactiveInFlight, procs: liveChildren };
-  app.use(traceHttp(probes));
 
   // `startTrace` sets the enabled flag synchronously and only the FILE work is
   // async, so `traceEnabled()` is already truthful on the next line.

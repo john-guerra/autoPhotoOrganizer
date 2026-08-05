@@ -57,13 +57,15 @@ describe("releaseVideo", () => {
 
   it("never throws — it runs while Svelte is destroying the block", () => {
     const exploding = {
-      pause: () => {
+      pause: () => {},
+      removeAttribute: () => {
         throw new Error("detached");
       },
-      removeAttribute: () => {},
       load: () => {},
     };
     expect(() => releaseVideo(exploding)).not.toThrow();
+    // It could not abort the fetch, and it says so rather than reporting a
+    // connection freed that is still open.
     expect(releaseVideo(exploding)).toBe(false);
   });
 
@@ -73,16 +75,18 @@ describe("releaseVideo", () => {
     expect(releaseVideo({})).toBe(false);
   });
 
-  it("still releases when pause() is unavailable mid-teardown", () => {
-    // A partially torn-down element can lose methods. Aborting the FETCH is
-    // the point; the pause is a nicety.
+  it("STILL releases when pause() throws — the pause is the nicety", () => {
+    // The first version wrapped all three in one try, so a throwing `pause()`
+    // skipped the two calls that actually abort the fetch — putting #305 back
+    // for that clip. Its test asserted `calls == []` and was titled "still
+    // releases", i.e. it documented the broken behaviour as intended. Caught
+    // in review.
     const v = fakeVideo();
     v.pause = () => {
       throw new Error("gone");
     };
-    releaseVideo(v);
-    // It bailed, and said so — the caller is not told the socket was freed
-    // when it was not.
-    expect(v.calls).toEqual([]);
+    expect(releaseVideo(v)).toBe(true);
+    expect(v.calls).toEqual(["removeAttribute:src", "load"]);
+    expect("src" in v.attrs).toBe(false);
   });
 });

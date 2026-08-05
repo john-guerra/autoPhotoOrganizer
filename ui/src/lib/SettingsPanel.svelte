@@ -4,7 +4,9 @@
   // adaptive page-size toggle. Presentational: it binds to state owned by
   // App.svelte and never touches the network itself. Built on the shared Modal;
   // the comma key that opens it is owned by App.svelte's onKeydown.
+  import { onDestroy } from "svelte";
   import Modal from "./Modal.svelte";
+  import { tracer } from "./trace.js";
   import {
     PREFETCH_PRESETS,
     PREFETCH_KNOBS,
@@ -65,16 +67,27 @@
   let diagError = $state("");
 
   /**
-   * Flush what is queued, then hand over the path.
+   * Flush BOTH halves of the recorder, then hand over the path.
    *
-   * Flushing FIRST is the point: the last few seconds of events are still
-   * sitting in a 250 ms batch, and those are the ones nearest whatever just
-   * went wrong. A path handed over before the flush points at a file missing
-   * exactly the part the user came for.
+   * Flushing first is the point: the events nearest whatever just went wrong
+   * are still sitting in a batch, and a path handed over before the flush
+   * points at a file missing exactly the part the user came for.
+   *
+   * BOTH halves, and the first version only did one. `/api/debug/trace/flush`
+   * drains the server's 250 ms batch; the BROWSER's tracer batches at 2 s
+   * (`ui/src/lib/trace.js`), so the client events from the last two seconds —
+   * the health-check verdicts that made the user open this panel — had not
+   * left the browser at all. The server-side flush cannot see them because
+   * they have not been sent yet, so the order here matters: client first,
+   * server second.
    */
   async function revealLog() {
     diagError = "";
     try {
+      // Client first: this only queues the send, so give it a turn to leave
+      // before asking the server to write what it has.
+      tracer.flush();
+      await new Promise((r) => setTimeout(r, 150));
       const res = await fetch("/api/debug/trace/flush", { method: "POST" });
       const body = await res.json();
       if (!body.enabled || !body.path) {
@@ -82,18 +95,29 @@
           "Logging is switched off for this run (AUTOGALLERY_TRACE=0).";
         return;
       }
+      // Set the path BEFORE trying the clipboard, and render it independently
+      // of the error (see the markup): a refused clipboard must still leave
+      // the user with something to select. Telling them "the path is above"
+      // while hiding it is worse than saying nothing.
       logPath = body.path;
-      await navigator.clipboard.writeText(body.path);
-      copied = true;
-      setTimeout(() => (copied = false), 2000);
     } catch (e) {
-      // Clipboard access can be refused, and then the path itself is still
-      // useful — show it rather than reporting nothing happened.
-      diagError = logPath
-        ? "Couldn't copy — the path is above, select it by hand."
-        : `Couldn't reach the log: ${e.message}`;
+      diagError = `Couldn't reach the log: ${e.message}`;
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(logPath);
+      copied = true;
+      clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => (copied = false), 2000);
+    } catch {
+      // Refused by the browser (no transient activation, a permissions
+      // policy, a non-Chromium engine). The path is on screen, so say what to
+      // do with it rather than reporting that nothing happened.
+      diagError = "Couldn't copy automatically — select the path and copy it.";
     }
   }
+  let copiedTimer;
+  onDestroy(() => clearTimeout(copiedTimer));
 </script>
 
 <Modal open={true} title="Scrolling & prefetch" size="md" onclose={close}>
@@ -213,16 +237,19 @@
       <p class="diag-lead">
         AutoGallery keeps a log of what it and the server were doing — requests,
         conversions, jobs, and any moment the app stopped responding. It never
-        leaves your machine.
+        leaves your machine, but it does record <strong
+          >the folders and files you browsed and anything you searched for</strong
+        >, so read it before attaching it to a public bug report.
       </p>
       <div class="diag-row">
         <button type="button" onclick={revealLog} data-testid="diag-copy">
           {copied ? "Copied ✓" : "Copy log location"}
         </button>
+        {#if logPath}
+          <code data-testid="diag-path">{logPath}</code>
+        {/if}
         {#if diagError}
           <small class="diag-error" data-testid="diag-error">{diagError}</small>
-        {:else if logPath}
-          <code data-testid="diag-path">{logPath}</code>
         {/if}
       </div>
     </section>

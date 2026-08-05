@@ -28,11 +28,16 @@
  *
  * ## All three steps are load-bearing
  *
- * `pause()` stops the decoder. `removeAttribute("src")` is the change the
- * spec's media-load algorithm looks for. `load()` is what actually RUNS that
- * algorithm and aborts the in-flight fetch. Drop any one and the connection
- * stays open — which is why "it is removed from the DOM, surely that is
+ * `removeAttribute("src")` is the change the spec's media-load algorithm
+ * looks for, and `load()` is what actually RUNS that algorithm and aborts the
+ * in-flight fetch. **Those two are what free the connection**; drop either and
+ * it stays open — which is why "it is removed from the DOM, surely that is
  * enough" was wrong for two releases.
+ *
+ * `pause()` is a nicety on top: it stops the decoder, which is CPU nobody
+ * asked for on a clip nobody is looking at. It gets its own `try` precisely
+ * because it is NOT load-bearing — an earlier version wrapped all three
+ * together, so a throwing `pause()` would have skipped the two that matter.
  *
  * Setting `src = ""` instead of removing the attribute is the classic
  * near-miss: it resolves against the document URL, so the element goes off and
@@ -45,7 +50,15 @@
 export function releaseVideo(el) {
   if (!el || typeof el.load !== "function") return false;
   try {
+    // Its OWN try. `pause()` is the one call here that is not load-bearing —
+    // it stops the decoder, where `removeAttribute` + `load()` are what abort
+    // the fetch. Letting it take the other two down with it would put #305
+    // back for that clip, which is exactly the wrong trade for a nicety.
     el.pause();
+  } catch {
+    /* already detached far enough that pausing is meaningless */
+  }
+  try {
     el.removeAttribute("src");
     el.load();
     return true;

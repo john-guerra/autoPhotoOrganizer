@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { EventEmitter } from "node:events";
 import { MLService, markHostFailure } from "./MLService.js";
 import { modelsDir } from "../lib/cachePaths.js";
+import { traceChild } from "../lib/procTrace.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -104,15 +105,22 @@ export class OnnxMLService extends MLService {
     // ELECTRON_RUN_AS_NODE makes the Electron binary behave as node. #67 is the
     // cautionary tale: a Node-ABI native addon in an Electron build crashes on
     // launch, and electron-builder's own rebuild was a silent no-op.
-    const child = this.#spawn(process.execPath, [this.#workerPath], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: "1",
-        AUTOGALLERY_MODELS_DIR:
-          process.env.AUTOGALLERY_MODELS_DIR ?? modelsDir(),
-      },
-    });
+    // Counted like every other child (#314). This one matters MOST: it runs
+    // ONNX inference across every core during a sweep, so a `loop.stall` line
+    // reading `procs: 0` while it was running says "nothing else was
+    // happening" about the one process that was.
+    const child = traceChild(
+      this.#spawn(process.execPath, [this.#workerPath], {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: "1",
+          AUTOGALLERY_MODELS_DIR:
+            process.env.AUTOGALLERY_MODELS_DIR ?? modelsDir(),
+        },
+      }),
+      { bin: "ml-worker", why: "inference" }
+    );
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => this.#onData(chunk));
     child.on("exit", (code, signal) => {
