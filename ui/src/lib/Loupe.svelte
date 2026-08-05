@@ -1,6 +1,7 @@
 <script>
-  import { imageUrl, fetchMeta, prepareVideo } from "./api.js";
+  import { imageUrl, fetchMeta, prepareVideo, cancelJob } from "./api.js";
   import { waitForJob } from "./jobs.js";
+  import { onDestroy } from "svelte";
   import LoupeDetails from "./LoupeDetails.svelte";
   import LoupeFilmstrip from "./LoupeFilmstrip.svelte";
   import { loadVideoPrefs, saveVideoPrefs } from "./videoPrefs.js";
@@ -125,6 +126,50 @@
       });
     });
   }
+  /**
+   * Conversions THIS loupe asked for and could still withdraw. id -> jobId.
+   *
+   * A transcode is started by ARRIVING on a clip, and arriving is not the same
+   * as wanting to watch it (#305). Scrubbing past twenty videos used to start
+   * twenty ffmpeg processes — not queued, CONCURRENT: the route's only gate is
+   * a per-photo dedup, and nothing anywhere caps how many run. The clip you
+   * stopped on was then starved by nineteen you had already left.
+   *
+   * So a started conversion is WITHDRAWABLE, and navigation is what withdraws
+   * it. Event-driven, with no settle window to tune: the signal is "you left",
+   * not "you have been still for 300ms".
+   */
+  const startedConversions = new Map();
+  /**
+   * The ids the ±1 window covers right now.
+   *
+   * Read by `prepareVideo` resolutions that land AFTER the user has moved on —
+   * without it, a request in flight during a fast scrub records its job into
+   * `startedConversions` after that id has already been withdrawn, and nothing
+   * would ever cancel it.
+   */
+  let videoWindow = new Set();
+
+  /** Cancel conversions for clips no longer in `keep`. Best effort: a job that
+   *  already finished, or that the user cancelled from the JobsPanel, 404s and
+   *  that is not worth reporting for a clip nobody is looking at. */
+  function withdrawConversions(keep) {
+    for (const [id, jobId] of startedConversions) {
+      if (keep.has(id)) continue;
+      startedConversions.delete(id);
+      // Forget the hint too, so coming back re-asks. The server is idempotent
+      // and an already-converted clip answers from cache.
+      videoPrefetched.delete(id);
+      cancelJob(jobId).catch(() => {});
+    }
+  }
+
+  // Closing the loupe withdraws everything still running. Without this, every
+  // conversion started while browsing runs to completion after the window is
+  // gone — `loadVideo`'s guards only stop it WRITING to the UI, they never
+  // stopped the encode.
+  onDestroy(() => withdrawConversions(new Set()));
+
   $effect(() => {
     if (item?.kind === "video") loadVideo(item.id);
     else if (item && item.kind !== "video") videoState = null;
@@ -172,7 +217,16 @@
     videoState = null;
     try {
       const r = await prepareVideo(id, { transcode });
-      if (item?.id !== id) return; // navigated away while we asked
+      if (item?.id !== id) {
+        // Navigated away while we asked — and THIS is the case that produced
+        // twenty concurrent ffmpeg processes (#305). The old code returned
+        // here, which stopped the UI being written but left the encode
+        // running. A conversion for a clip nobody is looking at is withdrawn.
+        if (r?.jobId) cancelJob(r.jobId).catch(() => {});
+        return;
+      }
+      // Withdrawable while it runs: the user may still scrub past this one.
+      if (r?.jobId) startedConversions.set(id, r.jobId);
       if (r.ready) {
         // `verify` means the server is GUESSING this machine can decode the
         // original. Ask our decoder; if it says no, come straight back for the
@@ -196,6 +250,7 @@
           };
         }
       });
+      startedConversions.delete(id); // finished: nothing left to withdraw
       if (item?.id !== id) return;
       if (job.status === "done") {
         videoState = { status: "ready", url: job.result.url };
@@ -253,6 +308,18 @@
    */
   const videoPrefetched = new Set(); // ids we've already asked the server about
   function prefetchVideos(i) {
+    // The clips worth converting right now: the one on screen, plus ±1. Built
+    // FIRST, because a resolution landing late needs to test against the
+    // current window rather than the one that was current when it was asked.
+    const keep = new Set();
+    const cur = items[i];
+    if (isRealPhoto(cur) && cur.kind === "video") keep.add(cur.id);
+    for (const d of [1, -1]) {
+      const it = items[i + d];
+      if (isRealPhoto(it) && it.kind === "video") keep.add(it.id);
+    }
+    videoWindow = keep;
+
     for (const d of [1, -1]) {
       const it = items[i + d];
       if (!isRealPhoto(it) || it.kind !== "video") continue;
@@ -261,8 +328,24 @@
       // Fire and forget: this is a HINT. If it fails, the real request the user's
       // own navigation makes will surface the error — a prefetch must never put a
       // message on screen for a photo the user isn't looking at.
-      prepareVideo(it.id).catch(() => videoPrefetched.delete(it.id));
+      prepareVideo(it.id)
+        .then((r) => {
+          if (!r?.jobId) return; // already converted, nothing to withdraw
+          // The user may have scrubbed past this clip while the request was in
+          // flight. Withdraw immediately rather than recording a job that the
+          // next `withdrawConversions` has already walked past.
+          if (!videoWindow.has(it.id)) {
+            cancelJob(r.jobId).catch(() => {});
+            videoPrefetched.delete(it.id);
+            return;
+          }
+          startedConversions.set(it.id, r.jobId);
+        })
+        .catch(() => videoPrefetched.delete(it.id));
     }
+
+    // Everything else this loupe started is for a clip the user has left.
+    withdrawConversions(keep);
   }
 </script>
 

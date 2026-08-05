@@ -6,6 +6,20 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.40
+
+- **Scrubbing past videos no longer buries the one you stopped on.** Landing on
+  a clip started converting it, and nothing ever stopped that — so passing
+  twenty videos ran twenty conversions at once, all competing with the clip you
+  actually wanted. A conversion you navigate away from is now withdrawn, and
+  closing the loupe withdraws everything still running (#305).
+
+## 2.19.38
+
+- Internal: the library-reset test that guards against blocking the server was
+  both flaky on CI and unable to detect the regression it existed for. It now
+  checks the behaviour deterministically (#310).
+
 ## 2.19.36
 
 - **The Face Map groups duplicates better out of the box.** UMAP's neighbourhood
