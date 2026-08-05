@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { trace } from "../lib/trace.js";
 
 /** @typedef {"scan"|"export"|"materialize"|"undo-move"|"enrich"|"transcode"|"hash"|"embed"|"faces"|"face-download"|"face-cluster"|"projection"} JobType */
 
@@ -54,6 +55,10 @@ class JobRegistry extends EventEmitter {
       controller: new AbortController(),
     };
     this.#jobs.set(id, job);
+    // Lifecycle only — never `update`, which is where progress ticks live and
+    // would drown the log in a thousand lines per scan. What a reader needs
+    // from a job is when it began, when it ended, and how.
+    trace("job", "create", { id, type, label: job.label, total });
     this.#emit();
     return job;
   }
@@ -68,6 +73,7 @@ class JobRegistry extends EventEmitter {
     if (!j) return;
     j.status = "done";
     j.result = result ?? null;
+    trace("job", "done", { id, type: j.type, done: j.done, total: j.total });
     this.#emit();
     // A clean finish of a SELF_CLEARING job takes its own row away. Note the
     // ORDER: the "done" snapshot goes out FIRST, and only then does the row
@@ -113,6 +119,7 @@ class JobRegistry extends EventEmitter {
     if (!j) return;
     j.status = "canceled";
     j.result = result ?? null;
+    trace("job", "stopped", { id, type: j.type, done: j.done });
     this.#emit();
   }
   fail(id, error) {
@@ -120,6 +127,7 @@ class JobRegistry extends EventEmitter {
     if (!j) return;
     j.status = j.controller.signal.aborted ? "canceled" : "failed";
     j.error = String(error?.message ?? error);
+    trace("job", j.status, { id, type: j.type, err: j.error });
     this.#emit();
   }
   /**
@@ -150,6 +158,7 @@ class JobRegistry extends EventEmitter {
     const j = this.#jobs.get(id);
     if (!j || j.status !== "running") return false;
     j.status = "paused";
+    trace("job", "paused", { id, type: j.type, reason: String(reason ?? "") });
     j.pauseReason = String(reason ?? "");
     j.parked = parked;
     this.#emit();
@@ -171,6 +180,7 @@ class JobRegistry extends EventEmitter {
     // a real pause. Cancelling a parked job is the most likely thing a user
     // does with one.
     if (!j || (j.status !== "running" && j.status !== "paused")) return false;
+    trace("job", "cancel", { id, type: j.type, done: j.done });
     j.controller.abort();
     return true;
   }

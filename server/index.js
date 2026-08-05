@@ -7,6 +7,17 @@ import { registerApi } from "./api.js";
 import { getDb } from "./db/connection.js";
 import { registry } from "./jobs/registry.js";
 import { interactiveInFlight } from "./lib/interactive.js";
+import {
+  startTrace,
+  trace,
+  traceEntries,
+  tracePath,
+  traceEnabled,
+  flushTrace,
+  ingestClientTrace,
+} from "./lib/trace.js";
+import { startEventLoopWatch, traceHttp } from "./lib/eventLoopWatch.js";
+import { liveChildren } from "./lib/procTrace.js";
 
 // sharp/libvips offloads decode+resize work to libuv's threadpool, which
 // defaults to just 4 threads regardless of CPU core count — a jump or
@@ -42,6 +53,26 @@ export function createApp({ ml } = {}) {
   // manifest ({id,from,to} per file); a big album blows the default 100kb limit
   // and the request 413s (undo silently failed — see #89).
   app.use(express.json({ limit: "50mb" }));
+
+  // The flight recorder (#314), FIRST so it sees every request including the
+  // ones that 404. It records on the socket closing, so it costs a listener
+  // per request and nothing else.
+  //
+  // `inflight` and `procs` ride along on every line because the interesting
+  // question about a slow request is never the request — it is what else was
+  // happening while it was slow.
+  const probes = { inflight: interactiveInFlight, procs: liveChildren };
+  app.use(traceHttp(probes));
+
+  // `startTrace` sets the enabled flag synchronously and only the FILE work is
+  // async, so `traceEnabled()` is already truthful on the next line.
+  startTrace().then((path) => {
+    if (path) console.log(`[trace] ${path}`);
+  });
+  if (traceEnabled()) {
+    trace("app", "start", { version, pid: process.pid, node: process.version });
+    startEventLoopWatch({ probes });
+  }
 
   // The pre-SQLite JSON stores are NO LONGER IMPORTED (#295).
   //
@@ -97,6 +128,48 @@ export function createApp({ ml } = {}) {
       busy: running.length > 0 || interactiveInFlight() > 0,
       running,
     });
+  });
+
+  /**
+   * The flight recorder, readable (#314).
+   *
+   * `since` is a SEQUENCE number, not a timestamp: a poller wants "what is new
+   * since I last looked", and two events routinely share a millisecond.
+   *
+   * Under `/api/debug/` rather than a hidden name because there is nothing
+   * secret here — it is the user's own machine, and a diagnostic you have to
+   * know a magic word to reach is one nobody uses when it matters.
+   */
+  app.get("/api/debug/trace", (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json({
+      enabled: traceEnabled(),
+      path: tracePath(),
+      entries: traceEntries({
+        since: Number(req.query.since) || 0,
+        limit: Math.min(5000, Number(req.query.limit) || 1000),
+        ch: req.query.ch ? String(req.query.ch) : undefined,
+      }),
+    });
+  });
+
+  /**
+   * The BROWSER's half of the log, merged into the same stream.
+   *
+   * One file, one clock, both sides — which is the only way to see that the
+   * client gave up at the same moment the server was still answering everyone
+   * else. Two separate logs would leave that inference to whoever is reading
+   * two sets of timestamps from two machines' clocks.
+   */
+  app.post("/api/debug/trace", (req, res) => {
+    const n = ingestClientTrace(req.body?.entries);
+    res.json({ recorded: n });
+  });
+
+  /** Force the pending batch to disk — for a user about to attach the file. */
+  app.post("/api/debug/trace/flush", async (_req, res) => {
+    await flushTrace();
+    res.json({ path: tracePath(), enabled: traceEnabled() });
   });
 
   // v0.1 culling API: scan, thumbnails, full images, ratings.

@@ -1,6 +1,6 @@
 import { readdir, stat, rename, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import sharp from "sharp";
 import exifr from "exifr";
 import ffmpegPathRaw from "ffmpeg-static";
@@ -8,6 +8,7 @@ import ffprobeStatic from "ffprobe-static";
 import { ProcessingService } from "./ProcessingService.js";
 import { createProgressParser } from "../lib/ffmpegProgress.js";
 import { gpsFromExif } from "../lib/exifGps.js";
+import { traceChild } from "../lib/procTrace.js";
 
 // In a packaged Electron build the static binaries are pulled out of the asar
 // archive (build.asarUnpack) so they can be spawned, but the resolved path still
@@ -53,7 +54,10 @@ const FFMPEG_TIMEOUT_MS = 15000;
  */
 function runBinary(bin, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = traceChild(
+      spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] }),
+      { bin: basename(bin), why: "probe" }
+    );
     const out = [];
     const err = [];
     let settled = false;
@@ -487,9 +491,12 @@ export class NodeProcessingService extends ProcessingService {
     ];
 
     await new Promise((resolve, reject) => {
-      const child = spawn(ffmpegPath, args, {
-        stdio: ["ignore", onProgress ? "pipe" : "ignore", "pipe"],
-      });
+      const child = traceChild(
+        spawn(ffmpegPath, args, {
+          stdio: ["ignore", onProgress ? "pipe" : "ignore", "pipe"],
+        }),
+        { bin: "ffmpeg", why: "transcode" }
+      );
       const err = [];
       const onAbort = () => child.kill("SIGKILL");
       signal?.addEventListener("abort", onAbort, { once: true });

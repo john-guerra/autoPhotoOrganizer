@@ -58,6 +58,42 @@
     k.key === "inFlightCap" && shown.inFlightCap === Infinity
       ? k.max
       : shown[k.key];
+
+  // --- diagnostics (#314) ---------------------------------------------------
+  let logPath = $state("");
+  let copied = $state(false);
+  let diagError = $state("");
+
+  /**
+   * Flush what is queued, then hand over the path.
+   *
+   * Flushing FIRST is the point: the last few seconds of events are still
+   * sitting in a 250 ms batch, and those are the ones nearest whatever just
+   * went wrong. A path handed over before the flush points at a file missing
+   * exactly the part the user came for.
+   */
+  async function revealLog() {
+    diagError = "";
+    try {
+      const res = await fetch("/api/debug/trace/flush", { method: "POST" });
+      const body = await res.json();
+      if (!body.enabled || !body.path) {
+        diagError =
+          "Logging is switched off for this run (AUTOGALLERY_TRACE=0).";
+        return;
+      }
+      logPath = body.path;
+      await navigator.clipboard.writeText(body.path);
+      copied = true;
+      setTimeout(() => (copied = false), 2000);
+    } catch (e) {
+      // Clipboard access can be refused, and then the path itself is still
+      // useful — show it rather than reporting nothing happened.
+      diagError = logPath
+        ? "Couldn't copy — the path is above, select it by hand."
+        : `Couldn't reach the log: ${e.message}`;
+    }
+  }
 </script>
 
 <Modal open={true} title="Scrolling & prefetch" size="md" onclose={close}>
@@ -167,6 +203,29 @@
         {/each}
       </div>
     </section>
+
+    <!-- The flight recorder (#314). A settings-panel citizen by contract 3: it
+         shows no photos and you cannot select anything from it. What it owes
+         the user is the PATH — a log nobody can find is a log nobody attaches
+         to a bug report. -->
+    <section data-testid="diagnostics">
+      <h3>Diagnostics</h3>
+      <p class="diag-lead">
+        AutoGallery keeps a log of what it and the server were doing — requests,
+        conversions, jobs, and any moment the app stopped responding. It never
+        leaves your machine.
+      </p>
+      <div class="diag-row">
+        <button type="button" onclick={revealLog} data-testid="diag-copy">
+          {copied ? "Copied ✓" : "Copy log location"}
+        </button>
+        {#if diagError}
+          <small class="diag-error" data-testid="diag-error">{diagError}</small>
+        {:else if logPath}
+          <code data-testid="diag-path">{logPath}</code>
+        {/if}
+      </div>
+    </section>
   </div>
 
   {#snippet footer()}
@@ -199,6 +258,41 @@
   }
   .other-panel small {
     color: #888;
+  }
+  .diag-lead {
+    margin: 0 0 0.5rem;
+    color: #999;
+    font-size: 0.78rem;
+    line-height: 1.45;
+  }
+  .diag-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .diag-row button {
+    background: #333;
+    color: inherit;
+    border: none;
+    border-radius: 4px;
+    padding: 0.35rem 0.7rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+  .diag-row button:hover {
+    background: #444;
+  }
+  .diag-row code {
+    font-size: 0.72rem;
+    color: #8ab4ff;
+    /* The path is long and the panel is not. Wrapping beats a scrollbar the
+       user has to find. */
+    overflow-wrap: anywhere;
+  }
+  .diag-error {
+    color: #ff9b9b;
   }
   .settings {
     display: flex;
