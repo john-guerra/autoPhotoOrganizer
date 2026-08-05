@@ -518,23 +518,77 @@ describe("resetLibrary is interruptible and chunked (#281)", () => {
     expect(db.prepare(`SELECT COUNT(*) c FROM photos`).get().c).toBe(0);
   });
 
-  it("never holds the loop for a frame, at the SHIPPED chunk size", async () => {
-    // The lesson of `docs/ARCHITECTURE-REVIEW-2026-08-04.md` §9, and the
-    // reason the two tests above are not enough: they inject `chunk: 5`, so
-    // they assert that the loop honours AN INJECTED budget and would pass
-    // identically if the shipped default were a million. That is precisely the
-    // shape of the #231 test that failed to catch #231.
+  it("chunks at the SHIPPED chunk size, not merely at an injected one", async () => {
+    // The lesson of `docs/ARCHITECTURE-REVIEW-2026-08-04.md` §9, and the reason
+    // the two tests above are not enough: they inject `chunk: 5`, so they
+    // assert that the loop honours AN INJECTED budget and would pass
+    // identically if the shipped default were a million. That is exactly the
+    // shape of the #231 test that failed to catch #231. This one passes no
+    // options at all.
     //
-    // This one passes no options at all and measures MILLISECONDS, which is
-    // what the user experiences. 20,000 photos is enough that a single
-    // transaction would be plainly visible; the budget has CI headroom.
+    // ## Why this counts progress instead of measuring milliseconds (#310)
+    //
+    // It used to assert `expectNoBlockOver(120, ...)`, and that was wrong in
+    // BOTH directions at once. Measured:
+    //
+    //   chunked, shipped defaults, 20k photos ......  5.5 ms worst hold
+    //   UNCHUNKED (one transaction), 20k photos ...  68 ms total
+    //   the budget .................................  120 ms
+    //   observed on CI, chunked ....................  231 ms
+    //
+    // The regression it existed to catch costs 68 ms — UNDER its own budget —
+    // so it would have stayed green through the exact change it guarded. And
+    // CI's worst hold for the CORRECT code is 231 ms, so the budget was also
+    // too tight to survive CI. Contradictory requirements; no number fixes it.
+    // (The 1.3 s figure that sized it is for 125,000 photos, not 20,000.)
+    //
+    // Counting the commits is deterministic, machine-independent, and actually
+    // discriminating: 20,000 rows at the shipped chunk of 1,000 must commit
+    // ~20 times. Remove the chunking and it commits once.
     const db = getDb();
     seedMany(db, 20_000);
-    const worst = await expectNoBlockOver(120, () => resetLibrary(db), {
+    /** @type {number[]} */
+    const commits = [];
+    const r = await resetLibrary(db, {
+      onProgress: (p) => commits.push(p.done),
+    });
+
+    expect(r.photos).toBe(20_000);
+    // 20 chunks of 1,000. A floor rather than an equality, so tuning the
+    // constant DOWN (safer) does not fail; raising it past 20x, or removing
+    // the loop, does.
+    expect(
+      commits.length,
+      `committed ${commits.length} times — the shipped chunk size should give ~20`
+    ).toBeGreaterThanOrEqual(10);
+    // Monotonic and complete: it really did walk the library.
+    expect(commits).toEqual([...commits].sort((a, b) => a - b));
+    expect(commits.at(-1)).toBe(20_000);
+    expect(db.prepare(`SELECT COUNT(*) c FROM photos`).get().c).toBe(0);
+  }, 60_000);
+
+  it("does not block catastrophically, at the SHIPPED chunk size", async () => {
+    // A CEILING, not a regression detector, and the difference is worth
+    // stating: at 20,000 photos even the fully un-chunked version only blocks
+    // for ~68 ms, so no BUDGET here can catch un-chunking by comparison — the
+    // test above is what catches that.
+    //
+    // It does still fail on total un-chunking, but by a different route:
+    // `expectNoBlockOver` throws its own "the probe NEVER FIRED" error when
+    // the work starves the loop end to end, independently of the number.
+    // Verified. Do not read that as the budget doing the work.
+    //
+    // What this catches is a catastrophic change — a per-row query, a sync
+    // fsync per chunk, an accidental O(n^2) — where the hold grows by an order
+    // of magnitude. The ceiling is set above the 231 ms observed on a loaded CI
+    // runner for correct code, because a test that fails on a slow machine
+    // teaches people to re-run rather than to read.
+    const db = getDb();
+    seedMany(db, 20_000);
+    const worst = await expectNoBlockOver(1_000, () => resetLibrary(db), {
       label: "resetLibrary at 20k photos",
     });
-    expect(worst).toBeLessThan(120);
-    expect(db.prepare(`SELECT COUNT(*) c FROM photos`).get().c).toBe(0);
+    expect(worst).toBeLessThan(1_000);
   }, 60_000);
 
   it("stops when cancelled, and what it deleted stays deleted", async () => {
