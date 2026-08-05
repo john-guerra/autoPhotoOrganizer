@@ -67,6 +67,12 @@ export function _resetFaceSweepForTest() {
  *   Injected so this is testable without ONNX — the real one calls the worker.
  * @param {object} [args.job] cancellation handle, as runSweep expects
  * @param {(p: {done: number, failed: number}) => void} [args.onProgress]
+ * @param {(ctx: {faces: number}) => Promise<void>} [args.afterBatch] awaited
+ *   after each COMMITTED batch, with the running face count. The seam exists so
+ *   a caller can do cross-photo work — filing faces into people (#304) —
+ *   without this module knowing that people exist. It is a safe point by
+ *   construction: the batch is committed, and it is where the sweep already
+ *   yields and checks for cancellation.
  * @param {number[]|null} [args.scopeIds] #221 — restrict the worklist to these
  *   photo ids (the user's selection, or what is on screen). `null` sweeps the
  *   library. An explicitly EMPTY array means "no photos" and is honoured as
@@ -79,6 +85,7 @@ export async function sweepFaces({
   engine,
   job,
   onProgress,
+  afterBatch,
   scopeIds = null,
   /** Preemption (#257); a no-op by default so existing callers are unchanged. */
   checkpoint = async () => {},
@@ -135,6 +142,10 @@ export async function sweepFaces({
           });
           faces += found.faces.length;
         }
+        // Cross-photo work the caller wants doing as the sweep goes, at a
+        // point where the batch is durable (#304). Awaited, so it cannot
+        // overlap the next batch.
+        await afterBatch?.({ faces });
         // runSweep does `done += await process(batch)`, so this MUST return a
         // count. Returning undefined makes `done` NaN, every comparison against
         // it false, and the drain never terminates — silently, at full CPU.

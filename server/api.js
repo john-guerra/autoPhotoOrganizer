@@ -1888,6 +1888,37 @@ export function registerApi(app, { ml } = {}) {
       pending: pendingInScope,
     });
 
+    /**
+     * How many NEW faces are worth a grouping pass (#304) — ADAPTIVE, because a
+     * fixed number is wrong at one end or the other.
+     *
+     * A pass costs one centroid rebuild, and that rebuild scales with the
+     * library. Measured, rebuilding from the assigned face rows:
+     *
+     *     76 people /    152 faces ->    1 ms
+     *   1,000 people /  2,000 faces ->    6 ms
+     *   5,000 people / 10,000 faces ->   27 ms
+     *  25,000 people / 50,000 faces ->  168 ms
+     *
+     * At a flat 500 faces, a 118,000-face library would rebuild ~236 times at
+     * ~400 ms — about 90 s added to a scan, ~10% of its runtime. That is
+     * "materially worse", which the issue rules out.
+     *
+     * At a flat 25,000, John's library (1,104 faces in total) would never
+     * group until the end — exactly the complaint that opened this issue.
+     *
+     * So the interval tracks the thing that makes the pass expensive: the
+     * number of people already known. A small library groups every 500 faces
+     * and fills in visibly; a 25,000-person library groups every 25,000 and
+     * pays a handful of rebuilds across the whole scan.
+     *
+     * `COUNT(*)` on `persons` is an indexed count of a small table — cheap
+     * enough to ask once per batch, unlike the rebuild it is protecting.
+     */
+    const groupEveryFaces = () =>
+      Math.max(500, getDb().prepare(`SELECT COUNT(*) c FROM persons`).get().c);
+    let facesAtLastGrouping = 0;
+
     const engine = createFaceEngine({
       modelId,
       pathFor: (file) => join(faceModelDir(modelId), file),
@@ -1910,6 +1941,48 @@ export function registerApi(app, { ml } = {}) {
             job,
             checkpoint,
             scopeIds: ids ?? null,
+            // FILE FACES AS THEY ARE FOUND (#304), not only at the end.
+            //
+            // #250 made grouping phase 2 of this job, and phase 2 runs after
+            // `scheduler.submit` resolves — i.e. after the WHOLE sweep. So on
+            // a long scan nobody existed until it finished, and John's live
+            // People view had nothing to show: "it worked but only once the
+            // whole scan finished".
+            //
+            // Safe because `groupRemaining` is already batched, resumable and
+            // idempotent: it takes a worklist of ungrouped faces and `attach`
+            // guards on `person_id IS NULL`, so running it many times over a
+            // growing library files each face exactly once and never
+            // re-examines one.
+            //
+            // THE INTERVAL IS IN FACES, NOT BATCHES, and that is the whole of
+            // the cost control. Running it k times does NOT multiply the
+            // O(faces x centroids) work — each face is filed once — but it
+            // does repeat the fixed per-call cost, and that is dominated by
+            // rebuilding every person's centroid (a scan of the assigned
+            // rows). At 25,000 people that rebuild is the expensive part, so
+            // the trigger has to be "enough new faces to be worth a rebuild",
+            // which a batch count cannot express: a batch is 8 photos and may
+            // hold zero faces or thirty.
+            afterBatch: async ({ faces }) => {
+              if (faces - facesAtLastGrouping < groupEveryFaces()) return;
+              facesAtLastGrouping = faces;
+              // Deliberately NO onProgress: the bar belongs to detection for
+              // the whole sweep. Handing it a second unit mid-run is the
+              // recalibration problem #250 wrote up, and here it would happen
+              // repeatedly. The PHASE line says what is happening instead.
+              registry.update(job.id, { phase: "Filing faces into people" });
+              try {
+                await withClusterLatch(() =>
+                  groupRemaining(getDb(), modelId, {
+                    scopeIds: ids ?? null,
+                    signal: job.controller.signal,
+                  })
+                );
+              } finally {
+                registry.update(job.id, { phase: "" });
+              }
+            },
             // NOTE WHAT IS *NOT* PATCHED HERE: `total`.
             //
             // It is already correct on the job — `pendingInScope`, counted
