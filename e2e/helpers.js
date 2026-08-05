@@ -454,6 +454,23 @@ export async function seedFaces(
  * popover and breaks specs that have nothing to do with faces. Leave the
  * library as you found it.
  */
+/**
+ * Delete every converted video proxy, so the next open really transcodes.
+ *
+ * Without this, a spec that needs a conversion to be IN FLIGHT is vacuous the
+ * second time the suite runs: the proxy is already on disk, `prepareVideo`
+ * answers `{ready:true}` with no job, and there is nothing to assert about.
+ * Same scratch-only guarantee as `seedFaces` — this touches `e2e/.tmp/home`
+ * and nothing else.
+ */
+export async function clearVideoProxies() {
+  const { rm } = await import("node:fs/promises");
+  await rm(join(process.cwd(), "e2e", ".tmp", "home", "cache", "videos"), {
+    recursive: true,
+    force: true,
+  });
+}
+
 export async function clearFaces() {
   const { default: Database } = await import("better-sqlite3");
   const db = new Database(
