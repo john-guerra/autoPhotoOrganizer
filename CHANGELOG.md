@@ -6,6 +6,17 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.45
+
+- **Arrowing through a folder of videos really is fixed now** (#305). Leaving a
+  clip stopped its picture but not its download: the browser went on streaming
+  every video you passed, and after about ten of them there were no connections
+  left — the clip you were actually on sat black at 0:00, and the app announced
+  it had lost the server while the server was answering in a millisecond.
+  Leaving a video now releases it. Measured on a folder of 400 MB screen
+  recordings: ten clips forward took the health check from 2 seconds back to
+  2 milliseconds.
+
 ## 2.19.44
 
 - **AutoGallery now keeps a diagnostic log** (#314). When something stalls or

@@ -159,3 +159,72 @@ test("@p1 navigating away from a converting video withdraws the conversion", asy
   // assert a bare [] in a test that stubs a failure").
   expect(errors.filter((e) => !/404/.test(e))).toEqual([]);
 });
+
+/**
+ * Leaving a video RELEASES ITS CONNECTION, not just its picture (#305).
+ *
+ * The withdrawal above stops the ffmpeg process. It does nothing for the case
+ * John actually reported, because his lecture folder is `.mov / h264 / yuv420p`
+ * — `playbackPlan` returns `direct`, so **no conversion ever runs** and there
+ * is nothing to withdraw. The loupe points `<video>` at the original file and
+ * the browser streams it.
+ *
+ * `{#key item.id}` then tears the element down on navigation, and its comment
+ * claimed that stopped playback. It stops the PICTURE. A detached element goes
+ * on holding its connection until garbage collection, and Chrome allows six
+ * per origin — so ten arrow presses fill the pool with abandoned loaders. The
+ * clip you are on cannot get a connection (black frame, `readyState` 0), and
+ * `/api/health` cannot be SENT, times out at 4 s, and the app reports the
+ * server lost while the server answers everyone else in 1 ms.
+ *
+ * Measured on the reported folder, ten arrows, same build:
+ *
+ * | | released | not released |
+ * |---|---|---|
+ * | `/api/health` | 2 ms | 2116 ms |
+ * | current clip | playing, `readyState` 4 | stuck at 0:00, `readyState` 0 |
+ *
+ * ## Why this asserts on the ELEMENT and not on that measurement
+ *
+ * The e2e fixture's videos are a few kilobytes. They finish instantly, hold no
+ * connection, and cannot saturate anything — so the honest end-state assertion
+ * ("health still answers") is green here whether or not the fix exists. Rather
+ * than build a multi-hundred-megabyte fixture to make the suite slow AND
+ * flaky, this holds a handle to the element Svelte has thrown away and asks
+ * whether it was released. That is deterministic, it is the fix's actual
+ * contract, and `ui/src/lib/releaseVideo.test.js` pins the three calls that
+ * make it work.
+ */
+test("@p1 navigating away from a video releases the element, not just the picture", async ({
+  page,
+}) => {
+  const errors = trackPageErrors(page);
+  await clearVideoProxies();
+  await openApp(page, { groupBy: "folder" });
+
+  const index = await grid.tileMatching(page, (n) => n.includes(VIDEO.name));
+  await loupe.open(page, index);
+
+  // A handle SURVIVES the element leaving the DOM, which is the only way to
+  // ask a question about something Svelte has already destroyed.
+  const video = await page
+    .locator(".stage video")
+    .elementHandle({ timeout: 20000 });
+  expect(video).toBeTruthy();
+  expect(await video.evaluate((v) => v.getAttribute("src"))).toBeTruthy();
+
+  await page.keyboard.press("ArrowRight");
+  await expect
+    .poll(async () => video.evaluate((v) => v.getAttribute("src")), {
+      timeout: 10000,
+      message:
+        "the abandoned <video> kept its src, so it is still holding a connection",
+    })
+    .toBe(null);
+
+  // Paused too — a decoder left running is CPU nobody asked for, on a clip
+  // nobody is looking at.
+  expect(await video.evaluate((v) => v.paused)).toBe(true);
+
+  expect(errors.filter((e) => !/404/.test(e))).toEqual([]);
+});

@@ -6,6 +6,7 @@
   import LoupeFilmstrip from "./LoupeFilmstrip.svelte";
   import { loadVideoPrefs, saveVideoPrefs } from "./videoPrefs.js";
   import { uiTrace } from "./trace.js";
+  import { releaseVideo } from "./releaseVideo.js";
 
   /**
    * @type {{
@@ -126,7 +127,11 @@
         // there; the user can press play.
       });
     });
+    // The element must give its CONNECTION back when it goes away, not just
+    // stop showing a picture — see releaseVideo.js. This is #305.
+    return { destroy: () => releaseVideo(el) };
   }
+
   /**
    * Conversions THIS loupe asked for and could still withdraw. id -> jobId.
    *
