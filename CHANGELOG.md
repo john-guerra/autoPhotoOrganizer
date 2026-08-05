@@ -6,6 +6,11 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.19.46
+
+- Internal: the video-connection trap behind #305 is written down where the
+  next change will meet it, so it cannot be reintroduced by accident.
+
 ## 2.19.45
 
 - **Arrowing through a folder of videos really is fixed now** (#305). Leaving a

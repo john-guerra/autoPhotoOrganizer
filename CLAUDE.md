@@ -132,9 +132,9 @@ README.md` claimed there was; it was removed as inaccurate.)
   `overrides` entry in `package.json` (see the `adm-zip`/`onnxruntime-node`
   entry) rather than leaving the finding open or downgrading.
 
-### Three traps that each cost an afternoon
+### Four traps that each cost an afternoon
 
-Svelte 4 + the DOM, in this app specifically. None of these fail loudly; each one
+Svelte + the DOM, in this app specifically. None of these fail loudly; each one
 silently does nothing, or hangs the tab.
 
 - **A `$:` statement must never depend on a `bind:this` element.** Svelte's
@@ -153,6 +153,19 @@ silently does nothing, or hangs the tab.
   "ResizeObserver loop completed with undelivered notifications" — an uncaught
   error that (rightly) fails `trackPageErrors`. Defer the work a frame
   (`requestAnimationFrame`), as `ToolbarRow.svelte` does.
+- **Destroying a `<video>` does NOT stop it downloading.** Removing the element
+  — which `{#key item.id}` does on every loupe navigation — stops the picture
+  and nothing else: the media loader stays alive until garbage collection.
+  Chrome allows **six connections per origin** and `/api/image/:id` answers an
+  open-ended `bytes=N-` by streaming the whole rest of the file, so a PLAYING
+  clip holds its connection continuously. Ten arrow presses through a video
+  folder therefore exhaust the pool: the clip you are on cannot get a
+  connection (black frame, `readyState` 0) and `/api/health` cannot be SENT, so
+  the app reports the server lost while the server answers in 1 ms. Call
+  `releaseVideo(el)` from the action's `destroy` (`ui/src/lib/releaseVideo.js`)
+  — `pause()`, `removeAttribute("src")`, `load()`, all three, in that order.
+  This is #305, and it survived two fixes aimed at the transcode path before
+  the trace log showed that path was never entered.
 
 ## A fixed bug gets a test that would have caught it
 
