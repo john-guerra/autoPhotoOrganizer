@@ -9,7 +9,10 @@ Lightroom too slow.
 
 - **Current status** → `CHANGELOG.md` (newest first) + open
   [GitHub Issues](https://github.com/john-guerra/autoPhotoOrganizer/issues). The
-  app is a stable `2.17.x` release.
+  app is on the **stable track** (no `-alpha` suffix since `2.9.0`); the version
+  it is actually on is `package.json`, and this sentence deliberately does not
+  name a number — the one that used to be here said `2.17.x` three minor
+  releases after that was true (#323).
 - **Working agreements & decisions already made** → `docs/ROADMAP.md` (its
   "Where the project was" log is prototype history, not current status).
 - **Filing or working a GitHub issue?** → the `working-issues` skill
@@ -104,9 +107,12 @@ README.md` claimed there was; it was removed as inaccurate.)
   album clustering is the pure client module `ui/src/lib/albums.js`.
 - `docs/superpowers/specs/` — design docs (the **why**; some are cited from
   source, so don't move them). Start with `2026-07-06-photo-triage-design.md`.
+- `docs/superpowers/plans/` — build plans for work **still in flight**. These
+  ARE instructions; check the issue they name is still open before following
+  one. Their checkboxes are not maintained, so an unticked box proves nothing.
 - `docs/superpowers/completed_plans/` — build plans whose feature has shipped.
   History, **not instructions**: the code is now a better answer than the plan.
-  See `docs/superpowers/README.md`.
+  A plan moves here when its feature ships. See `docs/superpowers/README.md`.
 - `legacy/` — **do-not-run** reference only (two prior generations; known insecure
   patterns). Read it to port the album-clustering algorithm; never execute it.
 

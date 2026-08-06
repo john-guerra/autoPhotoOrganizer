@@ -455,6 +455,38 @@ of #305's first two fixes were, and the trace log is what showed it: eleven
 transcode jobs. **Check which branch of `playbackPlan` the reported files take
 before touching the conversion machinery.**
 
+## `gh issue list --search` misses issues that exist. Grep the full list.
+
+**Do not trust `--search` as a duplicate check.** #314 was filed as a duplicate
+of #96 — which had asked for the same trace log three weeks earlier — after
+`gh issue list --search` returned nothing for it **twice**. It happened again
+during the #323 audit: a search for `documentation stale docs plans version`
+returned zero rows while four documents were demonstrably stale.
+
+GitHub's search index is not the issue list; it lags, it stems words its own
+way, and it silently returns an empty set rather than an error. The check that
+actually works costs one more command:
+
+```bash
+gh issue list --state all --limit 200 --json number,title,state \
+  -q '.[] | select(.title|test("<your keywords>";"i")) | "\(.number) \(.state) \(.title)"'
+```
+
+`--search` is a fine first pass. It is not an audit, and "search found nothing"
+is not evidence that nothing is there — the same shape as the greps that missed
+the `keep_scope` leak above.
+
+## Never write a comment or a doc that claims a test you did not write
+
+Caught in the 2.20.1 review: `e2e/diagnostics.spec.js` carried a comment
+referencing a refusal-path assertion **nobody had written**. This is the same
+family as a `.replace()` whose anchor never matches, or `kill $PIDS` in zsh —
+an operation that silently does nothing and reports success. The cost is worse
+than the missing test, because the comment actively stops the next agent from
+adding it.
+
+Before writing "covered by X" anywhere, run X and read the output.
+
 ## Where the deep context lives
 
 - Invariants, Svelte/DOM traps, feed-window transactions, usability & testing
