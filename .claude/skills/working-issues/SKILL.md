@@ -245,15 +245,35 @@ Before marking ready, rebase on `testing` and check two things:
   re-run `claim-version.sh`. The lock guarantees _uniqueness_, not that claim
   order matches merge order.
 
-Once merged:
+Then post your evidence comment and **stop watching**:
 
 ```bash
-gh issue edit $N --remove-label wip --add-label needs-validation
-gh issue comment $N --body "$(cat evidence.md)"     # what changed, why, how verified, test counts
-git push origin ":refs/tags/claim/$VERSION"          # release the version lock
-git worktree remove .claude/worktrees/issue-$N-<slug>
-git branch -d issue-$N-<slug>
+gh issue comment $N --body "$(cat evidence.md)"   # what changed, why, how verified, test counts
+gh pr merge --auto --merge                        # GitHub merges it the moment the checks pass
 ```
+
+**Never poll CI.** `testing` is branch-protected and requires `check` and
+`e2e`, so `--auto` is a real gate — it merges when green and leaves the PR
+alone when red. Watching an 11-minute run costs 30–50k tokens and buys nothing
+a notification would not. End your turn at `--auto`.
+
+**The close-out is automatic** (#330). `.github/workflows/pr-closeout.yml`
+swaps `wip` → `needs-validation` from your `Refs #N` and releases
+`claim/<version>`; the branch is deleted by a repo setting. You do **not** run
+those commands and you do **not** wait around to run them. All that is left is
+your own machine, and you can do it immediately:
+
+```bash
+git worktree remove .claude/worktrees/issue-$N-<slug>
+git branch -D issue-$N-<slug>
+```
+
+**`--admin` is permitted only when CI CANNOT RUN — never when it fails.** The
+bar: local `npm test` **and** `npm run test:e2e` both green and pasted into the
+merge body, plus a link to the githubstatus incident. Establish which one you
+are looking at before you reach for it — a **cancelled** job renders
+identically to a failed one, and `--log-failed` returns nothing because there
+is no log (see `docs/AGENT-NOTES.md`).
 
 **You do not close the issue. John does**, after validating. Leave it open with
 `needs-validation` — that label is his queue.

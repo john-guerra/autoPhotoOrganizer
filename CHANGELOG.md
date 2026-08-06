@@ -8,10 +8,11 @@ user-facing — what you can now do, not how it's built.
 
 ## 2.20.5
 
-- Internal: the approved design for making CI a gate nobody has to watch —
-  branch protection plus auto-merge, a workflow that does the post-merge
-  close-out an absent agent cannot, and the escape hatch for when GitHub
-  Actions is down (#330). Design only; no behaviour changes yet.
+- Internal: CI is now a real gate that nobody has to watch — branch protection
+  plus auto-merge, so an agent opens a PR and walks away; a workflow does the
+  post-merge close-out an absent agent cannot; superseded PR runs cancel
+  instead of racing to completion; and the e2e browser download is cached
+  (#330). Nothing user-facing.
 
 ## 2.20.3
 
