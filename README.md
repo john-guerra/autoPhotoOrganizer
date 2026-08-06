@@ -48,13 +48,19 @@ Two principles drive the design:
 
 ## Status
 
-v2 is stable and in active use (currently **2.16.x**, built on **Svelte 5
-(runes)** with an up-to-date dependency stack). Shipped so far: folder scanning,
-thumbnail generation with an on-disk cache, star ratings, the loupe, the
-justified + virtualized grid, burst-stack detection with manual cover override,
-auto-album clustering with move/copy into dated folders, feed filtering and
-grouping, a D3 timeline scrubber, tree + fisheye sidebars, missing-files review,
-a persisted folder library with offline browsing, and Electron packaging with a
+v2 is stable and in active use, built on **Svelte 5 (runes)** with an
+up-to-date dependency stack. The current version is in
+[`package.json`](./package.json), and what changed in it is in
+[`CHANGELOG.md`](./CHANGELOG.md) — those are the two files that cannot go stale.
+
+Shipped so far: folder scanning, thumbnail generation with an on-disk cache,
+star ratings, the loupe, the justified + virtualized grid, burst-stack detection
+with manual cover override, auto-album clustering with move/copy into dated
+folders, feed filtering and grouping, a D3 timeline scrubber, tree + fisheye
+sidebars, missing-files review, a persisted folder library with offline
+browsing, video playback and conversion, GPS place names, on-device image
+embeddings and near-duplicate detection, face detection with a browsable People
+view and a Face Map, a diagnostic trace log, and Electron packaging with a
 native folder picker. See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the full
 status and backlog (tracked in
 [GitHub Issues](https://github.com/john-guerra/autoPhotoOrganizer/issues)).
@@ -94,7 +100,7 @@ npm run electron:build:mac   # local smoke-test build (macOS) → release/
 npm run electron:build       # mac + win + linux (needs Wine for Windows, when run from macOS)
 ```
 
-Builds land in `release/` (e.g. `AutoGallery-2.16.1.dmg`).
+Builds land in `release/` (e.g. `AutoGallery-<version>.dmg`).
 
 ### Running a packaged build without code signing
 
@@ -130,12 +136,12 @@ in:
 **Linux** (`.AppImage`) — no signing concept; just make it executable:
 
 ```bash
-chmod +x AutoGallery-2.16.1.AppImage
-./AutoGallery-2.16.1.AppImage
+chmod +x AutoGallery-<version>.AppImage
+./AutoGallery-<version>.AppImage
 ```
 
 If it complains about FUSE, either install `libfuse2` or run it with
-`./AutoGallery-2.16.1.AppImage --appimage-extract-and-run`.
+`./AutoGallery-<version>.AppImage --appimage-extract-and-run`.
 
 ### Other commands
 

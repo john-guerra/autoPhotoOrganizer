@@ -6,6 +6,16 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.20.3
+
+- Internal: the docs an agent reads first no longer state a version the app
+  passed three releases ago, `docs/superpowers/plans/` is documented as the
+  third folder it has always been, four shipped plans moved to
+  `completed_plans/`, and `UI-CONTRACTS.md` no longer cites #222 as a settled
+  success when it was reopened after failing validation (#323). The
+  2026-08-05 handoff note is retired, its one durable lesson promoted into
+  `AGENT-NOTES.md`. Nothing user-facing.
+
 ## 2.20.2
 
 - Internal: a dated handoff note for the next agent (`docs/HANDOFF-2026-08-05.md`),

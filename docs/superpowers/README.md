@@ -5,6 +5,7 @@ Three kinds of document live here, and they age differently.
 | Folder             | What it is                                | Lifespan                          |
 | ------------------ | ----------------------------------------- | --------------------------------- |
 | `specs/`           | The design and the **why** behind it      | Outlives the code. Keep.          |
+| `plans/`           | Step-by-step build instructions, **live** | Until the feature ships.          |
 | `completed_plans/` | Step-by-step build instructions, executed | **Spent** once merged. Reference. |
 
 A **spec** answers "why is it built this way" — the question the code cannot
@@ -18,6 +19,25 @@ better answer than the plan, and a stale plan actively misleads — it describes
 intended end state, not the one that survived review. They are kept in
 `completed_plans/` as a record of how a feature was built (useful when
 archaeology is needed), never as instructions to follow.
+
+## `plans/` vs `completed_plans/` — and how to tell which a plan is
+
+A plan lives in `plans/` while its feature is being built and **moves to
+`completed_plans/` in the PR that ships it**. That move is the only thing
+separating instructions you should follow from history you should not, so it is
+worth doing in the same commit rather than "later".
+
+**Do not use the checkboxes to decide.** Every plan in this repo reads `0`
+ticked, including ones whose feature shipped weeks earlier — nobody maintains
+them, so `- [ ]` means "written down", not "outstanding" (#323). The reliable
+test is one command:
+
+```bash
+gh issue view <the issue the plan names> --json state -q .state
+```
+
+Open issue → the plan is live. Closed, or the feature is visibly in the app →
+the plan is spent, and moving it is a one-line PR anybody can make.
 
 ## Specs the code points at
 

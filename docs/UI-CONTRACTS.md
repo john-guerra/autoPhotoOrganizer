@@ -166,6 +166,19 @@ caller stops awaiting a result. Budget for the UI change, not just the server
 one. Both `POST /api/ml/faces` and `POST /api/ml/faces/cluster` now have this
 shape — the latter as of 2.18.43 (#222), and converting it took, in order:
 
+> **#222 is REOPENED — read this list as the shape, not as a finished job.**
+> Every step below did land, and the code is still the reference for _how_ the
+> conversion is done. But John validated `2.19.22` and reported "the jobs panel
+> doesn't show a progressive task as it does with the faces", so the contract is
+> not met on his library. The leading hypothesis (recorded on #222, not yet
+> confirmed) is that the server emits progress every ~11 ms and it cannot get
+> out: with the pre-#231 yield budget the loop was held 64–91 ms at a stretch.
+> **PR #285 landed the yield fix on 2026-08-04, so the stated blocker is
+> cleared and the re-test is the next step.** Until that happens, do not cite
+> #222 as a success story — cite it as the reminder that a route returning
+> `{jobId}` is necessary and not sufficient, because what the contract promises
+> is a bar the user can _see_ move.
+
 1. the route returning `{jobId}` and doing its work after `res.json()`;
 2. every refusal moving BEFORE `registry.create`, so a rejected request never
    leaves a row that appears and immediately fails;
