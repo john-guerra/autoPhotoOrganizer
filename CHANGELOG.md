@@ -6,6 +6,14 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.20.5
+
+- Internal: CI is now a real gate that nobody has to watch — branch protection
+  plus auto-merge, so an agent opens a PR and walks away; a workflow does the
+  post-merge close-out an absent agent cannot; superseded PR runs cancel
+  instead of racing to completion; and the e2e browser download is cached
+  (#330). Nothing user-facing.
+
 ## 2.20.3
 
 - Internal: the docs an agent reads first no longer state a version the app

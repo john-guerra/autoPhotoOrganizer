@@ -487,6 +487,46 @@ adding it.
 
 Before writing "covered by X" anywhere, run X and read the output.
 
+## A cancelled CI job looks exactly like a failed one
+
+`gh pr checks` renders a **cancelled** job as `fail`, and `--log-failed`
+returns nothing at all because there is no log — so it reads as a test that
+broke, and you go hunting for the test. There is no test. It never started.
+
+The honest signal is only in the jobs API:
+
+```bash
+gh api repos/{owner}/{repo}/actions/jobs/<id> \
+  -q '"\(.status) / \(.conclusion) — steps: \(.steps|length)"'
+# completed / cancelled — steps: 0    <- never ran; this is not your code
+```
+
+`steps: 0` means no runner ever picked it up. During the 2026-08-06 Actions
+outage this cost a real detour: `e2e` on PR #324 reported `fail` having
+executed **zero** steps, while CodeQL failed in `Set up job` with
+`Failed to resolve action download info: Service Unavailable`. Neither had
+anything to do with the diff. **Check githubstatus before diagnosing a red
+board you cannot explain** — and note the incident escalated for an hour after
+it opened, so "it was fine ten minutes ago" is not evidence.
+
+## CI on `testing` is a real gate now, and nobody watches it
+
+Branch protection requires `check` and `e2e` (#330). Four consequences:
+
+- **Never poll CI.** `gh pr merge --auto --merge`, then end your turn. GitHub
+  merges when green. The expensive thing was never CI's 11 minutes — it was an
+  agent blocking on them, which costs 30–50k tokens and buys nothing.
+- **The post-merge close-out is a workflow**, not your job —
+  `.github/workflows/pr-closeout.yml` handles `wip` → `needs-validation` and
+  releases the claim tag. Do not duplicate it by hand; two agents racing the
+  same tag deletion is how a live claim gets destroyed.
+- **`strict` is deliberately FALSE.** Your PR does not need rebasing onto the
+  current `testing` to merge. Turning it on would make every merge invalidate
+  every other open PR and re-run its CI — with several agents here, a queue of
+  11-minute waits behind whoever merged last.
+- **CodeQL is advisory, not required.** That is #290, still undecided, and it
+  also fails for pure infrastructure reasons (above).
+
 ## Where the deep context lives
 
 - Invariants, Svelte/DOM traps, feed-window transactions, usability & testing
