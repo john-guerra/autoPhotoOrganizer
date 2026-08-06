@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.20.2
+
+- Internal: a dated handoff note for the next agent (`docs/HANDOFF-2026-08-05.md`),
+  covering the two stale worktrees still to be cleared and why the v2.20.0 draft
+  must stay unpublished. Nothing user-facing.
+
 ## 2.20.1
 
 - **Your existing Face Map needs rebuilding once.** 2.20.0 raised the default
