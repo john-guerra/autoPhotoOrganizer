@@ -6,6 +6,13 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.20.5
+
+- Internal: the approved design for making CI a gate nobody has to watch —
+  branch protection plus auto-merge, a workflow that does the post-merge
+  close-out an absent agent cannot, and the escape hatch for when GitHub
+  Actions is down (#330). Design only; no behaviour changes yet.
+
 ## 2.20.3
 
 - Internal: the docs an agent reads first no longer state a version the app
