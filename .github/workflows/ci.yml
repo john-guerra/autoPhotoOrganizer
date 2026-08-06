@@ -27,6 +27,16 @@ on:
   pull_request:
     branches: [main, testing]
 
+# Cancel a PR run that a newer push has superseded — but NEVER cancel the
+# post-merge run on `testing`. That run is the record that trunk is green, and
+# it is the only thing that catches two individually-green PRs going red once
+# they are in one tree (#212: 36 tests red, across files neither PR had heard
+# of). Hence the condition: this is not boilerplate that can be simplified to a
+# bare `true`.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -60,7 +70,16 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      # The browser binary is ~130MB and was re-downloaded on every single run.
+      # Keyed on the lockfile, since that is what pins the Playwright version —
+      # a key that ignored it would serve a cached browser to a bumped client.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       # Chromium only — the app ships inside Electron, which is Chromium.
+      # `--with-deps` still runs on a cache hit: the system libraries it
+      # installs live outside the cached path.
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       # A red e2e run is worth nothing if you can't see WHAT the page looked
