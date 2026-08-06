@@ -6,6 +6,7 @@ import {
   views,
   faceMap,
   seedFaces,
+  addPeople,
   clearFaces,
   clearRatings,
   personCount,
@@ -134,6 +135,38 @@ test.describe("face map @p1", () => {
     await faceMap.build_(page);
     await expect(faceMap.count(page)).toContainText(String(PEOPLE));
     await expect(faceMap.scatter(page)).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("a map built before more people arrived offers a rebuild that WORKS", async ({
+    page,
+  }) => {
+    // #325: the run cache keyed on the PARAMETERS only, so a map built while
+    // face grouping was still running was handed back forever. The view always
+    // knew — it has rendered "N added since" since #232 — but as a CAPTION
+    // beside a map that looks broken, which is not something you can press.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await expect(faceMap.count(page)).toContainText(String(PEOPLE));
+
+    // Grouping carries on: 30 more people now clear the threshold.
+    await addPeople(PEOPLE + 1, PEOPLE + 30, FACES_EACH);
+
+    // Leaving and returning re-fetches /current, which is what reports drift.
+    // `toGrid`, not `show(page, "grid")` — the grid is the DEFAULT view and
+    // therefore the one view with no switcher button of its own.
+    await views.toGrid(page);
+    await views.show(page, "face-map");
+    await expect(faceMap.stale(page)).toContainText("30");
+
+    // Press it. This is the assertion the whole test exists for.
+    await faceMap.stale(page).click();
+    await expect(faceMap.count(page)).toContainText(String(PEOPLE + 30), {
+      timeout: 60_000,
+    });
+    await expect(faceMap.stale(page)).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 

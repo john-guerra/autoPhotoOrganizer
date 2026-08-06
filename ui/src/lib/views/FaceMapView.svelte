@@ -321,10 +321,23 @@
       {#if staleness?.missing > 0}
         <!-- The join keeps WHO is on the map truthful; only positions age.
              Saying so is the difference between a stale map and a map that
-             quietly pretends to be complete. -->
-        <span class="warn" data-testid="map-stale">
+             quietly pretends to be complete.
+
+             A BUTTON, not a caption (#325). A map missing a third of the
+             library, beside a line of amber text, reads as "this is broken"
+             rather than "press this" — and the fix for it was one click away
+             the whole time. `applyGear` is reused rather than given a second
+             code path: it is already "clear the selection and run with the
+             current parameters", which is exactly what this is, so the
+             rebuild is the same job, in the JobsPanel, cancellable. -->
+        <button
+          class="warn stale"
+          data-testid="map-stale"
+          disabled={loading}
+          onclick={applyGear}
+        >
           {n(staleness.missing)} added since — rebuild to place them
-        </span>
+        </button>
       {/if}
     {/if}
 
@@ -657,6 +670,23 @@
   .warn {
     color: #ffd166;
     font-size: 0.8rem;
+  }
+  /* The staleness notice is a real control, so it has to LOOK like one — an
+     outlined pill rather than text that happens to be clickable (#325). */
+  .stale {
+    font-family: inherit;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    padding: 2px 10px;
+    cursor: pointer;
+  }
+  .stale:hover:not(:disabled) {
+    background: rgba(255, 209, 102, 0.14);
+  }
+  .stale:disabled {
+    cursor: default;
+    opacity: 0.6;
   }
   .gear {
     margin-left: auto;
