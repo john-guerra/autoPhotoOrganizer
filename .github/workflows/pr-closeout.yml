@@ -1,0 +1,69 @@
+name: PR close-out
+
+# When a PR merges, do the close-out that the agent who opened it cannot: it is
+# gone. Auto-merge (#330) means the session ends at `gh pr merge --auto`, long
+# before the merge lands, so the `working-issues` close-out sequence — swap
+# `wip` -> `needs-validation`, release the `claim/<version>` tag — has nobody to
+# run it. Left undone, the repo fills with live claim tags and `claim-version.sh`
+# starts handing out numbers above a trunk nobody is on.
+#
+# Branch deletion is NOT here: `delete_branch_on_merge` is a repo setting.
+#
+# Fork safety: this is `pull_request`, not `pull_request_target`. GitHub issues a
+# read-only GITHUB_TOKEN for fork PRs, so the write permissions below cannot be
+# reached from a fork.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write # delete the claim tag
+  issues: write # swap the labels
+
+jobs:
+  closeout:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      # The MERGE COMMIT, not the base branch tip. Two PRs merging seconds apart
+      # would otherwise both read whichever version won the race, and the loser
+      # would delete the winner's live claim tag.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      - name: Swap wip -> needs-validation on the referenced issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BODY: ${{ github.event.pull_request.body }}
+        # The PR body is ATTACKER-CONTROLLED text. It is passed through `env:` and
+        # only ever referenced as "$BODY" — never interpolated into this script
+        # with ${{ }}, which would be a command-injection hole. The extracted
+        # issue number is then re-validated as digits-only before it reaches a
+        # command, so a body of `Refs #1; rm -rf /` cannot become an argument.
+        run: |
+          set -uo pipefail
+          N=$(printf '%s' "$BODY" | grep -oiE 'refs #[0-9]+' | head -1 | grep -oE '[0-9]+')
+          case "${N:-}" in
+            "" ) echo "No 'Refs #N' in the PR body — nothing to label. Not an error."; exit 0 ;;
+            *[!0-9]* ) echo "Refusing a non-numeric issue reference: $N"; exit 1 ;;
+          esac
+          echo "Referenced issue: #$N"
+          gh issue edit "$N" --remove-label wip --add-label needs-validation \
+            || echo "Could not relabel #$N (already closed, or the labels are not on it). Not failing."
+
+      - name: Release the claim tag for the version this PR shipped
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          V=$(node -p "require('./package.json').version")
+          echo "Version at the merge commit: $V"
+          if git ls-remote --exit-code --tags origin "refs/tags/claim/$V" >/dev/null 2>&1; then
+            git push origin ":refs/tags/claim/$V" && echo "Released claim/$V"
+          else
+            echo "No claim/$V to release. Not an error — not every PR claims one."
+          fi
