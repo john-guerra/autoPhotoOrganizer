@@ -1002,10 +1002,17 @@
       </aside>
       <!-- Drag to resize. A separate element rather than a CSS `resize`,
            which cannot persist and cannot be clamped. -->
+      <!-- `role="separator"`, not the implicit `button` role: a focusable
+           separator is the window-splitter pattern, and it is the ONLY role
+           that supports aria-valuenow/min/max. On a button they were ignored
+           by assistive tech and warned about by the compiler on every build —
+           three warnings that had been scrolling past since #327. -->
       <button
         type="button"
         class="resizer"
         data-testid="map-panel-resizer"
+        role="separator"
+        aria-orientation="vertical"
         aria-label="Resize the settings panel"
         aria-valuenow={panelWidth}
         aria-valuemin={PANEL_MIN}
@@ -1132,6 +1139,8 @@
           {#each nameChoices as c (c)}
             <button
               class="link"
+              data-testid="conflict-choice"
+              data-name={c}
               onclick={() => {
                 nameDraft = c;
                 nameChoices = null;

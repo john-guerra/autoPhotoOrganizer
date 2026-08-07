@@ -273,6 +273,51 @@ export const faceMap = {
   notice: (page) => page.locator('[data-testid="map-notice"]'),
   gear: (page) => page.locator('[data-testid="map-gear"]'),
   gearPanel: (page) => page.locator('[data-testid="map-gear-panel"]'),
+  /** The drag handle between the settings panel and the map (#327). */
+  resizer: (page) => page.locator('[data-testid="map-panel-resizer"]'),
+  /** How wide the settings panel actually IS, in CSS px. The user-visible
+   *  number — `panelWidth` is the intent, this is the outcome. */
+  panelWidth: async (page) =>
+    (await faceMap.gearPanel(page).boundingBox()).width,
+  /** Drag the resize handle by `dx` px. Real pointer moves: `startResize`
+   *  binds pointermove to WINDOW, so a dispatched event on the handle would
+   *  prove nothing about what a hand does. */
+  dragResizer: async (page, dx) => {
+    const box = await faceMap.resizer(page).boundingBox();
+    const y = box.y + box.height / 2;
+    await page.mouse.move(box.x + box.width / 2, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + dx, y, { steps: 10 });
+    await page.mouse.up();
+  },
+  /** The two dot-size sliders. */
+  minRadius: (page) => page.locator('[data-testid="map-min-radius"]'),
+  maxRadius: (page) => page.locator('[data-testid="map-max-radius"]'),
+  autoFit: (page) => page.locator('[data-testid="map-auto-fit"]'),
+  autoApply: (page) => page.locator('[data-testid="map-auto-apply"]'),
+  /** A name offered by the merge conflict prompt, by the name itself. */
+  conflictChoice: (page, name) =>
+    page.locator(`[data-testid="conflict-choice"][data-name="${name}"]`),
+  /**
+   * How much ink the points canvas is carrying.
+   *
+   * The map is a canvas, so "the dots got bigger" is unreachable from any
+   * assertion about the DOM — and a slider whose readout updates while the
+   * drawing does not is precisely the class of bug `docs/TESTING.md` was
+   * written for. Counting non-transparent pixels is crude and it is enough:
+   * bigger dots, more ink.
+   */
+  ink: (page) =>
+    page
+      .locator('[data-testid="scatter"] canvas:not(.overlay)')
+      .evaluate((c) => {
+        const d = c
+          .getContext("2d", { willReadFrequently: true })
+          .getImageData(0, 0, c.width, c.height).data;
+        let on = 0;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 16) on++;
+        return on;
+      }),
   members: (page) => page.locator('[data-testid="map-members"]'),
   /** One tuning control in the panel, by parameter name — the SLIDER (#327). */
   param: (page, key) => page.locator(`[data-testid="map-param-${key}"]`),
@@ -412,11 +457,33 @@ export const faceMap = {
  *   `hiddenByThreshold` is 0 in every test, and the "N people are left off"
  *   disclosure never renders at all — the element cannot be asserted on
  *   because it does not exist.
+ *
+ *   `sparseEvery: k` INTERLEAVES the thin cohort instead of appending it: every
+ *   kth id gets `sparseFaces` faces rather than `facesEach`, inside the same
+ *   1..`people` numbering. This is the one thing `below` cannot express, and it
+ *   is why #348 shipped without a test (#346).
+ *
+ *   The Face Map's selection was keyed by array INDEX. `pointsForRun` orders by
+ *   `ref_id`, and `below` numbers its cohort AFTER the main one — so raising or
+ *   lowering the threshold only ever appended or truncated, no index ever
+ *   MOVED, and four different versions of the test passed with the bug fully
+ *   present. Interleaving makes a threshold change remove people from the
+ *   middle, which shifts every index after them: the exact re-index that
+ *   index-keyed selection silently mis-attributes.
+ *
+ *   `below` is left alone deliberately — several specs depend on its numbering.
+ *   This is an opt-in second shape, not a change to the first.
  */
 export async function seedFaces(
   people = 24,
   facesEach = 2,
-  { assign = true, below = 0, belowFaces = 1 } = {}
+  {
+    assign = true,
+    below = 0,
+    belowFaces = 1,
+    sparseEvery = 0,
+    sparseFaces = 1,
+  } = {}
 ) {
   const { default: Database } = await import("better-sqlite3");
   const db = new Database(
@@ -473,7 +540,15 @@ export async function seedFaces(
     };
 
     db.transaction(() => {
-      for (let p = 1; p <= people; p++) seedPerson(p, facesEach);
+      for (let p = 1; p <= people; p++) {
+        // Interleaved when asked: every kth person is thin, so a threshold
+        // change punches holes in the middle of the ordering rather than
+        // trimming the end.
+        seedPerson(
+          p,
+          sparseEvery && p % sparseEvery === 0 ? sparseFaces : facesEach
+        );
+      }
       // The under-the-threshold cohort, numbered after the main one so the
       // first `people` ids keep meaning what every other helper assumes.
       for (let p = people + 1; p <= people + below; p++) {
