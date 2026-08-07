@@ -111,7 +111,7 @@ import { assignNewFaces } from "./ml/faceAssign.js";
 import { groupRemaining } from "./ml/faceGrouping.js";
 import { normalizeScope, resolveScope } from "./db/scopeIds.js";
 import { coverage, namedFilter } from "./pipeline/coverage.js";
-import { scheduler, PRIORITY } from "./pipeline/scheduler.js";
+import { scheduler, PRIORITY, RESOURCE } from "./pipeline/scheduler.js";
 import { runPipeline, totalWorkMs, MS_PER_PHOTO } from "./pipeline/run.js";
 import { STAGES } from "./pipeline/stages.js";
 import {
@@ -461,6 +461,13 @@ function kickEmbedSweep(
       .submit({
         priority: scopeIds ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
         key: scopeIds ? undefined : "backlog:embed",
+        // The ONNX child is one process with one queue, so this and a face
+        // sweep take turns rather than halving each other's throughput. This
+        // is what replaced embedSweep's own single-flight latch (#279): the
+        // lease is RELEASED at a checkpoint, so a run parked behind a scoped
+        // request blocks nobody, which is the property a module-level boolean
+        // could not have.
+        resource: RESOURCE.ONNX,
         label: job.label,
         // Say WHY it stopped rather than leaving a bar that has not moved to
         // be interpreted — starvation is legitimate here, silence is not.
@@ -485,6 +492,14 @@ function kickEmbedSweep(
         // Mirrors kickHashSweep above: "embed" is SELF_CLEARING, so finish()
         // (not dismiss()) is what actually removes a successful run's row.
         if (r.alreadyRunning)
+          return registry.finish(job.id, { alreadyRunning: true });
+        // The scheduler dropped this as a duplicate of a backlog sweep
+        // already queued under the same `key`. Newly REACHABLE as of #279 —
+        // the route's own `isEmbedInFlight()` refusal used to turn a second
+        // background kick away before it could ever reach `submit`, so this
+        // branch had no way to fire. Without it `r.paused`/`r.embedded` are
+        // undefined and the row finishes reporting NaN photos embedded.
+        if (r.coalesced)
           return registry.finish(job.id, { alreadyRunning: true });
         if (r.paused) {
           // WHY it paused, in the sweep's own words. "Drive not available"
@@ -1513,20 +1528,25 @@ export function registerApi(app, { ml } = {}) {
   //  1. `force: true` — hitting this endpoint IS the explicit user consent
   //     the `enabled` gate (kickEmbedSweep, above) requires, so it bypasses
   //     that gate on purpose. Do not remove it thinking it's a hole.
-  //  2. The single-flight latch in embedAllPending is NOT keyed by model, so
-  //     a kick while a sweep against a DIFFERENT model is still running
-  //     would otherwise silently no-op — kickEmbedSweep's own alreadyRunning
-  //     handling creates a job, finishes it, and self-clears it in the same
-  //     tick, which is invisible to anyone who didn't already have an SSE
-  //     subscription open. That's fine for a SCAN's silent background kick,
-  //     but not for a button the user just clicked (#161 fix round 1,
-  //     Important 2) — so check isEmbedInFlight() FIRST and answer
-  //     synchronously instead, before a job (that would vanish before
-  //     anyone could read it) ever gets created.
+  //  2. This route refuses a REDUNDANT kick, and #279 narrowed what counts as
+  //     redundant. It used to refuse whenever any sweep was running, which is
+  //     what stopped a scoped request from ever reaching the scheduler that
+  //     exists to prioritise it — John's report, exactly: "I didn't have a
+  //     way of starting a new faces search while the large run was running."
+  //
+  //     Now only an UNSCOPED kick is refused while a sweep is live, and that
+  //     refusal is still right for two independent reasons: the worklist is
+  //     identical, so the second pass would compute the same answer; and the
+  //     scheduler would `key`-coalesce it anyway, finishing the job row in
+  //     the same tick — the "job nobody can read" that #161 round 1,
+  //     Important 2 exists to prevent. Answering synchronously is the honest
+  //     version of the same no.
+  //
+  //     A SCOPED request is never refused here. It is a different worklist
+  //     and a different ask, it outranks the backlog, and the ONNX lease
+  //     makes it take turns rather than overlap.
   app.post("/api/ml/embed", (req, res) => {
-    if (isEmbedInFlight()) {
-      return res.json({ started: false, alreadyRunning: true });
-    }
+    const alreadySweeping = isEmbedInFlight();
     // #206: an optional `ids` scope embeds just those photos — the selection,
     // the current view, or one right-clicked folder — instead of the whole
     // library. Absent, behaviour is exactly as before.
@@ -1540,6 +1560,13 @@ export function registerApi(app, { ml } = {}) {
     const scoped = scopeForRoute(getDb(), req.body, { verb: "embed" });
     if (scoped.error) {
       return res.status(scoped.status).json({ error: scoped.error });
+    }
+    // Redundant only when this kick is UNSCOPED — see the note above. Read
+    // before `scopeForRoute` (which does not await) and applied after it, so
+    // a malformed scope is still a 400 rather than a misleading "already
+    // running".
+    if (alreadySweeping && !scoped.ids) {
+      return res.json({ started: false, alreadyRunning: true });
     }
     kickEmbedSweep(getDb(), getMl, {
       force: true,
@@ -1761,11 +1788,21 @@ export function registerApi(app, { ml } = {}) {
     }
   });
 
-  /** Start (or report) a face pass. */
+  /** Start (or report) a face pass.
+   *
+   *  #279 narrowed the in-flight refusal rather than deleting it. An UNSCOPED
+   *  kick while a pass is live is still refused — same worklist, and the
+   *  scheduler would coalesce it into a job row that vanishes before anyone
+   *  could read it. A SCOPED request is always let through: it outranks the
+   *  backlog sweep, parks it at the next batch boundary, and takes turns on
+   *  the ONNX lease. That is the whole of "I didn't have a way of starting a
+   *  new faces search while the large run was running".
+   *
+   *  The `isClusterInFlight` refusal below is a different thing and stays: it
+   *  is not "one sweep at a time", it is "starting a scan would throw away a
+   *  grouping that has already run its full O(n²) pass". */
   app.post("/api/ml/faces", async (req, res) => {
-    if (isFaceSweepInFlight()) {
-      return res.json({ started: false, alreadyRunning: true });
-    }
+    const alreadySweeping = isFaceSweepInFlight();
     // #222 landed a grouping job that reads every face vector and writes the
     // whole partition in ONE transaction at the end. Starting a scan
     // underneath it dooms it: it runs its full O(n²) pass, reaches the save,
@@ -1802,6 +1839,12 @@ export function registerApi(app, { ml } = {}) {
       return res.status(scoped.status).json({ error: scoped.error });
     }
     const ids = scoped.ids ?? undefined;
+    // Redundant only when UNSCOPED — see the note on this route. Read from
+    // the flag captured at entry, BEFORE the awaits below, because a sweep
+    // this request itself is racing must not count against it.
+    if (alreadySweeping && !ids) {
+      return res.json({ started: false, alreadyRunning: true });
+    }
     const modelId = faceModelIdOf(req.body?.model);
     const model = faceModelById(modelId);
     const weights = await faceWeightsStatus(modelId);
@@ -1834,14 +1877,13 @@ export function registerApi(app, { ml } = {}) {
       });
     }
 
-    // Re-check AFTER every await. Two requests can both pass the guard at the
-    // top of this handler and then both sit in `checkFaceModel`; the loser
-    // would create a second job that reports success having scanned nothing.
-    // `sweepFaces` sets its own flag synchronously, so from here down there is
-    // no yield for a third request to slip through.
-    if (isFaceSweepInFlight()) {
-      return res.json({ started: false, alreadyRunning: true });
-    }
+    // There used to be a re-check here, because two requests could both pass
+    // the guard at the top of this handler and then both sit in
+    // `checkFaceModel`, and the loser would create a second job that reported
+    // success having scanned nothing. Removed with the guard it re-checked
+    // (#279): both requests now create a job and both run, the second one
+    // queued behind the first on the ONNX lease. Two scoped asks are two real
+    // asks — running the second is the correct answer, not a race to lose.
 
     // How many photos this sweep will ACTUALLY look at, counted once, up front
     // — exactly as kickEmbedSweep does (#206), and for the same two reasons.
@@ -1943,6 +1985,8 @@ export function registerApi(app, { ml } = {}) {
       const r = await scheduler.submit({
         priority: ids ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
         key: ids ? undefined : "backlog:faces",
+        // Same lease as embedding — one ONNX child, one queue (#279).
+        resource: RESOURCE.ONNX,
         label: job.label,
         onPause: (blockedBy) =>
           registry.pause(job.id, waitingFor(blockedBy), { parked: true }),
@@ -2023,6 +2067,13 @@ export function registerApi(app, { ml } = {}) {
               }),
           }),
       });
+      // Dropped as a duplicate of a backlog sweep already queued under the
+      // same `key`. Reachable only since #279 removed this route's own
+      // refusal; before that a second background kick never reached `submit`.
+      // Left unhandled, phase 2 below would run against an undefined `r.done`.
+      if (r.coalesced) {
+        return registry.finish(job.id, { alreadyRunning: true });
+      }
       // A PAUSE is not a success and must not be reported as one. The sweep
       // stands down on a host failure precisely so it does not blame photos —
       // saying "done" here would hide that from the user entirely.

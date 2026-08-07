@@ -30,13 +30,30 @@
  *   worker, the SQLite writer and libvips; two of them on the same resource
  *   makes both slower and neither finishes sooner.
  *
- *   This rule was WRITTEN DOWN BEFORE IT WAS TRUE. Priority parking only ever
- *   parked a run of strictly LOWER priority, so two runs of equal priority —
- *   two scoped requests, or two background sweeps — both proceeded, and
- *   nothing here stopped them. What actually kept them apart was six
- *   hand-rolled `inFlight` booleans in `api.js`, each refusing its own route
- *   with a 409. The lease below is what lets those go (#279): a second request
- *   WAITS instead of being told no.
+ *   This rule was WRITTEN DOWN BEFORE IT WAS TRUE, and that sentence stood
+ *   here for three weeks describing a state that did not exist — long enough
+ *   for three later sessions to read it as a description of shipped behaviour
+ *   and be wrong. What follows is what the code does as of #279.
+ *
+ *   **True for `RESOURCE.ONNX`.** `embedAllPending` and `sweepFaces` both
+ *   declare it (api.js), so they take turns, and the latches that used to do
+ *   that job by REFUSING are gone. The difference is the whole fix: a lease
+ *   is released at `checkpoint()`, a boolean was held across a park — so a
+ *   background sweep parked in favour of a scoped request went on refusing
+ *   the very request that had just preempted it. Pressing the button did
+ *   nothing.
+ *
+ *   **NOT yet true for anything else.** `withClusterLatch`,
+ *   `withProjectionLatch`, `nearDupeSweep`, hashing and places still hold
+ *   their own booleans, and `groupRemaining` / `runPipeline` submit with no
+ *   `resource` at all — they are ordered by PRIORITY only, which parks a
+ *   strictly lower-priority run and does nothing for two of equal priority.
+ *   Deliberate: those latches guard against genuinely destructive overlap
+ *   (purging vectors under a running sweep), which a 409 answers correctly.
+ *   Note `groupRemaining` is pure CPU and touches no ONNX, so giving it
+ *   `RESOURCE.ONNX` to make it take turns would be a false name for a real
+ *   effect — the mistake this comment is an apology for. A `RESOURCE.CPU`
+ *   class is the honest version if that contention ever bites.
  * - **`checkpoint()` parks unless nothing of strictly higher priority is
  *   outstanding.** SCOPED (1) beats BACKGROUND (2).
  * - **Equal priority does not preempt — FIFO.** So "two scoped requests in a

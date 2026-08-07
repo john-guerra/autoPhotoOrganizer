@@ -6,6 +6,20 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.20.8
+
+- **You can now start a scan on your selection while a whole-library run is
+  going.** Asking to find faces (or compute similarity) in a selection used to
+  do nothing at all while a big background pass was running — the button
+  answered "already running" and no job appeared. The scoped request now takes
+  priority: the big run parks at its next batch boundary, yours runs, and the
+  big one picks up where it left off with nothing recomputed. Both are visible
+  in the jobs panel throughout, and a parked one says what it is waiting for
+  (#279, #257).
+- Kicking off a second whole-library pass while one is already running still
+  answers immediately instead of queueing a duplicate — it would scan exactly
+  the same photos.
+
 ## 2.20.6
 
 - **The Face Map no longer hands you a map of a library you no longer have.** A

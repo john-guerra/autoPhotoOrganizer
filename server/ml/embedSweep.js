@@ -11,21 +11,24 @@ import {
   markEmbedFailed,
 } from "../db/embeddings.js";
 
-let embedInFlight = false;
+/** How many embedding passes are live. OBSERVATIONAL, not a latch — see the
+ *  long note on `live` in faceSweep.js for why the two were separated (#279)
+ *  and why this counts rather than being a boolean. */
+let live = 0;
 
 /**
- * Whether a sweep is currently running, checked synchronously — the same
- * flag `embedAllPending` sets as its own first statement, before any
- * `await`. A caller that wants to distinguish "I kicked it" from "something
- * else already has the single-flight latch" (the explicit `/api/ml/embed`
- * route — see api.js's kickEmbedSweep) can check this INSTEAD of calling
- * embedAllPending and discovering `alreadyRunning` only after a job row was
- * created and immediately self-cleared, which a caller has no way to read
- * back (#161 fix round 1, Important 2).
+ * Is any embedding pass live (running OR parked at a checkpoint)?
+ *
+ * Read by the DESTRUCTIVE routes only — `/api/ml/purge` and the retry paths
+ * via `refuseWhileSweeping` — where a 409 is the right answer, because
+ * dropping vectors out from under a running sweep makes it fail on a row it
+ * just marked. It no longer refuses a second SWEEP: `resource: RESOURCE.ONNX`
+ * on the submit does that, and unlike this flag the lease is released at a
+ * park, so a queued sweep waits instead of being told no (#279).
  * @returns {boolean}
  */
 export function isEmbedInFlight() {
-  return embedInFlight;
+  return live > 0;
 }
 
 /**
@@ -60,9 +63,7 @@ export async function embedAllPending(
     checkpoint = async () => {},
   }
 ) {
-  if (embedInFlight)
-    return { embedded: 0, failed: 0, paused: false, alreadyRunning: true };
-  embedInFlight = true;
+  live++;
 
   try {
     const spec = modelById(model);
@@ -169,13 +170,13 @@ export async function embedAllPending(
 
     return { embedded: done - failed, failed, paused, pauseReason };
   } finally {
-    embedInFlight = false;
+    live--;
   }
 }
 
-/** Test-only: clear the single-flight latch between cases. */
+/** Test-only: reset the live count between cases. */
 export function _resetEmbedSweepForTest() {
-  embedInFlight = false;
+  live = 0;
 }
 
 /**
