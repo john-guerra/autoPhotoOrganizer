@@ -186,8 +186,10 @@ npm run format # prettier
 See [`CLAUDE.md`](./CLAUDE.md) for the full set of conventions and
 invariants, and
 [`docs/superpowers/specs/2026-07-06-photo-triage-design.md`](./docs/superpowers/specs/2026-07-06-photo-triage-design.md)
-for the original design doc (architecture, performance strategy, and the
-Phase 2 plan for faces / CLIP search / ML pick prediction).
+for the original design doc (architecture, performance strategy, and a
+roadmap whose "Phase 2" has largely shipped — the People view, Face Map, and
+on-device embeddings with near-duplicate detection; only the "predict my picks"
+keeper-ranking and the GPU archive-exploration renderer remain ahead).
 
 ## Testing
 
