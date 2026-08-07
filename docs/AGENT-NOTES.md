@@ -130,6 +130,32 @@ Keep this current: when one of these facts changes, update it in the same commit
   — but only if you look, and the obvious reading is that your change broke
   something. Either wait for the run, or work on `ui/` (Vite HMR is fine).
 
+- **Read the e2e test COUNT, not just the pass/fail line — a run can silently
+  execute a third fewer tests and report success.** Observed 2026-08-07 across
+  four consecutive runs of the same tree: 192 tests (1 failed), then **159**
+  (0 failed, and nothing anywhere saying 33 never ran), then a run that
+  executed nothing at all, then a clean 192. Only the last one was evidence.
+  The inventory is `ls e2e/*.spec.js | wc -l` (52 files) against the numbered
+  `✓ N` in the list reporter — if the final number is not ~192, the run did not
+  happen, whatever the summary says.
+
+  Two mechanisms, both self-inflicted and both easy to repeat:
+  - **`npm run test:e2e | tail -N` orphans the servers.** Same rule as the dev
+    server above, and it bites harder here: the pipe dies, `playwright` is
+    reparented still holding **4399/5399**, and the NEXT run either dies with
+    `http://localhost:5399 is already used` or comes up against the stale one.
+    Redirect to a file (`> log 2>&1`) and read the file.
+  - **Back-to-back runs race the port release.** Starting the next run the
+    instant the previous one reports finished is enough — the server has not
+    let go of 5399 yet. `lsof -nP -iTCP:5399 -sTCP:LISTEN` returning nothing is
+    the precondition, and it is one command.
+
+  **The harness's "exit code 0" does not mean the suite passed.** The run that
+  executed nothing — it printed only the port error — was still reported as
+  exit 0, because the exit code belongs to the npm pipeline, not to Playwright.
+  Treat the summary line as the only outcome, and the count as the only proof
+  it is about the whole suite.
+
 - **A test that never failed proves nothing.** Revert the fix, watch the test go
   red, restore. (Also in CLAUDE.md — repeated here because it's the most-skipped
   step.)
