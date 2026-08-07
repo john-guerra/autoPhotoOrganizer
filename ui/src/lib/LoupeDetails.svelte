@@ -9,6 +9,7 @@
     formatSize,
     formatDimensions,
   } from "./exifFormat.js";
+  import { dateRows } from "./photoDates.js";
 
   /**
    * @type {{
@@ -27,7 +28,13 @@
     inSelection = false,
     selectedCount = 0,
     onrate,
+    /** The feed's current sort attribute, so the Dates section can mark which
+     *  of the three is deciding this photo's position (#349). */
+    sortBy = "",
   } = $props();
+
+  /** Every date this photo has, unmerged — see `photoDates.js`. */
+  const dates = $derived(dateRows(meta, sortBy));
 
   const DASH = "—";
   const or = (s) => (s ? s : DASH);
@@ -101,6 +108,42 @@
         <dd>{fmtDate(takenAt)}</dd>
       </dl>
     </section>
+
+    <!-- THE THREE DATES, UNMERGED (#349).
+
+         "Taken" above is a COALESCE, and that is right for reading and useless
+         for debugging: when a photo lands in a group you did not expect, the
+         merged value is the one thing that cannot tell you why. A Pixel backup
+         folder grouped into 1984 under "Created" because macOS reports
+         birthtime as its own unknown-sentinel for files copied off a phone —
+         EXIF and mtime both said 2025. -->
+    {#if dates.length}
+      <section data-testid="loupe-dates">
+        <h4>Dates</h4>
+        <dl>
+          {#each dates as d (d.key)}
+            <dt class:drives={d.drives}>
+              {d.label}
+              {#if d.drives}<span
+                  class="tag"
+                  title="This is the date the feed is currently sorting and grouping by"
+                  >sorting by this</span
+                >{/if}
+            </dt>
+            <dd
+              class:drives={d.drives}
+              class:suspect={!!d.note && d.key === "btime"}
+              data-testid={`loupe-date-${d.key}`}
+            >
+              {fmtDate(d.ms)}
+              {#if d.note}
+                <span class="note">{d.note}</span>
+              {/if}
+            </dd>
+          {/each}
+        </dl>
+      </section>
+    {/if}
 
     {#if !isVideo}
       <section>
@@ -197,6 +240,40 @@
     color: #eee;
     text-align: right;
     word-break: break-word;
+  }
+
+  /* --- the Dates section (#349) ------------------------------------------
+     Two states, and the difference between them is the whole point: DRIVES
+     means "this is the one placing the photo in the feed", SUSPECT means
+     "this value is not a real date". A photo lands in 1984 only when both are
+     true of the same row, which is exactly what the eye should be drawn to. */
+  dt.drives,
+  dd.drives {
+    color: #fff;
+  }
+  .tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: #2e8b57;
+    color: #06121f;
+    font-size: 0.65rem;
+    font-weight: 600;
+    vertical-align: 1px;
+  }
+  dd.suspect {
+    color: #e8b339;
+  }
+  .note {
+    display: block;
+    color: #8a8a8a;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    /* Left, against the right-aligned dates above it: a sentence set ragged-left
+       is read as prose, and this one has to actually be read. */
+    text-align: left;
+    margin-top: 1px;
   }
   .rating-row :global(.stars) {
     font-size: 1rem;

@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.21.2
+
+- **The loupe now shows all three of a photo's dates**, not just the one it
+  picked: the EXIF capture date, the file's creation date and its modified
+  date, side by side, with the one your current sort is actually using marked.
+  A date that cannot be real — like the 1984 macOS writes when a file has no
+  creation date of its own — is flagged in amber and says so, which is how a
+  folder of 2025 phone photos turns out to be sorting into 1984 (#349).
+
 ## 2.21.0
 
 First packaged build since 2.20.1. Mostly the Face Map, which went from a
