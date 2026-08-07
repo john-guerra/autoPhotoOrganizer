@@ -278,6 +278,20 @@ export const faceMap = {
   param: (page, key) => page.locator(`[data-testid="map-param-${key}"]`),
   /** Which mode the panel is in: following the sliders, or waiting for Apply. */
   liveHint: (page) => page.locator('[data-testid="map-live-hint"]'),
+  /**
+   * Ensure the settings panel is OPEN, whatever state it was in.
+   *
+   * Not `gear().click()`. Since #327 the panel stays open across a rebuild —
+   * so `build_`, which opens it to reach the Rebuild button, leaves it open,
+   * and a spec that then clicks the gear CLOSES it. That cost an hour: the
+   * symptom was a handler apparently firing twice, and the give-away was one
+   * event with `isTrusted: true` (build_'s click) and one with `false`.
+   */
+  openGear: async (page) => {
+    const g = faceMap.gear(page);
+    if ((await g.getAttribute("aria-expanded")) !== "true") await g.click();
+    await faceMap.gearPanel(page).waitFor();
+  },
   /** The editable number beside that slider. A slider alone cannot express an
    *  exact value, and `<input type="number">` alone would not let you get from
    *  5 to 50 by typing — which is the annoyance that opened #327. */
@@ -334,8 +348,15 @@ export const faceMap = {
     const empty = faceMap.build(page);
     if (await empty.count()) await empty.click();
     else {
-      await faceMap.gear(page).click();
+      // Reaching Rebuild means opening the panel — and since #327 the panel
+      // STAYS open afterwards. Put it back, because this is a setup helper and
+      // the lasso specs pick people by canvas coordinates: an unexpectedly
+      // open panel narrows the map and selects someone else entirely.
+      const wasOpen =
+        (await faceMap.gear(page).getAttribute("aria-expanded")) === "true";
+      if (!wasOpen) await faceMap.gear(page).click();
       await faceMap.rebuild(page).click();
+      if (!wasOpen) await faceMap.gear(page).click();
     }
     await faceMap.count(page).waitFor({ timeout: 60_000 });
   },

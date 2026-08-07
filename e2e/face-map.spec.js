@@ -180,7 +180,7 @@ test.describe("face map @p1", () => {
     const errors = trackPageErrors(page);
     await openApp(page);
     await views.show(page, "face-map");
-    await faceMap.gear(page).click();
+    await faceMap.openGear(page);
 
     // Everyone clears the default of 5 (#255), so the gear opens on everyone.
     await expect(faceMap.members(page)).toContainText(String(PEOPLE));
@@ -219,7 +219,7 @@ test.describe("face map @p1", () => {
     const errors = trackPageErrors(page);
     await openApp(page);
     await views.show(page, "face-map");
-    await faceMap.gear(page).click();
+    await faceMap.openGear(page);
 
     const serverDefaults = await page.evaluate(async () => {
       const r = await fetch("/api/projections/options?algorithm=umap");
@@ -254,7 +254,7 @@ test.describe("face map @p1", () => {
     await openApp(page);
     await views.show(page, "face-map");
     await faceMap.build_(page);
-    await faceMap.gear(page).click();
+    await faceMap.openGear(page);
 
     // Panel and map on screen together: the whole point of the change.
     await expect(faceMap.gearPanel(page)).toBeVisible();
@@ -283,7 +283,7 @@ test.describe("face map @p1", () => {
     await openApp(page);
     await views.show(page, "face-map");
     await faceMap.build_(page);
-    await faceMap.gear(page).click();
+    await faceMap.openGear(page);
 
     // The panel says which mode it is in, and this fixture is small enough to
     // be live. A failure here means the machine got slower, not that the

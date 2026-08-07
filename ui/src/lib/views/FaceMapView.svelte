@@ -17,6 +17,7 @@
    * The map itself is `ScatterCanvas`, which knows nothing about people. All
    * the domain lives here.
    */
+  import { untrack } from "svelte";
   import { faceCropUrl } from "../faceCropUrl.js";
   import ScatterCanvas from "../scatter/ScatterCanvas.svelte";
   import {
@@ -27,11 +28,16 @@
   } from "../scatter/lod.js";
   import { loadSetting, saveSetting } from "../settings.js";
   import ParamSlider from "../ParamSlider.svelte";
+  import { alignTo, easeInOut, TWEEN_MS } from "../scatter/align.js";
   import {
     loadSettings,
     saveSettings,
     canGoLive,
     estimateMs,
+    clampPanelWidth,
+    PANEL_DEFAULT,
+    PANEL_MIN,
+    PANEL_MAX,
   } from "../mapSettings.js";
 
   let {
@@ -98,6 +104,148 @@
     visibleSet ? points.filter((p) => visibleSet.has(p.personId)) : points
   );
 
+  /**
+   * The positions actually drawn, tweened from the previous layout (#327).
+   *
+   * `shown` is the truth; this is the truth on its way there. Two things have
+   * to happen before a tween means anything:
+   *
+   *  1. **Align.** UMAP's rotation, reflection, scale and origin are arbitrary,
+   *     so most of the apparent movement between two runs is meaningless. The
+   *     new layout is fitted onto the old one first, leaving only real change
+   *     to animate.
+   *  2. **Pair by personId**, not by index. The member set can change between
+   *     runs (a different minFaces), and animating index-to-index would send
+   *     each dot to a stranger's position.
+   *
+   * A point with no previous position does not fly in from wherever index 7
+   * used to be — it simply appears where it belongs.
+   */
+  let anim = $state(null);
+  /** The aligned positions currently ON SCREEN when nothing is animating.
+   *
+   *  This is what fixes the tween "restarting" at the end. The animation runs
+   *  towards the ALIGNED layout, so if the steady state fell back to the raw
+   *  coordinates the map would snap from one frame to the other the instant
+   *  the tween finished — which reads as the animation playing again. The
+   *  aligned frame IS the display frame; raw coordinates are never drawn. */
+  let settled = $state(null);
+  let animRaf = 0;
+
+  const drawn = $derived.by(() => {
+    const n = shown.length;
+    if (anim && anim.from.length === n * 2) {
+      const t = easeInOut(anim.t);
+      const out = new Float32Array(n * 2);
+      for (let i = 0; i < n * 2; i++) {
+        out[i] = anim.from[i] + (anim.to[i] - anim.from[i]) * t;
+      }
+      return out;
+    }
+    if (settled && settled.length === n * 2) return settled;
+    const xy = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      xy[i * 2] = shown[i].x;
+      xy[i * 2 + 1] = shown[i].y;
+    }
+    return xy;
+  });
+
+  /**
+   * Start a tween whenever the positions change.
+   *
+   * Imperative rAF driven from an `$effect`, with the animation state read and
+   * written through `untrack` — an effect that both reads and writes its own
+   * state re-fires forever, which is CLAUDE.md's first trap wearing runes.
+   */
+  let lastKeyed = new Map();
+  $effect(() => {
+    const pts = shown;
+    untrack(() => {
+      const n = pts.length;
+      const raw = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        raw[i * 2] = pts[i].x;
+        raw[i * 2 + 1] = pts[i].y;
+      }
+
+      // Only tween when we have somewhere to come FROM for most of the map.
+      let known = 0;
+      for (const p of pts) if (lastKeyed.has(p.personId)) known++;
+      const worthTweening = n >= 2 && known >= n * 0.5 && !reduceMotion;
+
+      if (!worthTweening) {
+        cancelAnimationFrame(animRaf);
+        anim = null;
+        settled = raw;
+        lastKeyed = new Map(pts.map((p) => [p.personId, [p.x, p.y]]));
+        afterLayout();
+        return;
+      }
+
+      // Align the new layout onto where the map already is, so only real
+      // change animates rather than an arbitrary spin and rescale.
+      const prev = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        const was = lastKeyed.get(pts[i].personId);
+        prev[i * 2] = was ? was[0] : pts[i].x;
+        prev[i * 2 + 1] = was ? was[1] : pts[i].y;
+      }
+      const aligned = alignTo(prev, raw);
+
+      const from = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        const was = lastKeyed.get(pts[i].personId);
+        // A newcomer appears where it belongs rather than flying in from a
+        // position that was never its own.
+        from[i * 2] = was ? was[0] : aligned[i * 2];
+        from[i * 2 + 1] = was ? was[1] : aligned[i * 2 + 1];
+      }
+
+      cancelAnimationFrame(animRaf);
+      const t0 = performance.now();
+      anim = { from, to: aligned, t: 0 };
+      const step = () => {
+        const e = Math.min(1, (performance.now() - t0) / TWEEN_MS);
+        anim = { ...anim, t: e };
+        if (e < 1) {
+          animRaf = requestAnimationFrame(step);
+          return;
+        }
+        // The map ENDS in the aligned frame, so that is what stays on screen
+        // and what the next tween starts from.
+        settled = aligned;
+        anim = null;
+        lastKeyed = new Map(
+          pts.map((p, i) => [p.personId, [aligned[i * 2], aligned[i * 2 + 1]]])
+        );
+        afterLayout();
+      };
+      animRaf = requestAnimationFrame(step);
+    });
+  });
+
+  /**
+   * Bring the whole map back into view once it has settled.
+   *
+   * The canvas re-fits only when the PEOPLE change (its `fittedKey` is the
+   * count plus the first and last id), which is right for a merge and wrong
+   * for a parameter change: the same people at completely different
+   * coordinates would sit half off-screen with no clue why. On by default
+   * because that is the state a user expects after asking for a new layout;
+   * off for anyone who has zoomed somewhere deliberately and wants to stay.
+   */
+  function afterLayout() {
+    if (autoFit) requestAnimationFrame(() => scatter?.fit());
+  }
+
+  $effect(() => () => cancelAnimationFrame(animRaf));
+
+  /** Respect the OS setting; an animation nobody asked for is worse than none. */
+  const reduceMotion =
+    typeof matchMedia !== "undefined" &&
+    matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   const packed = $derived.by(() => {
     const n = shown.length;
     const x = new Float32Array(n);
@@ -105,10 +253,11 @@
     const ids = new Int32Array(n);
     const size = new Float32Array(n);
     const group = new Uint8Array(n);
+    const pos = drawn;
     for (let i = 0; i < n; i++) {
       const p = shown[i];
-      x[i] = p.x;
-      y[i] = p.y;
+      x[i] = pos[i * 2];
+      y[i] = pos[i * 2 + 1];
       ids[i] = p.personId;
       // PHOTOS, not faces: a dot's area says how much of the library this
       // person appears in, and two faces of them in one frame is one photo.
@@ -241,19 +390,84 @@
    *  handler can never disagree about which mode the panel is in. */
   const live = $derived(canGoLive(lastMs, options?.members) && !!onpreview);
 
+  /** Panel width, dragged by the handle on its edge and remembered. */
+  let panelWidth = $state(
+    clampPanelWidth(loadSetting("faceMapPanelWidth", PANEL_DEFAULT))
+  );
+  $effect(() => saveSetting("faceMapPanelWidth", panelWidth));
+
+  /**
+   * Rebuild automatically on ANY setting, including the ones that normally
+   * wait for Apply.
+   *
+   * Off by default and deliberately so: `minFaces` changes the member set, so
+   * on a library too big to preview this turns every drag into a real job.
+   * The label says that rather than leaving it to be discovered.
+   */
+  let autoApply = $state(loadSetting("faceMapAutoApply", false) === true);
+  $effect(() => saveSetting("faceMapAutoApply", autoApply));
+
+  /** Re-frame the map after every new layout. On by default. */
+  let autoFit = $state(loadSetting("faceMapAutoFit", true) !== false);
+  $effect(() => saveSetting("faceMapAutoFit", autoFit));
+
   let previewTimer = null;
-  function onTune(key, value, { live }) {
+  let applyTimer = null;
+
+  /** Drag the panel's edge. Pointer events on the window, not the handle, so
+   *  the drag survives the pointer leaving the 6px strip. */
+  function startResize(e) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = panelWidth;
+    const move = (ev) =>
+      (panelWidth = clampPanelWidth(startW + (ev.clientX - startX)));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  function onTune(key, value, { live: dragging }) {
     draft = { ...draft, [key]: value };
     saveSettings(draft);
-    if (!live) return;
-    if (!live) return;
-    clearTimeout(previewTimer);
-    previewTimer = setTimeout(() => onpreview(currentParams()), 60);
+    scheduleUpdate(key, dragging);
+  }
+
+  /**
+   * Decide what a settings change should DO.
+   *
+   * Three routes, cheapest first:
+   *  - preview, when the map can follow at this size and the parameter does
+   *    not change who is on the map;
+   *  - a real rebuild, when the user has asked for automatic updates — that
+   *    is a JOB, so it is debounced hard and stays cancellable;
+   *  - nothing, and Apply is there when they are ready.
+   */
+  function scheduleUpdate(key, dragging) {
+    // `minFaces` changes the member set, so it cannot be answered from the
+    // preview session's resident graph.
+    const previewable = key !== "minFaces" && live && !!onpreview;
+    if (previewable) {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => onpreview(currentParams()), 60);
+      return;
+    }
+    if (!autoApply || dragging) return;
+    // A rebuild is a job. One second, and only once the control is released —
+    // a job per slider tick is how a convenience turns into a queue nobody
+    // asked for.
+    clearTimeout(applyTimer);
+    applyTimer = setTimeout(() => onrun?.(currentParams()), 1000);
   }
 
   // A dragged slider outliving its view would fire a fetch into a dead
   // component. Svelte 5 runs an $effect's teardown on destroy.
-  $effect(() => () => clearTimeout(previewTimer));
+  $effect(() => () => {
+    clearTimeout(previewTimer);
+    clearTimeout(applyTimer);
+  });
 
   const algoRow = $derived(
     options?.algorithms?.find((a) => a.id === algo) ?? null
@@ -279,7 +493,9 @@
   );
 
   function applyGear() {
-    gearOpen = false;
+    // The panel STAYS OPEN. Closing it on Apply meant every rebuild cost you
+    // your place in the settings you were tuning — and tuning is the whole
+    // point of the panel (#327).
     selected = new Set();
     onrun?.(currentParams());
   }
@@ -454,7 +670,11 @@
        first in the DOM and first visually, so tab order matches what you see. -->
   <div class="body">
     {#if gearOpen}
-      <aside class="gear-panel" data-testid="map-gear-panel">
+      <aside
+        class="gear-panel"
+        data-testid="map-gear-panel"
+        style={`flex-basis:${panelWidth}px`}
+      >
         <!-- minFaces is ALWAYS Apply-driven, at any library size: it changes the
            member set, so it invalidates both the centroid query and the
            preview session's neighbour graph. It is also the parameter where
@@ -559,6 +779,35 @@
           {/if}
         </fieldset>
 
+        <label class="auto">
+          <input
+            type="checkbox"
+            data-testid="map-auto-fit"
+            bind:checked={autoFit}
+          />
+          <span>
+            Zoom to fit after each change
+            <span class="auto-note">
+              Off if you would rather stay where you have zoomed to.
+            </span>
+          </span>
+        </label>
+
+        <label class="auto">
+          <input
+            type="checkbox"
+            data-testid="map-auto-apply"
+            bind:checked={autoApply}
+          />
+          <span>
+            Update automatically
+            <span class="auto-note">
+              rebuilds on every change, including Minimum faces. On a library
+              too big to preview, each change starts a job.
+            </span>
+          </span>
+        </label>
+
         <!-- Say WHICH mode the panel is in. Without this, a map that does not
              follow the slider reads as a broken control rather than as "this
              library is big enough that it needs a press" (#327). -->
@@ -582,6 +831,26 @@
           {loading ? "Building…" : runId ? "Rebuild map" : "Build map"}
         </button>
       </aside>
+      <!-- Drag to resize. A separate element rather than a CSS `resize`,
+           which cannot persist and cannot be clamped. -->
+      <button
+        type="button"
+        class="resizer"
+        data-testid="map-panel-resizer"
+        aria-label="Resize the settings panel"
+        aria-valuenow={panelWidth}
+        aria-valuemin={PANEL_MIN}
+        aria-valuemax={PANEL_MAX}
+        onpointerdown={startResize}
+        onkeydown={(e) => {
+          if (e.key === "ArrowLeft")
+            panelWidth = clampPanelWidth(panelWidth - 16);
+          else if (e.key === "ArrowRight")
+            panelWidth = clampPanelWidth(panelWidth + 16);
+          else return;
+          e.preventDefault();
+        }}
+      ></button>
     {/if}
 
     <div class="map-area">
@@ -825,6 +1094,33 @@
     min-width: 0;
     min-height: 0;
   }
+  .resizer {
+    flex: 0 0 6px;
+    cursor: col-resize;
+    background: #2a2a2a;
+    border: 0;
+    padding: 0;
+    align-self: stretch;
+  }
+  .resizer:hover,
+  .resizer:focus-visible {
+    background: #7aa2f7;
+  }
+  .auto {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.8rem;
+  }
+  .auto input {
+    margin-top: 2px;
+  }
+  .auto-note {
+    display: block;
+    font-size: 0.72rem;
+    color: #888;
+    line-height: 1.35;
+  }
   .live-hint {
     margin: 0;
     font-size: 0.72rem;
@@ -845,7 +1141,10 @@
     align-items: stretch;
     /* 10-20% of the view, with pixel bounds so it stays usable on a laptop
        and does not become a canyon on an ultrawide. */
-    flex: 0 0 clamp(220px, 16%, 340px);
+    /* Width is the user's, dragged by the handle and remembered; the
+       flex-basis comes from `panelWidth` inline. */
+    flex: 0 0 auto;
+    width: auto;
     overflow-y: auto;
     overscroll-behavior: contain;
   }

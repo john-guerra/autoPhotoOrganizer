@@ -96,3 +96,16 @@ export function loadSettings() {
 export function saveSettings(obj) {
   saveSetting(KEY, obj ?? {});
 }
+
+/** Panel width bounds, in px. Below the floor the sliders and their help text
+ *  stop being readable; above the ceiling the map is the thing being squeezed. */
+export const PANEL_MIN = 240;
+export const PANEL_MAX = 640;
+export const PANEL_DEFAULT = 320;
+
+/** @param {number} px @returns {number} */
+export function clampPanelWidth(px) {
+  const n = Number(px);
+  if (!Number.isFinite(n)) return PANEL_DEFAULT;
+  return Math.min(PANEL_MAX, Math.max(PANEL_MIN, Math.round(n)));
+}

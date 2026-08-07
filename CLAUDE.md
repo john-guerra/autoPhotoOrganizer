@@ -302,15 +302,28 @@ message**:
    worktrees and old dev servers linger; a stale one on another port serves the
    version it was started with and reports no error (see `docs/AGENT-NOTES.md`).
    So always add: _check the title bar says `vX.Y.Z` before trusting anything._
-2. **The command** — the exact line, with an explicit non-default port so it
-   cannot collide with whatever he already has open:
+2. **The command — `npm run electron:dev`.** That is how John validates: the
+   real app in the real window, not a browser tab. Start it yourself; he should
+   not have to set up the thing you are asking him to check.
 
    ```bash
-   PORT=4351 npm run dev      # UI on :5173, API on :4351
+   npm run electron:dev       # Electron window; Vite :5173, API :4321
    ```
 
-   Start it yourself and give him the URL when you can; he should not have to
-   set up the thing you are asking him to check.
+   Two things this constrains, both from `docs/AGENT-NOTES.md`:
+
+   - **Kill every other dev server first.** `electron:dev` and `npm run dev`
+     cannot both run. `electron:dev` starts its own Vite, and if 5173 is taken
+     Vite silently moves to 5174 while Electron's dev URL stays 5173 — so the
+     window loads nothing and the only clue is a port line buried in the log.
+   - **It needs the NODE ABI, not the Electron one.** In dev mode Electron only
+     loads the Vite URL; the Express server stays a separate Node process. If
+     an `electron:build:*` left better-sqlite3 built for Electron, run
+     `npm run rebuild:node` first. Check with:
+     `node -e "const D=require('better-sqlite3'); new D(':memory:').prepare('select 1').get()"`
+
+   Use `PORT=<n> npm run dev` only for your OWN checks — curling a route,
+   driving it with a browser tool — never as what you hand him.
 
 3. **What to do, and what counts as right or wrong** — numbered steps against
    HIS data, not the fixture, and for each one what he should see. Include the

@@ -4,6 +4,10 @@ import {
   saveSettings,
   canGoLive,
   estimateMs,
+  clampPanelWidth,
+  PANEL_MIN,
+  PANEL_MAX,
+  PANEL_DEFAULT,
   LIVE_MS,
 } from "./mapSettings.js";
 
@@ -95,5 +99,20 @@ describe("the live boundary (#327)", () => {
     expect(LIVE_MS).toBe(400);
     expect(canGoLive(LIVE_MS - 1)).toBe(true);
     expect(canGoLive(LIVE_MS)).toBe(false);
+  });
+});
+
+describe("the panel's width (#327)", () => {
+  it("keeps it readable and keeps the map worth looking at", () => {
+    expect(clampPanelWidth(10)).toBe(PANEL_MIN);
+    expect(clampPanelWidth(9999)).toBe(PANEL_MAX);
+    expect(clampPanelWidth(300)).toBe(300);
+  });
+
+  it("falls back to the default rather than NaN", () => {
+    // A NaN width collapses the panel to nothing, and the user cannot drag a
+    // handle they cannot see.
+    expect(clampPanelWidth(undefined)).toBe(PANEL_DEFAULT);
+    expect(clampPanelWidth("wide")).toBe(PANEL_DEFAULT);
   });
 });
