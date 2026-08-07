@@ -147,7 +147,9 @@ function start({ key, data, dim, n }) {
  * @param {number} o.dim
  * @param {number} o.n
  * @param {{nNeighbors:number, minDist:number, nEpochs:number, seed:number}} o.params
- * @returns {Promise<Float32Array>} `2n` floats, interleaved x,y
+ * @returns {Promise<{xy: Float32Array, warm: boolean}>} `xy` is `2n` floats,
+ *   interleaved x,y. `warm` is false when this call had to build the graph —
+ *   its timing is then graph-build + layout, not the steady-state cost.
  */
 export async function previewProjection({ key, data, dim, n, params }) {
   // umap-js throws "Not enough data points" below nNeighbors, and a map of four
@@ -158,7 +160,11 @@ export async function previewProjection({ key, data, dim, n, params }) {
     );
   }
 
-  if (!session || session.key !== key) {
+  // Whether this request PAID for the graph decides what its timing means: a
+  // cold call is graph-build + layout, a warm one is the steady-state cost the
+  // live boundary actually cares about (#327).
+  const warm = !!session && session.key === key;
+  if (!warm) {
     destroy();
     start({ key, data, dim, n });
   }
@@ -169,10 +175,11 @@ export async function previewProjection({ key, data, dim, n, params }) {
   touch();
 
   const id = nextId++;
-  return new Promise((resolve, reject) => {
+  const xy = await new Promise((resolve, reject) => {
     s.pending.set(id, { resolve, reject });
     s.worker.postMessage({ type: "run", id, params });
   });
+  return { xy, warm };
 }
 
 /**

@@ -3,6 +3,7 @@ import {
   loadSettings,
   saveSettings,
   canGoLive,
+  estimateMs,
   LIVE_MS,
 } from "./mapSettings.js";
 
@@ -59,12 +60,35 @@ describe("the live boundary (#327)", () => {
     expect(canGoLive(3100)).toBe(false);
   });
 
-  it("does NOT go live before anything has been measured", () => {
+  it("does NOT go live with neither a measurement nor a member count", () => {
     // Optimism here means a 25,758-person library locks up on the first drag,
     // which is exactly the case the boundary exists to prevent.
     expect(canGoLive(null)).toBe(false);
     expect(canGoLive(undefined)).toBe(false);
     expect(canGoLive(NaN)).toBe(false);
+  });
+
+  it("falls back to the fitted estimate before anything is measured", () => {
+    // Without this the small library can never become live: a measurement only
+    // arrives from a preview, and a preview only happens in live mode.
+    expect(canGoLive(null, 203)).toBe(true);
+    expect(canGoLive(null, 25_758)).toBe(false);
+  });
+
+  it("prefers a real measurement over the estimate", () => {
+    // The estimate says a 203-person library is fast. If this machine measured
+    // 3.1s, the machine wins.
+    expect(canGoLive(3100, 203)).toBe(false);
+    expect(canGoLive(90, 25_758)).toBe(true);
+  });
+
+  it("estimates from the curve fitted to real runs", () => {
+    // ms = 3.29 * n^0.80. Measured: 21 -> 46ms, 203 -> 201ms, 852 -> 842ms.
+    expect(estimateMs(203)).toBeGreaterThan(150);
+    expect(estimateMs(203)).toBeLessThan(400);
+    expect(estimateMs(25_758)).toBeGreaterThan(5_000);
+    expect(estimateMs(null)).toBe(null);
+    expect(estimateMs(0)).toBe(null);
   });
 
   it("draws the line at 400ms", () => {

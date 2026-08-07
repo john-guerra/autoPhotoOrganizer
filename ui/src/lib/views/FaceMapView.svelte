@@ -27,7 +27,12 @@
   } from "../scatter/lod.js";
   import { loadSetting, saveSetting } from "../settings.js";
   import ParamSlider from "../ParamSlider.svelte";
-  import { loadSettings, saveSettings, canGoLive } from "../mapSettings.js";
+  import {
+    loadSettings,
+    saveSettings,
+    canGoLive,
+    estimateMs,
+  } from "../mapSettings.js";
 
   let {
     /** `[{personId, x, y, name, coverFaceId, faces}]` from the current run. */
@@ -234,7 +239,7 @@
    */
   /** Whether the sliders currently drive the map. Derived, so the hint and the
    *  handler can never disagree about which mode the panel is in. */
-  const live = $derived(canGoLive(lastMs) && !!onpreview);
+  const live = $derived(canGoLive(lastMs, options?.members) && !!onpreview);
 
   let previewTimer = null;
   function onTune(key, value, { live }) {
@@ -826,6 +831,10 @@
     color: #888;
     line-height: 1.35;
   }
+  .gear-panel > * {
+    min-width: 0;
+    max-width: 100%;
+  }
   .gear-panel {
     background: #171717;
     border-right: 1px solid #2a2a2a;
@@ -856,8 +865,11 @@
     padding: 3px 6px;
     font: inherit;
   }
+  /* Was `min-width: 20rem`, from when this was a wide horizontal popover. In a
+     16% column that forces the sliders off the edge — caught by looking at a
+     screenshot, not by any test (#327). */
   .sizes {
-    min-width: 20rem;
+    min-width: 0;
   }
   .tuning {
     min-width: 22rem;
@@ -920,12 +932,19 @@
     color: #888;
     padding: 0 4px;
   }
+  /* One column, not three. `auto auto 1fr` fitted a wide popover; in a narrow
+     panel the measured note ("Finds the same person in the top 5 about 58% of
+     the time") was clipped mid-sentence — which is worse than absent, because
+     it looks like the app is broken rather than terse. */
   .algo {
     display: grid;
-    grid-template-columns: auto auto 1fr;
-    gap: 6px;
+    grid-template-columns: auto 1fr;
+    gap: 2px 6px;
     align-items: baseline;
     font-size: 0.8rem;
+  }
+  .algo-note {
+    grid-column: 1 / -1;
   }
   .algo.disabled {
     opacity: 0.55;

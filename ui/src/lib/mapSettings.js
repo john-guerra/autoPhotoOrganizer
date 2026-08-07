@@ -29,17 +29,47 @@ const KEY = "faceMapParams";
 export const LIVE_MS = 400;
 
 /**
+ * What one projection will cost, before we have measured one.
+ *
+ * `ms = 3.29 * n^0.80`, fitted to real runs on the real library (21 -> 46 ms,
+ * 203 -> 201 ms, 852 -> 842 ms). It exists ONLY to answer the first question,
+ * because a real measurement is not available yet and the two candidates are
+ * both wrong: assuming live locks up a 25,758-person library on the first
+ * drag, and assuming Apply means a small library can never become live, since
+ * a measurement only ever arrives from a preview that live mode would have to
+ * allow first.
+ *
+ * It is a cold-start prior and nothing else — one warm measurement replaces
+ * it, and `canGoLive` prefers the measurement whenever there is one.
+ *
+ * @param {number|null|undefined} members
+ * @returns {number|null} milliseconds, or null when the count is unknown
+ */
+export function estimateMs(members) {
+  const n = Number(members);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return 3.29 * n ** 0.8;
+}
+
+/**
  * May the map follow the slider, given how long the last projection took?
  *
- * `null`/`undefined` is FALSE, not true: before anything has been measured,
- * optimism means a 25,758-person library locks up on the first drag — exactly
- * the case the boundary exists to prevent.
+ * `lastMs` must come from a WARM projection. A cold one paid to build the
+ * neighbour graph — 438 ms against 127 ms warm, measured on the real library —
+ * and thresholding on that one-off would disqualify live mode using a cost
+ * that never recurs.
  *
- * @param {number|null|undefined} lastMs
+ * With no measurement, falls back to `estimateMs(members)`; with neither, it
+ * is false, because assuming live is how a large library locks up on the first
+ * drag.
+ *
+ * @param {number|null|undefined} lastMs a WARM projection's duration
+ * @param {number|null|undefined} [members] for the cold-start estimate
  * @returns {boolean}
  */
-export function canGoLive(lastMs) {
-  return Number.isFinite(lastMs) && lastMs < LIVE_MS;
+export function canGoLive(lastMs, members) {
+  const ms = Number.isFinite(lastMs) ? lastMs : estimateMs(members);
+  return Number.isFinite(ms) && ms < LIVE_MS;
 }
 
 /**

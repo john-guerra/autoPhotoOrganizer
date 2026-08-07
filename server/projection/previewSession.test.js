@@ -37,7 +37,7 @@ function blobs(n, dim = 8) {
 describe("the preview session (#327)", () => {
   it("returns one coordinate pair per point, all finite", async () => {
     const { data, dim, n } = blobs(60);
-    const xy = await previewProjection({
+    const { xy } = await previewProjection({
       key: "a",
       data,
       dim,
@@ -54,8 +54,20 @@ describe("the preview session (#327)", () => {
     // showed, so committing does not move the map under the user.
     const { data, dim, n } = blobs(60);
     const p = { nNeighbors: 10, minDist: 0.1, nEpochs: 30, seed: 7 };
-    const a = await previewProjection({ key: "a", data, dim, n, params: p });
-    const b = await previewProjection({ key: "a", data, dim, n, params: p });
+    const { xy: a } = await previewProjection({
+      key: "a",
+      data,
+      dim,
+      n,
+      params: p,
+    });
+    const { xy: b } = await previewProjection({
+      key: "a",
+      data,
+      dim,
+      n,
+      params: p,
+    });
     expect([...b]).toEqual([...a]);
   });
 
@@ -68,7 +80,7 @@ describe("the preview session (#327)", () => {
       n,
       params: { nNeighbors: 10, minDist: 0.1, nEpochs: 20, seed: 1 },
     });
-    const second = await previewProjection({
+    const { xy: second } = await previewProjection({
       key: "a",
       data,
       dim,
@@ -85,14 +97,14 @@ describe("the preview session (#327)", () => {
     // same layout and the slider would do nothing.
     const { data, dim, n } = blobs(80);
     const p = { minDist: 0.1, nEpochs: 40, seed: 3 };
-    const a = await previewProjection({
+    const { xy: a } = await previewProjection({
       key: "a",
       data,
       dim,
       n,
       params: { ...p, nNeighbors: 5 },
     });
-    const b = await previewProjection({
+    const { xy: b } = await previewProjection({
       key: "a",
       data,
       dim,
@@ -108,9 +120,34 @@ describe("the preview session (#327)", () => {
     const b = blobs(70);
     const p = { nNeighbors: 10, minDist: 0.1, nEpochs: 20, seed: 1 };
     await previewProjection({ key: "a", ...a, params: p });
-    const xy = await previewProjection({ key: "b", ...b, params: p });
+    const { xy } = await previewProjection({ key: "b", ...b, params: p });
     expect(xy.length).toBe(2 * b.n);
     expect(previewStats().builds).toBe(2);
+  });
+
+  it("reports whether the call had to build the graph", async () => {
+    // The client thresholds its live/Apply decision on `ms`, and a cold call's
+    // ms is graph-build + layout — a cost that never recurs. Measured on the
+    // real library: 438ms cold, 127ms warm. Without this flag the first
+    // preview would disqualify live mode permanently.
+    const { data, dim, n } = blobs(60);
+    const p = { nNeighbors: 10, minDist: 0.1, nEpochs: 20, seed: 1 };
+    const first = await previewProjection({
+      key: "a",
+      data,
+      dim,
+      n,
+      params: p,
+    });
+    expect(first.warm).toBe(false);
+    const again = await previewProjection({
+      key: "a",
+      data,
+      dim,
+      n,
+      params: p,
+    });
+    expect(again.warm).toBe(true);
   });
 
   it("refuses a library too small to graph, rather than returning a blob", async () => {

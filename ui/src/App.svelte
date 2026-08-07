@@ -2846,10 +2846,12 @@
         return false;
       }
       mapNotice = "";
-      // The SERVER's measurement, not the round trip: what decides whether to
-      // stay live is the work, and on a loopback the difference is noise
-      // anyway — but the server's number is the honest one to threshold on.
-      mapLastMs = body.ms ?? Math.round(performance.now() - t0);
+      // ONLY a warm preview may move the threshold. A cold one paid to build
+      // the neighbour graph — 438 ms against 127 ms warm on the real library —
+      // and thresholding on that would drop the panel out of live mode using
+      // a cost that never recurs. Caught by driving the real app, not by a
+      // test: both numbers looked fine in isolation.
+      if (body.warm) mapLastMs = body.ms ?? Math.round(performance.now() - t0);
       // Positions changed; everything else about a person did not. Merging
       // rather than replacing keeps names and crops without a second fetch.
       const by = new Map(mapPoints.map((p) => [p.personId, p]));
@@ -2891,10 +2893,6 @@
         return false;
       }
       if (body.jobId) await waitForJob(body.jobId);
-      // The first measurement the live boundary can use. Until a map has been
-      // built once, `canGoLive(null)` is false and the slider stays on Apply —
-      // deliberately, since optimism here locks up a large library.
-      mapLastMs = Math.round(performance.now() - t0);
       await loadFaceMap(params);
       await loadMapOptions(params);
       return true;

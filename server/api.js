@@ -2710,7 +2710,7 @@ export function registerApi(app, { ml } = {}) {
 
     const t0 = Date.now();
     try {
-      const xy = await previewProjection({
+      const { xy, warm } = await previewProjection({
         // The member SET is what the graph was built from, so the key has to
         // change whenever it does — the same rule #325 was about, applied to a
         // cache that is in memory and would fail far more quietly.
@@ -2728,10 +2728,12 @@ export function registerApi(app, { ml } = {}) {
           y: xy[i * 2 + 1],
         };
       }
-      // `ms` is how the client decides whether to keep following the slider.
-      // Measured per request rather than derived from a member count, so it
-      // stays right on a slow machine and a fast one.
-      res.json({ points, members, ms: Date.now() - t0 });
+      // `ms` is how the client decides whether to keep following the slider,
+      // and `warm` is what makes that number mean anything. A COLD request
+      // paid for the neighbour graph — 438 ms against 127 ms warm, measured on
+      // the real library — so thresholding on it would disqualify live mode
+      // using the one cost that never recurs.
+      res.json({ points, members, ms: Date.now() - t0, warm });
     } catch (e) {
       res.status(500).json({ error: String(e?.message ?? e) });
     }
