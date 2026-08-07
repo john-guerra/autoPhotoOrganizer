@@ -316,11 +316,13 @@ message**:
      cannot both run. `electron:dev` starts its own Vite, and if 5173 is taken
      Vite silently moves to 5174 while Electron's dev URL stays 5173 — so the
      window loads nothing and the only clue is a port line buried in the log.
-   - **It needs the NODE ABI, not the Electron one.** In dev mode Electron only
-     loads the Vite URL; the Express server stays a separate Node process. If
-     an `electron:build:*` left better-sqlite3 built for Electron, run
-     `npm run rebuild:node` first. Check with:
+   - **The ABI no longer bites, as of better-sqlite3 13 (2.21.0).** It moved to
+     the N-API, so one binary serves Node and Electron and an interrupted
+     `electron:build:*` can no longer strand you — this used to be the thing
+     that broke `npm run dev` and every test. Still worth one line if a
+     database error looks like a binding error, since it is free:
      `node -e "const D=require('better-sqlite3'); new D(':memory:').prepare('select 1').get()"`
+     Full story, and why `rebuild:node` is kept anyway → `docs/AGENT-NOTES.md`.
 
    Use `PORT=<n> npm run dev` only for your OWN checks — curling a route,
    driving it with a browser tool — never as what you hand him.
