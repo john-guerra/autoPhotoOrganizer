@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   alignTo,
+  similarityFrom,
+  applySimilarity,
   easeInOut,
   delayFraction,
   progressAt,
@@ -183,5 +185,50 @@ describe("the camera lead-in (#327)", () => {
     // sets off, so the user is looking at the right place already.
     expect(FIT_MS).toBeGreaterThan(0);
     expect(FIT_MS).toBeLessThan(TWEEN_MS);
+  });
+});
+
+describe("aligning from a SUBSET (#327)", () => {
+  it("measures on the pairs and applies to everyone", () => {
+    // Changing the minimum faces adds people. The alignment can only be
+    // measured on the ones that existed before, but it has to move ALL of
+    // them — otherwise the newcomers sit in the raw, unrotated frame while
+    // everyone else is in the display frame.
+    const rotated = transform(BASE, { theta: 0.8, scale: 3, dx: 12 });
+    // Pair only the first three points.
+    const pairPrev = BASE.slice(0, 6);
+    const pairNext = rotated.slice(0, 6);
+    const T = similarityFrom(pairPrev, pairNext);
+    const all = applySimilarity(rotated, T);
+    // Every point, paired or not, lands back on the original.
+    expect(rms(BASE, all)).toBeLessThan(1e-3);
+  });
+
+  it("is not fooled by newcomers standing in for themselves", () => {
+    // The bug this replaced: unpaired points were given their own NEW position
+    // as their "previous" one, which drags the fit towards doing nothing. Here
+    // most points are new, and the three real pairs still determine the
+    // transform.
+    const rotated = transform(BASE, { theta: 1.2, scale: 2 });
+    const naive = alignTo(
+      // what the old code effectively passed: pairs for 3, identity for 3
+      Float32Array.from([...BASE.slice(0, 6), ...rotated.slice(6)]),
+      rotated
+    );
+    const T = similarityFrom(BASE.slice(0, 6), rotated.slice(0, 6));
+    const proper = applySimilarity(rotated, T);
+    expect(rms(BASE, proper)).toBeLessThan(rms(BASE, naive));
+  });
+
+  it("returns null rather than a bogus transform when nothing pairs", () => {
+    expect(similarityFrom(new Float32Array(0), new Float32Array(0))).toBe(null);
+    expect(
+      similarityFrom(Float32Array.from([1, 2]), Float32Array.from([3, 4]))
+    ).toBe(null);
+  });
+
+  it("passes points through unchanged when there is no transform", () => {
+    const xy = Float32Array.from([1, 2, 3, 4]);
+    expect([...applySimilarity(xy, null)]).toEqual([1, 2, 3, 4]);
   });
 });

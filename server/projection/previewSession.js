@@ -22,19 +22,25 @@
  */
 import { Worker } from "node:worker_threads";
 import { MAX_OLD_GENERATION_MB } from "./runProjection.js";
+import { MAX_N_NEIGHBORS } from "./algorithms.js";
 
 const WORKER_URL = new URL("./previewWorker.js", import.meta.url);
 
 /**
- * The k the neighbour graph is built at.
+ * The k the neighbour graph is built at — the SCHEMA'S CEILING, deliberately.
  *
- * `nNeighbors` maxes at 200 in the schema, but k dominates both build time and
- * memory, and a preview exists to FIND a value rather than to explore the
- * extremes — John's own picks across five photo scopes landed between 15 and 36
- * (#326). 60 covers that with headroom. A request above the cap is clamped in
- * the worker; Apply runs cold and honours the real number.
+ * It was 60 for a while, on the reasoning that a preview exists to find a value
+ * rather than to explore extremes. That was wrong for a reason worth writing
+ * down: a preview capped below the slider silently shows a different map from
+ * the one Apply would produce, so dragging past the cap changes nothing on
+ * screen and then the map jumps when you commit. That is exactly the #325
+ * failure family.
+ *
+ * The cost is bounded anyway. `Math.min(maxK, n - 1)` means a small library
+ * never pays for 300, and a library big enough for a k=300 graph to hurt is one
+ * where `canGoLive` has already refused to preview at all.
  */
-export const MAX_PREVIEW_K = 60;
+export const MAX_PREVIEW_K = MAX_N_NEIGHBORS;
 
 /** How long an idle session keeps its graph resident. */
 export const IDLE_MS = 120_000;

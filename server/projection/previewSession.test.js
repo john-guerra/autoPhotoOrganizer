@@ -17,6 +17,7 @@ import {
   _resetPreviewForTest,
   MAX_PREVIEW_K,
 } from "./previewSession.js";
+import { MAX_N_NEIGHBORS } from "./algorithms.js";
 
 afterEach(async () => {
   await _resetPreviewForTest();
@@ -163,7 +164,10 @@ describe("the preview session (#327)", () => {
     ).rejects.toThrow(/too few/i);
   });
 
-  it("caps the graph at MAX_PREVIEW_K so one build serves the whole slider", () => {
-    expect(MAX_PREVIEW_K).toBeGreaterThanOrEqual(60);
+  it("builds the graph at the SLIDER'S ceiling, so one build serves all of it", () => {
+    // Not "at least 60". A cap below the schema's max means dragging past it
+    // changes nothing on screen and the map jumps when you press Apply — a
+    // preview that is not the thing it previews (#325's family).
+    expect(MAX_PREVIEW_K).toBe(MAX_N_NEIGHBORS);
   });
 });

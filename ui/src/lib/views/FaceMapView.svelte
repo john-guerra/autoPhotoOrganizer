@@ -30,7 +30,8 @@
   import { loadSetting, saveSetting } from "../settings.js";
   import ParamSlider from "../ParamSlider.svelte";
   import {
-    alignTo,
+    similarityFrom,
+    applySimilarity,
     delayFraction,
     progressAt,
     lerpTransform,
@@ -187,9 +188,15 @@
         raw[i * 2 + 1] = pts[i].y;
       }
 
+      // Enough PAIRED points to measure an alignment from — not a share of
+      // the new set. Changing the minimum faces can more than double the map
+      // (76 people at 5, 258 at 2), and a "half the points must be familiar"
+      // rule silently refused to animate exactly the change that moves most.
+      // Newcomers do not need a previous position; they appear where they
+      // belong.
       let known = 0;
       for (const p of pts) if (lastKeyed.has(p.personId)) known++;
-      const worthTweening = n >= 2 && known >= n * 0.5 && !reduceMotion;
+      const worthTweening = n >= 2 && known >= 2 && !reduceMotion;
 
       cancelAnimationFrame(animRaf);
 
@@ -202,14 +209,22 @@
       }
 
       // Align onto where the map already is, so only real change animates
-      // rather than an arbitrary spin and rescale.
-      const prev = new Float32Array(n * 2);
+      // rather than an arbitrary spin and rescale. Measured on the PAIRED
+      // points alone — including a newcomer with its own new position as its
+      // "previous" one would bias the fit towards the identity transform.
+      const pairPrev = new Float32Array(known * 2);
+      const pairNext = new Float32Array(known * 2);
+      let k = 0;
       for (let i = 0; i < n; i++) {
         const was = lastKeyed.get(pts[i].personId);
-        prev[i * 2] = was ? was[0] : pts[i].x;
-        prev[i * 2 + 1] = was ? was[1] : pts[i].y;
+        if (!was) continue;
+        pairPrev[k * 2] = was[0];
+        pairPrev[k * 2 + 1] = was[1];
+        pairNext[k * 2] = raw[i * 2];
+        pairNext[k * 2 + 1] = raw[i * 2 + 1];
+        k++;
       }
-      const aligned = alignTo(prev, raw);
+      const aligned = applySimilarity(raw, similarityFrom(pairPrev, pairNext));
 
       const from = new Float32Array(n * 2);
       const delay = new Float32Array(n);
