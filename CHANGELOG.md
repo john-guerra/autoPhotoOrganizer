@@ -33,6 +33,10 @@ feature you had to already understand to one you can explore.
   throughout (#279, #257).
 - Security: pinned a patched `js-yaml` inside the auto-updater, closing a
   high-severity advisory with no upstream fix (#338).
+- Internal: better-sqlite3 moved to 13, which switches it to the N-API — one
+  binary now serves both Node and Electron, so the rebuild dance that could
+  strand a half-finished packaged build is gone. Dependabot also now opens its
+  PRs against `testing` rather than the release line.
 
 ## 2.20.9
 

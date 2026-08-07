@@ -354,13 +354,19 @@ describe("better-sqlite3 opens from inside a WORKER in an asar (#282 step 4)", (
    * and runs a statement.
    */
   const binary = electronBinary();
-  // better-sqlite3 plus the two packages it REQUIRES at runtime. They are
-  // hoisted to the top level of node_modules in a real install, so copying
-  // only better-sqlite3 produces "Cannot find module 'bindings'" — a probe
-  // failure that looks exactly like the thing being tested and is not.
-  // (`prebuild-install` is a dependency but an install-time one; nothing
-  // requires it at runtime.)
-  const NEEDED = ["better-sqlite3", "bindings", "file-uri-to-path"];
+  // Everything better-sqlite3 REQUIRES at runtime, because these are copied
+  // into the miniature asar and a missing one produces "Cannot find module" —
+  // a probe failure that looks exactly like the thing being tested and is not.
+  //
+  // As of better-sqlite3 13 that list is EMPTY. 12.x resolved its binary
+  // through `bindings` (which pulls `file-uri-to-path`); 13 moved to the N-API
+  // and loads `prebuilds/<platform>-<arch>.node` directly, so both packages
+  // are gone from node_modules entirely. They were left in this array for one
+  // release and the effect was the failure mode this repo keeps meeting:
+  // `haveAll` went false, the probe SKIPPED, and the skip is indistinguishable
+  // from a pass unless you read the count. `node-addon-api` is headers for
+  // `binding.gyp`, not a runtime require.
+  const NEEDED = ["better-sqlite3"];
   const srcOf = (name) =>
     new URL(`../../node_modules/${name}`, import.meta.url).pathname;
   const haveAll = NEEDED.every((n) => existsSync(srcOf(n)));
