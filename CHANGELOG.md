@@ -19,6 +19,8 @@ user-facing — what you can now do, not how it's built.
 - **Neighbours now defaults to 30.** Picked from 40 real projections of your own
   library across five albums, rather than from one screenshot — and a fresh
   comparison did not reproduce the old 50 (#326).
+- Security: pinned a patched `js-yaml` inside the auto-updater, closing a
+  high-severity advisory that had no upstream fix available (#338).
 
 ## 2.20.5
 
@@ -37,7 +39,6 @@ user-facing — what you can now do, not how it's built.
   success when it was reopened after failing validation (#323). The
   2026-08-05 handoff note is retired, its one durable lesson promoted into
   `AGENT-NOTES.md`. Nothing user-facing.
-
 
 ## 2.20.2
 
