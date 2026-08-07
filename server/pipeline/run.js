@@ -185,6 +185,10 @@ export async function runPipeline({
     // Park here if something higher-priority is waiting (#257). At the TOP of
     // the loop, so a preemption costs at most the cohort already in flight.
     await checkpoint();
+    // The cancel may have arrived while we were parked, and `checkpoint()`
+    // returns rather than throwing so that THIS loop keeps its own cooperative
+    // shape: break, and report the partial counts below (#344).
+    if (signal?.aborted) break;
 
     const live = enabled.filter((s) => !stalled.some((x) => x.id === s.id));
     if (!live.length) break;

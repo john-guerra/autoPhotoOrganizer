@@ -169,6 +169,13 @@ export async function runSweep(
     // BEFORE `idle()`: a preempted sweep should stand aside immediately rather
     // than first waiting for the user to stop interacting.
     await checkpoint();
+    // AGAIN, because the cancel may have arrived while we were parked (#344).
+    // `checkpoint()` returns rather than throwing on a cancelled run — it does
+    // not get to decide what stopping means — so without this the sweep would
+    // fall through to a whole further batch (idle, nextBatch, process) before
+    // the check at the top of the loop came round, making a parked cancel
+    // unbounded where a running one costs at most the batch in flight.
+    abortIfCanceled();
     // Let the user go first. A full-library sweep will happily starve the
     // thumbnails the user is actually waiting on (measured: 15ms -> 90ms, tiles
     // abandoned mid-scroll). State-driven, not timer-driven — see
