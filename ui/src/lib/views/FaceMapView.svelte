@@ -314,15 +314,52 @@
   });
 
   let transform = $state({ k: 1, tx: 0, ty: 0 });
-  /** Selected point INDICES — the canvas's currency. */
-  let selected = $state(new Set());
+  /**
+   * The selection, keyed by personId — NOT by index.
+   *
+   * The canvas's currency is indices (it draws packed arrays), and this used to
+   * be stored that way to match. That is only safe while `shown` never changes
+   * under a live selection, and it changes on two ordinary paths:
+   *
+   *  - **a filter change**, which re-filters `points` into a different subset;
+   *  - **an automatic rebuild**, which `minFaces` and `algorithm` now trigger
+   *    by themselves (#327). The manual Build button clears the selection
+   *    first; the automatic path had no reason to, and that asymmetry is the
+   *    bug — index 2 in the new layout is a different human.
+   *
+   * The failure was silent and destructive in the way that matters: the tray
+   * kept showing "3 people", Merge stayed enabled, and it merged whoever now
+   * occupied those slots. Only a NAME clash would have refused it, so the
+   * unnamed people this view exists to tidy up were exactly the ones at risk.
+   *
+   * Keying by identity also earns something the index version could not:
+   * UI-CONTRACTS §1 says a selection SURVIVES a filter change, and now it does
+   * — narrow the view, and the people you picked are still picked.
+   */
+  let selectedIds = $state(new Set());
+  /** The same selection as INDICES, for the canvas. Derived, never stored. */
+  const selected = $derived(
+    new Set(
+      shown.reduce((acc, p, i) => {
+        if (selectedIds.has(p.personId)) acc.push(i);
+        return acc;
+      }, [])
+    )
+  );
   let merging = $state(false);
   let nameDraft = $state("");
   let nameChoices = $state(null);
   let lastUndo = $state(null);
 
   const n = (v) => (v ?? 0).toLocaleString();
-  const chosen = $derived([...selected].map((i) => shown[i]).filter(Boolean));
+  /**
+   * The selected PEOPLE.
+   *
+   * Filtered through `shown`, so someone the current filter hides is not
+   * silently merged: they stay in `selectedIds` and come back when the filter
+   * widens, but they are not part of what a Merge press acts on.
+   */
+  const chosen = $derived(shown.filter((p) => selectedIds.has(p.personId)));
   const chosenFaces = $derived(chosen.reduce((s, p) => s + (p.faces || 0), 0));
   const chosenNames = $derived([
     ...new Set(chosen.map((p) => p.name).filter((x) => x && x.trim())),
@@ -567,30 +604,53 @@
     // The panel STAYS OPEN. Closing it on Apply meant every rebuild cost you
     // your place in the settings you were tuning — and tuning is the whole
     // point of the panel (#327).
-    selected = new Set();
+    //
+    // The selection is NO LONGER cleared here. It is keyed by personId, so it
+    // survives the rebuild intact and lands on the same people wherever they
+    // end up in the new layout — which is what someone who has just spent a
+    // minute lassoing wanted. Clearing was only ever protection against the
+    // index bug above.
     onrun?.(currentParams());
   }
 
   // --- selection -----------------------------------------------------------
+  //
+  // The canvas hands back INDICES into `shown`; the selection stores
+  // personIds. These three functions are the boundary, and it is deliberately
+  // the only place the two currencies meet.
+  const idAt = (i) => shown[i]?.personId;
+
   function onLasso(indices, mods) {
     // The pure module owns the set arithmetic (shift adds, alt subtracts) so
     // the rule is unit-tested rather than re-derived here.
-    const next = new Set(mods.alt ? selected : mods.shift ? selected : []);
-    if (mods.alt) for (const i of indices) next.delete(i);
-    else for (const i of indices) next.add(i);
-    selected = next;
+    const next = new Set(mods.alt || mods.shift ? selectedIds : []);
+    for (const i of indices) {
+      const id = idAt(i);
+      if (id == null) continue;
+      if (mods.alt) next.delete(id);
+      else next.add(id);
+    }
+    selectedIds = next;
     nameChoices = null;
     if (chosenNames.length === 1) nameDraft = chosenNames[0];
   }
 
-  function dropFromTray(index) {
-    const next = new Set(selected);
-    next.delete(index);
-    selected = next;
+  /**
+   * Drop one person from the tray.
+   *
+   * By personId, because the tray is a list of PEOPLE. It used to take a
+   * position and index back through `[...selected][i]`, which quietly required
+   * the tray's order and the selection set's iteration order to agree — true
+   * at the time, and a trap for whoever next changed how either is built.
+   */
+  function deselect(personId) {
+    const next = new Set(selectedIds);
+    next.delete(personId);
+    selectedIds = next;
   }
 
   function clearSelection() {
-    selected = new Set();
+    selectedIds = new Set();
     nameChoices = null;
     nameDraft = "";
   }
@@ -1024,14 +1084,14 @@
       </div>
 
       <ul class="tray-list">
-        {#each chosen as p, i (p.personId)}
+        {#each chosen as p (p.personId)}
           <li>
             <button
               class="chip"
               data-testid="tray-chip"
               data-person={p.personId}
               title={`Remove ${p.name || "this person"} from the selection`}
-              onclick={() => dropFromTray([...selected][i])}
+              onclick={() => deselect(p.personId)}
             >
               {#if crop(p)}
                 <img src={crop(p)} alt="" loading="lazy" />

@@ -1,6 +1,21 @@
 import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
 import { buildFilter, ALLOWED_ORIENTATIONS, ALLOWED_KINDS } from "./filters.js";
+import { dateAttrExpr } from "./sort.js";
+
+/**
+ * The date exprs, taken FROM sort.js rather than spelled out here.
+ *
+ * These three tests used to hardcode "COALESCE(photos.taken_at, photos.btime,
+ * photos.mtime)". That pins the wrong thing: what matters is that the filter
+ * uses the SAME date notion as the sort and the grouping, not that the string
+ * has a particular shape. Spelling it out meant a legitimate change to the
+ * shared expression (#349's sentinel guard) broke three tests that had no
+ * opinion about sentinels, and the temptation is then to paste the new string
+ * in and move on -- which is how the filter and the sort drift apart for real.
+ */
+const TAKEN = dateAttrExpr("date_taken");
+const CREATED = dateAttrExpr("date_created");
 
 /** A tiny real database — the text facet is about what SQLite MATCHES, so
  *  asserting on the SQL string would prove nothing about the search box. */
@@ -199,21 +214,15 @@ describe("buildFilter", () => {
 
   it("emits a COALESCE(taken_at,btime,mtime) range for dateFrom/dateTo", () => {
     const both = buildFilter({ dateFrom: 1000, dateTo: 2000 });
-    expect(both.sql).toBe(
-      "COALESCE(photos.taken_at, photos.btime, photos.mtime) >= ? AND COALESCE(photos.taken_at, photos.btime, photos.mtime) <= ?"
-    );
+    expect(both.sql).toBe(`${TAKEN} >= ? AND ${TAKEN} <= ?`);
     expect(both.params).toEqual([1000, 2000]);
 
     const fromOnly = buildFilter({ dateFrom: 1000 });
-    expect(fromOnly.sql).toBe(
-      "COALESCE(photos.taken_at, photos.btime, photos.mtime) >= ?"
-    );
+    expect(fromOnly.sql).toBe(`${TAKEN} >= ?`);
     expect(fromOnly.params).toEqual([1000]);
 
     const toOnly = buildFilter({ dateTo: 2000 });
-    expect(toOnly.sql).toBe(
-      "COALESCE(photos.taken_at, photos.btime, photos.mtime) <= ?"
-    );
+    expect(toOnly.sql).toBe(`${TAKEN} <= ?`);
     expect(toOnly.params).toEqual([2000]);
 
     expect(buildFilter({ dateFrom: null, dateTo: null })).toEqual({
@@ -225,7 +234,7 @@ describe("buildFilter", () => {
   it("AND-composes the time range with a rating facet, params in order", () => {
     const f = buildFilter({ minRating: 4, dateFrom: 1000, dateTo: 2000 });
     expect(f.sql).toBe(
-      "photos.rating >= ? AND COALESCE(photos.taken_at, photos.btime, photos.mtime) >= ? AND COALESCE(photos.taken_at, photos.btime, photos.mtime) <= ?"
+      `photos.rating >= ? AND ${TAKEN} >= ? AND ${TAKEN} <= ?`
     );
     expect(f.params).toEqual([4, 1000, 2000]);
   });
@@ -235,11 +244,11 @@ describe("buildFilter", () => {
       "photos.mtime >= ?"
     );
     expect(buildFilter({ dateTo: 2000, dateAttr: "date_created" }).sql).toBe(
-      "COALESCE(photos.btime, photos.mtime) <= ?"
+      `${CREATED} <= ?`
     );
     // Default / unknown attr falls back to date_taken (EXIF-created).
     expect(buildFilter({ dateFrom: 1000, dateAttr: "name" }).sql).toBe(
-      "COALESCE(photos.taken_at, photos.btime, photos.mtime) >= ?"
+      `${TAKEN} >= ?`
     );
     // dateAttr alone (no bounds) constrains nothing.
     expect(buildFilter({ dateAttr: "date_modified" })).toEqual({

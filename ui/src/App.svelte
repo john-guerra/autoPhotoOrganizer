@@ -7099,6 +7099,7 @@
     showDetails={showLoupeDetails}
     showFilmstrip={showLoupeFilmstrip}
     thumbSize={filmstripThumbSize}
+    sortBy={sort.by}
     oncontextmenu={(d) => openContextMenu(d.x, d.y, selected)}
     onclose={closeLoupe}
     onrate={(v) => rate(selected, v)}

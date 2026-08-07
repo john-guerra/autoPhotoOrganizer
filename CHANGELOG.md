@@ -6,7 +6,7 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
-## 2.21.1
+## 2.21.5
 
 - **Stop actually stops a job that is waiting its turn.** A background scan
   that had stood aside for something you asked for would accept the Stop
@@ -23,6 +23,24 @@ user-facing — what you can now do, not how it's built.
   Preview and Apply now accept exactly the same libraries (#345).
 - **A preview interrupted by a change of settings says so**, instead of
   reporting an internal worker error for something that is not an error (#345).
+
+## 2.21.3
+
+- **Photos no longer pile into 1984.** Sorting or grouping by Created put
+  1,557 of your photos — everything copied off a phone or a card — into a
+  single 1984 group, because macOS answers "this file has no creation date"
+  with the day the Macintosh was launched, and we took it for a date. That
+  value is now recognised for what it is and the file's modified date is used
+  instead. Your photos move to the right year with no rescan (#349).
+
+## 2.21.2
+
+- **The loupe now shows all three of a photo's dates**, not just the one it
+  picked: the EXIF capture date, the file's creation date and its modified
+  date, side by side, with the one your current sort is actually using marked.
+  A date that cannot be real — like the 1984 macOS writes when a file has no
+  creation date of its own — is flagged in amber and says so, which is how a
+  folder of 2025 phone photos turns out to be sorting into 1984 (#349).
 
 ## 2.21.0
 
@@ -49,6 +67,10 @@ feature you had to already understand to one you can explore.
   composed. The big run now parks at its next batch boundary, yours runs, and
   the big one resumes with nothing recomputed — both visible in the jobs panel
   throughout (#279, #257).
+- **Your Face Map selection now follows the people, not their positions**, so a
+  rebuild or a filter change can no longer leave the tray holding someone you
+  never picked — and pressing Build keeps your selection instead of clearing it
+  (#327).
 - Security: pinned a patched `js-yaml` inside the auto-updater, closing a
   high-severity advisory with no upstream fix (#338).
 - Internal: better-sqlite3 moved to 13, which switches it to the N-API — one
