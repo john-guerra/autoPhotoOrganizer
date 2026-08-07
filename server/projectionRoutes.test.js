@@ -346,10 +346,25 @@ describe("POST /api/projections/preview (#327)", () => {
   });
 
   it("refuses a too-small library specifically", async () => {
-    seedPeople(3);
+    // TWO, not three. This asserted three until #345: the route refused below
+    // 5 while `POST /api/projections` refused below 3, so a 3-4 person library
+    // could commit a map the slider 400'd on every single time — at the one
+    // size where looking before committing matters most. Both now refuse at
+    // the same place, from one constant (`MIN_MEMBERS`).
+    seedPeople(2);
     const r = await preview({ minFaces: 2, nEpochs: 20 });
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/minimum faces/i);
+  });
+
+  it("previews the smallest library Apply will accept (#345)", async () => {
+    // The other half of the same rule, and the half a threshold change breaks
+    // silently: refusing correctly is worthless if the size just above the
+    // boundary is refused too.
+    seedPeople(3);
+    const r = await preview({ minFaces: 2, nEpochs: 20 });
+    expect(r.status).toBe(200);
+    expect(r.body.points).toHaveLength(3);
   });
 });
 

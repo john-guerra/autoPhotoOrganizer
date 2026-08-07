@@ -47,6 +47,42 @@ export const TSNE_MAX_MEMBERS = 6000;
 export const MAX_EPOCHS = 2000;
 
 /**
+ * The fewest people worth projecting, for PREVIEW AND APPLY ALIKE (#345).
+ *
+ * One constant because they had drifted: Apply refused below 3 and the preview
+ * below 5, so a 3-4 person library could commit a map it was never allowed to
+ * preview — the slider 400'd every time, at exactly the size where looking
+ * before committing matters most. Neither number was a technical floor;
+ * measured against the real worker, n=3 and n=4 project fine and only n=2
+ * raises umap-js's "Not enough data points" (it needs nNeighbors >= 2, and the
+ * workers clamp k to n - 1). So this is a judgement about what deserves to be
+ * called a map, and a judgement is exactly the kind of thing that must not
+ * exist twice.
+ */
+export const MIN_MEMBERS = 3;
+
+/**
+ * Why `members` is too few to map, or null when it is enough.
+ *
+ * Returns the SENTENCE rather than a boolean, because the two cases need
+ * different advice: nobody qualifying means "group faces first", while two
+ * people qualifying means "lower the minimum". A generic refusal at this
+ * boundary leaves the user with a dead button and no next step.
+ *
+ * @param {number} members
+ * @param {number} minFaces
+ * @returns {string|null}
+ */
+export function tooFewMembers(members, minFaces) {
+  if (members >= MIN_MEMBERS) return null;
+  if (members === 0) {
+    return `Nobody has ${minFaces} or more faces yet. Group faces first, or lower the minimum.`;
+  }
+  const has = members === 1 ? "person has" : "people have";
+  return `Only ${members} ${has} ${minFaces} or more faces — that is not a map. Lower the minimum faces.`;
+}
+
+/**
  * The largest neighbourhood the slider offers.
  *
  * Exported so the preview session builds its graph at the SAME ceiling — a

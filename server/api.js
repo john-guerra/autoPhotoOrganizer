@@ -142,6 +142,7 @@ import {
   isOfferable,
   defaultParams,
   allParamSpecs,
+  tooFewMembers,
 } from "./projection/algorithms.js";
 import { runProjection } from "./projection/runProjection.js";
 import { previewProjection } from "./projection/previewSession.js";
@@ -289,6 +290,7 @@ import { sampleOffsets } from "./db/sampleGroup.js";
 import { setKeepScope, keepScopeIds } from "./db/keepScope.js";
 import { createManualStack, dissolveStack } from "./db/manualStacks.js";
 import { registry } from "./jobs/registry.js";
+import { runFor } from "./jobs/scheduledJob.js";
 import { createSemaphore } from "./lib/semaphore.js";
 import {
   classifyMissing,
@@ -297,26 +299,6 @@ import {
   dismissPhotos,
   carryMetadata,
 } from "./db/missing.js";
-
-/**
- * What a parked job says about why it is parked.
- *
- * Every scheduler pause used to read "Waiting — a scoped request is running
- * first", which tells the user the one thing they can already see (it is not
- * moving) and withholds the one thing they cannot (what it is waiting FOR, and
- * therefore roughly how long). A bar that has not moved in ten minutes with no
- * named cause is indistinguishable from a hang, which is the whole of #208.
- *
- * `blockedBy` is null when the run ahead carries no label — say "another
- * request" rather than inventing a name for it.
- *
- * @param {string|null} blockedBy
- */
-function waitingFor(blockedBy) {
-  return blockedBy
-    ? `Waiting for “${blockedBy}” to finish — it resumes on its own.`
-    : "Waiting for another request to finish — it resumes on its own.";
-}
 
 /** Kick the background hasher with a JobsPanel entry, so hours of full-file
  * SHA-1 on a 114k library are visible and cancelable rather than invisible.
@@ -469,12 +451,9 @@ function kickEmbedSweep(
         // request blocks nobody, which is the property a module-level boolean
         // could not have.
         resource: RESOURCE.ONNX,
-        label: job.label,
-        // Say WHY it stopped rather than leaving a bar that has not moved to
-        // be interpreted — starvation is legitimate here, silence is not.
-        onPause: (blockedBy) =>
-          registry.pause(job.id, waitingFor(blockedBy), { parked: true }),
-        onResume: () => registry.resume(job.id),
+        // Label, cancellation signal and the two park callbacks — spread as one
+        // object so a submit cannot be half-wired (#344). See jobs/scheduledJob.js.
+        ...runFor(job),
         body: ({ checkpoint }) =>
           embedAllPending(db, {
             ml,
@@ -1988,10 +1967,7 @@ export function registerApi(app, { ml } = {}) {
         key: ids ? undefined : "backlog:faces",
         // Same lease as embedding — one ONNX child, one queue (#279).
         resource: RESOURCE.ONNX,
-        label: job.label,
-        onPause: (blockedBy) =>
-          registry.pause(job.id, waitingFor(blockedBy), { parked: true }),
-        onResume: () => registry.resume(job.id),
+        ...runFor(job),
         body: ({ checkpoint }) =>
           sweepFaces({
             db: getDb(),
@@ -2326,10 +2302,9 @@ export function registerApi(app, { ml } = {}) {
     withClusterLatch(async () => {
       const r = await scheduler.submit({
         priority: scopeIds ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
-        label: job.label,
-        onPause: (blockedBy) =>
-          registry.pause(job.id, waitingFor(blockedBy), { parked: true }),
-        onResume: () => registry.resume(job.id),
+        // Includes the signal `groupRemaining` also takes below, so Cancel
+        // reaches this run while it is parked and not only while it is running.
+        ...runFor(job),
         body: ({ checkpoint }) =>
           groupRemaining(db, modelId, {
             scopeIds,
@@ -2561,14 +2536,9 @@ export function registerApi(app, { ml } = {}) {
 
     // An empty or near-empty scope is refused SPECIFICALLY rather than run:
     // a job that starts and finishes in 40ms looks like the button misfired.
-    if (members < 3) {
-      return res.status(400).json({
-        error:
-          members === 0
-            ? `Nobody has ${params.minFaces} or more faces yet. Group faces first, or lower the minimum.`
-            : `Only ${members} ${members === 1 ? "person has" : "people have"} ${params.minFaces} or more faces — that is not a map. Lower the minimum faces.`,
-      });
-    }
+    // Shared with the preview route, so the two cannot drift again (#345).
+    const tooFew = tooFewMembers(members, params.minFaces);
+    if (tooFew) return res.status(400).json({ error: tooFew });
     if (!isOfferable(algorithm, members)) {
       const row = offerableAlgorithms(members).find((a) => a.id === algorithm);
       return res
@@ -2702,11 +2672,11 @@ export function registerApi(app, { ml } = {}) {
       return res.status(500).json({ error: String(e.message ?? e) });
     }
     const members = centroids.ids.length;
-    if (members < 5) {
-      return res.status(400).json({
-        error: `Only ${members} ${members === 1 ? "person has" : "people have"} ${params.minFaces} or more faces — lower the minimum faces.`,
-      });
-    }
+    // The SAME refusal as Apply below, from the same constant. This route used
+    // its own `< 5` while Apply refused below 3, so a 3-4 person library could
+    // commit a map it was never allowed to preview (#345).
+    const tooFew = tooFewMembers(members, params.minFaces);
+    if (tooFew) return res.status(400).json({ error: tooFew });
 
     const t0 = Date.now();
     try {
@@ -4370,10 +4340,9 @@ export function registerApi(app, { ml } = {}) {
       .submit({
         priority: scoped.ids ? PRIORITY.SCOPED : PRIORITY.BACKGROUND,
         key: scoped.ids ? undefined : "pipeline:all",
-        label: job.label,
-        onPause: (blockedBy) =>
-          registry.pause(job.id, waitingFor(blockedBy), { parked: true }),
-        onResume: () => registry.resume(job.id),
+        // Includes the signal `runPipeline` also takes below, so Cancel reaches
+        // this run while it is parked and not only while it is running.
+        ...runFor(job),
         body: ({ checkpoint }) =>
           runPipeline({
             db,

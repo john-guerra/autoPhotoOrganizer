@@ -151,17 +151,88 @@ describe("the preview session (#327)", () => {
     expect(again.warm).toBe(true);
   });
 
+  it("a second call DURING a cold build is not warm (#345)", async () => {
+    // `warm` decided "is there a session object for this key", and `start()`
+    // installs the session synchronously — before the graph exists. So a second
+    // preview arriving inside the ~200-450ms cold round trip (a pause-then-drag
+    // while judging the map) reported warm:true for a call whose latency is
+    // graph-build + BOTH layouts, queued behind the first on a single-threaded
+    // worker. `App.svelte` writes only warm timings into `mapLastMs`, so that
+    // one inflated number is exactly the one `canGoLive`'s 400ms threshold
+    // reads — and live mode turns itself off seconds after Apply.
+    //
+    // No timing anywhere: the two calls are started without awaiting the first,
+    // which is the interleaving itself rather than a race against the clock.
+    const { data, dim, n } = blobs(60);
+    const p = { nNeighbors: 10, minDist: 0.1, nEpochs: 20, seed: 1 };
+    const first = previewProjection({ key: "a", data, dim, n, params: p });
+    const second = previewProjection({ key: "a", data, dim, n, params: p });
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(a.warm).toBe(false);
+    expect(b.warm).toBe(false);
+    // Still ONE build: not-warm must not be confused with "rebuild the graph".
+    expect(previewStats().builds).toBe(1);
+    // And a call after the build really is warm, or the flag is just always
+    // false and the test above passes for nothing.
+    const third = await previewProjection({
+      key: "a",
+      data,
+      dim,
+      n,
+      params: p,
+    });
+    expect(third.warm).toBe(true);
+    expect(previewStats().builds).toBe(1);
+  });
+
+  it("a cold build replaced mid-flight says so, rather than reporting a worker exit code", async () => {
+    // `destroy()` rejects `pending`, which is still empty while the graph is
+    // building — so the first caller fell through to the worker's `exit`
+    // handler and got "preview worker exited with code 1" for something that is
+    // not an error at all: the user moved on to a different member set.
+    const a = blobs(60);
+    const b = blobs(70);
+    const p = { nNeighbors: 10, minDist: 0.1, nEpochs: 20, seed: 1 };
+    const first = previewProjection({ key: "a", ...a, params: p });
+    const second = previewProjection({ key: "b", ...b, params: p });
+
+    await expect(first).rejects.toThrow(/replaced/);
+    const { xy } = await second;
+    expect(xy.length).toBe(2 * b.n);
+  });
+
   it("refuses a library too small to graph, rather than returning a blob", async () => {
-    const { data, dim } = blobs(3);
+    // TWO, not three. umap-js needs nNeighbors >= 2 and the worker clamps k to
+    // n - 1, so this is where the machinery genuinely stops.
+    const { data, dim } = blobs(2);
     await expect(
       previewProjection({
         key: "tiny",
         data,
         dim,
-        n: 3,
+        n: 2,
         params: { nNeighbors: 10, minDist: 0.1, nEpochs: 5, seed: 1 },
       })
     ).rejects.toThrow(/too few/i);
+  });
+
+  it("previews anything Apply would accept — three people included (#345)", async () => {
+    // The preview refused below 5 while `POST /api/projections` refused below
+    // 3, so a 3-4 person library could commit a map it could never preview:
+    // the slider 400'd every time, at the one size where looking before
+    // committing matters most. A preview that refuses what Apply accepts is
+    // the one thing a preview must not do, so the boundary is Apply's.
+    const { data, dim, n } = blobs(3);
+    const { xy } = await previewProjection({
+      key: "three",
+      data,
+      dim,
+      n,
+      params: { nNeighbors: 10, minDist: 0.1, nEpochs: 20, seed: 1 },
+    });
+    expect(xy.length).toBe(2 * n);
+    expect([...xy].every(Number.isFinite)).toBe(true);
   });
 
   it("builds the graph at the SLIDER'S ceiling, so one build serves all of it", () => {

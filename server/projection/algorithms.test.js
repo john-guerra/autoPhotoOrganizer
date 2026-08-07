@@ -9,6 +9,8 @@ import {
   allParamSpecs,
   paramsFor,
   DEFAULT_MIN_FACES,
+  MIN_MEMBERS,
+  tooFewMembers,
 } from "./algorithms.js";
 
 describe("offerableAlgorithms (#232)", () => {
@@ -253,5 +255,28 @@ describe("UMAP's default neighbourhood (#326)", () => {
       "utf8"
     );
     expect(src).toMatch(/do not derive this from the member count/i);
+  });
+});
+
+describe("tooFewMembers — preview and Apply refuse at the SAME size (#345)", () => {
+  it("accepts every size Apply accepts, starting at three", () => {
+    // The bug was a preview that refused what Apply would run: 3-4 people
+    // could commit a map they could never look at first. One constant, so the
+    // question "is this enough to be a map?" has exactly one answer.
+    expect(MIN_MEMBERS).toBe(3);
+    for (const n of [3, 4, 5, 40]) expect(tooFewMembers(n, 5)).toBeNull();
+  });
+
+  it("refuses below it, and says what to DO about it", () => {
+    // Two different next steps, so a shared refusal must not flatten them into
+    // one sentence: nobody qualifying means the faces are not grouped yet,
+    // while two qualifying means the threshold is too high.
+    expect(tooFewMembers(0, 5)).toMatch(/group faces first/i);
+    expect(tooFewMembers(1, 5)).toMatch(/1 person has/);
+    expect(tooFewMembers(2, 5)).toMatch(/2 people have/);
+    for (const n of [0, 1, 2]) {
+      expect(tooFewMembers(n, 5)).toMatch(/lower the minimum/i);
+      expect(tooFewMembers(n, 5)).toContain("5");
+    }
   });
 });
