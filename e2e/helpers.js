@@ -276,6 +276,8 @@ export const faceMap = {
   members: (page) => page.locator('[data-testid="map-members"]'),
   /** One tuning control in the panel, by parameter name — the SLIDER (#327). */
   param: (page, key) => page.locator(`[data-testid="map-param-${key}"]`),
+  /** Which mode the panel is in: following the sliders, or waiting for Apply. */
+  liveHint: (page) => page.locator('[data-testid="map-live-hint"]'),
   /** The editable number beside that slider. A slider alone cannot express an
    *  exact value, and `<input type="number">` alone would not let you get from
    *  5 to 50 by typing — which is the annoyance that opened #327. */

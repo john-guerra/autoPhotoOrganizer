@@ -267,6 +267,43 @@ test.describe("face map @p1", () => {
     expect(errors).toEqual([]);
   });
 
+  test("dragging a slider moves the map, with no job and no stored run", async ({
+    page,
+  }) => {
+    // #327's payoff. The map is a canvas, so no other tier can see this at
+    // all — and the assertion is that the PIXELS changed, not that a request
+    // was sent, because a preview that fires and never reaches the canvas is
+    // exactly the "renders and does nothing" bug this file exists for.
+    const errors = trackPageErrors(page);
+    const previews = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/projections/preview")) previews.push(r.url());
+    });
+
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await faceMap.gear(page).click();
+
+    // The panel says which mode it is in, and this fixture is small enough to
+    // be live. A failure here means the machine got slower, not that the
+    // feature broke — which is the point of thresholding on measured latency.
+    await expect(faceMap.liveHint(page)).toContainText("follows the sliders");
+
+    const before = await faceMap.scatter(page).screenshot();
+    await faceMap.param(page, "nNeighbors").fill("8");
+    await faceMap.param(page, "nNeighbors").dispatchEvent("input");
+
+    await expect
+      .poll(
+        async () => (await faceMap.scatter(page).screenshot()).equals(before),
+        { timeout: 15_000 }
+      )
+      .toBe(false);
+    expect(previews.length).toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+  });
+
   // NOT tested here: that the panel's values survive a reload (#287).
   //
   // `openApp` registers `localStorage.clear()` through `addInitScript`, which

@@ -232,12 +232,16 @@
    * reactive statement. CLAUDE.md's first trap: a `$:`/`$effect` whose
    * dependencies include an object re-fires on every flush forever.
    */
+  /** Whether the sliders currently drive the map. Derived, so the hint and the
+   *  handler can never disagree about which mode the panel is in. */
+  const live = $derived(canGoLive(lastMs) && !!onpreview);
+
   let previewTimer = null;
   function onTune(key, value, { live }) {
     draft = { ...draft, [key]: value };
     saveSettings(draft);
     if (!live) return;
-    if (!canGoLive(lastMs) || !onpreview) return;
+    if (!live) return;
     clearTimeout(previewTimer);
     previewTimer = setTimeout(() => onpreview(currentParams()), 60);
   }
@@ -550,6 +554,20 @@
           {/if}
         </fieldset>
 
+        <!-- Say WHICH mode the panel is in. Without this, a map that does not
+             follow the slider reads as a broken control rather than as "this
+             library is big enough that it needs a press" (#327). -->
+        <p class="live-hint" data-testid="map-live-hint">
+          {#if live}
+            The map follows the sliders — about {Math.round(lastMs)}ms a change.
+          {:else if lastMs != null}
+            {Math.round(lastMs / 100) / 10}s a change, so the map waits for
+            Apply.
+          {:else}
+            Build the map once and the sliders go live if it is quick enough.
+          {/if}
+        </p>
+
         <button
           class="primary"
           data-testid="map-build"
@@ -801,6 +819,12 @@
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
+  }
+  .live-hint {
+    margin: 0;
+    font-size: 0.72rem;
+    color: #888;
+    line-height: 1.35;
   }
   .gear-panel {
     background: #171717;
