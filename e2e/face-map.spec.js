@@ -267,6 +267,36 @@ test.describe("face map @p1", () => {
     expect(errors).toEqual([]);
   });
 
+  test("a precise value can be typed, below the slider's own step", async ({
+    page,
+  }) => {
+    // #327: the number box carried the schema's step, so minDist — which steps
+    // by 0.05 — treated 0.0001 as invalid and the browser silently refused it.
+    // You could not get from 0.1 to 0.0001 by any amount of typing. The number
+    // box exists precisely to express what the slider cannot, so it takes
+    // `step="any"`; only the slider is stepped.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await faceMap.openGear(page);
+
+    // TYPED, not `fill`ed. `fill` sets the value straight onto the element and
+    // bypasses the keystroke path entirely — it passes with the bug still in
+    // place, which is how this test was decoration for one run.
+    // Cleared with `fill("")`, then TYPED. `fill` alone sets the value straight
+    // onto the element and bypasses the keystroke path — it passed with the bug
+    // still in place, which made this test decoration for one run. And a
+    // select-all keystroke is no good either: the app binds Cmd/Ctrl+A to
+    // selecting photos, so the field never gets selected.
+    const box = faceMap.paramNum(page, "minDist");
+    await box.fill("");
+    await box.pressSequentially("0.0001");
+    await box.blur();
+    await expect(faceMap.paramNum(page, "minDist")).toHaveValue("0.0001");
+    expect(errors).toEqual([]);
+  });
+
   test("dragging a slider moves the map, with no job and no stored run", async ({
     page,
   }) => {

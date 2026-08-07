@@ -19,6 +19,7 @@
    */
   import { untrack } from "svelte";
   import { faceCropUrl } from "../faceCropUrl.js";
+  import { isTypingTarget } from "../focus.js";
   import ScatterCanvas from "../scatter/ScatterCanvas.svelte";
   import {
     DEFAULT_MIN_RADIUS,
@@ -596,6 +597,13 @@
   }
 
   function onKey(e) {
+    // NOT while the user is typing. `0` is this view's "fit the map back into
+    // view" shortcut, and without this guard it ate every zero typed into the
+    // panel's boxes: "0.0001" arrived as ".1". The bug shipped with #232 and
+    // was unreachable until #327 put editable fields in the view — the same
+    // shape as culling.spec.js's "typing digits in a text field does not
+    // silently re-rate", which is why `isTypingTarget` already existed.
+    if (isTypingTarget(e.target)) return;
     // Declared in the registry's `keys`, so they appear in the shortcuts
     // overlay automatically and App does not answer them with a message about
     // photos.

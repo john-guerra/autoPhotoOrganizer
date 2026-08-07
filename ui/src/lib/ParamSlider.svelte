@@ -37,15 +37,41 @@
       oninput={(e) => oninput?.(clamp(e.currentTarget.value))}
       onchange={(e) => onchange?.(clamp(e.currentTarget.value))}
     />
+    <!-- A TEXT box, not `type="number"` (#327).
+         Two separate ways a number input refuses what you type, and both bit
+         John trying to get from 0.1 to 0.0001:
+
+           - it carries a step (minDist steps by 0.05), so a finer value is
+             invalid and the browser will not accept it;
+           - and while the content is invalid — including every intermediate
+             state on the way to a valid one — `.value` reads as the EMPTY
+             STRING, so the field silently empties instead of holding what you
+             typed.
+
+         `inputmode="decimal"` still brings up the numeric keypad. Parsing and
+         clamping is ours, which is the point: this box exists to express a
+         value the slider cannot. -->
     <input
       class="num"
-      type="number"
+      type="text"
+      inputmode="decimal"
+      autocomplete="off"
+      spellcheck="false"
+      aria-label={spec.label}
       data-testid={`map-param-${spec.key}-num`}
-      min={spec.min}
-      max={spec.max}
-      step={spec.step}
-      {value}
-      onchange={(e) => onchange?.(clamp(e.currentTarget.value))}
+      value={String(value)}
+      onchange={(e) => {
+        const raw = e.currentTarget.value.trim();
+        const n = Number(raw);
+        // Unreadable input reverts rather than silently becoming a default —
+        // a control that answers a typo with someone else's number is worse
+        // than one that refuses.
+        if (raw === "" || !Number.isFinite(n)) {
+          e.currentTarget.value = String(value);
+          return;
+        }
+        onchange?.(clamp(n));
+      }}
     />
   </span>
   <span class="tunable-help">{spec.help}</span>
@@ -72,7 +98,7 @@
   }
   .num {
     flex: 0 0 auto;
-    width: 6ch;
+    width: 7.5ch;
     font: inherit;
     font-size: 0.85rem;
     background: #111;
