@@ -527,6 +527,33 @@ Branch protection requires `check` and `e2e` (#330). Four consequences:
 - **CodeQL is advisory, not required.** That is #290, still undecided, and it
   also fails for pure infrastructure reasons (above).
 
+## CHECK THE BASE BRANCH before arming auto-merge on a PR you did not open
+
+`gh pr merge --auto` is the right habit, and it will happily merge a PR into
+the wrong branch without saying a word. **The repository's default branch is
+`main`**, so anything that opens a PR without naming a base gets the RELEASE
+line, not the trunk.
+
+Dependabot is the automated case and did exactly this: #333 and #334 targeted
+`main`, an agent armed auto-merge on both without looking, and they landed on
+the release line. Fixed at the source with `target-branch: "testing"` in
+`.github/dependabot.yml` (2.21.0) — but the habit generalises to any PR you did
+not open yourself:
+
+```bash
+gh pr view <N> --json baseRefName -q .baseRefName    # must say "testing"
+```
+
+Two reasons it matters, and the second is the one that bites late:
+
+- A change lands in the branch `release.yml` cuts `v*` builds from **without
+  passing through the trunk** at all.
+- **The promotion is a fast-forward.** `git merge --ff-only origin/testing`
+  fails the instant `main` holds a commit `testing` does not, so the damage
+  shows up at release time, in a command that has always worked. Recovery is a
+  back-merge of `main` into `testing`; check it worked with
+  `git merge-base --is-ancestor origin/main HEAD`.
+
 ## Where the deep context lives
 
 - Invariants, Svelte/DOM traps, feed-window transactions, usability & testing
