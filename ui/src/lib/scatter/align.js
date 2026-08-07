@@ -111,5 +111,78 @@ export function alignTo(prev, next) {
 export const easeInOut = (t) =>
   t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
 
-/** How long a parameter change takes to play out, in ms. */
+/** How long ONE point takes to travel, in ms. */
 export const TWEEN_MS = 450;
+
+/**
+ * How far apart the points start moving, in ms.
+ *
+ * d3's `.delay((d, i) => …)`, and the reason it is worth having: when several
+ * hundred dots set off at the same instant the eye sees one mass sliding and
+ * cannot follow any individual. Staggered, the movement reads as many separate
+ * things going many separate places, which is what actually happened.
+ */
+export const STAGGER_MS = 260;
+
+/** The whole animation, start to finish. */
+export const TOTAL_MS = TWEEN_MS + STAGGER_MS;
+
+/**
+ * When point `i` starts moving, as a fraction of `STAGGER_MS`.
+ *
+ * A HASH of the index rather than the index itself. Delaying by index makes a
+ * wave sweep across the map in whatever arbitrary order `persons.id` happens
+ * to be, which looks mechanical and implies an ordering that does not exist.
+ * Hashing scatters the starts while staying deterministic, so the same change
+ * always animates the same way.
+ *
+ * @param {number} i @param {number} n
+ * @returns {number} 0..1
+ */
+export function delayFraction(i, n) {
+  if (!Number.isFinite(i) || !Number.isFinite(n) || n <= 1) return 0;
+  // xorshift-ish integer hash; cheap and well spread for small i.
+  let h = (i + 1) * 2654435761;
+  h ^= h >>> 15;
+  h = Math.imul(h, 2246822519);
+  h ^= h >>> 13;
+  return ((h >>> 0) % 1000) / 1000;
+}
+
+/**
+ * How far through its own travel point `i` is.
+ *
+ * @param {number} elapsed ms since the animation began
+ * @param {number} delay ms this point waits before setting off
+ * @returns {number} 0..1, eased
+ */
+export function progressAt(elapsed, delay) {
+  const t = (elapsed - delay) / TWEEN_MS;
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+  return easeInOut(t);
+}
+
+/**
+ * Interpolate a viewport transform.
+ *
+ * The camera moves BEFORE the points do, so the user is looking at the right
+ * place by the time anything sets off. Zoom is interpolated in log space: `k`
+ * is a multiplier, so a linear walk from 1 to 8 spends most of its time nearly
+ * zoomed out and then lurches.
+ *
+ * @param {{k:number,tx:number,ty:number}} a
+ * @param {{k:number,tx:number,ty:number}} b
+ * @param {number} t 0..1
+ */
+export function lerpTransform(a, b, t) {
+  const e = easeInOut(Math.min(1, Math.max(0, t)));
+  return {
+    k: Math.exp(Math.log(a.k) + (Math.log(b.k) - Math.log(a.k)) * e),
+    tx: a.tx + (b.tx - a.tx) * e,
+    ty: a.ty + (b.ty - a.ty) * e,
+  };
+}
+
+/** How long the camera takes to re-frame before the points move. */
+export const FIT_MS = 320;

@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { alignTo, easeInOut, TWEEN_MS } from "./align.js";
+import {
+  alignTo,
+  easeInOut,
+  delayFraction,
+  progressAt,
+  lerpTransform,
+  TWEEN_MS,
+  STAGGER_MS,
+  TOTAL_MS,
+  FIT_MS,
+} from "./align.js";
 
 /** RMS distance between two interleaved coordinate lists. */
 function rms(a, b) {
@@ -87,5 +97,91 @@ describe("the tween's shape", () => {
   it("is long enough to read and short enough not to be in the way", () => {
     expect(TWEEN_MS).toBeGreaterThanOrEqual(250);
     expect(TWEEN_MS).toBeLessThanOrEqual(800);
+  });
+});
+
+describe("the stagger (#327)", () => {
+  it("spreads the starts across the whole window", () => {
+    const n = 200;
+    const d = Array.from({ length: n }, (_, i) => delayFraction(i, n));
+    expect(Math.min(...d)).toBeLessThan(0.1);
+    expect(Math.max(...d)).toBeGreaterThan(0.9);
+    // Roughly uniform, not clustered at one end.
+    const mean = d.reduce((a, b) => a + b, 0) / n;
+    expect(mean).toBeGreaterThan(0.35);
+    expect(mean).toBeLessThan(0.65);
+  });
+
+  it("does NOT sweep in index order", () => {
+    // Delaying by index makes a wave cross the map in whatever order
+    // persons.id happens to be — mechanical, and it implies an ordering that
+    // does not exist. Consecutive points should not be consecutive starts.
+    const n = 60;
+    let ascending = 0;
+    for (let i = 1; i < n; i++) {
+      if (delayFraction(i, n) > delayFraction(i - 1, n)) ascending++;
+    }
+    expect(ascending).toBeGreaterThan(n * 0.25);
+    expect(ascending).toBeLessThan(n * 0.75);
+  });
+
+  it("is deterministic, so the same change animates the same way", () => {
+    expect(delayFraction(7, 100)).toBe(delayFraction(7, 100));
+  });
+
+  it("has no stagger when there is nothing to stagger", () => {
+    expect(delayFraction(0, 1)).toBe(0);
+    expect(delayFraction(NaN, 10)).toBe(0);
+  });
+
+  it("every point has finished by TOTAL_MS", () => {
+    // Otherwise the animation ends while something is still mid-flight and the
+    // map jumps to its resting frame — the snap this design already fixed once.
+    expect(TOTAL_MS).toBe(TWEEN_MS + STAGGER_MS);
+    expect(progressAt(TOTAL_MS, STAGGER_MS)).toBe(1);
+  });
+
+  it("holds a delayed point still until its turn", () => {
+    expect(progressAt(0, 120)).toBe(0);
+    expect(progressAt(100, 120)).toBe(0);
+    expect(progressAt(120 + TWEEN_MS, 120)).toBe(1);
+    expect(progressAt(120 + TWEEN_MS / 2, 120)).toBeCloseTo(0.5, 5);
+  });
+});
+
+describe("the camera lead-in (#327)", () => {
+  it("interpolates zoom in LOG space", () => {
+    // k is a multiplier. Linearly, half way from 1 to 8 is 4.5 — nearly zoomed
+    // in already — so the move spends its time at the wrong end and lurches.
+    const mid = lerpTransform(
+      { k: 1, tx: 0, ty: 0 },
+      { k: 8, tx: 0, ty: 0 },
+      0.5
+    );
+    expect(mid.k).toBeCloseTo(Math.sqrt(8), 4);
+  });
+
+  it("starts and ends exactly where it was told", () => {
+    const a = { k: 1, tx: 10, ty: -4 };
+    const b = { k: 3, tx: 100, ty: 50 };
+    expect(lerpTransform(a, b, 0)).toEqual(a);
+    const end = lerpTransform(a, b, 1);
+    expect(end.k).toBeCloseTo(b.k, 5);
+    expect(end.tx).toBeCloseTo(b.tx, 5);
+    expect(end.ty).toBeCloseTo(b.ty, 5);
+  });
+
+  it("clamps rather than overshooting", () => {
+    const a = { k: 1, tx: 0, ty: 0 };
+    const b = { k: 4, tx: 20, ty: 20 };
+    expect(lerpTransform(a, b, 2).tx).toBeCloseTo(20, 5);
+    expect(lerpTransform(a, b, -1).tx).toBeCloseTo(0, 5);
+  });
+
+  it("leads the points rather than running with them", () => {
+    // The whole point of the sequencing: the camera is done before anything
+    // sets off, so the user is looking at the right place already.
+    expect(FIT_MS).toBeGreaterThan(0);
+    expect(FIT_MS).toBeLessThan(TWEEN_MS);
   });
 });

@@ -28,7 +28,15 @@
   } from "../scatter/lod.js";
   import { loadSetting, saveSetting } from "../settings.js";
   import ParamSlider from "../ParamSlider.svelte";
-  import { alignTo, easeInOut, TWEEN_MS } from "../scatter/align.js";
+  import {
+    alignTo,
+    delayFraction,
+    progressAt,
+    lerpTransform,
+    STAGGER_MS,
+    TOTAL_MS,
+    FIT_MS,
+  } from "../scatter/align.js";
   import {
     loadSettings,
     saveSettings,
@@ -122,23 +130,27 @@
    * used to be — it simply appears where it belongs.
    */
   let anim = $state(null);
-  /** The aligned positions currently ON SCREEN when nothing is animating.
+  /** The aligned positions on screen when nothing is animating.
    *
-   *  This is what fixes the tween "restarting" at the end. The animation runs
-   *  towards the ALIGNED layout, so if the steady state fell back to the raw
-   *  coordinates the map would snap from one frame to the other the instant
-   *  the tween finished — which reads as the animation playing again. The
-   *  aligned frame IS the display frame; raw coordinates are never drawn. */
+   *  The animation runs towards the ALIGNED layout, so if the resting state
+   *  fell back to raw coordinates the map would snap between two frames the
+   *  instant the tween finished — which reads as it playing again. The aligned
+   *  frame IS the display frame; raw coordinates are never drawn. */
   let settled = $state(null);
   let animRaf = 0;
 
   const drawn = $derived.by(() => {
     const n = shown.length;
     if (anim && anim.from.length === n * 2) {
-      const t = easeInOut(anim.t);
       const out = new Float32Array(n * 2);
-      for (let i = 0; i < n * 2; i++) {
-        out[i] = anim.from[i] + (anim.to[i] - anim.from[i]) * t;
+      for (let i = 0; i < n; i++) {
+        // Each point runs its OWN clock: the stagger is what turns one mass
+        // sliding into many separate things going many separate places.
+        const t = progressAt(anim.elapsed, anim.delay[i]);
+        out[i * 2] = anim.from[i * 2] + (anim.to[i * 2] - anim.from[i * 2]) * t;
+        out[i * 2 + 1] =
+          anim.from[i * 2 + 1] +
+          (anim.to[i * 2 + 1] - anim.from[i * 2 + 1]) * t;
       }
       return out;
     }
@@ -152,11 +164,16 @@
   });
 
   /**
-   * Start a tween whenever the positions change.
+   * Play a layout change: re-frame, then move.
    *
-   * Imperative rAF driven from an `$effect`, with the animation state read and
-   * written through `untrack` — an effect that both reads and writes its own
-   * state re-fires forever, which is CLAUDE.md's first trap wearing runes.
+   * The camera goes first and alone. Fitting at the END means the user watches
+   * points travel to somewhere they cannot see and the map jumps afterwards;
+   * fitting DURING means the ground moves while the things standing on it move
+   * too, and nothing is readable. So: `FIT_MS` of camera, then the points.
+   *
+   * Imperative rAF driven from an `$effect`, with everything it writes read
+   * back through `untrack` — an effect that reads and writes its own state
+   * re-fires forever, which is CLAUDE.md's first trap wearing runes.
    */
   let lastKeyed = new Map();
   $effect(() => {
@@ -169,22 +186,22 @@
         raw[i * 2 + 1] = pts[i].y;
       }
 
-      // Only tween when we have somewhere to come FROM for most of the map.
       let known = 0;
       for (const p of pts) if (lastKeyed.has(p.personId)) known++;
       const worthTweening = n >= 2 && known >= n * 0.5 && !reduceMotion;
 
+      cancelAnimationFrame(animRaf);
+
       if (!worthTweening) {
-        cancelAnimationFrame(animRaf);
         anim = null;
         settled = raw;
         lastKeyed = new Map(pts.map((p) => [p.personId, [p.x, p.y]]));
-        afterLayout();
+        if (autoFit) requestAnimationFrame(() => scatter?.fit());
         return;
       }
 
-      // Align the new layout onto where the map already is, so only real
-      // change animates rather than an arbitrary spin and rescale.
+      // Align onto where the map already is, so only real change animates
+      // rather than an arbitrary spin and rescale.
       const prev = new Float32Array(n * 2);
       for (let i = 0; i < n; i++) {
         const was = lastKeyed.get(pts[i].personId);
@@ -194,50 +211,61 @@
       const aligned = alignTo(prev, raw);
 
       const from = new Float32Array(n * 2);
+      const delay = new Float32Array(n);
       for (let i = 0; i < n; i++) {
         const was = lastKeyed.get(pts[i].personId);
         // A newcomer appears where it belongs rather than flying in from a
         // position that was never its own.
         from[i * 2] = was ? was[0] : aligned[i * 2];
         from[i * 2 + 1] = was ? was[1] : aligned[i * 2 + 1];
+        delay[i] = delayFraction(i, n) * STAGGER_MS;
       }
 
-      cancelAnimationFrame(animRaf);
+      // Where the camera has to be for the NEW layout. Computed before
+      // anything moves, so the re-frame can lead.
+      let camFrom = null;
+      let camTo = null;
+      if (autoFit && scatter?.fitFor) {
+        const xs = new Float32Array(n);
+        const ys = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          xs[i] = aligned[i * 2];
+          ys[i] = aligned[i * 2 + 1];
+        }
+        camTo = scatter.fitFor(xs, ys);
+        camFrom = { ...transform };
+      }
+
       const t0 = performance.now();
-      anim = { from, to: aligned, t: 0 };
+      const camMs = camTo ? FIT_MS : 0;
+      anim = { from, to: aligned, delay, elapsed: 0 };
+
       const step = () => {
-        const e = Math.min(1, (performance.now() - t0) / TWEEN_MS);
-        anim = { ...anim, t: e };
-        if (e < 1) {
+        const now = performance.now() - t0;
+        if (camTo && now < camMs) {
+          transform = lerpTransform(camFrom, camTo, now / camMs);
+          anim = { ...anim, elapsed: 0 };
+          animRaf = requestAnimationFrame(step);
+          return;
+        }
+        if (camTo) transform = camTo;
+        const e = now - camMs;
+        anim = { ...anim, elapsed: e };
+        if (e < TOTAL_MS) {
           animRaf = requestAnimationFrame(step);
           return;
         }
         // The map ENDS in the aligned frame, so that is what stays on screen
-        // and what the next tween starts from.
+        // and what the next change starts from.
         settled = aligned;
         anim = null;
         lastKeyed = new Map(
           pts.map((p, i) => [p.personId, [aligned[i * 2], aligned[i * 2 + 1]]])
         );
-        afterLayout();
       };
       animRaf = requestAnimationFrame(step);
     });
   });
-
-  /**
-   * Bring the whole map back into view once it has settled.
-   *
-   * The canvas re-fits only when the PEOPLE change (its `fittedKey` is the
-   * count plus the first and last id), which is right for a merge and wrong
-   * for a parameter change: the same people at completely different
-   * coordinates would sit half off-screen with no clue why. On by default
-   * because that is the state a user expects after asking for a new layout;
-   * off for anyone who has zoomed somewhere deliberately and wants to stay.
-   */
-  function afterLayout() {
-    if (autoFit) requestAnimationFrame(() => scatter?.fit());
-  }
 
   $effect(() => () => cancelAnimationFrame(animRaf));
 
@@ -446,15 +474,20 @@
    *  - nothing, and Apply is there when they are ready.
    */
   function scheduleUpdate(key, dragging) {
-    // `minFaces` changes the member set, so it cannot be answered from the
-    // preview session's resident graph.
-    const previewable = key !== "minFaces" && live && !!onpreview;
+    // Two parameters cannot come from the preview session: `minFaces` changes
+    // the member set the resident graph was built from, and `algorithm`
+    // selects a different algorithm entirely (the preview path is UMAP-only,
+    // since t-SNE is O(n^2) and PCA has nothing to tune).
+    const previewable =
+      key !== "minFaces" && key !== "algorithm" && live && !!onpreview;
     if (previewable) {
       clearTimeout(previewTimer);
       previewTimer = setTimeout(() => onpreview(currentParams()), 60);
       return;
     }
-    if (!autoApply || dragging) return;
+    // Choosing an algorithm is a decision, not an exploration, so it applies
+    // whether or not automatic updates are on. A slider drag is the opposite.
+    if (key !== "algorithm" && (!autoApply || dragging)) return;
     // A rebuild is a job. One second, and only once the control is released —
     // a job per slider tick is how a convenience turns into a queue nobody
     // asked for.
@@ -711,6 +744,10 @@
                   // Refetch so the panel below shows THIS algorithm's
                   // parameters; the schema is per-algorithm.
                   onoptions?.(currentParams());
+                  // And route through the same scheduler as every other
+                  // setting, so switching algorithm animates like the rest
+                  // rather than sitting still until Apply is pressed.
+                  scheduleUpdate("algorithm", false);
                 }}
               />
               <span class="algo-label">{a.label}</span>
