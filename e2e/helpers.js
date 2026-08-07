@@ -285,6 +285,14 @@ export const faceMap = {
   build: (page) => page.locator('[data-testid="map-build-empty"]'),
   rebuild: (page) => page.locator('[data-testid="map-build"]'),
   count: (page) => page.locator('[data-testid="map-count"]'),
+  /**
+   * The "N added since — rebuild to place them" affordance.
+   *
+   * A BUTTON, not a caption (#325). `docs/TESTING.md` exists because a
+   * "Remove" button once rendered correctly and silently did nothing when
+   * pressed, so this one is pressed.
+   */
+  stale: (page) => page.locator('[data-testid="map-stale"]'),
   tray: (page) => page.locator('[data-testid="map-tray"]'),
   trayCount: (page) => page.locator('[data-testid="tray-count"]'),
   chips: (page) => page.locator('[data-testid="tray-chip"]'),
@@ -441,6 +449,74 @@ export async function seedFaces(
       // first `people` ids keep meaning what every other helper assumes.
       for (let p = people + 1; p <= people + below; p++) {
         seedPerson(p, belowFaces);
+      }
+    })();
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Add people to the scratch index WITHOUT wiping what is already there.
+ *
+ * `seedFaces` deletes every face, person and projection run before it seeds,
+ * which is right for a fresh test and useless for #325 — that bug is
+ * specifically "a run already exists and the library grew underneath it".
+ * Same scratch-index-only guarantee as `seedFaces`: it can only ever open
+ * `e2e/.tmp/home/index.db`.
+ *
+ * @param {number} from first person id to create (inclusive) — must not
+ *   collide with ids `seedFaces` already used, since `persons.id` is explicit
+ * @param {number} to last person id to create (inclusive)
+ * @param {number} facesEach faces per person. Must CLEAR the product's
+ *   `minFaces` default or the new people never reach the map and the caller
+ *   is measuring nothing.
+ */
+export async function addPeople(from, to, facesEach = 5) {
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(
+    join(process.cwd(), "e2e", ".tmp", "home", "index.db")
+  );
+  try {
+    const model = "buffalo_s";
+    const photos = db
+      .prepare(
+        `SELECT id FROM photos WHERE stale = 0 AND kind = 'image' ORDER BY id`
+      )
+      .all()
+      .map((r) => r.id);
+    if (!photos.length) throw new Error("addPeople: no photos to attach to");
+
+    const DIM = 16;
+    const insPerson = db.prepare(
+      `INSERT INTO persons (id, name, created_at) VALUES (?, ?, ?)`
+    );
+    const insFace = db.prepare(
+      `INSERT INTO photo_faces
+         (photo_id, model, box_x, box_y, box_w, box_h, det_score,
+          dim, scale, vec, person_id, person_source, created_at)
+       VALUES (?, ?, 0, 0, 10, 10, 0.9, ?, ?, ?, ?, 'model', ?)`
+    );
+    db.transaction(() => {
+      for (let p = from; p <= to; p++) {
+        insPerson.run(p, null, 1000 + p);
+        for (let f = 0; f < facesEach; f++) {
+          // Same distinct-direction-per-person scheme seedFaces uses, so the
+          // projection has real structure rather than coincident points.
+          const bytes = new Int8Array(DIM);
+          for (let i = 0; i < DIM; i++) {
+            bytes[i] = Math.round(Math.sin(i * 0.7 + p * 1.3 + f * 0.05) * 100);
+          }
+          insFace.run(
+            photos[(p * facesEach + f) % photos.length],
+            model,
+            DIM,
+            0.01,
+            Buffer.from(bytes.buffer),
+            p,
+            Date.now()
+          );
+        }
       }
     })();
   } finally {

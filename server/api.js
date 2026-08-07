@@ -2531,7 +2531,23 @@ export function registerApi(app, { ml } = {}) {
       algorithm,
       paramsKey: pk,
     });
-    if (cached) {
+    // A hit is only honoured while the run still DESCRIBES the library (#325).
+    // `paramsKey` covers the parameters; a run's real input is the member set,
+    // which the key cannot see — so a map built while face grouping was still
+    // going was handed back forever. The DEFAULT parameters are the worst case
+    // and the reason this read as "50 is broken": `App.svelte` states no
+    // opinion it does not have, so entering the view asks for the server's
+    // defaults, which is the FIRST map anyone builds and therefore the stalest
+    // run they own. Every other value they try mints a fresh key and gets
+    // built against today's library.
+    //
+    // Comparing the count here rather than folding a member fingerprint INTO
+    // the key is deliberate: a fingerprint would let a background face sweep
+    // silently invalidate every map the user owns, each costing 4-20s to
+    // rebuild. This gets the same correctness at the one moment they have
+    // actually asked for a map. `GET /current` is unchanged — a read must not
+    // start a job — and keeps reporting `staleness` for the view to act on.
+    if (cached && cached.members === members) {
       return res.json({
         reused: true,
         runId: cached.id,

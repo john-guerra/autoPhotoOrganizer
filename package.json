@@ -1,6 +1,6 @@
 {
   "name": "autogallery",
-  "version": "2.20.5",
+  "version": "2.20.6",
   "description": "Fast, local-first photo triage: plug in an SD card, cull with the keyboard, organize the best shots into dated album folders.",
   "main": "electron/main.js",
   "type": "module",
@@ -78,7 +78,8 @@
     "npm errors ('Override without name') if a comment key is placed INSIDE `overrides` itself — every key there is parsed as a real override target — so this note lives here instead, as a sibling field npm does not validate.",
     "@huggingface/transformers pins its OWN onnxruntime-node (1.24.3) and sharp (0.34.5), a second copy of each native addon that asarUnpack/electron-rebuild -w miss (#161/#67, and the exact shape of #67's launch crash).",
     "The \".\" key inside the nested onnxruntime-node override pins THAT package's own version to the root one ($onnxruntime-node) so npm hoists to a single copy; \"$sharp\" does the same for sharp.",
-    "\"adm-zip\" MUST stay nested inside that SAME onnxruntime-node block, not as a sibling top-level \"onnxruntime-node\" override key. A sibling top-level key silently drops this adm-zip pin back to the vulnerable 0.5.18 (the 2.18.21 fix, GHSA-xcpc-8h2w-3j85) with no npm warning and no `npm ls` signal — only `npm audit --omit=dev` shows it. Verified empirically 2026-07-25 by bisecting three overrides shapes; re-run that audit after touching this block."
+    "\"adm-zip\" MUST stay nested inside that SAME onnxruntime-node block, not as a sibling top-level \"onnxruntime-node\" override key. A sibling top-level key silently drops this adm-zip pin back to the vulnerable 0.5.18 (the 2.18.21 fix, GHSA-xcpc-8h2w-3j85) with no npm warning and no `npm ls` signal — only `npm audit --omit=dev` shows it. Verified empirically 2026-07-25 by bisecting three overrides shapes; re-run that audit after touching this block.",
+    "electron-updater pins js-yaml ^4.1.0 and 6.8.9 is its latest release, so GHSA-5p4m-2wfm-xmqj (quadratic CPU in !!omap resolution, js-yaml 4.0.0-4.3.0) has no upstream fix to wait for. 4.3.1 is outside the advisory range AND inside electron-updater's own range, so this is a patch pin rather than the js-yaml 5.x major it does not declare support for. Drop this entry once electron-updater ships a release requiring >= 4.3.1 (#338)."
   ],
   "overrides": {
     "@huggingface/transformers": {
@@ -87,6 +88,9 @@
         "adm-zip": "^0.6.0"
       },
       "sharp": "$sharp"
+    },
+    "electron-updater": {
+      "js-yaml": "^4.3.1"
     }
   },
   "build": {

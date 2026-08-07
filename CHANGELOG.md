@@ -6,6 +6,22 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.20.6
+
+- **The Face Map no longer hands you a map of a library you no longer have.** A
+  map is stored under the settings it was built with, and asking for those same
+  settings gave the old map back even after face grouping had found hundreds
+  more people. The default settings were hit hardest, because that is the first
+  map you ever build — which is why it looked like one particular Neighbours
+  value was broken. Building now notices and rebuilds (#325).
+- **"N added since" is a button.** It has always told you the map was out of
+  date; now you can press it (#325).
+- **Neighbours now defaults to 30.** Picked from 40 real projections of your own
+  library across five albums, rather than from one screenshot — and a fresh
+  comparison did not reproduce the old 50 (#326).
+- Security: pinned a patched `js-yaml` inside the auto-updater, closing a
+  high-severity advisory that had no upstream fix available (#338).
+
 ## 2.20.5
 
 - Internal: CI is now a real gate that nobody has to watch — branch protection

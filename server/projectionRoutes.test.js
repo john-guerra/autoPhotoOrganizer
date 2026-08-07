@@ -70,10 +70,17 @@ afterEach(async () => {
   delete process.env.AUTOGALLERY_HOME;
 });
 
-/** `n` people with `facesEach` faces apiece, spread over distinct directions. */
-function seedPeople(n, facesEach = 2) {
+/**
+ * People `from..n` with `facesEach` faces apiece, spread over distinct
+ * directions.
+ *
+ * `from` exists so a test can GROW the library after a map has been built —
+ * the case #325 is about. Re-running from 1 would collide on `persons.id`,
+ * which is inserted explicitly here.
+ */
+function seedPeople(n, facesEach = 2, from = 1) {
   const db = getDb();
-  for (let p = 1; p <= n; p++) {
+  for (let p = from; p <= n; p++) {
     const files = Array.from({ length: facesEach }, (_, i) => ({
       name: `IMG_${i}.jpg`,
       size: 1000 + i,
@@ -208,6 +215,36 @@ describe("POST /api/projections (#232)", () => {
     expect(again.body.runId).toBeGreaterThan(0);
     expect(again.body.jobId).toBeUndefined();
     expect(registry.list().length).toBe(before);
+  });
+
+  it("does NOT reuse a run whose library has grown since (#325)", async () => {
+    // The cache key covers the PARAMETERS. A run's real input is the member
+    // set, which the key cannot see — so a map built while face grouping was
+    // still running was handed back forever, and the DEFAULT parameters are
+    // the worst case because they are the first map anyone builds.
+    seedPeople(8);
+    const first = await post({ minFaces: 2, nEpochs: 30 });
+    await settled(first.body.jobId);
+
+    seedPeople(12, 2, 9); // four more people since that map was built
+
+    const again = await post({ minFaces: 2, nEpochs: 30 });
+    expect(again.body.reused).toBeUndefined();
+    expect(again.status).toBe(201);
+    const job = await settled(again.body.jobId);
+    expect(job.result.members).toBe(12);
+  });
+
+  it("still reuses a run when the library has NOT changed (#325)", async () => {
+    // The other half, and the reason the check is a comparison rather than a
+    // fingerprint in the cache key: revalidating must not turn every hit into
+    // a rebuild.
+    seedPeople(8);
+    const first = await post({ minFaces: 2, nEpochs: 30 });
+    await settled(first.body.jobId);
+    const again = await post({ minFaces: 2, nEpochs: 30 });
+    expect(again.body.reused).toBe(true);
+    expect(again.body.jobId).toBeUndefined();
   });
 
   it("a DIFFERENT parameter is a different run, not a cache hit", async () => {
