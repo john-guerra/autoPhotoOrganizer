@@ -274,10 +274,16 @@ export const faceMap = {
   gear: (page) => page.locator('[data-testid="map-gear"]'),
   gearPanel: (page) => page.locator('[data-testid="map-gear-panel"]'),
   members: (page) => page.locator('[data-testid="map-members"]'),
-  /** One tuning control in the gear, by parameter name — `nNeighbors`, `minFaces`, … */
+  /** One tuning control in the panel, by parameter name — the SLIDER (#327). */
   param: (page, key) => page.locator(`[data-testid="map-param-${key}"]`),
+  /** The editable number beside that slider. A slider alone cannot express an
+   *  exact value, and `<input type="number">` alone would not let you get from
+   *  5 to 50 by typing — which is the annoyance that opened #327. */
+  paramNum: (page, key) => page.locator(`[data-testid="map-param-${key}-num"]`),
   /** The minimum-faces threshold, which sits above the algorithm's own knobs. */
   minFaces: (page) => page.locator('[data-testid="map-param-minFaces"]'),
+  /** Its editable number. */
+  minFacesNum: (page) => page.locator('[data-testid="map-param-minFaces-num"]'),
   /** How many people the minimum-faces threshold is leaving off (#255). */
   hidden: (page) => page.locator('[data-testid="map-hidden"]'),
   /** The same disclosure in the empty state, before a map has been built. */

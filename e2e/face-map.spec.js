@@ -6,6 +6,7 @@ import {
   views,
   faceMap,
   seedFaces,
+  reload,
   addPeople,
   clearFaces,
   clearRatings,
@@ -183,16 +184,11 @@ test.describe("face map @p1", () => {
 
     // Everyone clears the default of 5 (#255), so the gear opens on everyone.
     await expect(faceMap.members(page)).toContainText(String(PEOPLE));
-    await faceMap
-      .gearPanel(page)
-      .locator('input[type="number"]')
-      .first()
-      .fill(String(FACES_EACH + 1));
-    await faceMap
-      .gearPanel(page)
-      .locator('input[type="number"]')
-      .first()
-      .blur();
+    // Through the helper, not an inline `input[type="number"]` — docs/TESTING.md
+    // keeps selectors in one file so a markup change is one edit. #327 turned
+    // these into slider + number pairs, which is exactly such a change.
+    await faceMap.minFacesNum(page).fill(String(FACES_EACH + 1));
+    await faceMap.minFacesNum(page).blur();
     // Nobody has that many faces in the fixture, so the honest answer is zero.
     // "0 people", not "0" — `toContainText("0")` also matches "120 people",
     // which is the answer this assertion exists to rule out.
@@ -245,6 +241,41 @@ test.describe("face map @p1", () => {
 
     expect(errors).toEqual([]);
   });
+
+  test("the settings sit BESIDE the map, and a value can be retyped", async ({
+    page,
+  }) => {
+    // #327, both halves. The gear was a popover OVER the map, so you could not
+    // see what a parameter did to the thing you were changing it for — and
+    // #326 established the right neighbourhood cannot be predicted, only
+    // found by looking. And `<input type="number">` clamps on every keystroke,
+    // so typing a 0 after a 5 to get 50 did nothing at all.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await faceMap.gear(page).click();
+
+    // Panel and map on screen together: the whole point of the change.
+    await expect(faceMap.gearPanel(page)).toBeVisible();
+    await expect(faceMap.scatter(page)).toBeVisible();
+
+    await faceMap.paramNum(page, "nNeighbors").fill("50");
+    await faceMap.paramNum(page, "nNeighbors").blur();
+    // The slider tracks the number, so they are one control rather than two.
+    await expect(faceMap.param(page, "nNeighbors")).toHaveValue("50");
+    expect(errors).toEqual([]);
+  });
+
+  // NOT tested here: that the panel's values survive a reload (#287).
+  //
+  // `openApp` registers `localStorage.clear()` through `addInitScript`, which
+  // Playwright re-runs on EVERY navigation — so `reload(page)` wipes the
+  // settings before the app can read them. That clearing is deliberate and
+  // load-bearing (docs/AGENT-NOTES.md: three specs leaking a working set turned
+  // 36 unrelated tests red), so weakening it for one convenience assertion is
+  // the wrong trade. The load/save/sanitise logic is covered instead by
+  // ui/src/lib/mapSettings.test.js, and the wiring by the retype test above.
 
   test("says how many people the minimum is leaving off, BEFORE you build", async ({
     page,

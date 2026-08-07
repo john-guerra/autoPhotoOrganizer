@@ -2812,6 +2812,61 @@
   }
 
   /**
+   * How long the last projection took, in ms.
+   *
+   * The Face Map panel reads it to decide whether the map may follow a slider.
+   * A MEASURED latency rather than a member count, so the same library is live
+   * on a fast machine and Apply-driven on a slow one (#327).
+   */
+  let mapLastMs = $state(null);
+
+  /** Only the newest preview may land: a slider produces requests faster than
+   *  they complete, and an older one arriving late would rewind the map. */
+  let previewSeq = 0;
+
+  /**
+   * A live preview: new coordinates, no run, no job (#327).
+   *
+   * App still owns `mapPoints` — a view that fetched its own data is exactly
+   * how the #155 boundary rots (see the note above `loadFaceMap`).
+   */
+  async function previewFaceMap(params) {
+    const seq = ++previewSeq;
+    const t0 = performance.now();
+    try {
+      const res = await fetch("/api/projections/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(params),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (seq !== previewSeq) return false;
+      if (!res.ok) {
+        mapNotice = body.error ?? `Couldn't preview the map (${res.status}).`;
+        return false;
+      }
+      mapNotice = "";
+      // The SERVER's measurement, not the round trip: what decides whether to
+      // stay live is the work, and on a loopback the difference is noise
+      // anyway — but the server's number is the honest one to threshold on.
+      mapLastMs = body.ms ?? Math.round(performance.now() - t0);
+      // Positions changed; everything else about a person did not. Merging
+      // rather than replacing keeps names and crops without a second fetch.
+      const by = new Map(mapPoints.map((p) => [p.personId, p]));
+      mapPoints = body.points.map((p) => ({
+        ...(by.get(p.personId) ?? {}),
+        ...p,
+      }));
+      mapParams = { ...params };
+      return true;
+    } catch (e) {
+      if (seq !== previewSeq) return false;
+      mapNotice = `Couldn't preview the map: ${e.message}`;
+      return false;
+    }
+  }
+
+  /**
    * Build a projection, then reload the points.
    *
    * The VIEW asks; App runs the job and awaits it. `waitForJob` is the same
@@ -2821,6 +2876,7 @@
   async function runFaceMap(params) {
     mapNotice = "";
     mapLoading = true;
+    const t0 = performance.now();
     try {
       const res = await fetch("/api/projections", {
         method: "POST",
@@ -2835,6 +2891,10 @@
         return false;
       }
       if (body.jobId) await waitForJob(body.jobId);
+      // The first measurement the live boundary can use. Until a map has been
+      // built once, `canGoLive(null)` is false and the slider stays on Apply —
+      // deliberately, since optimism here locks up a large library.
+      mapLastMs = Math.round(performance.now() - t0);
       await loadFaceMap(params);
       await loadMapOptions(params);
       return true;
@@ -3007,6 +3067,8 @@
         loading: mapLoading,
         notice: mapNotice,
         onrun: runFaceMap,
+        onpreview: previewFaceMap,
+        lastMs: mapLastMs,
         onoptions: loadMapOptions,
         // The EXISTING personId filter (#167), same as People — not a second
         // way to narrow the feed.

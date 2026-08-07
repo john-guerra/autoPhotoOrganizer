@@ -26,6 +26,8 @@
     clampRadius,
   } from "../scatter/lod.js";
   import { loadSetting, saveSetting } from "../settings.js";
+  import ParamSlider from "../ParamSlider.svelte";
+  import { loadSettings, saveSettings, canGoLive } from "../mapSettings.js";
 
   let {
     /** `[{personId, x, y, name, coverFaceId, faces}]` from the current run. */
@@ -56,6 +58,10 @@
     onrun,
     /** `(params) => Promise` — refresh options as the gear changes. */
     onoptions,
+    /** `(params) => Promise<boolean>` — new coordinates, no run, no job (#327). */
+    onpreview,
+    /** How long the last projection took, in ms. Drives the live boundary. */
+    lastMs = null,
     /** `({intoId, ids, name}) => Promise<{ok, error, names?, token?, ...}>` */
     onmerge,
     /** `(token) => Promise` */
@@ -175,13 +181,18 @@
    * defaults, so the gear and the cache key agree from the first render.
    */
   const seeded = new Set();
+  const remembered = loadSettings();
   $effect(() => {
     const next = { ...draft };
     let changed = false;
     for (const spec of specs) {
       if (seeded.has(spec.key)) continue;
       seeded.add(spec.key);
-      next[spec.key] = options?.params?.[spec.key] ?? spec.default;
+      // Remembered value first (#287), then the server's default. The client
+      // still states no opinion it does not HAVE — an untouched parameter has
+      // nothing stored, so the server's default is what reaches the run.
+      next[spec.key] =
+        remembered[spec.key] ?? options?.params?.[spec.key] ?? spec.default;
       changed = true;
     }
     if (changed) draft = next;
@@ -193,7 +204,47 @@
   // sends no `minFaces` at all and the server fills in its own.
   const minFaces = $derived(draft.minFaces ?? 5);
 
+  /** The schema row for the threshold, so it renders through the same control
+   *  as everything else rather than being a hand-written second shape. */
+  const minFacesSpec = $derived(
+    specs.find((s) => s.key === "minFaces") ?? {
+      key: "minFaces",
+      label: "Minimum faces",
+      min: 1,
+      max: 50,
+      step: 1,
+      default: 5,
+      help: "People with fewer faces than this are left off the map.",
+    }
+  );
+
   const currentParams = () => ({ ...draft, algorithm: algo });
+
+  /**
+   * A tuning control moved (#327).
+   *
+   * `live` means the slider is still being dragged. The map follows only when
+   * the LAST projection was fast enough that following feels attached to the
+   * control — measured, not assumed, so the same code is live on a 203-person
+   * library and Apply-driven on a 25,758-person one.
+   *
+   * The debounce is a plain `let` timer driven from the handler, NOT a
+   * reactive statement. CLAUDE.md's first trap: a `$:`/`$effect` whose
+   * dependencies include an object re-fires on every flush forever.
+   */
+  let previewTimer = null;
+  function onTune(key, value, { live }) {
+    draft = { ...draft, [key]: value };
+    saveSettings(draft);
+    if (!live) return;
+    if (!canGoLive(lastMs) || !onpreview) return;
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => onpreview(currentParams()), 60);
+  }
+
+  // A dragged slider outliving its view would fire a fetch into a dead
+  // component. Svelte 5 runs an $effect's teardown on destroy.
+  $effect(() => () => clearTimeout(previewTimer));
 
   const algoRow = $derived(
     options?.algorithms?.find((a) => a.id === algo) ?? null
@@ -387,190 +438,197 @@
     </p>
   {/if}
 
-  {#if gearOpen}
-    <div class="gear-panel" data-testid="map-gear-panel">
-      <label>
-        Minimum faces
-        <input
-          type="number"
-          data-testid="map-param-minFaces"
-          min="1"
-          max="50"
+  <!-- The map and its settings side by side (#327). The settings used to be a
+       popover OVER the map, so you could not see what a parameter did to the
+       thing you were changing it for — and #326 established that the right
+       neighbourhood cannot be predicted, only found by looking. The panel is
+       first in the DOM and first visually, so tab order matches what you see. -->
+  <div class="body">
+    {#if gearOpen}
+      <aside class="gear-panel" data-testid="map-gear-panel">
+        <!-- minFaces is ALWAYS Apply-driven, at any library size: it changes the
+           member set, so it invalidates both the centroid query and the
+           preview session's neighbour graph. It is also the parameter where
+           "how many people am I about to map" deserves a deliberate press. -->
+        <ParamSlider
+          spec={minFacesSpec}
           value={minFaces}
-          onchange={(e) => {
-            draft = { ...draft, minFaces: +e.currentTarget.value };
+          onchange={(v) => {
+            draft = { ...draft, minFaces: v };
             onoptions?.(currentParams());
           }}
         />
-      </label>
-      <span class="members" data-testid="map-members">
-        {n(options?.members)} people · about {estimateSeconds}s
-        {#if hiddenByThreshold > 0}
-          <span class="hidden-count" data-testid="map-hidden">
-            · {n(hiddenByThreshold)} with fewer faces left off
-          </span>
-        {/if}
-      </span>
-
-      <fieldset>
-        <legend>How to lay it out</legend>
-        {#each options?.algorithms ?? [] as a (a.id)}
-          <label class="algo" class:disabled={!a.enabled}>
-            <input
-              type="radio"
-              name="face-map-algorithm"
-              value={a.id}
-              disabled={!a.enabled}
-              checked={algo === a.id}
-              onchange={() => {
-                algo = a.id;
-                // Refetch so the panel below shows THIS algorithm's
-                // parameters; the schema is per-algorithm.
-                onoptions?.(currentParams());
-              }}
-            />
-            <span class="algo-label">{a.label}</span>
-            <!-- The measured score, so a menu of three options where two are
-                 worse is information rather than a footgun. -->
-            <span class="algo-note">{a.enabled ? a.note : a.reason}</span>
-          </label>
-        {/each}
-      </fieldset>
-
-      <fieldset class="sizes">
-        <legend>Dot size (px)</legend>
-        <label>
-          Smallest
-          <input
-            type="range"
-            data-testid="map-min-radius"
-            min={RADIUS_LIMITS.min}
-            max={20}
-            step="0.5"
-            bind:value={minRadius}
-          />
-          <span class="num">{minRadius}</span>
-        </label>
-        <label>
-          Largest
-          <input
-            type="range"
-            data-testid="map-max-radius"
-            min={2}
-            max={RADIUS_LIMITS.max}
-            step="1"
-            bind:value={maxRadius}
-          />
-          <span class="num">{maxRadius}</span>
-        </label>
-        <!-- Say what the size MEANS, or a slider that changes dot sizes reads
-             as decoration rather than an encoding. -->
-        <p class="hint">
-          Area is proportional to how many photos someone is in, on a
-          square-root scale. These apply straight away — they do not rebuild the
-          map.
-        </p>
-      </fieldset>
-
-      <!-- Rendered from the algorithm's OWN schema, so choosing t-SNE offers
-           perplexity rather than neighbours, and a new algorithm arrives with
-           its controls instead of needing a third place hand-edited. -->
-      <fieldset class="tuning" data-testid="map-tuning">
-        <legend>{algoLabel} settings</legend>
-        {#if tunables.length}
-          {#each tunables as spec (spec.key)}
-            <label class="tunable">
-              <span class="tunable-name">{spec.label}</span>
-              <input
-                type="number"
-                data-testid={`map-param-${spec.key}`}
-                min={spec.min}
-                max={spec.max}
-                step={spec.step}
-                value={draft[spec.key] ?? spec.default}
-                onchange={(e) =>
-                  (draft = { ...draft, [spec.key]: +e.currentTarget.value })}
-              />
-              <span class="tunable-help">{spec.help}</span>
-            </label>
-          {/each}
-        {:else}
-          <!-- An empty panel reads as a broken control; say why it is empty. -->
-          <p class="hint" data-testid="map-no-params">
-            {algoLabel} is a fixed projection — there is nothing to tune. It always
-            produces the same map from the same photos.
-          </p>
-        {/if}
-      </fieldset>
-
-      <button
-        class="primary"
-        data-testid="map-build"
-        onclick={applyGear}
-        disabled={loading}
-      >
-        {loading ? "Building…" : runId ? "Rebuild map" : "Build map"}
-      </button>
-    </div>
-  {/if}
-
-  {#if !runId && !loading}
-    <div class="empty" data-testid="map-empty">
-      <p class="empty-title">No map yet.</p>
-      <p class="empty-hint">
-        A map lays out everyone by how alike their faces are, so you can lasso
-        the groups that are really one person and merge them in one go.
-        {#if options}
-          {n(options.members)} people have {minFaces} or more faces — about {estimateSeconds}
-          seconds.{#if hiddenByThreshold > 0}
-            <span data-testid="map-hidden-empty">
-              {n(hiddenByThreshold)} more have fewer than {minFaces} and are left
-              off; lower the minimum in map settings to include them.
+        <span class="members" data-testid="map-members">
+          {n(options?.members)} people · about {estimateSeconds}s
+          {#if hiddenByThreshold > 0}
+            <span class="hidden-count" data-testid="map-hidden">
+              · {n(hiddenByThreshold)} with fewer faces left off
             </span>
           {/if}
-        {/if}
-      </p>
-      <button class="primary" data-testid="map-build-empty" onclick={applyGear}>
-        Build the map
-      </button>
-      <p class="empty-hint small">
-        It is kept, so coming back here is instant.
-      </p>
-    </div>
-  {:else}
-    {#if visibleSet && shown.length === 0}
-      <div class="empty" data-testid="map-filtered-empty">
-        <p class="empty-title">Nobody here.</p>
-        <p class="empty-hint">
-          None of the {n(points.length)} people on the map appear in the photos you
-          are viewing. Widen the filter, or clear it, to see everyone again.
-        </p>
-      </div>
+        </span>
+
+        <fieldset>
+          <legend>How to lay it out</legend>
+          {#each options?.algorithms ?? [] as a (a.id)}
+            <label class="algo" class:disabled={!a.enabled}>
+              <input
+                type="radio"
+                name="face-map-algorithm"
+                value={a.id}
+                disabled={!a.enabled}
+                checked={algo === a.id}
+                onchange={() => {
+                  algo = a.id;
+                  // Refetch so the panel below shows THIS algorithm's
+                  // parameters; the schema is per-algorithm.
+                  onoptions?.(currentParams());
+                }}
+              />
+              <span class="algo-label">{a.label}</span>
+              <!-- The measured score, so a menu of three options where two are
+                 worse is information rather than a footgun. -->
+              <span class="algo-note">{a.enabled ? a.note : a.reason}</span>
+            </label>
+          {/each}
+        </fieldset>
+
+        <fieldset class="sizes">
+          <legend>Dot size (px)</legend>
+          <label>
+            Smallest
+            <input
+              type="range"
+              data-testid="map-min-radius"
+              min={RADIUS_LIMITS.min}
+              max={20}
+              step="0.5"
+              bind:value={minRadius}
+            />
+            <span class="num">{minRadius}</span>
+          </label>
+          <label>
+            Largest
+            <input
+              type="range"
+              data-testid="map-max-radius"
+              min={2}
+              max={RADIUS_LIMITS.max}
+              step="1"
+              bind:value={maxRadius}
+            />
+            <span class="num">{maxRadius}</span>
+          </label>
+          <!-- Say what the size MEANS, or a slider that changes dot sizes reads
+             as decoration rather than an encoding. -->
+          <p class="hint">
+            Area is proportional to how many photos someone is in, on a
+            square-root scale. These apply straight away — they do not rebuild
+            the map.
+          </p>
+        </fieldset>
+
+        <!-- Rendered from the algorithm's OWN schema, so choosing t-SNE offers
+           perplexity rather than neighbours, and a new algorithm arrives with
+           its controls instead of needing a third place hand-edited. -->
+        <fieldset class="tuning" data-testid="map-tuning">
+          <legend>{algoLabel} settings</legend>
+          {#if tunables.length}
+            {#each tunables as spec (spec.key)}
+              <ParamSlider
+                {spec}
+                value={draft[spec.key] ?? spec.default}
+                oninput={(v) => onTune(spec.key, v, { live: true })}
+                onchange={(v) => onTune(spec.key, v, { live: false })}
+              />
+            {/each}
+          {:else}
+            <!-- An empty panel reads as a broken control; say why it is empty. -->
+            <p class="hint" data-testid="map-no-params">
+              {algoLabel} is a fixed projection — there is nothing to tune. It always
+              produces the same map from the same photos.
+            </p>
+          {/if}
+        </fieldset>
+
+        <button
+          class="primary"
+          data-testid="map-build"
+          onclick={applyGear}
+          disabled={loading}
+        >
+          {loading ? "Building…" : runId ? "Rebuild map" : "Build map"}
+        </button>
+      </aside>
     {/if}
-    <div class="canvas-wrap" class:hidden={visibleSet && shown.length === 0}>
-      <ScatterCanvas
-        bind:this={scatter}
-        points={packed}
-        bind:transform
-        {minRadius}
-        {maxRadius}
-        highlighted={selected}
-        imageFor={(i) => crop(shown[i])}
-        labelFor={(i) =>
-          `${shown[i]?.name || "Unnamed"} · ${n(shown[i]?.photos)} photo${
-            shown[i]?.photos === 1 ? "" : "s"
-          } · ${n(shown[i]?.faces)} faces`}
-        onlasso={onLasso}
-        onpick={(i, e) => {
-          if (e.shiftKey || e.altKey) return;
-          onpick?.(shown[i]?.personId ?? null);
-        }}
-      />
-      {#if loading}
-        <p class="overlay-note">Building the map…</p>
+
+    <div class="map-area">
+      {#if !runId && !loading}
+        <div class="empty" data-testid="map-empty">
+          <p class="empty-title">No map yet.</p>
+          <p class="empty-hint">
+            A map lays out everyone by how alike their faces are, so you can
+            lasso the groups that are really one person and merge them in one
+            go.
+            {#if options}
+              {n(options.members)} people have {minFaces} or more faces — about {estimateSeconds}
+              seconds.{#if hiddenByThreshold > 0}
+                <span data-testid="map-hidden-empty">
+                  {n(hiddenByThreshold)} more have fewer than {minFaces} and are left
+                  off; lower the minimum in map settings to include them.
+                </span>
+              {/if}
+            {/if}
+          </p>
+          <button
+            class="primary"
+            data-testid="map-build-empty"
+            onclick={applyGear}
+          >
+            Build the map
+          </button>
+          <p class="empty-hint small">
+            It is kept, so coming back here is instant.
+          </p>
+        </div>
+      {:else}
+        {#if visibleSet && shown.length === 0}
+          <div class="empty" data-testid="map-filtered-empty">
+            <p class="empty-title">Nobody here.</p>
+            <p class="empty-hint">
+              None of the {n(points.length)} people on the map appear in the photos
+              you are viewing. Widen the filter, or clear it, to see everyone again.
+            </p>
+          </div>
+        {/if}
+        <div
+          class="canvas-wrap"
+          class:hidden={visibleSet && shown.length === 0}
+        >
+          <ScatterCanvas
+            bind:this={scatter}
+            points={packed}
+            bind:transform
+            {minRadius}
+            {maxRadius}
+            highlighted={selected}
+            imageFor={(i) => crop(shown[i])}
+            labelFor={(i) =>
+              `${shown[i]?.name || "Unnamed"} · ${n(shown[i]?.photos)} photo${
+                shown[i]?.photos === 1 ? "" : "s"
+              } · ${n(shown[i]?.faces)} faces`}
+            onlasso={onLasso}
+            onpick={(i, e) => {
+              if (e.shiftKey || e.altKey) return;
+              onpick?.(shown[i]?.personId ?? null);
+            }}
+          />
+          {#if loading}
+            <p class="overlay-note">Building the map…</p>
+          {/if}
+        </div>
       {/if}
     </div>
-  {/if}
+  </div>
 
   {#if chosen.length}
     <!-- THE REVIEW TRAY. The lasso is a claim ("these are one person") and
@@ -728,15 +786,35 @@
     text-decoration: underline;
     padding: 0 2px;
   }
+  /* The map and its settings side by side (#327). `min-height: 0` on the row
+     and `min-width: 0` on the map are what stop a flex child refusing to
+     shrink below its content — without them the canvas pushes the panel off
+     screen at narrow widths. */
+  .body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .map-area {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
   .gear-panel {
     background: #171717;
-    border-bottom: 1px solid #2a2a2a;
+    border-right: 1px solid #2a2a2a;
     padding: 10px 12px;
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 12px;
-    align-items: flex-start;
-    flex: 0 0 auto;
+    align-items: stretch;
+    /* 10-20% of the view, with pixel bounds so it stays usable on a laptop
+       and does not become a canyon on an ultrawide. */
+    flex: 0 0 clamp(220px, 16%, 340px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
   .gear-panel label {
     display: flex;
