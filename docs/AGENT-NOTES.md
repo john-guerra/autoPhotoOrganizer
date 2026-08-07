@@ -179,17 +179,47 @@ declared` at import time. It cost a cycle in #221: 1,549 unit tests passed
   cannot catch a decoder that agrees with it and disagrees with the real
   graph. Only this file can.
 
-## Native modules: better-sqlite3's ABI is a one-way switch
+## Native modules: better-sqlite3's ABI trap is GONE as of 13.0 (2.21.0)
 
-- **`npm run electron:build:*` leaves better-sqlite3 built for ELECTRON, and
-  every Node process then dies.** The build script is
-  `rebuild:electron → build → rebuild:node`; if that last step does not run
-  (interrupted, failed, or the build was killed), the binary left behind is
-  `node_modules/better-sqlite3/bin/darwin-arm64-148/` — 148 is Electron 43's
-  `NODE_MODULE_VERSION`. Node 24 wants 137, so `npm run dev`, the e2e suite and
-  every unit test that opens a DB fail with
-  `Could not locate the bindings file`. Fix: **`npm run rebuild:node`**.
-- **`require("better-sqlite3")` is NOT a check for this.** It only loads the JS
+**Read this before acting on any older note, comment or issue about rebuilding
+better-sqlite3 — several still say the opposite.**
+
+better-sqlite3 **13.0.0 moved to the N-API**, which is ABI-stable across Node
+and Electron by design (the same reason `onnxruntime-node` never needed a
+rebuild — see the `electron-rebuild -w onnxruntime-node` note below). One
+binary now serves both runtimes, and the layout says so: the ABI-versioned
+`bin/darwin-arm64-148/` is gone, replaced by `prebuilds/darwin-arm64.node` —
+**platform and arch only, no `NODE_MODULE_VERSION` in the name.**
+
+Measured on 13.0.3 / darwin-arm64 / Electron 43, 2026-08-07:
+
+```bash
+# the SAME binary, both runtimes, no rebuild between them
+node -e "const D=require('better-sqlite3'); new D(':memory:').prepare('select 1').get()"
+ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron -e "…same…"   # ABI 148, works
+npm run rebuild:electron && node -e "…same…"                       # STILL works
+```
+
+That last line is the whole difference. Under 12.x it was the failure: an
+`electron:build:*` that did not reach its final `rebuild:node` left every Node
+process dying on `Could not locate the bindings file`. It cannot happen now.
+
+- **`rebuild:electron` and `rebuild:node` are now inert for better-sqlite3, and
+  they are kept deliberately** — exactly like the `-w onnxruntime-node` flag
+  below, so they start doing real work again if a future release ships source
+  instead of prebuilt binaries. `lib/binding.js` tries `prebuilds/` FIRST and
+  only falls back to `build/Debug` then `build/Release`, so even a binary
+  compiled by `electron-rebuild` is not the one that loads.
+- **13.0 also dropped `bindings` and `file-uri-to-path`** (12.x resolved its
+  binary through them; the N-API build does not). They are no longer in
+  `node_modules` at all. This bit the asar probe in
+  `server/ml/asarPackaging.test.js`, which copied both into its miniature asar
+  and **silently skipped** when they vanished — one more instance of the
+  house failure mode, an operation that does nothing and reports success. The
+  probe's `NEEDED` list is now `["better-sqlite3"]` alone; if a future version
+  reintroduces a runtime dependency, add it there or the probe stops testing
+  anything.
+- **`require("better-sqlite3")` is still NOT a check.** It only loads the JS
   wrapper; the native binding is not touched until `new Database()`. A require
   that succeeds tells you nothing, and reading "it loads fine" as "the ABI is
   right" cost a wrong diagnosis (2026-07-28). The real check is one line:
