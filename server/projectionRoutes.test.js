@@ -19,6 +19,7 @@ import {
   withProjectionLatch,
   _resetProjectionForTest,
 } from "./projection/latch.js";
+import { _resetPreviewForTest } from "./projection/previewSession.js";
 import { registry } from "./jobs/registry.js";
 import { createApp } from "./index.js";
 
@@ -64,6 +65,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await srv?.close();
+  // The preview session holds a worker and a neighbour graph across requests.
+  // Leaving one alive leaks a thread into the next test file.
+  await _resetPreviewForTest();
   _resetDbForTest();
   _resetProjectionForTest();
   await rm(cacheDir, { recursive: true, force: true });
@@ -291,6 +295,61 @@ describe("POST /api/projections (#232)", () => {
       algorithm: "umap",
       runId: expect.any(Number),
     });
+  });
+});
+
+describe("POST /api/projections/preview (#327)", () => {
+  const preview = async (body) => {
+    const res = await fetch(`${srv.base}/api/projections/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: MODEL, ...body }),
+    });
+    return { status: res.status, body: await res.json() };
+  };
+
+  it("returns points and writes NO run", async () => {
+    seedPeople(20);
+    const before = getDb()
+      .prepare(`SELECT COUNT(*) n FROM projection_runs`)
+      .get().n;
+    const r = await preview({ minFaces: 2, nEpochs: 20 });
+    expect(r.status).toBe(200);
+    expect(r.body.points).toHaveLength(20);
+    expect(r.body.points[0]).toMatchObject({
+      personId: expect.any(Number),
+      x: expect.any(Number),
+      y: expect.any(Number),
+    });
+    // The whole reason preview is a separate path: a drag would write dozens
+    // of rows, and pruneRuns(keep: 3) would then evict the maps the user
+    // actually built.
+    expect(
+      getDb().prepare(`SELECT COUNT(*) n FROM projection_runs`).get().n
+    ).toBe(before);
+  });
+
+  it("starts no job either", async () => {
+    // Contract 2 governs work you might walk away from. A JobsPanel row that
+    // appears and completes in 83ms is noise, not control.
+    seedPeople(20);
+    const before = registry.list().length;
+    await preview({ minFaces: 2, nEpochs: 20 });
+    expect(registry.list().length).toBe(before);
+  });
+
+  it("reports how long it took, so the client can decide to stay live", async () => {
+    seedPeople(20);
+    const r = await preview({ minFaces: 2, nEpochs: 20 });
+    expect(r.body.ms).toBeGreaterThanOrEqual(0);
+    expect(r.body.members).toBe(20);
+  });
+
+  it("refuses a too-small library specifically", async () => {
+    seedPeople(3);
+    const r = await preview({ minFaces: 2, nEpochs: 20 });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/minimum faces/i);
   });
 });
 

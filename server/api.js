@@ -144,6 +144,7 @@ import {
   allParamSpecs,
 } from "./projection/algorithms.js";
 import { runProjection } from "./projection/runProjection.js";
+import { previewProjection } from "./projection/previewSession.js";
 import {
   isProjectionInFlight,
   withProjectionLatch,
@@ -2667,6 +2668,75 @@ export function registerApi(app, { ml } = {}) {
    * `interactiveRoute` for the same reason /api/thumb has it: these are drawn
    * a screenful at a time and must not queue behind a sweep.
    */
+  /**
+   * A LIVE preview: coordinates for these parameters, and nothing else (#327).
+   *
+   * Deliberately not persisted and deliberately not a job. It exists so the
+   * settings panel can follow a slider, which the measurements make possible —
+   * 83 ms at 203 people with the session's resident neighbour graph. Both
+   * omissions are the point rather than an oversight:
+   *
+   *  - **No `projection_runs` row.** One drag would write dozens, and
+   *    `pruneRuns(keep: 3)` would then evict the maps the user actually built.
+   *    A convenience feature that deletes your work is not a convenience.
+   *  - **No job.** Contract 2 governs work the user might walk away from; a
+   *    JobsPanel row that appears and completes in 83 ms is noise. The path
+   *    that CAN be slow is Apply, which still creates a real cancellable job.
+   *
+   * Apply reproduces this exactly — runs are seeded and deterministic — so
+   * committing what you previewed does not move the map under you. That
+   * property is what makes previewing safe, and it is why the warm start this
+   * design started with had to go: a path-dependent preview could not offer it.
+   */
+  app.post("/api/projections/preview", async (req, res) => {
+    const db = getDb();
+    const modelId = faceModelIdOf(req.body?.model);
+    // UMAP only. t-SNE is O(n^2) and PCA has nothing to tune, so neither has a
+    // slider worth following.
+    const params = defaultParams({ ...req.body, algorithm: "umap" });
+
+    let centroids;
+    try {
+      centroids = personCentroids(db, modelId, { minFaces: params.minFaces });
+    } catch (e) {
+      return res.status(500).json({ error: String(e.message ?? e) });
+    }
+    const members = centroids.ids.length;
+    if (members < 5) {
+      return res.status(400).json({
+        error: `Only ${members} ${members === 1 ? "person has" : "people have"} ${params.minFaces} or more faces — lower the minimum faces.`,
+      });
+    }
+
+    const t0 = Date.now();
+    try {
+      const xy = await previewProjection({
+        // The member SET is what the graph was built from, so the key has to
+        // change whenever it does — the same rule #325 was about, applied to a
+        // cache that is in memory and would fail far more quietly.
+        key: `${modelId}:${params.minFaces}:${members}`,
+        data: centroids.data,
+        dim: centroids.dim,
+        n: members,
+        params,
+      });
+      const points = new Array(members);
+      for (let i = 0; i < members; i++) {
+        points[i] = {
+          personId: centroids.ids[i],
+          x: xy[i * 2],
+          y: xy[i * 2 + 1],
+        };
+      }
+      // `ms` is how the client decides whether to keep following the slider.
+      // Measured per request rather than derived from a member count, so it
+      // stays right on a slow machine and a fast one.
+      res.json({ points, members, ms: Date.now() - t0 });
+    } catch (e) {
+      res.status(500).json({ error: String(e?.message ?? e) });
+    }
+  });
+
   app.get("/api/ml/faces/:id/crop", interactiveRoute, async (req, res) => {
     const db = getDb();
     const faceId = Number(req.params.id);
