@@ -188,6 +188,11 @@ export async function runPipeline({
     // The cancel may have arrived while we were parked, and `checkpoint()`
     // returns rather than throwing so that THIS loop keeps its own cooperative
     // shape: break, and report the partial counts below (#344).
+    //
+    // The stage loop below checks the signal too, so no PHOTO is processed
+    // either way. What this saves is a `nextCohort` query nobody wanted and —
+    // the part that reaches the user — `cohorts`/`photos` being incremented
+    // for a cohort that never ran, in the counts this function RETURNS.
     if (signal?.aborted) break;
 
     const live = enabled.filter((s) => !stalled.some((x) => x.id === s.id));

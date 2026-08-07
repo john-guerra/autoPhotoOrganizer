@@ -22,7 +22,7 @@
  */
 import { Worker } from "node:worker_threads";
 import { MAX_OLD_GENERATION_MB } from "./runProjection.js";
-import { MAX_N_NEIGHBORS } from "./algorithms.js";
+import { MAX_N_NEIGHBORS, MIN_MEMBERS } from "./algorithms.js";
 
 const WORKER_URL = new URL("./previewWorker.js", import.meta.url);
 
@@ -194,7 +194,12 @@ export async function previewProjection({ key, data, dim, n, params }) {
   // "Too small to be a useful map" is a judgement, and it is Apply's to make —
   // it already makes it, in those words, at exactly this boundary. A preview
   // that refuses what Apply accepts is the one thing a preview must not do.
-  if (!Number.isFinite(n) || n < 3) {
+  // FROM THE CONSTANT, not a literal 3. The route refuses first (api.js calls
+  // `tooFewMembers`, which reads the same constant), so a literal here could
+  // not disagree with Apply TODAY — it would simply wait to, silently, the
+  // first time the constant moved. Which is the shape of the bug this whole
+  // comment is about.
+  if (!Number.isFinite(n) || n < MIN_MEMBERS) {
     throw new Error(
       `too few people to preview a map (${n}) — lower the minimum faces`
     );
