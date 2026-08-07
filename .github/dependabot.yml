@@ -2,10 +2,24 @@
 # on latest" workflow (see docs/AI-CODING-READINESS-CHECKLIST.md). Weekly PRs so
 # a known-CVE or a stale transitive dep can't sit unnoticed; dev-tooling updates
 # are grouped into one PR to keep the noise down.
+#
+# `target-branch: testing` is LOAD-BEARING, not tidiness. Dependabot defaults to
+# the repository's default branch, which here is `main` — the release line.
+# `main` is meant to sit at the last version John has validated until he merges
+# a batch forward, so a dependency PR landing there directly:
+#
+#   1. puts an unvalidated change into the branch that `release.yml` cuts `v*`
+#      builds from, skipping the trunk entirely;
+#   2. breaks the promotion, which is a fast-forward — `git merge --ff-only
+#      origin/testing` fails the moment `main` holds a commit `testing` does not.
+#
+# Both happened on 2026-08-07: #333 and #334 merged into `main`, and the 2.21.0
+# promotion had to be repaired before it could be run. See docs/AGENT-NOTES.md.
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
+    target-branch: "testing"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
@@ -18,5 +32,6 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "testing"
     schedule:
       interval: "weekly"
