@@ -31,6 +31,10 @@ feature you had to already understand to one you can explore.
   composed. The big run now parks at its next batch boundary, yours runs, and
   the big one resumes with nothing recomputed — both visible in the jobs panel
   throughout (#279, #257).
+- **Your Face Map selection now follows the people, not their positions**, so a
+  rebuild or a filter change can no longer leave the tray holding someone you
+  never picked — and pressing Build keeps your selection instead of clearing it
+  (#327).
 - Security: pinned a patched `js-yaml` inside the auto-updater, closing a
   high-severity advisory with no upstream fix (#338).
 - Internal: better-sqlite3 moved to 13, which switches it to the N-API — one
