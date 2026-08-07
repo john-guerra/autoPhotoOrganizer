@@ -292,6 +292,37 @@ Full ladder, filing template, and the parallel-agent claim protocol → the
   make the checkpoint commit. Only hold off if the work is mid-flight and
   known-broken.
 
+## Asking John to validate: always answer all three questions
+
+Every time you hand work back for him to check — a `needs-validation` issue, a
+PR, "does this work for you?" — **answer these three, unprompted, in the same
+message**:
+
+1. **Where** — the URL, and the version it should show. He runs several
+   worktrees and old dev servers linger; a stale one on another port serves the
+   version it was started with and reports no error (see `docs/AGENT-NOTES.md`).
+   So always add: _check the title bar says `vX.Y.Z` before trusting anything._
+2. **The command** — the exact line, with an explicit non-default port so it
+   cannot collide with whatever he already has open:
+
+   ```bash
+   PORT=4351 npm run dev      # UI on :5173, API on :4351
+   ```
+
+   Start it yourself and give him the URL when you can; he should not have to
+   set up the thing you are asking him to check.
+
+3. **What to do, and what counts as right or wrong** — numbered steps against
+   HIS data, not the fixture, and for each one what he should see. Include the
+   step where you think it is most likely to be wrong, and say why. "Test the
+   face map" is not a request; "build a map, run face detection on the 597
+   photos that have none, come back — an amber pill should appear, and pressing
+   it should raise the count" is.
+
+He asked for this explicitly after being handed work twice with no way to run
+it. A validation request missing any of the three is incomplete in the same way
+a feature with no error handling is.
+
 ## Keyboard shortcuts
 
 This is a keyboard-first app: a shortcut nobody can find does not exist.
