@@ -214,16 +214,16 @@ describe("defaultParams", () => {
   });
 });
 
-describe("UMAP's default neighbourhood (#307)", () => {
-  it("defaults to 50, which is what was validated on real data", () => {
-    // Pinned because it was chosen by LOOKING, not by theory. John compared 15
-    // against 50 on a 254-person library and 50 gave visibly tighter,
-    // lassoable per-identity clusters — which is the whole job of this map.
-    // The theory ("high values favour the overall shape") argued for a low
-    // default and lost to a screenshot.
+describe("UMAP's default neighbourhood (#326)", () => {
+  it("defaults to 30 — the value John picked on his own library", () => {
+    // Still chosen by LOOKING rather than by theory, but by looking at forty
+    // projections instead of one screenshot: a sweep of eight neighbourhood
+    // values across five photo scopes of the real library, John picking the
+    // best cell in each. 30 is his pick for the WHOLE-LIBRARY case, which is
+    // the case a default actually serves.
     const umap = ALGORITHMS.find((a) => a.id === "umap");
     const n = umap.params.find((p) => p.key === "nNeighbors");
-    expect(n.default).toBe(50);
+    expect(n.default).toBe(30);
     expect(n.default).toBeGreaterThanOrEqual(n.min);
     expect(n.default).toBeLessThanOrEqual(n.max);
   });
@@ -238,5 +238,20 @@ describe("UMAP's default neighbourhood (#307)", () => {
       "utf8"
     );
     expect(src).toMatch(/58\.3% top-5.*nNeighbors=15/);
+  });
+
+  it("records that the default must NOT be derived from the member count", () => {
+    // #307's note argued the opposite — "a default derived from the point
+    // count would preserve what he actually saw" — and that idea was tested
+    // and refuted (#326): two scopes of nearly the same size want values 2.4x
+    // apart, so no f(members) can return both. The refutation lives in a
+    // comment, so a test keeps the comment alive, exactly like the 58.3%
+    // assertion above. Without it the next agent re-derives the idea, which is
+    // how #307 shipped in the first place.
+    const src = readFileSync(
+      new URL("./algorithms.js", import.meta.url),
+      "utf8"
+    );
+    expect(src).toMatch(/do not derive this from the member count/i);
   });
 });

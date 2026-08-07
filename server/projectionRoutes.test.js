@@ -19,6 +19,7 @@ import {
   withProjectionLatch,
   _resetProjectionForTest,
 } from "./projection/latch.js";
+import { _resetPreviewForTest } from "./projection/previewSession.js";
 import { registry } from "./jobs/registry.js";
 import { createApp } from "./index.js";
 
@@ -64,16 +65,26 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await srv?.close();
+  // The preview session holds a worker and a neighbour graph across requests.
+  // Leaving one alive leaks a thread into the next test file.
+  await _resetPreviewForTest();
   _resetDbForTest();
   _resetProjectionForTest();
   await rm(cacheDir, { recursive: true, force: true });
   delete process.env.AUTOGALLERY_HOME;
 });
 
-/** `n` people with `facesEach` faces apiece, spread over distinct directions. */
-function seedPeople(n, facesEach = 2) {
+/**
+ * People `from..n` with `facesEach` faces apiece, spread over distinct
+ * directions.
+ *
+ * `from` exists so a test can GROW the library after a map has been built —
+ * the case #325 is about. Re-running from 1 would collide on `persons.id`,
+ * which is inserted explicitly here.
+ */
+function seedPeople(n, facesEach = 2, from = 1) {
   const db = getDb();
-  for (let p = 1; p <= n; p++) {
+  for (let p = from; p <= n; p++) {
     const files = Array.from({ length: facesEach }, (_, i) => ({
       name: `IMG_${i}.jpg`,
       size: 1000 + i,
@@ -210,6 +221,36 @@ describe("POST /api/projections (#232)", () => {
     expect(registry.list().length).toBe(before);
   });
 
+  it("does NOT reuse a run whose library has grown since (#325)", async () => {
+    // The cache key covers the PARAMETERS. A run's real input is the member
+    // set, which the key cannot see — so a map built while face grouping was
+    // still running was handed back forever, and the DEFAULT parameters are
+    // the worst case because they are the first map anyone builds.
+    seedPeople(8);
+    const first = await post({ minFaces: 2, nEpochs: 30 });
+    await settled(first.body.jobId);
+
+    seedPeople(12, 2, 9); // four more people since that map was built
+
+    const again = await post({ minFaces: 2, nEpochs: 30 });
+    expect(again.body.reused).toBeUndefined();
+    expect(again.status).toBe(201);
+    const job = await settled(again.body.jobId);
+    expect(job.result.members).toBe(12);
+  });
+
+  it("still reuses a run when the library has NOT changed (#325)", async () => {
+    // The other half, and the reason the check is a comparison rather than a
+    // fingerprint in the cache key: revalidating must not turn every hit into
+    // a rebuild.
+    seedPeople(8);
+    const first = await post({ minFaces: 2, nEpochs: 30 });
+    await settled(first.body.jobId);
+    const again = await post({ minFaces: 2, nEpochs: 30 });
+    expect(again.body.reused).toBe(true);
+    expect(again.body.jobId).toBeUndefined();
+  });
+
   it("a DIFFERENT parameter is a different run, not a cache hit", async () => {
     seedPeople(8);
     const a = await post({ minFaces: 2, nEpochs: 30 });
@@ -254,6 +295,61 @@ describe("POST /api/projections (#232)", () => {
       algorithm: "umap",
       runId: expect.any(Number),
     });
+  });
+});
+
+describe("POST /api/projections/preview (#327)", () => {
+  const preview = async (body) => {
+    const res = await fetch(`${srv.base}/api/projections/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: MODEL, ...body }),
+    });
+    return { status: res.status, body: await res.json() };
+  };
+
+  it("returns points and writes NO run", async () => {
+    seedPeople(20);
+    const before = getDb()
+      .prepare(`SELECT COUNT(*) n FROM projection_runs`)
+      .get().n;
+    const r = await preview({ minFaces: 2, nEpochs: 20 });
+    expect(r.status).toBe(200);
+    expect(r.body.points).toHaveLength(20);
+    expect(r.body.points[0]).toMatchObject({
+      personId: expect.any(Number),
+      x: expect.any(Number),
+      y: expect.any(Number),
+    });
+    // The whole reason preview is a separate path: a drag would write dozens
+    // of rows, and pruneRuns(keep: 3) would then evict the maps the user
+    // actually built.
+    expect(
+      getDb().prepare(`SELECT COUNT(*) n FROM projection_runs`).get().n
+    ).toBe(before);
+  });
+
+  it("starts no job either", async () => {
+    // Contract 2 governs work you might walk away from. A JobsPanel row that
+    // appears and completes in 83ms is noise, not control.
+    seedPeople(20);
+    const before = registry.list().length;
+    await preview({ minFaces: 2, nEpochs: 20 });
+    expect(registry.list().length).toBe(before);
+  });
+
+  it("reports how long it took, so the client can decide to stay live", async () => {
+    seedPeople(20);
+    const r = await preview({ minFaces: 2, nEpochs: 20 });
+    expect(r.body.ms).toBeGreaterThanOrEqual(0);
+    expect(r.body.members).toBe(20);
+  });
+
+  it("refuses a too-small library specifically", async () => {
+    seedPeople(3);
+    const r = await preview({ minFaces: 2, nEpochs: 20 });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/minimum faces/i);
   });
 });
 

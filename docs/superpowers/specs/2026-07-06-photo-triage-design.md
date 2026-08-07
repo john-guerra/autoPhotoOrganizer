@@ -101,7 +101,19 @@ You can cull ANY folder from day one; ingest is an optional first step.
 
 Faces, ML ranking, cloud/mobile, and any photo editing.
 
-## Phase 2 (recorded, not built)
+## Phase 2 (recorded 2026-07-06 — the first bullet has since SHIPPED)
+
+> **Status note, 2026-08-07 (#336).** This section is kept as written, because
+> a spec records what was decided and when. But the heading used to say
+> "recorded, not built" and that is no longer true of half of it, which is the
+> kind of quietly-stale claim #323 was filed about. As of 2.21.0:
+>
+> - **Local search — SHIPPED.** Face detection and grouping, the People view,
+>   the Face Map, and on-device SigLIP/CLIP embeddings with near-duplicate
+>   detection. Exactly the stack named below: transformers.js / ONNX Runtime in
+>   Node, computed in the background, stored in the SQLite index.
+> - **"Predict my picks" — still not built.** So is the GPU archive renderer
+>   under "Rendering strategy" below.
 
 - **Google-Photos-style local search** — face detection/clustering + CLIP
   embeddings via transformers.js / ONNX Runtime in Node. All local, all JS,

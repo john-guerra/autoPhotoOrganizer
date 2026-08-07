@@ -6,11 +6,48 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
-## 2.20.7
+## 2.20.9
 
-- **Docs:** the README architecture note no longer frames faces / CLIP search
-  as unbuilt "Phase 2" — those shipped; only pick-prediction and the GPU archive
-  renderer remain (#336).
+- **The Face Map's settings now sit beside the map, and the sliders move it as
+  you drag.** They used to be a popover over the map, so you could not see what
+  a setting did to the thing you were changing it for. On a library this size a
+  change lands in under a tenth of a second; on a much larger one the panel says
+  so and waits for Apply instead of pretending (#327).
+- **You can type a number again.** The settings were number boxes that clamped
+  on every keystroke, so getting from 5 to 50 by typing a 0 was impossible.
+  Every setting is now a slider with an editable number beside it (#327).
+- **The map remembers your settings.** They no longer reset every time you
+  reload (#287).
+
+## 2.20.8
+
+- **You can now start a scan on your selection while a whole-library run is
+  going.** Asking to find faces (or compute similarity) in a selection used to
+  do nothing at all while a big background pass was running — the scope
+  picker and the button were both greyed out, so the request could not even be
+  composed. The scoped request now takes priority: the big run parks at its
+  next batch boundary, yours runs, and the big one picks up where it left off
+  with nothing recomputed. Both are visible in the jobs panel throughout, and a
+  parked one says what it is waiting for (#279, #257).
+- Kicking off a second whole-library pass while one is already running still
+  answers immediately instead of queueing a duplicate — it would scan exactly
+  the same photos.
+
+## 2.20.6
+
+- **The Face Map no longer hands you a map of a library you no longer have.** A
+  map is stored under the settings it was built with, and asking for those same
+  settings gave the old map back even after face grouping had found hundreds
+  more people. The default settings were hit hardest, because that is the first
+  map you ever build — which is why it looked like one particular Neighbours
+  value was broken. Building now notices and rebuilds (#325).
+- **"N added since" is a button.** It has always told you the map was out of
+  date; now you can press it (#325).
+- **Neighbours now defaults to 30.** Picked from 40 real projections of your own
+  library across five albums, rather than from one screenshot — and a fresh
+  comparison did not reproduce the old 50 (#326).
+- Security: pinned a patched `js-yaml` inside the auto-updater, closing a
+  high-severity advisory that had no upstream fix available (#338).
 
 ## 2.20.5
 

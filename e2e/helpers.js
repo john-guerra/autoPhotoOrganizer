@@ -274,10 +274,32 @@ export const faceMap = {
   gear: (page) => page.locator('[data-testid="map-gear"]'),
   gearPanel: (page) => page.locator('[data-testid="map-gear-panel"]'),
   members: (page) => page.locator('[data-testid="map-members"]'),
-  /** One tuning control in the gear, by parameter name — `nNeighbors`, `minFaces`, … */
+  /** One tuning control in the panel, by parameter name — the SLIDER (#327). */
   param: (page, key) => page.locator(`[data-testid="map-param-${key}"]`),
+  /** Which mode the panel is in: following the sliders, or waiting for Apply. */
+  liveHint: (page) => page.locator('[data-testid="map-live-hint"]'),
+  /**
+   * Ensure the settings panel is OPEN, whatever state it was in.
+   *
+   * Not `gear().click()`. Since #327 the panel stays open across a rebuild —
+   * so `build_`, which opens it to reach the Rebuild button, leaves it open,
+   * and a spec that then clicks the gear CLOSES it. That cost an hour: the
+   * symptom was a handler apparently firing twice, and the give-away was one
+   * event with `isTrusted: true` (build_'s click) and one with `false`.
+   */
+  openGear: async (page) => {
+    const g = faceMap.gear(page);
+    if ((await g.getAttribute("aria-expanded")) !== "true") await g.click();
+    await faceMap.gearPanel(page).waitFor();
+  },
+  /** The editable number beside that slider. A slider alone cannot express an
+   *  exact value, and `<input type="number">` alone would not let you get from
+   *  5 to 50 by typing — which is the annoyance that opened #327. */
+  paramNum: (page, key) => page.locator(`[data-testid="map-param-${key}-num"]`),
   /** The minimum-faces threshold, which sits above the algorithm's own knobs. */
   minFaces: (page) => page.locator('[data-testid="map-param-minFaces"]'),
+  /** Its editable number. */
+  minFacesNum: (page) => page.locator('[data-testid="map-param-minFaces-num"]'),
   /** How many people the minimum-faces threshold is leaving off (#255). */
   hidden: (page) => page.locator('[data-testid="map-hidden"]'),
   /** The same disclosure in the empty state, before a map has been built. */
@@ -285,6 +307,14 @@ export const faceMap = {
   build: (page) => page.locator('[data-testid="map-build-empty"]'),
   rebuild: (page) => page.locator('[data-testid="map-build"]'),
   count: (page) => page.locator('[data-testid="map-count"]'),
+  /**
+   * The "N added since — rebuild to place them" affordance.
+   *
+   * A BUTTON, not a caption (#325). `docs/TESTING.md` exists because a
+   * "Remove" button once rendered correctly and silently did nothing when
+   * pressed, so this one is pressed.
+   */
+  stale: (page) => page.locator('[data-testid="map-stale"]'),
   tray: (page) => page.locator('[data-testid="map-tray"]'),
   trayCount: (page) => page.locator('[data-testid="tray-count"]'),
   chips: (page) => page.locator('[data-testid="tray-chip"]'),
@@ -318,8 +348,15 @@ export const faceMap = {
     const empty = faceMap.build(page);
     if (await empty.count()) await empty.click();
     else {
-      await faceMap.gear(page).click();
+      // Reaching Rebuild means opening the panel — and since #327 the panel
+      // STAYS open afterwards. Put it back, because this is a setup helper and
+      // the lasso specs pick people by canvas coordinates: an unexpectedly
+      // open panel narrows the map and selects someone else entirely.
+      const wasOpen =
+        (await faceMap.gear(page).getAttribute("aria-expanded")) === "true";
+      if (!wasOpen) await faceMap.gear(page).click();
       await faceMap.rebuild(page).click();
+      if (!wasOpen) await faceMap.gear(page).click();
     }
     await faceMap.count(page).waitFor({ timeout: 60_000 });
   },
@@ -441,6 +478,74 @@ export async function seedFaces(
       // first `people` ids keep meaning what every other helper assumes.
       for (let p = people + 1; p <= people + below; p++) {
         seedPerson(p, belowFaces);
+      }
+    })();
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Add people to the scratch index WITHOUT wiping what is already there.
+ *
+ * `seedFaces` deletes every face, person and projection run before it seeds,
+ * which is right for a fresh test and useless for #325 — that bug is
+ * specifically "a run already exists and the library grew underneath it".
+ * Same scratch-index-only guarantee as `seedFaces`: it can only ever open
+ * `e2e/.tmp/home/index.db`.
+ *
+ * @param {number} from first person id to create (inclusive) — must not
+ *   collide with ids `seedFaces` already used, since `persons.id` is explicit
+ * @param {number} to last person id to create (inclusive)
+ * @param {number} facesEach faces per person. Must CLEAR the product's
+ *   `minFaces` default or the new people never reach the map and the caller
+ *   is measuring nothing.
+ */
+export async function addPeople(from, to, facesEach = 5) {
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(
+    join(process.cwd(), "e2e", ".tmp", "home", "index.db")
+  );
+  try {
+    const model = "buffalo_s";
+    const photos = db
+      .prepare(
+        `SELECT id FROM photos WHERE stale = 0 AND kind = 'image' ORDER BY id`
+      )
+      .all()
+      .map((r) => r.id);
+    if (!photos.length) throw new Error("addPeople: no photos to attach to");
+
+    const DIM = 16;
+    const insPerson = db.prepare(
+      `INSERT INTO persons (id, name, created_at) VALUES (?, ?, ?)`
+    );
+    const insFace = db.prepare(
+      `INSERT INTO photo_faces
+         (photo_id, model, box_x, box_y, box_w, box_h, det_score,
+          dim, scale, vec, person_id, person_source, created_at)
+       VALUES (?, ?, 0, 0, 10, 10, 0.9, ?, ?, ?, ?, 'model', ?)`
+    );
+    db.transaction(() => {
+      for (let p = from; p <= to; p++) {
+        insPerson.run(p, null, 1000 + p);
+        for (let f = 0; f < facesEach; f++) {
+          // Same distinct-direction-per-person scheme seedFaces uses, so the
+          // projection has real structure rather than coincident points.
+          const bytes = new Int8Array(DIM);
+          for (let i = 0; i < DIM; i++) {
+            bytes[i] = Math.round(Math.sin(i * 0.7 + p * 1.3 + f * 0.05) * 100);
+          }
+          insFace.run(
+            photos[(p * facesEach + f) % photos.length],
+            model,
+            DIM,
+            0.01,
+            Buffer.from(bytes.buffer),
+            p,
+            Date.now()
+          );
+        }
       }
     })();
   } finally {

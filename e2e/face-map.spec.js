@@ -6,6 +6,8 @@ import {
   views,
   faceMap,
   seedFaces,
+  reload,
+  addPeople,
   clearFaces,
   clearRatings,
   personCount,
@@ -137,6 +139,38 @@ test.describe("face map @p1", () => {
     expect(errors).toEqual([]);
   });
 
+  test("a map built before more people arrived offers a rebuild that WORKS", async ({
+    page,
+  }) => {
+    // #325: the run cache keyed on the PARAMETERS only, so a map built while
+    // face grouping was still running was handed back forever. The view always
+    // knew — it has rendered "N added since" since #232 — but as a CAPTION
+    // beside a map that looks broken, which is not something you can press.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await expect(faceMap.count(page)).toContainText(String(PEOPLE));
+
+    // Grouping carries on: 30 more people now clear the threshold.
+    await addPeople(PEOPLE + 1, PEOPLE + 30, FACES_EACH);
+
+    // Leaving and returning re-fetches /current, which is what reports drift.
+    // `toGrid`, not `show(page, "grid")` — the grid is the DEFAULT view and
+    // therefore the one view with no switcher button of its own.
+    await views.toGrid(page);
+    await views.show(page, "face-map");
+    await expect(faceMap.stale(page)).toContainText("30");
+
+    // Press it. This is the assertion the whole test exists for.
+    await faceMap.stale(page).click();
+    await expect(faceMap.count(page)).toContainText(String(PEOPLE + 30), {
+      timeout: 60_000,
+    });
+    await expect(faceMap.stale(page)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test("the gear reports a live member count that tracks minimum faces", async ({
     page,
   }) => {
@@ -146,20 +180,15 @@ test.describe("face map @p1", () => {
     const errors = trackPageErrors(page);
     await openApp(page);
     await views.show(page, "face-map");
-    await faceMap.gear(page).click();
+    await faceMap.openGear(page);
 
     // Everyone clears the default of 5 (#255), so the gear opens on everyone.
     await expect(faceMap.members(page)).toContainText(String(PEOPLE));
-    await faceMap
-      .gearPanel(page)
-      .locator('input[type="number"]')
-      .first()
-      .fill(String(FACES_EACH + 1));
-    await faceMap
-      .gearPanel(page)
-      .locator('input[type="number"]')
-      .first()
-      .blur();
+    // Through the helper, not an inline `input[type="number"]` — docs/TESTING.md
+    // keeps selectors in one file so a markup change is one edit. #327 turned
+    // these into slider + number pairs, which is exactly such a change.
+    await faceMap.minFacesNum(page).fill(String(FACES_EACH + 1));
+    await faceMap.minFacesNum(page).blur();
     // Nobody has that many faces in the fixture, so the honest answer is zero.
     // "0 people", not "0" — `toContainText("0")` also matches "120 people",
     // which is the answer this assertion exists to rule out.
@@ -190,7 +219,7 @@ test.describe("face map @p1", () => {
     const errors = trackPageErrors(page);
     await openApp(page);
     await views.show(page, "face-map");
-    await faceMap.gear(page).click();
+    await faceMap.openGear(page);
 
     const serverDefaults = await page.evaluate(async () => {
       const r = await fetch("/api/projections/options?algorithm=umap");
@@ -212,6 +241,145 @@ test.describe("face map @p1", () => {
 
     expect(errors).toEqual([]);
   });
+
+  test("the settings sit BESIDE the map, and a value can be retyped", async ({
+    page,
+  }) => {
+    // #327, both halves. The gear was a popover OVER the map, so you could not
+    // see what a parameter did to the thing you were changing it for — and
+    // #326 established the right neighbourhood cannot be predicted, only
+    // found by looking. And `<input type="number">` clamps on every keystroke,
+    // so typing a 0 after a 5 to get 50 did nothing at all.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await faceMap.openGear(page);
+
+    // Panel and map on screen together: the whole point of the change.
+    await expect(faceMap.gearPanel(page)).toBeVisible();
+    await expect(faceMap.scatter(page)).toBeVisible();
+
+    await faceMap.paramNum(page, "nNeighbors").fill("50");
+    await faceMap.paramNum(page, "nNeighbors").blur();
+    // The slider tracks the number, so they are one control rather than two.
+    await expect(faceMap.param(page, "nNeighbors")).toHaveValue("50");
+    expect(errors).toEqual([]);
+  });
+
+  test("changing the minimum faces rebuilds by itself, without Rebuild", async ({
+    page,
+  }) => {
+    // #327. John's trace showed it exactly: moving the threshold fired only
+    // GET /api/projections/options, and POST /api/projections appeared solely
+    // where he had pressed Rebuild. The threshold cannot be previewed — it
+    // changes the member set the resident graph was built from — so it has to
+    // start a real rebuild on its own.
+    const errors = trackPageErrors(page);
+    const builds = [];
+    page.on("request", (r) => {
+      if (
+        r.method() === "POST" &&
+        new URL(r.url()).pathname === "/api/projections"
+      ) {
+        builds.push(r.url());
+      }
+    });
+
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await faceMap.openGear(page);
+    const before = builds.length;
+
+    // Lower the threshold and let go. Nothing else is touched — in particular
+    // Rebuild is never pressed.
+    await faceMap.minFacesNum(page).fill("");
+    await faceMap.minFacesNum(page).pressSequentially("2");
+    await faceMap.minFacesNum(page).blur();
+
+    await expect
+      .poll(() => builds.length, { timeout: 20_000 })
+      .toBeGreaterThan(before);
+    expect(errors).toEqual([]);
+  });
+
+  test("a precise value can be typed, below the slider's own step", async ({
+    page,
+  }) => {
+    // #327: the number box carried the schema's step, so minDist — which steps
+    // by 0.05 — treated 0.0001 as invalid and the browser silently refused it.
+    // You could not get from 0.1 to 0.0001 by any amount of typing. The number
+    // box exists precisely to express what the slider cannot, so it takes
+    // `step="any"`; only the slider is stepped.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await faceMap.openGear(page);
+
+    // TYPED, not `fill`ed. `fill` sets the value straight onto the element and
+    // bypasses the keystroke path entirely — it passes with the bug still in
+    // place, which is how this test was decoration for one run.
+    // Cleared with `fill("")`, then TYPED. `fill` alone sets the value straight
+    // onto the element and bypasses the keystroke path — it passed with the bug
+    // still in place, which made this test decoration for one run. And a
+    // select-all keystroke is no good either: the app binds Cmd/Ctrl+A to
+    // selecting photos, so the field never gets selected.
+    const box = faceMap.paramNum(page, "minDist");
+    await box.fill("");
+    await box.pressSequentially("0.0001");
+    await box.blur();
+    await expect(faceMap.paramNum(page, "minDist")).toHaveValue("0.0001");
+    expect(errors).toEqual([]);
+  });
+
+  test("dragging a slider moves the map, with no job and no stored run", async ({
+    page,
+  }) => {
+    // #327's payoff. The map is a canvas, so no other tier can see this at
+    // all — and the assertion is that the PIXELS changed, not that a request
+    // was sent, because a preview that fires and never reaches the canvas is
+    // exactly the "renders and does nothing" bug this file exists for.
+    const errors = trackPageErrors(page);
+    const previews = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/projections/preview")) previews.push(r.url());
+    });
+
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await faceMap.openGear(page);
+
+    // The panel says which mode it is in, and this fixture is small enough to
+    // be live. A failure here means the machine got slower, not that the
+    // feature broke — which is the point of thresholding on measured latency.
+    await expect(faceMap.liveHint(page)).toContainText("follows the sliders");
+
+    const before = await faceMap.scatter(page).screenshot();
+    await faceMap.param(page, "nNeighbors").fill("8");
+    await faceMap.param(page, "nNeighbors").dispatchEvent("input");
+
+    await expect
+      .poll(
+        async () => (await faceMap.scatter(page).screenshot()).equals(before),
+        { timeout: 15_000 }
+      )
+      .toBe(false);
+    expect(previews.length).toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+  });
+
+  // NOT tested here: that the panel's values survive a reload (#287).
+  //
+  // `openApp` registers `localStorage.clear()` through `addInitScript`, which
+  // Playwright re-runs on EVERY navigation — so `reload(page)` wipes the
+  // settings before the app can read them. That clearing is deliberate and
+  // load-bearing (docs/AGENT-NOTES.md: three specs leaking a working set turned
+  // 36 unrelated tests red), so weakening it for one convenience assertion is
+  // the wrong trade. The load/save/sanitise logic is covered instead by
+  // ui/src/lib/mapSettings.test.js, and the wiring by the retype test above.
 
   test("says how many people the minimum is leaving off, BEFORE you build", async ({
     page,

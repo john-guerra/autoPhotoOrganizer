@@ -47,6 +47,19 @@ export const TSNE_MAX_MEMBERS = 6000;
 export const MAX_EPOCHS = 2000;
 
 /**
+ * The largest neighbourhood the slider offers.
+ *
+ * Exported so the preview session builds its graph at the SAME ceiling — a
+ * preview capped lower than the slider would show one map while Apply produced
+ * another, which is the #325 failure family (a view quietly presenting itself
+ * as something it is not).
+ *
+ * `worker.js` clamps to `n - 1` regardless, so this is a ceiling on the
+ * control rather than a promise about any particular library.
+ */
+export const MAX_N_NEIGHBORS = 300;
+
+/**
  * How many faces a person needs before they are worth a dot (#255).
  *
  * Exported so the server's own fallbacks (`personCentroids`, `runStaleness`)
@@ -110,21 +123,41 @@ export const ALGORITHMS = Object.freeze([
         key: "nNeighbors",
         label: "Neighbours",
         min: 2,
-        max: 200,
+        max: MAX_N_NEIGHBORS,
         step: 1,
-        // 50, not 15, from looking at the real thing (#307). John compared the
-        // two on a 254-person library and 50 gives visibly tighter, more
-        // lassoable per-identity clusters — which is what this map is FOR.
+        // 30, measured (#326) — and the paragraph below is the part that
+        // matters more than the number.
         //
-        // That is evidence and the theory was not: "high values favour the
-        // overall shape" argues for a LOW default, and it lost to a
-        // screenshot.
+        // Forty real UMAP runs over the real library (one seed, one minDist,
+        // 200 epochs, only this parameter moving), rendered as small multiples
+        // with real face crops across five photo scopes, John picking the best
+        // cell in each:
         //
-        // Worth knowing it is a RATIO he validated, not an absolute. 50 of 254
-        // points is ~20%; on the 25,758-person library cited above it is 0.2%,
-        // a different regime entirely. A default derived from the point count
-        // would preserve what he actually saw — see #307.
-        default: 50,
+        //   whole library  255 people -> 30      Austria 2   42 people -> 15
+        //   Austria 5      151 people -> 22      Austria 4   53 people -> 36
+        //
+        // DO NOT DERIVE THIS FROM THE MEMBER COUNT. #307's note argued for
+        // exactly that ("a default derived from the point count would preserve
+        // what he actually saw"), and this sweep refutes it: Austria 2 and
+        // Austria 4 hold 42 and 53 people — nearly the same size — and want
+        // values 2.4x apart, so no f(members) can return both. Fitting one
+        // anyway gives k = 12.4 * members^0.149 at R^2 = 0.11 (linear would be
+        // exponent 1.0, sqrt 0.5); member counts span 6.1x across the scopes
+        // while the picks span 2.4x. A cheap clustering pass does not rescue
+        // it either — those two scopes have near-identical structure (9 vs 15
+        // components at cosine 0.5, mean cluster size 4.7 vs 3.5) and every
+        // structural measure correlates r ~ 0.2 with the picks.
+        //
+        // 50 came from ONE screenshot of a 254-person library and did not
+        // replicate: shown the same map again, John picked 30.
+        //
+        // The honest reading is that the right neighbourhood is a property of
+        // the photographs, not of anything the index can count — which is why
+        // #327 makes the control live instead of making the default cleverer.
+        // Method, the four picks, and the caveats (n=4, eight discrete
+        // options) live in
+        // `docs/superpowers/specs/2026-08-06-face-map-neighbourhood-design.md`.
+        default: 30,
         help: "How much of the neighbourhood each point is fitted to. Low values keep tight local groups; high values favour the overall shape.",
       }),
       Object.freeze({

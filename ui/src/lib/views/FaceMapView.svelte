@@ -17,7 +17,9 @@
    * The map itself is `ScatterCanvas`, which knows nothing about people. All
    * the domain lives here.
    */
+  import { untrack } from "svelte";
   import { faceCropUrl } from "../faceCropUrl.js";
+  import { isTypingTarget } from "../focus.js";
   import ScatterCanvas from "../scatter/ScatterCanvas.svelte";
   import {
     DEFAULT_MIN_RADIUS,
@@ -26,6 +28,27 @@
     clampRadius,
   } from "../scatter/lod.js";
   import { loadSetting, saveSetting } from "../settings.js";
+  import ParamSlider from "../ParamSlider.svelte";
+  import {
+    similarityFrom,
+    applySimilarity,
+    delayFraction,
+    progressAt,
+    lerpTransform,
+    STAGGER_MS,
+    TOTAL_MS,
+    FIT_MS,
+  } from "../scatter/align.js";
+  import {
+    loadSettings,
+    saveSettings,
+    canGoLive,
+    estimateMs,
+    clampPanelWidth,
+    PANEL_DEFAULT,
+    PANEL_MIN,
+    PANEL_MAX,
+  } from "../mapSettings.js";
 
   let {
     /** `[{personId, x, y, name, coverFaceId, faces}]` from the current run. */
@@ -56,6 +79,10 @@
     onrun,
     /** `(params) => Promise` — refresh options as the gear changes. */
     onoptions,
+    /** `(params) => Promise<boolean>` — new coordinates, no run, no job (#327). */
+    onpreview,
+    /** How long the last projection took, in ms. Drives the live boundary. */
+    lastMs = null,
     /** `({intoId, ids, name}) => Promise<{ok, error, names?, token?, ...}>` */
     onmerge,
     /** `(token) => Promise` */
@@ -87,6 +114,182 @@
     visibleSet ? points.filter((p) => visibleSet.has(p.personId)) : points
   );
 
+  /**
+   * The positions actually drawn, tweened from the previous layout (#327).
+   *
+   * `shown` is the truth; this is the truth on its way there. Two things have
+   * to happen before a tween means anything:
+   *
+   *  1. **Align.** UMAP's rotation, reflection, scale and origin are arbitrary,
+   *     so most of the apparent movement between two runs is meaningless. The
+   *     new layout is fitted onto the old one first, leaving only real change
+   *     to animate.
+   *  2. **Pair by personId**, not by index. The member set can change between
+   *     runs (a different minFaces), and animating index-to-index would send
+   *     each dot to a stranger's position.
+   *
+   * A point with no previous position does not fly in from wherever index 7
+   * used to be — it simply appears where it belongs.
+   */
+  let anim = $state(null);
+  /** The aligned positions on screen when nothing is animating.
+   *
+   *  The animation runs towards the ALIGNED layout, so if the resting state
+   *  fell back to raw coordinates the map would snap between two frames the
+   *  instant the tween finished — which reads as it playing again. The aligned
+   *  frame IS the display frame; raw coordinates are never drawn. */
+  let settled = $state(null);
+  let animRaf = 0;
+
+  const drawn = $derived.by(() => {
+    const n = shown.length;
+    if (anim && anim.from.length === n * 2) {
+      const out = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        // Each point runs its OWN clock: the stagger is what turns one mass
+        // sliding into many separate things going many separate places.
+        const t = progressAt(anim.elapsed, anim.delay[i]);
+        out[i * 2] = anim.from[i * 2] + (anim.to[i * 2] - anim.from[i * 2]) * t;
+        out[i * 2 + 1] =
+          anim.from[i * 2 + 1] +
+          (anim.to[i * 2 + 1] - anim.from[i * 2 + 1]) * t;
+      }
+      return out;
+    }
+    if (settled && settled.length === n * 2) return settled;
+    const xy = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      xy[i * 2] = shown[i].x;
+      xy[i * 2 + 1] = shown[i].y;
+    }
+    return xy;
+  });
+
+  /**
+   * Play a layout change: re-frame, then move.
+   *
+   * The camera goes first and alone. Fitting at the END means the user watches
+   * points travel to somewhere they cannot see and the map jumps afterwards;
+   * fitting DURING means the ground moves while the things standing on it move
+   * too, and nothing is readable. So: `FIT_MS` of camera, then the points.
+   *
+   * Imperative rAF driven from an `$effect`, with everything it writes read
+   * back through `untrack` — an effect that reads and writes its own state
+   * re-fires forever, which is CLAUDE.md's first trap wearing runes.
+   */
+  let lastKeyed = new Map();
+  $effect(() => {
+    const pts = shown;
+    untrack(() => {
+      const n = pts.length;
+      const raw = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        raw[i * 2] = pts[i].x;
+        raw[i * 2 + 1] = pts[i].y;
+      }
+
+      // Enough PAIRED points to measure an alignment from — not a share of
+      // the new set. Changing the minimum faces can more than double the map
+      // (76 people at 5, 258 at 2), and a "half the points must be familiar"
+      // rule silently refused to animate exactly the change that moves most.
+      // Newcomers do not need a previous position; they appear where they
+      // belong.
+      let known = 0;
+      for (const p of pts) if (lastKeyed.has(p.personId)) known++;
+      const worthTweening = n >= 2 && known >= 2 && !reduceMotion;
+
+      cancelAnimationFrame(animRaf);
+
+      if (!worthTweening) {
+        anim = null;
+        settled = raw;
+        lastKeyed = new Map(pts.map((p) => [p.personId, [p.x, p.y]]));
+        if (autoFit) requestAnimationFrame(() => scatter?.fit());
+        return;
+      }
+
+      // Align onto where the map already is, so only real change animates
+      // rather than an arbitrary spin and rescale. Measured on the PAIRED
+      // points alone — including a newcomer with its own new position as its
+      // "previous" one would bias the fit towards the identity transform.
+      const pairPrev = new Float32Array(known * 2);
+      const pairNext = new Float32Array(known * 2);
+      let k = 0;
+      for (let i = 0; i < n; i++) {
+        const was = lastKeyed.get(pts[i].personId);
+        if (!was) continue;
+        pairPrev[k * 2] = was[0];
+        pairPrev[k * 2 + 1] = was[1];
+        pairNext[k * 2] = raw[i * 2];
+        pairNext[k * 2 + 1] = raw[i * 2 + 1];
+        k++;
+      }
+      const aligned = applySimilarity(raw, similarityFrom(pairPrev, pairNext));
+
+      const from = new Float32Array(n * 2);
+      const delay = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const was = lastKeyed.get(pts[i].personId);
+        // A newcomer appears where it belongs rather than flying in from a
+        // position that was never its own.
+        from[i * 2] = was ? was[0] : aligned[i * 2];
+        from[i * 2 + 1] = was ? was[1] : aligned[i * 2 + 1];
+        delay[i] = delayFraction(i, n) * STAGGER_MS;
+      }
+
+      // Where the camera has to be for the NEW layout. Computed before
+      // anything moves, so the re-frame can lead.
+      let camFrom = null;
+      let camTo = null;
+      if (autoFit && scatter?.fitFor) {
+        const xs = new Float32Array(n);
+        const ys = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          xs[i] = aligned[i * 2];
+          ys[i] = aligned[i * 2 + 1];
+        }
+        camTo = scatter.fitFor(xs, ys);
+        camFrom = { ...transform };
+      }
+
+      const t0 = performance.now();
+      const camMs = camTo ? FIT_MS : 0;
+      anim = { from, to: aligned, delay, elapsed: 0 };
+
+      const step = () => {
+        const now = performance.now() - t0;
+        if (camTo && now < camMs) {
+          transform = lerpTransform(camFrom, camTo, now / camMs);
+          anim = { ...anim, elapsed: 0 };
+          animRaf = requestAnimationFrame(step);
+          return;
+        }
+        if (camTo) transform = camTo;
+        const e = now - camMs;
+        anim = { ...anim, elapsed: e };
+        if (e < TOTAL_MS) {
+          animRaf = requestAnimationFrame(step);
+          return;
+        }
+        // The map ENDS in the aligned frame, so that is what stays on screen
+        // and what the next change starts from.
+        settled = aligned;
+        anim = null;
+        lastKeyed = new Map(
+          pts.map((p, i) => [p.personId, [aligned[i * 2], aligned[i * 2 + 1]]])
+        );
+      };
+      animRaf = requestAnimationFrame(step);
+    });
+  });
+
+  $effect(() => () => cancelAnimationFrame(animRaf));
+
+  /** Respect the OS setting; an animation nobody asked for is worse than none. */
+  const reduceMotion =
+    typeof matchMedia !== "undefined" &&
+    matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   const packed = $derived.by(() => {
     const n = shown.length;
     const x = new Float32Array(n);
@@ -94,10 +297,11 @@
     const ids = new Int32Array(n);
     const size = new Float32Array(n);
     const group = new Uint8Array(n);
+    const pos = drawn;
     for (let i = 0; i < n; i++) {
       const p = shown[i];
-      x[i] = p.x;
-      y[i] = p.y;
+      x[i] = pos[i * 2];
+      y[i] = pos[i * 2 + 1];
       ids[i] = p.personId;
       // PHOTOS, not faces: a dot's area says how much of the library this
       // person appears in, and two faces of them in one frame is one photo.
@@ -175,13 +379,18 @@
    * defaults, so the gear and the cache key agree from the first render.
    */
   const seeded = new Set();
+  const remembered = loadSettings();
   $effect(() => {
     const next = { ...draft };
     let changed = false;
     for (const spec of specs) {
       if (seeded.has(spec.key)) continue;
       seeded.add(spec.key);
-      next[spec.key] = options?.params?.[spec.key] ?? spec.default;
+      // Remembered value first (#287), then the server's default. The client
+      // still states no opinion it does not HAVE — an untouched parameter has
+      // nothing stored, so the server's default is what reaches the run.
+      next[spec.key] =
+        remembered[spec.key] ?? options?.params?.[spec.key] ?? spec.default;
       changed = true;
     }
     if (changed) draft = next;
@@ -193,7 +402,143 @@
   // sends no `minFaces` at all and the server fills in its own.
   const minFaces = $derived(draft.minFaces ?? 5);
 
+  /** The schema row for the threshold, so it renders through the same control
+   *  as everything else rather than being a hand-written second shape. */
+  const minFacesSpec = $derived(
+    specs.find((s) => s.key === "minFaces") ?? {
+      key: "minFaces",
+      label: "Minimum faces",
+      min: 1,
+      max: 50,
+      step: 1,
+      default: 5,
+      help: "People with fewer faces than this are left off the map.",
+    }
+  );
+
   const currentParams = () => ({ ...draft, algorithm: algo });
+
+  /**
+   * A tuning control moved (#327).
+   *
+   * `live` means the slider is still being dragged. The map follows only when
+   * the LAST projection was fast enough that following feels attached to the
+   * control — measured, not assumed, so the same code is live on a 203-person
+   * library and Apply-driven on a 25,758-person one.
+   *
+   * The debounce is a plain `let` timer driven from the handler, NOT a
+   * reactive statement. CLAUDE.md's first trap: a `$:`/`$effect` whose
+   * dependencies include an object re-fires on every flush forever.
+   */
+  /** Whether the sliders currently drive the map. Derived, so the hint and the
+   *  handler can never disagree about which mode the panel is in. */
+  const live = $derived(canGoLive(lastMs, options?.members) && !!onpreview);
+
+  /** Panel width, dragged by the handle on its edge and remembered. */
+  let panelWidth = $state(
+    clampPanelWidth(loadSetting("faceMapPanelWidth", PANEL_DEFAULT))
+  );
+  $effect(() => saveSetting("faceMapPanelWidth", panelWidth));
+
+  /**
+   * Rebuild automatically on ANY setting, including the ones that normally
+   * wait for Apply.
+   *
+   * Off by default and deliberately so: `minFaces` changes the member set, so
+   * on a library too big to preview this turns every drag into a real job.
+   * The label says that rather than leaving it to be discovered.
+   */
+  let autoApply = $state(loadSetting("faceMapAutoApply", false) === true);
+  $effect(() => saveSetting("faceMapAutoApply", autoApply));
+
+  /** Re-frame the map after every new layout. On by default. */
+  let autoFit = $state(loadSetting("faceMapAutoFit", true) !== false);
+  $effect(() => saveSetting("faceMapAutoFit", autoFit));
+
+  let previewTimer = null;
+  let applyTimer = null;
+
+  /** Drag the panel's edge. Pointer events on the window, not the handle, so
+   *  the drag survives the pointer leaving the 6px strip. */
+  function startResize(e) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = panelWidth;
+    const move = (ev) =>
+      (panelWidth = clampPanelWidth(startW + (ev.clientX - startX)));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  function onTune(key, value, { live: dragging }) {
+    draft = { ...draft, [key]: value };
+    saveSettings(draft);
+    scheduleUpdate(key, dragging);
+  }
+
+  /**
+   * Decide what a settings change should DO.
+   *
+   * Three routes, cheapest first:
+   *  - preview, when the map can follow at this size and the parameter does
+   *    not change who is on the map;
+   *  - a real rebuild, when the user has asked for automatic updates — that
+   *    is a JOB, so it is debounced hard and stays cancellable;
+   *  - nothing, and Apply is there when they are ready.
+   */
+  /**
+   * Which settings cannot be answered from the preview session.
+   *
+   * `minFaces` changes the member set the resident graph was built from, and
+   * `algorithm` selects a different algorithm entirely — the preview path is
+   * UMAP-only, since t-SNE is O(n^2) and PCA has nothing to tune. Both
+   * therefore need a real rebuild, which is a job.
+   */
+  const NEEDS_REBUILD = new Set(["minFaces", "algorithm"]);
+
+  function scheduleUpdate(key, dragging) {
+    if (!NEEDS_REBUILD.has(key) && live && onpreview) {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => onpreview(currentParams()), 60);
+      return;
+    }
+    // A setting that needs a rebuild applies BY ITSELF once you let go,
+    // whether or not automatic updates are on. John: "changing the min num
+    // faces still doesn't trigger the animation, I still have to hit
+    // rebuild." Choosing a threshold or an algorithm is a decision; dragging
+    // a slider is exploration, and only the latter waits for permission.
+    if (!NEEDS_REBUILD.has(key) && (!autoApply || dragging)) return;
+    if (dragging) return;
+    clearTimeout(applyTimer);
+    applyTimer = setTimeout(runWhenFree, 700);
+  }
+
+  /**
+   * Start the rebuild, or wait for the one already running.
+   *
+   * The server single-flights projections and 409s a second one. Retrying is
+   * better than surfacing "a map is already being built" to someone who simply
+   * moved a slider twice — they did nothing wrong, and the message would be
+   * about our plumbing rather than their photos.
+   */
+  function runWhenFree() {
+    if (loading) {
+      clearTimeout(applyTimer);
+      applyTimer = setTimeout(runWhenFree, 300);
+      return;
+    }
+    onrun?.(currentParams());
+  }
+
+  // A dragged slider outliving its view would fire a fetch into a dead
+  // component. Svelte 5 runs an $effect's teardown on destroy.
+  $effect(() => () => {
+    clearTimeout(previewTimer);
+    clearTimeout(applyTimer);
+  });
 
   const algoRow = $derived(
     options?.algorithms?.find((a) => a.id === algo) ?? null
@@ -219,7 +564,9 @@
   );
 
   function applyGear() {
-    gearOpen = false;
+    // The panel STAYS OPEN. Closing it on Apply meant every rebuild cost you
+    // your place in the settings you were tuning — and tuning is the whole
+    // point of the panel (#327).
     selected = new Set();
     onrun?.(currentParams());
   }
@@ -287,6 +634,13 @@
   }
 
   function onKey(e) {
+    // NOT while the user is typing. `0` is this view's "fit the map back into
+    // view" shortcut, and without this guard it ate every zero typed into the
+    // panel's boxes: "0.0001" arrived as ".1". The bug shipped with #232 and
+    // was unreachable until #327 put editable fields in the view — the same
+    // shape as culling.spec.js's "typing digits in a text field does not
+    // silently re-rate", which is why `isTypingTarget` already existed.
+    if (isTypingTarget(e.target)) return;
     // Declared in the registry's `keys`, so they appear in the shortcuts
     // overlay automatically and App does not answer them with a message about
     // photos.
@@ -321,10 +675,23 @@
       {#if staleness?.missing > 0}
         <!-- The join keeps WHO is on the map truthful; only positions age.
              Saying so is the difference between a stale map and a map that
-             quietly pretends to be complete. -->
-        <span class="warn" data-testid="map-stale">
+             quietly pretends to be complete.
+
+             A BUTTON, not a caption (#325). A map missing a third of the
+             library, beside a line of amber text, reads as "this is broken"
+             rather than "press this" — and the fix for it was one click away
+             the whole time. `applyGear` is reused rather than given a second
+             code path: it is already "clear the selection and run with the
+             current parameters", which is exactly what this is, so the
+             rebuild is the same job, in the JobsPanel, cancellable. -->
+        <button
+          class="warn stale"
+          data-testid="map-stale"
+          disabled={loading}
+          onclick={applyGear}
+        >
           {n(staleness.missing)} added since — rebuild to place them
-        </span>
+        </button>
       {/if}
     {/if}
 
@@ -374,190 +741,274 @@
     </p>
   {/if}
 
-  {#if gearOpen}
-    <div class="gear-panel" data-testid="map-gear-panel">
-      <label>
-        Minimum faces
-        <input
-          type="number"
-          data-testid="map-param-minFaces"
-          min="1"
-          max="50"
+  <!-- The map and its settings side by side (#327). The settings used to be a
+       popover OVER the map, so you could not see what a parameter did to the
+       thing you were changing it for — and #326 established that the right
+       neighbourhood cannot be predicted, only found by looking. The panel is
+       first in the DOM and first visually, so tab order matches what you see. -->
+  <div class="body">
+    {#if gearOpen}
+      <aside
+        class="gear-panel"
+        data-testid="map-gear-panel"
+        style={`flex-basis:${panelWidth}px`}
+      >
+        <!-- minFaces is ALWAYS Apply-driven, at any library size: it changes the
+           member set, so it invalidates both the centroid query and the
+           preview session's neighbour graph. It is also the parameter where
+           "how many people am I about to map" deserves a deliberate press. -->
+        <ParamSlider
+          spec={minFacesSpec}
           value={minFaces}
-          onchange={(e) => {
-            draft = { ...draft, minFaces: +e.currentTarget.value };
+          onchange={(v) => {
+            draft = { ...draft, minFaces: v };
+            saveSettings(draft);
+            // Refresh the member count shown beside the control...
             onoptions?.(currentParams());
+            // ...and rebuild, which the threshold does by itself: it cannot be
+            // previewed, so without this it silently did nothing until Rebuild
+            // was pressed.
+            scheduleUpdate("minFaces", false);
           }}
         />
-      </label>
-      <span class="members" data-testid="map-members">
-        {n(options?.members)} people · about {estimateSeconds}s
-        {#if hiddenByThreshold > 0}
-          <span class="hidden-count" data-testid="map-hidden">
-            · {n(hiddenByThreshold)} with fewer faces left off
-          </span>
-        {/if}
-      </span>
-
-      <fieldset>
-        <legend>How to lay it out</legend>
-        {#each options?.algorithms ?? [] as a (a.id)}
-          <label class="algo" class:disabled={!a.enabled}>
-            <input
-              type="radio"
-              name="face-map-algorithm"
-              value={a.id}
-              disabled={!a.enabled}
-              checked={algo === a.id}
-              onchange={() => {
-                algo = a.id;
-                // Refetch so the panel below shows THIS algorithm's
-                // parameters; the schema is per-algorithm.
-                onoptions?.(currentParams());
-              }}
-            />
-            <span class="algo-label">{a.label}</span>
-            <!-- The measured score, so a menu of three options where two are
-                 worse is information rather than a footgun. -->
-            <span class="algo-note">{a.enabled ? a.note : a.reason}</span>
-          </label>
-        {/each}
-      </fieldset>
-
-      <fieldset class="sizes">
-        <legend>Dot size (px)</legend>
-        <label>
-          Smallest
-          <input
-            type="range"
-            data-testid="map-min-radius"
-            min={RADIUS_LIMITS.min}
-            max={20}
-            step="0.5"
-            bind:value={minRadius}
-          />
-          <span class="num">{minRadius}</span>
-        </label>
-        <label>
-          Largest
-          <input
-            type="range"
-            data-testid="map-max-radius"
-            min={2}
-            max={RADIUS_LIMITS.max}
-            step="1"
-            bind:value={maxRadius}
-          />
-          <span class="num">{maxRadius}</span>
-        </label>
-        <!-- Say what the size MEANS, or a slider that changes dot sizes reads
-             as decoration rather than an encoding. -->
-        <p class="hint">
-          Area is proportional to how many photos someone is in, on a
-          square-root scale. These apply straight away — they do not rebuild the
-          map.
-        </p>
-      </fieldset>
-
-      <!-- Rendered from the algorithm's OWN schema, so choosing t-SNE offers
-           perplexity rather than neighbours, and a new algorithm arrives with
-           its controls instead of needing a third place hand-edited. -->
-      <fieldset class="tuning" data-testid="map-tuning">
-        <legend>{algoLabel} settings</legend>
-        {#if tunables.length}
-          {#each tunables as spec (spec.key)}
-            <label class="tunable">
-              <span class="tunable-name">{spec.label}</span>
-              <input
-                type="number"
-                data-testid={`map-param-${spec.key}`}
-                min={spec.min}
-                max={spec.max}
-                step={spec.step}
-                value={draft[spec.key] ?? spec.default}
-                onchange={(e) =>
-                  (draft = { ...draft, [spec.key]: +e.currentTarget.value })}
-              />
-              <span class="tunable-help">{spec.help}</span>
-            </label>
-          {/each}
-        {:else}
-          <!-- An empty panel reads as a broken control; say why it is empty. -->
-          <p class="hint" data-testid="map-no-params">
-            {algoLabel} is a fixed projection — there is nothing to tune. It always
-            produces the same map from the same photos.
-          </p>
-        {/if}
-      </fieldset>
-
-      <button
-        class="primary"
-        data-testid="map-build"
-        onclick={applyGear}
-        disabled={loading}
-      >
-        {loading ? "Building…" : runId ? "Rebuild map" : "Build map"}
-      </button>
-    </div>
-  {/if}
-
-  {#if !runId && !loading}
-    <div class="empty" data-testid="map-empty">
-      <p class="empty-title">No map yet.</p>
-      <p class="empty-hint">
-        A map lays out everyone by how alike their faces are, so you can lasso
-        the groups that are really one person and merge them in one go.
-        {#if options}
-          {n(options.members)} people have {minFaces} or more faces — about {estimateSeconds}
-          seconds.{#if hiddenByThreshold > 0}
-            <span data-testid="map-hidden-empty">
-              {n(hiddenByThreshold)} more have fewer than {minFaces} and are left
-              off; lower the minimum in map settings to include them.
+        <span class="members" data-testid="map-members">
+          {n(options?.members)} people · about {estimateSeconds}s
+          {#if hiddenByThreshold > 0}
+            <span class="hidden-count" data-testid="map-hidden">
+              · {n(hiddenByThreshold)} with fewer faces left off
             </span>
           {/if}
-        {/if}
-      </p>
-      <button class="primary" data-testid="map-build-empty" onclick={applyGear}>
-        Build the map
-      </button>
-      <p class="empty-hint small">
-        It is kept, so coming back here is instant.
-      </p>
-    </div>
-  {:else}
-    {#if visibleSet && shown.length === 0}
-      <div class="empty" data-testid="map-filtered-empty">
-        <p class="empty-title">Nobody here.</p>
-        <p class="empty-hint">
-          None of the {n(points.length)} people on the map appear in the photos you
-          are viewing. Widen the filter, or clear it, to see everyone again.
+        </span>
+
+        <fieldset>
+          <legend>How to lay it out</legend>
+          {#each options?.algorithms ?? [] as a (a.id)}
+            <label class="algo" class:disabled={!a.enabled}>
+              <input
+                type="radio"
+                name="face-map-algorithm"
+                value={a.id}
+                disabled={!a.enabled}
+                checked={algo === a.id}
+                onchange={() => {
+                  algo = a.id;
+                  // Refetch so the panel below shows THIS algorithm's
+                  // parameters; the schema is per-algorithm.
+                  onoptions?.(currentParams());
+                  // And route through the same scheduler as every other
+                  // setting, so switching algorithm animates like the rest
+                  // rather than sitting still until Apply is pressed.
+                  scheduleUpdate("algorithm", false);
+                }}
+              />
+              <span class="algo-label">{a.label}</span>
+              <!-- The measured score, so a menu of three options where two are
+                 worse is information rather than a footgun. -->
+              <span class="algo-note">{a.enabled ? a.note : a.reason}</span>
+            </label>
+          {/each}
+        </fieldset>
+
+        <fieldset class="sizes">
+          <legend>Dot size (px)</legend>
+          <label>
+            Smallest
+            <input
+              type="range"
+              data-testid="map-min-radius"
+              min={RADIUS_LIMITS.min}
+              max={20}
+              step="0.5"
+              bind:value={minRadius}
+            />
+            <span class="num">{minRadius}</span>
+          </label>
+          <label>
+            Largest
+            <input
+              type="range"
+              data-testid="map-max-radius"
+              min={2}
+              max={RADIUS_LIMITS.max}
+              step="1"
+              bind:value={maxRadius}
+            />
+            <span class="num">{maxRadius}</span>
+          </label>
+          <!-- Say what the size MEANS, or a slider that changes dot sizes reads
+             as decoration rather than an encoding. -->
+          <p class="hint">
+            Area is proportional to how many photos someone is in, on a
+            square-root scale. These apply straight away — they do not rebuild
+            the map.
+          </p>
+        </fieldset>
+
+        <!-- Rendered from the algorithm's OWN schema, so choosing t-SNE offers
+           perplexity rather than neighbours, and a new algorithm arrives with
+           its controls instead of needing a third place hand-edited. -->
+        <fieldset class="tuning" data-testid="map-tuning">
+          <legend>{algoLabel} settings</legend>
+          {#if tunables.length}
+            {#each tunables as spec (spec.key)}
+              <ParamSlider
+                {spec}
+                value={draft[spec.key] ?? spec.default}
+                oninput={(v) => onTune(spec.key, v, { live: true })}
+                onchange={(v) => onTune(spec.key, v, { live: false })}
+              />
+            {/each}
+          {:else}
+            <!-- An empty panel reads as a broken control; say why it is empty. -->
+            <p class="hint" data-testid="map-no-params">
+              {algoLabel} is a fixed projection — there is nothing to tune. It always
+              produces the same map from the same photos.
+            </p>
+          {/if}
+        </fieldset>
+
+        <label class="auto">
+          <input
+            type="checkbox"
+            data-testid="map-auto-fit"
+            bind:checked={autoFit}
+          />
+          <span>
+            Zoom to fit after each change
+            <span class="auto-note">
+              Off if you would rather stay where you have zoomed to.
+            </span>
+          </span>
+        </label>
+
+        <label class="auto">
+          <input
+            type="checkbox"
+            data-testid="map-auto-apply"
+            bind:checked={autoApply}
+          />
+          <span>
+            Update automatically
+            <span class="auto-note">
+              rebuilds on every change, including Minimum faces. On a library
+              too big to preview, each change starts a job.
+            </span>
+          </span>
+        </label>
+
+        <!-- Say WHICH mode the panel is in. Without this, a map that does not
+             follow the slider reads as a broken control rather than as "this
+             library is big enough that it needs a press" (#327). -->
+        <p class="live-hint" data-testid="map-live-hint">
+          {#if live}
+            The map follows the sliders — about {Math.round(lastMs)}ms a change.
+          {:else if lastMs != null}
+            {Math.round(lastMs / 100) / 10}s a change, so the map waits for
+            Apply.
+          {:else}
+            Build the map once and the sliders go live if it is quick enough.
+          {/if}
         </p>
-      </div>
-    {/if}
-    <div class="canvas-wrap" class:hidden={visibleSet && shown.length === 0}>
-      <ScatterCanvas
-        bind:this={scatter}
-        points={packed}
-        bind:transform
-        {minRadius}
-        {maxRadius}
-        highlighted={selected}
-        imageFor={(i) => crop(shown[i])}
-        labelFor={(i) =>
-          `${shown[i]?.name || "Unnamed"} · ${n(shown[i]?.photos)} photo${
-            shown[i]?.photos === 1 ? "" : "s"
-          } · ${n(shown[i]?.faces)} faces`}
-        onlasso={onLasso}
-        onpick={(i, e) => {
-          if (e.shiftKey || e.altKey) return;
-          onpick?.(shown[i]?.personId ?? null);
+
+        <button
+          class="primary"
+          data-testid="map-build"
+          onclick={applyGear}
+          disabled={loading}
+        >
+          {loading ? "Building…" : runId ? "Rebuild map" : "Build map"}
+        </button>
+      </aside>
+      <!-- Drag to resize. A separate element rather than a CSS `resize`,
+           which cannot persist and cannot be clamped. -->
+      <button
+        type="button"
+        class="resizer"
+        data-testid="map-panel-resizer"
+        aria-label="Resize the settings panel"
+        aria-valuenow={panelWidth}
+        aria-valuemin={PANEL_MIN}
+        aria-valuemax={PANEL_MAX}
+        onpointerdown={startResize}
+        onkeydown={(e) => {
+          if (e.key === "ArrowLeft")
+            panelWidth = clampPanelWidth(panelWidth - 16);
+          else if (e.key === "ArrowRight")
+            panelWidth = clampPanelWidth(panelWidth + 16);
+          else return;
+          e.preventDefault();
         }}
-      />
-      {#if loading}
-        <p class="overlay-note">Building the map…</p>
+      ></button>
+    {/if}
+
+    <div class="map-area">
+      {#if !runId && !loading}
+        <div class="empty" data-testid="map-empty">
+          <p class="empty-title">No map yet.</p>
+          <p class="empty-hint">
+            A map lays out everyone by how alike their faces are, so you can
+            lasso the groups that are really one person and merge them in one
+            go.
+            {#if options}
+              {n(options.members)} people have {minFaces} or more faces — about {estimateSeconds}
+              seconds.{#if hiddenByThreshold > 0}
+                <span data-testid="map-hidden-empty">
+                  {n(hiddenByThreshold)} more have fewer than {minFaces} and are left
+                  off; lower the minimum in map settings to include them.
+                </span>
+              {/if}
+            {/if}
+          </p>
+          <button
+            class="primary"
+            data-testid="map-build-empty"
+            onclick={applyGear}
+          >
+            Build the map
+          </button>
+          <p class="empty-hint small">
+            It is kept, so coming back here is instant.
+          </p>
+        </div>
+      {:else}
+        {#if visibleSet && shown.length === 0}
+          <div class="empty" data-testid="map-filtered-empty">
+            <p class="empty-title">Nobody here.</p>
+            <p class="empty-hint">
+              None of the {n(points.length)} people on the map appear in the photos
+              you are viewing. Widen the filter, or clear it, to see everyone again.
+            </p>
+          </div>
+        {/if}
+        <div
+          class="canvas-wrap"
+          class:hidden={visibleSet && shown.length === 0}
+        >
+          <ScatterCanvas
+            bind:this={scatter}
+            points={packed}
+            bind:transform
+            {minRadius}
+            {maxRadius}
+            highlighted={selected}
+            imageFor={(i) => crop(shown[i])}
+            labelFor={(i) =>
+              `${shown[i]?.name || "Unnamed"} · ${n(shown[i]?.photos)} photo${
+                shown[i]?.photos === 1 ? "" : "s"
+              } · ${n(shown[i]?.faces)} faces`}
+            onlasso={onLasso}
+            onpick={(i, e) => {
+              if (e.shiftKey || e.altKey) return;
+              onpick?.(shown[i]?.personId ?? null);
+            }}
+          />
+          {#if loading}
+            <p class="overlay-note">Building the map…</p>
+          {/if}
+        </div>
       {/if}
     </div>
-  {/if}
+  </div>
 
   {#if chosen.length}
     <!-- THE REVIEW TRAY. The lasso is a claim ("these are one person") and
@@ -658,6 +1109,23 @@
     color: #ffd166;
     font-size: 0.8rem;
   }
+  /* The staleness notice is a real control, so it has to LOOK like one — an
+     outlined pill rather than text that happens to be clickable (#325). */
+  .stale {
+    font-family: inherit;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    padding: 2px 10px;
+    cursor: pointer;
+  }
+  .stale:hover:not(:disabled) {
+    background: rgba(255, 209, 102, 0.14);
+  }
+  .stale:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
   .gear {
     margin-left: auto;
     font: inherit;
@@ -698,15 +1166,75 @@
     text-decoration: underline;
     padding: 0 2px;
   }
+  /* The map and its settings side by side (#327). `min-height: 0` on the row
+     and `min-width: 0` on the map are what stop a flex child refusing to
+     shrink below its content — without them the canvas pushes the panel off
+     screen at narrow widths. */
+  .body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .map-area {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
+  .resizer {
+    flex: 0 0 6px;
+    cursor: col-resize;
+    background: #2a2a2a;
+    border: 0;
+    padding: 0;
+    align-self: stretch;
+  }
+  .resizer:hover,
+  .resizer:focus-visible {
+    background: #7aa2f7;
+  }
+  .auto {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.8rem;
+  }
+  .auto input {
+    margin-top: 2px;
+  }
+  .auto-note {
+    display: block;
+    font-size: 0.72rem;
+    color: #888;
+    line-height: 1.35;
+  }
+  .live-hint {
+    margin: 0;
+    font-size: 0.72rem;
+    color: #888;
+    line-height: 1.35;
+  }
+  .gear-panel > * {
+    min-width: 0;
+    max-width: 100%;
+  }
   .gear-panel {
     background: #171717;
-    border-bottom: 1px solid #2a2a2a;
+    border-right: 1px solid #2a2a2a;
     padding: 10px 12px;
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 12px;
-    align-items: flex-start;
+    align-items: stretch;
+    /* 10-20% of the view, with pixel bounds so it stays usable on a laptop
+       and does not become a canyon on an ultrawide. */
+    /* Width is the user's, dragged by the handle and remembered; the
+       flex-basis comes from `panelWidth` inline. */
     flex: 0 0 auto;
+    width: auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
   .gear-panel label {
     display: flex;
@@ -724,8 +1252,11 @@
     padding: 3px 6px;
     font: inherit;
   }
+  /* Was `min-width: 20rem`, from when this was a wide horizontal popover. In a
+     16% column that forces the sliders off the edge — caught by looking at a
+     screenshot, not by any test (#327). */
   .sizes {
-    min-width: 20rem;
+    min-width: 0;
   }
   .tuning {
     min-width: 22rem;
@@ -788,12 +1319,19 @@
     color: #888;
     padding: 0 4px;
   }
+  /* One column, not three. `auto auto 1fr` fitted a wide popover; in a narrow
+     panel the measured note ("Finds the same person in the top 5 about 58% of
+     the time") was clipped mid-sentence — which is worse than absent, because
+     it looks like the app is broken rather than terse. */
   .algo {
     display: grid;
-    grid-template-columns: auto auto 1fr;
-    gap: 6px;
+    grid-template-columns: auto 1fr;
+    gap: 2px 6px;
     align-items: baseline;
     font-size: 0.8rem;
+  }
+  .algo-note {
+    grid-column: 1 / -1;
   }
   .algo.disabled {
     opacity: 0.55;

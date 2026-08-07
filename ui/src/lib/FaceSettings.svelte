@@ -36,6 +36,7 @@
     buildScopes,
     activeScope as activeScopeOf,
     scopeRequestFor,
+    isWholeLibraryRequest,
     DEFAULT_SCOPE,
   } from "./scopeControl.js";
 
@@ -113,6 +114,30 @@
   let activeScope = $derived(activeScopeOf(scopes, scopeChoice));
   let scopeRequest = $derived(
     scopeRequestFor(scopeChoice, { selectedIds, filterSpec })
+  );
+
+  /**
+   * Would pressing Find faces right now ask for work already under way?
+   *
+   * Mirrors the server's rule EXACTLY (#279): `POST /api/ml/faces` refuses a
+   * request that carries no scope while a pass is live, because it is the same
+   * worklist — and lets a scoped one straight through to the scheduler, which
+   * parks the big run in its favour.
+   *
+   * The UI has to agree, and it did not: it disabled the button (and the scope
+   * picker with it) for the whole of any running pass, so the scoped request
+   * the server would now ACCEPT could not be composed, let alone sent. John
+   * reported it as "I cannot start the scoped find faces because the ui is
+   * disabled when running the previous one" — the server half of #279 shipped
+   * and changed nothing he could see.
+   *
+   * The predicate lives in `scopeControl.js` rather than inline here, for the
+   * reason that module exists at all: it is the server's rule restated, so it
+   * gets a unit test and one home, instead of a condition each panel rewrites
+   * slightly differently.
+   */
+  let redundantWhileRunning = $derived(
+    !!status?.running && isWholeLibraryRequest(scopeRequest)
   );
 
   // GROUPING gets its own scope, and must: contract 1 says `allCount` is the
@@ -307,6 +332,11 @@
            not one per feature. Without it the only offer was the whole library:
            you select twenty photos and the app proposes fourteen minutes of
            inference to answer a question about twenty. -->
+      <!-- `disabled` deliberately does NOT include `status.running` (#279).
+           Choosing a scope is how the user composes the request that preempts
+           the run already going; greying it out while one runs is what made
+           the scoped path unreachable from the UI even after the server began
+           accepting it. -->
       <ScopeControl
         legend="Find faces in"
         name="face-scope"
@@ -322,20 +352,23 @@
         emptyMessage={pending === 0 && scopeChoice === "all"
           ? "Every photo has been looked at."
           : "Nothing to scan in this scope."}
-        disabled={!!busy || status.running}
+        disabled={!!busy}
         bind:choice={scopeChoice}
       />
 
       <div class="actions">
-        <!-- No `clusterJob` in `disabled` any more (#258 Phase 4). Scanning and
-             grouping used to be mutually exclusive in the UI because nothing
-             ordered them on the server; now the scheduler does, so a scan
-             requested while a grouping runs QUEUES instead of being refused. A
-             disabled button is a worse answer than a queue — it makes the user
-             wait without telling them what for. -->
+        <!-- No `clusterJob` in `disabled` (#258 Phase 4), and no bare
+             `status.running` either (#279). Same argument both times, and the
+             second one is the argument the first one wrote down and then did
+             not finish applying: a scan requested while something else runs
+             QUEUES rather than being refused, so "a disabled button is a worse
+             answer than a queue — it makes the user wait without telling them
+             what for" applies to a running SCAN exactly as it did to a running
+             grouping. What stays disabled is only the genuinely redundant ask:
+             an unscoped sweep while an unscoped sweep is under way. -->
         <button
           class="primary"
-          disabled={!!busy || status.running || !activeScope?.n}
+          disabled={!!busy || redundantWhileRunning || !activeScope?.n}
           onclick={() =>
             act("scan", async () => {
               const r = await startFaceScan(modelId, scopeRequest);
@@ -360,7 +393,11 @@
                  the UI could have prevented is a dead button with an
                  explanation. -->
             Grouping faces…
-          {:else if status.running}
+          {:else if redundantWhileRunning}
+            <!-- Only when the ask is the redundant one. While a sweep runs and
+                 the user has picked a scope, the label must stay actionable —
+                 "Scanning…" on a button they CAN press reads as a dead
+                 control. -->
             Scanning…
           {:else if !activeScope?.n}
             {pending === 0 ? "All photos scanned" : "Nothing in this scope"}

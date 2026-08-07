@@ -502,6 +502,19 @@
   }
 
   /** Fit every point into the viewport. The parent calls this via `bind:`. */
+  /**
+   * The transform that WOULD fit these coordinates, without applying it.
+   *
+   * Exposed so the parent can animate the camera towards a layout that is not
+   * on screen yet (#327): the map re-frames first, then the points travel.
+   * Width and height live here, so the arithmetic has to.
+   *
+   * @param {ArrayLike<number>} xs @param {ArrayLike<number>} ys
+   */
+  export function fitFor(xs, ys) {
+    return fitExtent(xs, ys, width, height, 32);
+  }
+
   export function fit() {
     if (!n || width <= 0 || height <= 0) return;
     transform = fitExtent(points.x, points.y, width, height, 32);
