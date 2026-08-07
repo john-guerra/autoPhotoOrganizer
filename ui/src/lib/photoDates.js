@@ -58,7 +58,7 @@ export function birthTimeSuspicion(ms) {
 /** Human wording for `birthTimeSuspicion`'s verdicts. */
 export function suspicionNote(kind) {
   if (kind === "mac-epoch")
-    return "macOS reports this when a file has no creation date of its own — it is not a real date";
+    return "not a real date — macOS writes this when a file has no creation date of its own, so the modified date is used instead";
   if (kind === "implausible")
     return "before digital photography — the file cannot really be this old";
   return "";
@@ -94,16 +94,28 @@ export function dateRows(meta, sortAttr = "") {
       key: "btime",
       label: "File created",
       ms: btime,
+      // A sentinel does NOT drive anything any more: the server skips it and
+      // falls through to mtime (#349). Saying "sorting by this" next to a date
+      // the feed is deliberately ignoring would be confidently wrong — the
+      // exact failure the marker exists to prevent.
       drives:
-        sortAttr === "date_created" ||
-        (sortAttr === "date_taken" && meta.takenAtExif == null),
+        !suspicion &&
+        (sortAttr === "date_created" ||
+          (sortAttr === "date_taken" && meta.takenAtExif == null)),
       note: suspicionNote(suspicion),
     },
     {
       key: "mtime",
       label: "File modified",
       ms: meta.mtime ?? null,
-      drives: sortAttr === "date_modified",
+      // Also the answer when the creation date turned out to be a sentinel and
+      // the server fell through to here — which is the whole point of showing
+      // the marker rather than the user inferring it from the COALESCE order.
+      drives:
+        sortAttr === "date_modified" ||
+        (!!suspicion &&
+          (sortAttr === "date_created" ||
+            (sortAttr === "date_taken" && meta.takenAtExif == null))),
       note: "",
     },
   ];

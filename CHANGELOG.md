@@ -6,6 +6,15 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.21.3
+
+- **Photos no longer pile into 1984.** Sorting or grouping by Created put
+  1,557 of your photos — everything copied off a phone or a card — into a
+  single 1984 group, because macOS answers "this file has no creation date"
+  with the day the Macintosh was launched, and we took it for a date. That
+  value is now recognised for what it is and the file's modified date is used
+  instead. Your photos move to the right year with no rescan (#349).
+
 ## 2.21.2
 
 - **The loupe now shows all three of a photo's dates**, not just the one it

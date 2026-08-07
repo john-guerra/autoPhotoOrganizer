@@ -22,8 +22,35 @@
  *    has been attempted, and leave the rest in Unknown until it has.
  */
 
+/**
+ * The floor below which a FILE creation date is a sentinel, not a date (#349).
+ *
+ * macOS answers "this file has no creation date" with **1984-01-24** — the day
+ * the Macintosh was introduced — and that is the normal state of anything
+ * copied off a phone, a camera card, or a filesystem with no birth time of its
+ * own. `stat` reports it as an ordinary date and we store it faithfully, so
+ * nothing anywhere is misbehaving; the value itself is a sentinel wearing a
+ * date's costume. On John's library it was **1,557 photos (4.6%), every one
+ * carrying the identical value**, all sorting into 1984 under "Created".
+ *
+ * A single floor rather than an equality check on 1984-01-24, for two reasons:
+ * the stored value carries the timezone of whatever machine wrote it, so there
+ * is no one instant to compare against; and other filesystems have their own
+ * sentinels (the unix epoch is the common one) which this catches too.
+ *
+ * **1990 is about the FILE, not the photograph.** A scan of a 1952 print is an
+ * ordinary thing to own and its EXIF may well say 1952 — `taken_at` is
+ * untouched by this and always wins. But the JPEG holding that scan cannot
+ * have been created before JPEG existed, so no real `btime` is below this.
+ */
+export const BTIME_FLOOR_MS = Date.UTC(1990, 0, 1);
+
+/** `btime`, or NULL when it is a sentinel — so the COALESCEs below fall
+ *  through to `mtime` exactly as they already do for a missing btime. */
+const TRUSTED_BTIME = `CASE WHEN photos.btime >= ${BTIME_FLOOR_MS} THEN photos.btime END`;
+
 /** The unconditional fallback, for sorting and filtering: never NULL. */
-const FILE_DATE = "COALESCE(photos.btime, photos.mtime)";
+const FILE_DATE = `COALESCE(${TRUSTED_BTIME}, photos.mtime)`;
 
 /**
  * The taken date for GROUPING and DISPLAY: EXIF, else — once we have actually
@@ -58,7 +85,16 @@ export const TAKEN_AT_EXPR = `COALESCE(photos.taken_at,
 export function effectiveTakenAtMs(row) {
   if (row?.taken_at != null) return row.taken_at;
   if (row?.width == null) return null; // EXIF not read yet — don't guess
-  return row.btime ?? row.mtimeMs ?? row.mtime ?? null;
+  // The twin of TRUSTED_BTIME. A sentinel btime falls through to mtime here
+  // exactly as it does in SQL — if these two disagree the SQL groups the feed
+  // one way and this labels the row that lands in it another.
+  const btime = trustedBtime(row.btime);
+  return btime ?? row.mtimeMs ?? row.mtime ?? null;
+}
+
+/** @param {number|null|undefined} btime @returns {number|null} */
+export function trustedBtime(btime) {
+  return typeof btime === "number" && btime >= BTIME_FLOOR_MS ? btime : null;
 }
 
 /** Sortable attributes → NULL-safe ORDER-BY exprs. Determinism only needs to be
@@ -67,7 +103,10 @@ export function effectiveTakenAtMs(row) {
  *  not-yet-read photo at one end of the feed. */
 export const SORT_ATTRS = {
   date_taken: {
-    expr: "COALESCE(photos.taken_at, photos.btime, photos.mtime)",
+    // Same sentinel guard as FILE_DATE — a photo whose EXIF has not been read
+    // reaches the file dates here too, so skipping it in only one of the two
+    // would fix Created and leave Taken misfiling the same photos.
+    expr: `COALESCE(photos.taken_at, ${FILE_DATE})`,
   },
   date_created: { expr: FILE_DATE },
   date_modified: { expr: "photos.mtime" },
