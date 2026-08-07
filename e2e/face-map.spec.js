@@ -200,6 +200,57 @@ test.describe("face map @p1", () => {
     expect(errors).toEqual([]);
   });
 
+  test("says so when the panel cannot refresh that count (#347)", async ({
+    page,
+  }) => {
+    // The count above is the whole reason the panel meets contract 1 — so a
+    // refresh that fails and says nothing leaves the user planning a rebuild
+    // around a number that is no longer true.
+    //
+    // It failed in BOTH directions and neither was visible. All three
+    // `onoptions` call sites fire without awaiting, so a thrown fetch became an
+    // unhandled rejection; and `loadMapOptions` guarded its assignment with a
+    // bare `if (res.ok)`, so a non-2xx was swallowed without even that.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+
+    // Break it only AFTER the view has loaded: what is under test is the
+    // gear's own unawaited call, not the working-set loader's awaited one.
+    await page.route("**/api/projections/options*", (route) => route.abort());
+    await faceMap.openGear(page);
+
+    // Specific over generic (CLAUDE.md): the message names what is now
+    // untrustworthy and what to do, rather than "Error".
+    await expect(faceMap.notice(page)).toContainText(
+      /couldn't refresh the map settings/i
+    );
+    await expect(faceMap.notice(page)).toContainText("out of date");
+
+    // Now the other half — a server that answers, badly. This one used to be
+    // the quieter of the two, because `if (res.ok)` is not an error path.
+    await page.unroute("**/api/projections/options*");
+    await page.route("**/api/projections/options*", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "no" }),
+      })
+    );
+    await faceMap.gear(page).click(); // close
+    await faceMap.openGear(page); // and reopen, which refreshes
+    await expect(faceMap.notice(page)).toContainText("(503)");
+
+    // The failed requests are this test's own doing — never assert a bare []
+    // in a spec that stubs a failure (docs/AGENT-NOTES.md).
+    expect(
+      errors.filter(
+        (e) =>
+          !/projections\/options|ERR_FAILED|Failed to load resource/i.test(e)
+      )
+    ).toEqual([]);
+  });
+
   test("the gear opens on the SERVER's defaults, not a copy of them", async ({
     page,
   }) => {

@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.21.4
+
+- **The face map's settings panel says when its numbers are stale.** If the
+  member count and "about Ns" estimate fail to refresh, you now get a message
+  saying so instead of a number that has quietly stopped being true (#347).
+
 ## 2.21.3
 
 - **Photos no longer pile into 1984.** Sorting or grouping by Created put

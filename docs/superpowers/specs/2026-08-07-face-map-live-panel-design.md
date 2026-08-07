@@ -102,6 +102,27 @@ presenting itself as something it is not.
 **Decision: no warm start, no position tween. Instant cold redraw.** The map on
 screen is always the true map for the parameters shown.
 
+> **Reversed in half, 2026-08-07 — read this before citing the line above (#347).**
+>
+> **The position tween SHIPPED.** John asked for it in as many words —
+> _"I don't see the animation. I want to see the animation between changes"_ —
+> after driving the panel with the instant redraw in place. `FaceMapView.svelte`
+> now staggers points between parameter sets, paired by `personId`, over a
+> Procrustes alignment (`scatter/align.js`).
+>
+> **Warm start stays rejected.** That half was not overturned and the table
+> above is still the reason: continuity bought by lowering the learning rate is
+> continuity bought by not applying the parameter change, and the invariant in
+> the sentence above — the map on screen is the true map for the parameters
+> shown — is exactly what a tween preserves and a warm start does not. The
+> projection is still computed cold; only the journey to it is animated.
+>
+> **The 0.664 residual is why alignment was needed, not an argument against the
+> tween.** A cold UMAP run is free to rotate and reflect the whole embedding, so
+> tweening raw coordinates animates a spin nobody asked for. Aligning on the
+> paired points first is what makes the movement read as "these people moved"
+> rather than "the map turned over".
+
 ---
 
 ## What we build
@@ -171,9 +192,10 @@ was filed for.
 
 ## What this deliberately does not do
 
-- **No animated transition between parameter sets.** Refuted above. A crossfade
-  remains open as a cheap substitute for a position tween, but it is not
-  required and should not be smuggled in.
+- ~~**No animated transition between parameter sets.**~~ **Overturned and
+  built** — John asked for the animation after seeing the instant redraw, and
+  it shipped as a Procrustes-aligned position tween. See the dated note above
+  the "What we build" heading. It was not smuggled in; it was requested.
 - **No warm start.** Refuted above, with the numbers, so that nobody re-derives
   it — the same reason #326's refutation lives in a comment with a test holding
   it in place.
