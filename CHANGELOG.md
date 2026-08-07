@@ -6,6 +6,38 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.21.0
+
+First packaged build since 2.20.1. Mostly the Face Map, which went from a
+feature you had to already understand to one you can explore.
+
+- **The Face Map's settings sit beside the map, and the sliders move it as you
+  drag.** They used to be a popover on top of the map, so you could not see
+  what a setting did to the thing you were changing it for. Every setting is
+  now a slider you can also type an exact number into, the map re-frames itself
+  and the faces animate to their new places, and the panel is as wide as you
+  drag it. On a library too big to keep up, it says so and waits for Apply
+  rather than pretending (#327, #287).
+- **The Face Map no longer hands you a map of a library you no longer have.**
+  Asking for settings you had used before gave back the old map even after face
+  grouping had found hundreds more people — worst on the default settings,
+  which is the first map you ever build, and is why it looked like one
+  particular Neighbours value was broken. It now notices and rebuilds, and the
+  "N added since" notice is a button you can press (#325).
+- **Neighbours defaults to 30**, chosen from 40 real projections across five of
+  your own albums rather than from a screenshot (#326).
+- **You can scan your selection while a whole-library run is going.** The scope
+  picker and the button used to be greyed out, so the request could not even be
+  composed. The big run now parks at its next batch boundary, yours runs, and
+  the big one resumes with nothing recomputed — both visible in the jobs panel
+  throughout (#279, #257).
+- Security: pinned a patched `js-yaml` inside the auto-updater, closing a
+  high-severity advisory with no upstream fix (#338).
+- Internal: better-sqlite3 moved to 13, which switches it to the N-API — one
+  binary now serves both Node and Electron, so the rebuild dance that could
+  strand a half-finished packaged build is gone. Dependabot also now opens its
+  PRs against `testing` rather than the release line.
+
 ## 2.20.9
 
 - **The Face Map's settings now sit beside the map, and the sliders move it as

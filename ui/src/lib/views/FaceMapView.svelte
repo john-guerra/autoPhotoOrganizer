@@ -1243,15 +1243,6 @@
     font-size: 0.8rem;
     color: #bbb;
   }
-  .gear-panel input[type="number"] {
-    width: 6rem;
-    background: #0d0d0d;
-    color: #eee;
-    border: 1px solid #333;
-    border-radius: 4px;
-    padding: 3px 6px;
-    font: inherit;
-  }
   /* Was `min-width: 20rem`, from when this was a wide horizontal popover. In a
      16% column that forces the sliders off the edge — caught by looking at a
      screenshot, not by any test (#327). */
@@ -1261,22 +1252,6 @@
   .tuning {
     min-width: 22rem;
     max-width: 30rem;
-  }
-  .tunable {
-    display: grid;
-    grid-template-columns: 9rem 6rem;
-    gap: 4px 8px;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-  .tunable-name {
-    color: #ddd;
-  }
-  .tunable-help {
-    grid-column: 1 / -1;
-    color: #888;
-    font-size: 0.74rem;
-    line-height: 1.4;
   }
   .sizes label {
     flex-direction: row;
@@ -1342,11 +1317,6 @@
   }
   .algo-note {
     color: #8a8a8a;
-  }
-  details summary {
-    font-size: 0.8rem;
-    color: #888;
-    cursor: pointer;
   }
   .primary {
     font: inherit;
