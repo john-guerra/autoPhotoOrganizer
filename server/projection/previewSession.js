@@ -22,7 +22,7 @@
  */
 import { Worker } from "node:worker_threads";
 import { MAX_OLD_GENERATION_MB } from "./runProjection.js";
-import { MAX_N_NEIGHBORS } from "./algorithms.js";
+import { MAX_N_NEIGHBORS, MIN_MEMBERS } from "./algorithms.js";
 
 const WORKER_URL = new URL("./previewWorker.js", import.meta.url);
 
@@ -49,7 +49,8 @@ export const IDLE_MS = 120_000;
  * @typedef {{
  *   key: string, worker: Worker, n: number,
  *   pending: Map<number, {resolve: (v: Float32Array) => void, reject: (e: Error) => void}>,
- *   ready: Promise<unknown>, timer: NodeJS.Timeout|null
+ *   ready: Promise<unknown>, built: boolean,
+ *   abandon: ((e: Error) => void)|null, timer: NodeJS.Timeout|null
  * }} Session
  */
 
@@ -69,6 +70,12 @@ function destroy() {
     p.reject(new Error("preview session was replaced"));
   }
   dying.pending.clear();
+  // A session replaced DURING its cold build has nothing in `pending` yet — its
+  // caller is still awaiting `ready` — so the loop above reached nobody, and
+  // `terminate()` below then answered them through the worker's `exit` handler:
+  // "preview worker exited with code 1" for something that is not an error at
+  // all, just a user who moved on to a different member set (#345).
+  dying.abandon?.(new Error("preview session was replaced"));
   dying.worker.terminate();
 }
 
@@ -106,11 +113,20 @@ function start({ key, data, dim, n }) {
     pending: new Map(),
     timer: null,
     ready: null,
+    // "The graph EXISTS", as distinct from "a session object exists". `session`
+    // is assigned synchronously below, before the worker has built anything, so
+    // these two answers differ for the whole cold round trip — which is exactly
+    // the window a slider drag lands in (#345).
+    built: false,
+    abandon: null,
   };
 
   s.ready = new Promise((resolve, reject) => {
+    s.abandon = reject;
     const onFirst = (m) => {
-      if (m?.type === "ready") resolve(m);
+      if (m?.type !== "ready") return;
+      s.built = true;
+      resolve(m);
     };
     worker.on("message", onFirst);
     worker.once("error", reject);
@@ -118,6 +134,11 @@ function start({ key, data, dim, n }) {
       reject(new Error(`preview worker exited with code ${code}`));
     });
   });
+  // A replaced or reaped session may have nobody awaiting `ready` — the idle
+  // timer reaps sessions whose callers all finished long ago. Marking it
+  // handled here keeps that from surfacing as an unhandled rejection; anyone
+  // who does await `ready` still sees the rejection.
+  s.ready.catch(() => {});
 
   worker.on("message", (m) => {
     if (m?.type !== "done" && m?.type !== "failed") return;
@@ -154,23 +175,54 @@ function start({ key, data, dim, n }) {
  * @param {number} o.n
  * @param {{nNeighbors:number, minDist:number, nEpochs:number, seed:number}} o.params
  * @returns {Promise<{xy: Float32Array, warm: boolean}>} `xy` is `2n` floats,
- *   interleaved x,y. `warm` is false when this call had to build the graph —
- *   its timing is then graph-build + layout, not the steady-state cost.
+ *   interleaved x,y. `warm` is false when this call had to WAIT for the graph —
+ *   whether it started the build itself or arrived while one was in flight. Its
+ *   timing is then graph-build + layout, not the steady-state cost, and only a
+ *   warm timing may be thresholded on (#345).
  */
 export async function previewProjection({ key, data, dim, n, params }) {
-  // umap-js throws "Not enough data points" below nNeighbors, and a map of four
-  // people is not a map. Refuse specifically rather than return a blob.
-  if (!Number.isFinite(n) || n < 5) {
+  // THE SAME MINIMUM AS APPLY, deliberately (#345).
+  //
+  // This was 5 while `POST /api/projections` refused below 3, so a 3-4 person
+  // library could commit a map it was never allowed to preview — the preview
+  // 400'd every time, for the one library size where you would most want to
+  // look before committing. Two thresholds that had drifted apart, not a
+  // technical floor: measured against the real worker, n=3 and n=4 project
+  // fine and only n=2 raises umap-js's "Not enough data points" (it needs
+  // nNeighbors >= 2, and `previewWorker` clamps k to n-1).
+  //
+  // "Too small to be a useful map" is a judgement, and it is Apply's to make —
+  // it already makes it, in those words, at exactly this boundary. A preview
+  // that refuses what Apply accepts is the one thing a preview must not do.
+  // FROM THE CONSTANT, not a literal 3. The route refuses first (api.js calls
+  // `tooFewMembers`, which reads the same constant), so a literal here could
+  // not disagree with Apply TODAY — it would simply wait to, silently, the
+  // first time the constant moved. Which is the shape of the bug this whole
+  // comment is about.
+  if (!Number.isFinite(n) || n < MIN_MEMBERS) {
     throw new Error(
       `too few people to preview a map (${n}) — lower the minimum faces`
     );
   }
 
-  // Whether this request PAID for the graph decides what its timing means: a
-  // cold call is graph-build + layout, a warm one is the steady-state cost the
-  // live boundary actually cares about (#327).
-  const warm = !!session && session.key === key;
-  if (!warm) {
+  // TWO QUESTIONS, and conflating them was #345.
+  //
+  // "May I reuse the resident session?" is about the KEY, and it is what
+  // decides whether to rebuild. "Did this call skip the graph build?" is about
+  // whether that graph EXISTS YET, and it is what the timing means. `start()`
+  // installs `session` synchronously, so for the whole cold round trip
+  // (~200-450 ms) the answers differ — and a second preview arriving in that
+  // window is ordinary "wiggle the slider while judging the map" behaviour.
+  //
+  // Reading `warm` off mere existence made that second call report the
+  // steady-state flag for a latency of graph-build + BOTH layouts (the worker
+  // is single-threaded, so it queues behind the first). `App.svelte` writes
+  // only warm timings into `mapLastMs` precisely to keep build cost out of the
+  // decision, so that one number went straight into `canGoLive`'s 400 ms
+  // threshold and turned live mode off in the first seconds after Apply.
+  const reuse = !!session && session.key === key;
+  const warm = reuse && session.built;
+  if (!reuse) {
     destroy();
     start({ key, data, dim, n });
   }

@@ -68,10 +68,27 @@ class JobRegistry extends EventEmitter {
     Object.assign(j, patch);
     this.#emit();
   }
+  /**
+   * A job that has STOPPED is not parked, whatever it was doing a moment ago.
+   *
+   * `parked` is a live-closure flag, and `dismiss`/`dismissAll` refuse while it
+   * is set — correctly, since a parked run is work that still exists. But a run
+   * that unwinds STRAIGHT OUT of a park (now reachable: cancelling a parked job
+   * finally stops it, #344) would keep the flag forever and leave a finished
+   * row nothing could ever clear. Every terminal transition goes through here.
+   *
+   * @param {object} j
+   */
+  #settle(j) {
+    j.parked = false;
+    j.pauseReason = "";
+  }
+
   finish(id, result) {
     const j = this.#jobs.get(id);
     if (!j) return;
     j.status = "done";
+    this.#settle(j);
     j.result = result ?? null;
     trace("job", "done", { id, type: j.type, done: j.done, total: j.total });
     this.#emit();
@@ -118,6 +135,7 @@ class JobRegistry extends EventEmitter {
     const j = this.#jobs.get(id);
     if (!j) return;
     j.status = "canceled";
+    this.#settle(j);
     j.result = result ?? null;
     trace("job", "stopped", { id, type: j.type, done: j.done });
     this.#emit();
@@ -126,6 +144,7 @@ class JobRegistry extends EventEmitter {
     const j = this.#jobs.get(id);
     if (!j) return;
     j.status = j.controller.signal.aborted ? "canceled" : "failed";
+    this.#settle(j);
     j.error = String(error?.message ?? error);
     trace("job", j.status, { id, type: j.type, err: j.error });
     this.#emit();

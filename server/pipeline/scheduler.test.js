@@ -426,3 +426,153 @@ describe("a lease per resource class — the mutual exclusion (#279)", () => {
     expect(log).toEqual(["after0", "after1"]);
   });
 });
+
+describe("cancelling a PARKED run actually stops it (#344)", () => {
+  /**
+   * A run that parks behind a scoped request that never finishes, i.e. the
+   * starvation case the scheduler's own comments call real and by design. The
+   * blocker is only released by `release()`, so nothing else can wake the
+   * parked checkpoint — if the cancel does not, nothing does.
+   */
+  function starvedBackground(s, { signal, log }) {
+    let release;
+    const held = new Promise((r) => (release = r));
+    const scoped = s.submit({
+      priority: PRIORITY.SCOPED,
+      resource: RESOURCE.ONNX,
+      label: "Finding faces in 20 photos",
+      body: async ({ checkpoint }) => {
+        await checkpoint();
+        await held;
+      },
+    });
+    const bg = s.submit({
+      priority: PRIORITY.BACKGROUND,
+      resource: RESOURCE.ONNX,
+      label: "Finding faces",
+      signal,
+      onPause: () => log.push("pause"),
+      onResume: () => log.push("resume"),
+      // Shaped like runSweep: the abort check sits immediately after the
+      // checkpoint, so "stopped promptly" and "ran one more batch" are
+      // distinguishable in the log.
+      body: async ({ checkpoint }) => {
+        for (let i = 0; i < 5; i++) {
+          await checkpoint();
+          if (signal.aborted) return { canceled: true, batches: i };
+          log.push(`batch${i}`);
+          await settle();
+        }
+        return { canceled: false, batches: 5 };
+      },
+    });
+    return { scoped, bg, release };
+  }
+
+  it("unparks the moment its signal aborts, without waiting for the blocker", async () => {
+    // The bug: the parked promise's only exit was "nothing outranks me and the
+    // lease is free", so `registry.cancel()` returned true, the UI accepted it,
+    // and the job sat parked forever while scoped requests kept arriving.
+    const s = new Scheduler();
+    const controller = new AbortController();
+    const log = [];
+    const { scoped, bg, release } = starvedBackground(s, {
+      signal: controller.signal,
+      log,
+    });
+
+    await settle();
+    await settle();
+    // Genuinely parked — otherwise this test proves nothing about parking.
+    expect(log).toContain("pause");
+    const batchesBefore = log.filter((e) => e.startsWith("batch")).length;
+
+    controller.abort();
+    // Raced against a macrotask rather than simply awaited: the failure mode is
+    // a HANG, and a hang should report as this assertion rather than as a
+    // five-second timeout with no explanation.
+    const outcome = await Promise.race([
+      bg,
+      settle().then(() => "still parked"),
+    ]);
+    expect(outcome).not.toBe("still parked");
+    expect(outcome.canceled).toBe(true);
+    // ...and it did not pay for a whole further batch on the way out, which
+    // cancelling a RUNNING job never does.
+    expect(outcome.batches).toBe(batchesBefore);
+
+    release();
+    await scoped;
+    expect(s.liveCount).toBe(0);
+  });
+
+  it("does not take the resource lease on its way out", async () => {
+    // A cancelled run that grabs the ONNX lease as it unwinds hands the next
+    // waiter a holder that is already gone — the leaked-lease failure above,
+    // reached from the other direction.
+    const s = new Scheduler();
+    const controller = new AbortController();
+    const log = [];
+    const { scoped, bg, release } = starvedBackground(s, {
+      signal: controller.signal,
+      log,
+    });
+    await settle();
+    await settle();
+    controller.abort();
+    await bg;
+
+    release();
+    await scoped;
+    const after = [];
+    await s.submit({
+      priority: PRIORITY.BACKGROUND,
+      resource: RESOURCE.ONNX,
+      body: fakeSweep("after", 2, after),
+    });
+    expect(after).toEqual(["after0", "after1"]);
+  });
+
+  it("leaves no parked job flagged as paused once it stops", async () => {
+    // `onResume` is what clears `registry`'s `parked` flag, and a job that ends
+    // still flagged parked is undismissable forever (registry.dismiss).
+    const s = new Scheduler();
+    const controller = new AbortController();
+    const log = [];
+    const { scoped, bg, release } = starvedBackground(s, {
+      signal: controller.signal,
+      log,
+    });
+    await settle();
+    await settle();
+    controller.abort();
+    await bg;
+    expect(log.filter((e) => e === "resume")).toHaveLength(1);
+    release();
+    await scoped;
+  });
+
+  it("still parks normally for a run that is never cancelled", async () => {
+    // The signal is optional and must change nothing when absent or unaborted.
+    const s = new Scheduler();
+    const controller = new AbortController();
+    const log = [];
+    const bg = s.submit({
+      priority: PRIORITY.BACKGROUND,
+      signal: controller.signal,
+      onPause: () => log.push("pause"),
+      onResume: () => log.push("resume"),
+      body: fakeSweep("bg", 3, log),
+    });
+    await settle();
+    await settle();
+    const scoped = s.submit({
+      priority: PRIORITY.SCOPED,
+      body: fakeSweep("sc", 1, log),
+    });
+    await Promise.all([bg, scoped]);
+    expect(log.filter((e) => e.startsWith("bg"))).toHaveLength(3);
+    expect(log.filter((e) => e === "pause")).toHaveLength(1);
+    expect(log.filter((e) => e === "resume")).toHaveLength(1);
+  });
+});

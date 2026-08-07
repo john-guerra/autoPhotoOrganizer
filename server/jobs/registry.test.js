@@ -378,4 +378,30 @@ describe("a PARKED job is not a finished one (#257/#282)", () => {
     expect(registry.cancel(job.id)).toBe(true);
     expect(job.controller.signal.aborted).toBe(true);
   });
+
+  // This assertion is the reason #344 could ship: the test above claims a
+  // parked job is cancellable and only checks that a FLAG was set. Whether the
+  // parked closure ever notices lives in `scheduler.test.js`; whether the ROW
+  // it leaves behind is usable lives here, and neither was covered.
+  it.each(["fail", "stopped", "finish"])(
+    "clears `parked` when a parked job ends via %s, or its row is undismissable forever",
+    (how) => {
+      const job = registry.create("pipeline", { label: "Scanning" });
+      registry.pause(job.id, "waiting its turn", { parked: true });
+      registry.cancel(job.id);
+      // Every one of the three is reachable now that a parked run can unwind:
+      // the sweeps throw, the pipeline returns `{canceled: true}` cooperatively,
+      // and `stopped()` is the honest middle.
+      if (how === "fail") registry.fail(job.id, new Error("canceled"));
+      else if (how === "stopped") registry.stopped(job.id, { done: 3 });
+      else registry.finish(job.id, { canceled: true });
+
+      const row = registry.list().find((j) => j.id === job.id);
+      // `finish` on a self-clearing type would remove the row; "pipeline" is not
+      // one, so a row is always there to inspect.
+      expect(row.parked).toBe(false);
+      expect(row.pauseReason).toBe("");
+      expect(registry.dismiss(job.id)).toBe(true);
+    }
+  );
 });
