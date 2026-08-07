@@ -6,6 +6,12 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.20.7
+
+- **Docs:** the README architecture note no longer frames faces / CLIP search
+  as unbuilt "Phase 2" — those shipped; only pick-prediction and the GPU archive
+  renderer remain (#336).
+
 ## 2.20.5
 
 - Internal: CI is now a real gate that nobody has to watch — branch protection
