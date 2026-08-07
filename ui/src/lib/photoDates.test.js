@@ -47,13 +47,27 @@ describe("birthTimeSuspicion", () => {
 });
 
 describe("dateRows", () => {
-  it("names the row that is deciding this photo's position", () => {
-    // The bug report exactly: sorting by Created puts this 2025 photo in 1984.
+  it("points at MTIME when the creation date is a sentinel the server skips", () => {
+    // Since #349 the server refuses a sentinel btime and falls through to
+    // mtime, so "sorting by this" belongs on the row actually in charge.
+    // Marking the 1984 row would be confidently wrong — the precise failure
+    // the marker exists to prevent.
     const rows = dateRows(REAL, "date_created");
     const driving = rows.filter((r) => r.drives);
     expect(driving).toHaveLength(1);
+    expect(driving[0].key).toBe("mtime");
+    // The sentinel is still called out, just no longer blamed for the sort.
+    const btimeRow = rows.find((r) => r.key === "btime");
+    expect(btimeRow.drives).toBe(false);
+    expect(btimeRow.note).toContain("not a real date");
+  });
+
+  it("points at the creation date when it is a real one", () => {
+    const ok = { ...REAL, takenAtExif: null, btime: 1735783135000 };
+    const driving = dateRows(ok, "date_created").filter((r) => r.drives);
+    expect(driving).toHaveLength(1);
     expect(driving[0].key).toBe("btime");
-    expect(driving[0].note).toContain("not a real date");
+    expect(driving[0].note).toBe("");
   });
 
   it("blames EXIF when the sort is Taken and EXIF exists", () => {
@@ -62,10 +76,16 @@ describe("dateRows", () => {
   });
 
   it("falls through to the file date when EXIF was never read", () => {
-    // This is the case where a bad btime reaches a Taken sort too, so the
-    // marker has to follow the COALESCE rather than assume EXIF wins.
-    const rows = dateRows({ ...REAL, takenAtExif: null }, "date_taken");
-    expect(rows.find((r) => r.drives).key).toBe("btime");
+    // A bad btime reaches a Taken sort too, so the marker follows the whole
+    // COALESCE rather than assuming EXIF wins — sentinel included.
+    const noExif = { ...REAL, takenAtExif: null };
+    expect(dateRows(noExif, "date_taken").find((r) => r.drives).key).toBe(
+      "mtime"
+    );
+    const realBtime = { ...noExif, btime: 1735783135000 };
+    expect(dateRows(realBtime, "date_taken").find((r) => r.drives).key).toBe(
+      "btime"
+    );
   });
 
   it("marks nothing when the feed is not sorted by a date at all", () => {
