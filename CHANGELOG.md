@@ -33,7 +33,6 @@ user-facing — what you can now do, not how it's built.
   answers immediately instead of queueing a duplicate — it would scan exactly
   the same photos.
 
-
 ## 2.20.6
 
 - **The Face Map no longer hands you a map of a library you no longer have.** A
