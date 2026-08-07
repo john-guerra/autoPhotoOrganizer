@@ -6,6 +6,7 @@ import { getDb, _resetDbForTest } from "../db/connection.js";
 import { upsertScan } from "../db/photos.js";
 import { facesFor, faceCounts, pendingFaceRows } from "../db/faces.js";
 import { sweepFaces, isTransient } from "./faceSweep.js";
+import { Scheduler, PRIORITY, RESOURCE } from "../pipeline/scheduler.js";
 
 const MODEL = "buffalo_s";
 let cacheDir;
@@ -280,5 +281,84 @@ describe("classifying a failure", () => {
     ]) {
       expect(isTransient(new Error(m)), m).toBe(false);
     }
+  });
+});
+
+describe("a scoped request preempts the background sweep (#279)", () => {
+  /** Next macrotask, so a parked checkpoint gets a chance to settle. */
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it("runs the scoped request instead of refusing it", async () => {
+    const db = getDb();
+    const ids = seed(db, 40); // 5 batches at FACE_BATCH=8
+    const s = new Scheduler();
+    // Slow enough that the background run is genuinely mid-sweep when the
+    // scoped one arrives — otherwise this passes for the wrong reason.
+    const slow = {
+      async detect() {
+        await settle();
+        return { faces: [], skipped: 0 };
+      },
+    };
+
+    const bg = s.submit({
+      priority: PRIORITY.BACKGROUND,
+      body: ({ checkpoint }) =>
+        sweepFaces({ db, modelId: MODEL, engine: slow, checkpoint }),
+    });
+    await settle();
+    await settle();
+
+    const scoped = s.submit({
+      priority: PRIORITY.SCOPED,
+      body: ({ checkpoint }) =>
+        sweepFaces({
+          db,
+          modelId: MODEL,
+          engine: slow,
+          checkpoint,
+          scopeIds: [ids[39]],
+        }),
+    });
+
+    const [, sc] = await Promise.all([bg, scoped]);
+
+    // The whole of #279: the scheduler promoted this run, and the sweep's own
+    // single-flight latch — still held by the run the scheduler just PARKED —
+    // refused it anyway. The user presses the button and nothing happens.
+    expect(sc.alreadyRunning).toBeUndefined();
+    expect(sc.done).toBe(1);
+  });
+  it("two equal-priority sweeps take turns instead of overlapping", async () => {
+    // The half of the deleted latch that was RIGHT. Priority only parks a
+    // strictly LOWER-priority run, so two scoped requests are invisible to it;
+    // without the lease both would proceed, both read the same pending rows,
+    // and the second putFaces would overwrite the first's — twice the cost of
+    // the slowest thing this app does, for nothing.
+    const db = getDb();
+    seed(db, 24);
+    const s = new Scheduler();
+    let concurrent = 0;
+    let peak = 0;
+    const engine = {
+      async detect() {
+        concurrent++;
+        peak = Math.max(peak, concurrent);
+        await settle();
+        concurrent--;
+        return { faces: [], skipped: 0 };
+      },
+    };
+    const run = () =>
+      s.submit({
+        priority: PRIORITY.SCOPED,
+        resource: RESOURCE.ONNX,
+        body: ({ checkpoint }) =>
+          sweepFaces({ db, modelId: MODEL, engine, checkpoint }),
+      });
+
+    await Promise.all([run(), run()]);
+
+    expect(peak).toBe(1);
   });
 });

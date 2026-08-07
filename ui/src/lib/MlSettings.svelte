@@ -23,6 +23,7 @@
     buildScopes,
     activeScope as activeScopeOf,
     scopeRequestFor,
+    isWholeLibraryRequest,
     formatEstimate,
     DEFAULT_SCOPE,
   } from "./scopeControl.js";
@@ -177,6 +178,15 @@
   // library (#245).
   const scopeRequest = $derived(
     scopeRequestFor(scopeChoice, { selectedIds, filterSpec })
+  );
+
+  /** Would pressing Embed now ask for work already under way? The same
+   *  predicate FaceSettings uses, and the same one the SERVER applies — see
+   *  `isWholeLibraryRequest` (#279). Keyed on the request rather than on
+   *  `scopeChoice === "all"`, because "Filtered" with nothing filtered
+   *  collapses to the sweep and is what the server will actually see. */
+  const redundantWhileRunning = $derived(
+    !!runningJob && isWholeLibraryRequest(scopeRequest)
   );
 
   /**
@@ -827,12 +837,21 @@
     />
 
     <div class="ml-actions">
+      <!-- `!!runningJob` alone would be the #279 bug in its other panel: the
+           server now ACCEPTS a scoped embed while a sweep runs (the scoped
+           request outranks the backlog and parks it), so disabling this for
+           the whole of any running sweep makes the accepted request
+           impossible to ask for. Only the redundant ask — an unscoped sweep
+           while an unscoped sweep runs — stays disabled, which is exactly
+           what `POST /api/ml/embed` refuses. -->
       <button
         data-testid="ml-embed-now"
-        disabled={busy || !!runningJob || !activeScope?.n}
+        disabled={busy || redundantWhileRunning || !activeScope?.n}
         onclick={embedNow}
       >
-        {runningJob ? "Embedding…" : `Embed ${activeScope?.label ?? "all"}`}
+        {redundantWhileRunning
+          ? "Embedding…"
+          : `Embed ${activeScope?.label ?? "all"}`}
       </button>
       {#if runningJob}
         <button disabled={stopping} onclick={stopSweep}>

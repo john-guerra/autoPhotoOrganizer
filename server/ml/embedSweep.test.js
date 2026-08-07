@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, _resetDbForTest } from "../db/connection.js";
 import { upsertScan } from "../db/photos.js";
+import { Scheduler, PRIORITY, RESOURCE } from "../pipeline/scheduler.js";
 import {
   embedCounts,
   pendingEmbedRows,
@@ -351,7 +352,22 @@ describe("embedAllPending", () => {
     }
   });
 
-  it("is single-flight — a second scan must not start a second sweep", async () => {
+  it("two sweeps take turns — the second must not embed the same photos again", async () => {
+    // The guarantee is unchanged; WHO ENFORCES IT moved (#279).
+    //
+    // This used to be a module-level `embedInFlight` boolean, and the second
+    // caller was REFUSED (`alreadyRunning: true`). That refusal was held
+    // across a scheduler park, so a background sweep parked in favour of a
+    // scoped request went on refusing the request that had just preempted it
+    // — John pressed the button and nothing happened. Mutual exclusion is now
+    // the scheduler's `RESOURCE.ONNX` lease, which is released at a
+    // checkpoint, so the loser WAITS instead of being turned away.
+    //
+    // The assertion that matters is the same one either way, and it is the
+    // second one: 2 photos at the default limit (16) is exactly one batch, so
+    // a single `embedImages` call proves the second sweep found an empty
+    // worklist rather than redoing the work. Without it this passes whether
+    // the loser did nothing or did everything twice.
     const db = getDb();
     seed(db, 2);
     const ml = stubMl();
@@ -361,15 +377,19 @@ describe("embedAllPending", () => {
       model: MODEL,
       idle: async () => {},
     };
-    const [first, second] = await Promise.all([
-      embedAllPending(db, opts),
-      embedAllPending(db, opts),
-    ]);
-    expect([first.alreadyRunning, second.alreadyRunning]).toContain(true);
-    // 2 photos at the default limit (16) is exactly one batch. Without this,
-    // the test above passes as long as EITHER call short-circuits — it
-    // can't tell "the loser did no work" from "the loser did the work
-    // twice". One call proves the loser touched the encoder zero times.
+    const s = new Scheduler();
+    const run = () =>
+      s.submit({
+        priority: PRIORITY.BACKGROUND,
+        resource: RESOURCE.ONNX,
+        body: ({ checkpoint }) => embedAllPending(db, { ...opts, checkpoint }),
+      });
+
+    const [first, second] = await Promise.all([run(), run()]);
+
+    // Neither is refused any more — both ran, in turn.
+    expect(first.alreadyRunning).toBeUndefined();
+    expect(second.alreadyRunning).toBeUndefined();
     expect(ml.embedImages).toHaveBeenCalledTimes(1);
   });
 

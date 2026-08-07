@@ -296,6 +296,65 @@ test.describe("faces scope @p1", () => {
     ).toBeChecked();
     expect(errors).toEqual([]);
   });
+  /**
+   * #279's UI half, and the reason a green server suite was not enough.
+   *
+   * The server was fixed so a SCOPED request preempts a running whole-library
+   * sweep — parks it, runs yours, resumes it. John validated it and reported:
+   * "I cannot start the scoped find faces because the ui is disabled when
+   * running the previous one." The panel disabled the scan button (and the
+   * scope picker with it) for the whole of any running pass, so the request
+   * the server had just started accepting could not be composed at all.
+   *
+   * `running` is stubbed rather than started, because starting a REAL pass
+   * needs 191 MB of weights and real inference — see the note above.
+   */
+  test("a scoped scan stays pressable while a whole-library pass runs (#279)", async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    // Registered AFTER the beforeEach stub, so this one matches first.
+    await page.route("**/api/ml/faces*", async (route, request) => {
+      if (request.method() !== "GET") return route.continue();
+      const real = await route.fetch();
+      const body = await real.json();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...body,
+          weights: { ready: true, missing: [], corrupt: [] },
+          running: true,
+        }),
+      });
+    });
+
+    await openApp(page);
+    // A selection FIRST. "Selected" with nothing selected is an empty scope,
+    // which ScopeControl disables on purpose — offered but never silently
+    // widened to the library (UI-CONTRACTS § Scope). Asserting on it before
+    // selecting anything tests that rule, not this one.
+    await page.keyboard.press("Meta+a");
+    await expect(statusBar.root(page)).toContainText(/[1-9]\d* selected/);
+    await mlPanel.open(page);
+
+    // The scope control must stay live — it is HOW the user composes the
+    // request that preempts. Disabling it is what made the path unreachable.
+    await expect(faceSettings.scopeOption(page, "selected")).toBeEnabled();
+
+    // "All" while a sweep runs IS redundant — same worklist — and the server
+    // answers it with alreadyRunning. The button correctly stays disabled.
+    await faceSettings.scopeOption(page, "all").check();
+    await expect(faceSettings.scan(page)).toBeDisabled();
+
+    // ...but with a real selection it is a different ask, and must be live.
+    await faceSettings.scopeOption(page, "selected").check();
+    await expect(faceSettings.scan(page)).toBeEnabled();
+    // And it says what it will do, rather than "Scanning…" on a live button.
+    await expect(faceSettings.scan(page)).toContainText(/Find faces in/);
+
+    expect(errors).toEqual([]);
+  });
 });
 
 /**

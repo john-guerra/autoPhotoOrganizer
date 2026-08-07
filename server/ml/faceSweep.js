@@ -32,29 +32,52 @@ import { join } from "node:path";
 export const FACE_BATCH = 8;
 
 /**
- * Whether a face pass is running right now.
+ * How many face passes are live right now.
  *
- * Checked by the route BEFORE it creates a job row, not after: a second job
- * that immediately self-clears as `alreadyRunning` is a flicker in the
- * JobsPanel the user cannot act on — #161 round 1's I2, and the reason
- * isEmbedInFlight and isNearDupeSweepInFlight both exist.
+ * ## This is OBSERVATIONAL. It is no longer a latch (#279).
  *
- * Two concurrent sweeps would also fight over the worklist. Both read the same
- * pending rows, both detect them, and the second putFaces replaces the first's
- * rows for the same photo. Not corrupting — but exactly twice the cost of the
- * slowest thing this app does.
+ * It used to be both, and being both is what John reported: a boolean that
+ * said "a sweep is running" AND refused the second caller. The refusal was
+ * wrong, and not because refusing is rude — because of WHERE it sat. The
+ * scheduler wraps every sweep (`scheduler.submit`, api.js), so when a scoped
+ * request arrives the background run is correctly PARKED at its checkpoint —
+ * but a parked run is still inside `drain()`, so it still held this flag, and
+ * the scoped run the scheduler had just promoted was refused by the very run
+ * it had just parked. Pressing the button did nothing, which is exactly the
+ * report.
+ *
+ * Mutual exclusion now lives where it can be released at a park:
+ * `resource: RESOURCE.ONNX` on the submit. `checkpoint()` drops the lease
+ * BEFORE it waits, so a parked run blocks nobody, and a second sweep WAITS
+ * (visibly, as a parked job) instead of being told no.
+ *
+ * ## Why a COUNTER and not a boolean
+ *
+ * Because runs now queue, two are legitimately alive at once: one executing,
+ * one parked at its first checkpoint. With a boolean the finisher clears the
+ * flag while the parked run is still live, and every guard below silently
+ * goes blind at exactly the wrong moment. Same reason `lib/interactive.js`
+ * counts.
+ *
+ * ## What still reads it, and why that is not the bug
+ *
+ * The DESTRUCTIVE routes: `faces/purge`, `faces/retry-failed`,
+ * `faces/cluster` and `people/merge-bulk`. Those are not "one sweep at a
+ * time" — they are "do not throw away a grouping / purge vectors out from
+ * under a running scan", and a 409 is the right answer to them. They stay.
  */
-let inFlight = false;
+let live = 0;
 
-/** @returns {boolean} */
+/** Is any face pass live (running OR parked)? See the note above: this
+ *  answers the destructive routes, and no longer refuses a second sweep. */
 export function isFaceSweepInFlight() {
-  return inFlight;
+  return live > 0;
 }
 
-/** Tests only. `finally` already clears the flag on any exit path, but a test
+/** Tests only. `finally` already decrements on any exit path, but a test
  *  that deliberately explodes mid-sweep needs a way back to a known state. */
 export function _resetFaceSweepForTest() {
-  inFlight = false;
+  live = 0;
 }
 
 /**
@@ -90,25 +113,17 @@ export async function sweepFaces({
   /** Preemption (#257); a no-op by default so existing callers are unchanged. */
   checkpoint = async () => {},
 }) {
-  if (inFlight)
-    return {
-      done: 0,
-      failed: 0,
-      faces: 0,
-      paused: false,
-      alreadyRunning: true,
-    };
   const model = faceModelById(modelId);
   let faces = 0;
-  inFlight = true;
+  live++;
   try {
     return await drain();
   } finally {
     // `finally`, not a line after the await: a throw, a cancel, or a pause
-    // must all release the flag. Leaving it set makes every later sweep a
-    // silent no-op for the rest of the process's life, and the only symptom
-    // is a button that does nothing.
-    inFlight = false;
+    // must all decrement. Leaving it raised makes every destructive route
+    // (purge, retry-failed, cluster) refuse for the rest of the process's
+    // life, and the only symptom is a button that does nothing.
+    live--;
   }
 
   async function drain() {
