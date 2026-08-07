@@ -19,6 +19,7 @@
    *   showDetails?: boolean,
    *   showFilmstrip?: boolean,
    *   thumbSize?: number,
+   *   sortBy?: string,
    *   oncontextmenu?: (detail: { x: number, y: number }) => void,
    *   onclose?: () => void,
    *   ontoggleselect?: () => void,
@@ -40,6 +41,9 @@
     showDetails = true,
     showFilmstrip = true,
     thumbSize = 64,
+    /** The feed's current sort attribute, forwarded to the details panel so it
+     *  can mark which date is deciding this photo's position (#349). */
+    sortBy = "",
     oncontextmenu,
     onclose,
     ontoggleselect,
@@ -461,6 +465,7 @@
         {inSelection}
         {selectedCount}
         {onrate}
+        {sortBy}
       />
     {/if}
   </div>

@@ -2991,6 +2991,21 @@ export function registerApi(app, { ml } = {}) {
         // EXIF date, else the file's creation date (see TAKEN_AT_EXPR). Same
         // helper the feed rows use, so the loupe and the grid never disagree.
         takenAt: takenAtIso(p),
+        // The THREE RAW dates behind that one answer, unmerged and unguarded.
+        //
+        // `takenAt` is a COALESCE, so when a photo lands in a group you did not
+        // expect, the one thing it cannot tell you is WHICH date put it there.
+        // That is not hypothetical: a Pixel backup folder grouped into 1984
+        // under "Created" because macOS reports `birthtime` as 1984-01-24 —
+        // its own "unknown" sentinel — for 1,557 files copied off a phone,
+        // while EXIF and mtime both said 2025 (#349).
+        //
+        // Epoch ms rather than ISO, deliberately: the client has to be able to
+        // recognise the sentinel and say so, and a formatted string has already
+        // thrown away the evidence.
+        takenAtExif: p.taken_at ?? null,
+        btime: p.btime ?? null,
+        mtime: p.mtime ?? null,
         width: p.width ?? null,
         height: p.height ?? null,
         duration: p.duration ?? null,
