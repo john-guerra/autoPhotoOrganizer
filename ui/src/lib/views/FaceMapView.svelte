@@ -489,26 +489,48 @@
    *    is a JOB, so it is debounced hard and stays cancellable;
    *  - nothing, and Apply is there when they are ready.
    */
+  /**
+   * Which settings cannot be answered from the preview session.
+   *
+   * `minFaces` changes the member set the resident graph was built from, and
+   * `algorithm` selects a different algorithm entirely — the preview path is
+   * UMAP-only, since t-SNE is O(n^2) and PCA has nothing to tune. Both
+   * therefore need a real rebuild, which is a job.
+   */
+  const NEEDS_REBUILD = new Set(["minFaces", "algorithm"]);
+
   function scheduleUpdate(key, dragging) {
-    // Two parameters cannot come from the preview session: `minFaces` changes
-    // the member set the resident graph was built from, and `algorithm`
-    // selects a different algorithm entirely (the preview path is UMAP-only,
-    // since t-SNE is O(n^2) and PCA has nothing to tune).
-    const previewable =
-      key !== "minFaces" && key !== "algorithm" && live && !!onpreview;
-    if (previewable) {
+    if (!NEEDS_REBUILD.has(key) && live && onpreview) {
       clearTimeout(previewTimer);
       previewTimer = setTimeout(() => onpreview(currentParams()), 60);
       return;
     }
-    // Choosing an algorithm is a decision, not an exploration, so it applies
-    // whether or not automatic updates are on. A slider drag is the opposite.
-    if (key !== "algorithm" && (!autoApply || dragging)) return;
-    // A rebuild is a job. One second, and only once the control is released —
-    // a job per slider tick is how a convenience turns into a queue nobody
-    // asked for.
+    // A setting that needs a rebuild applies BY ITSELF once you let go,
+    // whether or not automatic updates are on. John: "changing the min num
+    // faces still doesn't trigger the animation, I still have to hit
+    // rebuild." Choosing a threshold or an algorithm is a decision; dragging
+    // a slider is exploration, and only the latter waits for permission.
+    if (!NEEDS_REBUILD.has(key) && (!autoApply || dragging)) return;
+    if (dragging) return;
     clearTimeout(applyTimer);
-    applyTimer = setTimeout(() => onrun?.(currentParams()), 1000);
+    applyTimer = setTimeout(runWhenFree, 700);
+  }
+
+  /**
+   * Start the rebuild, or wait for the one already running.
+   *
+   * The server single-flights projections and 409s a second one. Retrying is
+   * better than surfacing "a map is already being built" to someone who simply
+   * moved a slider twice — they did nothing wrong, and the message would be
+   * about our plumbing rather than their photos.
+   */
+  function runWhenFree() {
+    if (loading) {
+      clearTimeout(applyTimer);
+      applyTimer = setTimeout(runWhenFree, 300);
+      return;
+    }
+    onrun?.(currentParams());
   }
 
   // A dragged slider outliving its view would fire a fetch into a dead
@@ -740,7 +762,13 @@
           value={minFaces}
           onchange={(v) => {
             draft = { ...draft, minFaces: v };
+            saveSettings(draft);
+            // Refresh the member count shown beside the control...
             onoptions?.(currentParams());
+            // ...and rebuild, which the threshold does by itself: it cannot be
+            // previewed, so without this it silently did nothing until Rebuild
+            // was pressed.
+            scheduleUpdate("minFaces", false);
           }}
         />
         <span class="members" data-testid="map-members">

@@ -267,6 +267,43 @@ test.describe("face map @p1", () => {
     expect(errors).toEqual([]);
   });
 
+  test("changing the minimum faces rebuilds by itself, without Rebuild", async ({
+    page,
+  }) => {
+    // #327. John's trace showed it exactly: moving the threshold fired only
+    // GET /api/projections/options, and POST /api/projections appeared solely
+    // where he had pressed Rebuild. The threshold cannot be previewed — it
+    // changes the member set the resident graph was built from — so it has to
+    // start a real rebuild on its own.
+    const errors = trackPageErrors(page);
+    const builds = [];
+    page.on("request", (r) => {
+      if (
+        r.method() === "POST" &&
+        new URL(r.url()).pathname === "/api/projections"
+      ) {
+        builds.push(r.url());
+      }
+    });
+
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await faceMap.openGear(page);
+    const before = builds.length;
+
+    // Lower the threshold and let go. Nothing else is touched — in particular
+    // Rebuild is never pressed.
+    await faceMap.minFacesNum(page).fill("");
+    await faceMap.minFacesNum(page).pressSequentially("2");
+    await faceMap.minFacesNum(page).blur();
+
+    await expect
+      .poll(() => builds.length, { timeout: 20_000 })
+      .toBeGreaterThan(before);
+    expect(errors).toEqual([]);
+  });
+
   test("a precise value can be typed, below the slider's own step", async ({
     page,
   }) => {
