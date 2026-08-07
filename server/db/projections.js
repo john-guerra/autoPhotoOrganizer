@@ -1,11 +1,25 @@
 /**
  * The projection run cache (#232).
  *
- * A projection is expensive (4s at the default member count, 20s with
- * singletons), deterministic for a given seed, and worth persisting — like
+ * A projection is deterministic for a given seed and worth persisting — like
  * `content_hash`. Runs are keyed by (kind, model, algorithm, params_key), so
  * flipping a parameter back to one you already computed is instant and starts
  * no job at all.
+ *
+ * HOW EXPENSIVE, measured (#327). This used to say "4s at the default member
+ * count, 20s with singletons", and the shape of that claim was wrong as well
+ * as the numbers — it implied superlinear growth. Fitted to real runs on a
+ * real library, `ms = 3.29 * n^0.80`, which is SUBLINEAR:
+ *
+ *    21 people   46 ms        1,000 people   ~0.8 s
+ *   203 people  201 ms        5,499 people   ~3.1 s
+ *   852 people  842 ms       25,758 people  ~10.7 s
+ *
+ * Three quarters of that is the neighbour graph, which is why #327's preview
+ * session holds one and answers a parameter change in 61-117 ms instead.
+ * Persisting still earns its keep at the top of the range; at the bottom it is
+ * the RUN that matters rather than the saving, since a stored map is what the
+ * view reopens on.
  *
  * The design decision worth stating up front: **a run is a snapshot, and its
  * points are served by INNER JOIN persons.** Merge eight people away and their

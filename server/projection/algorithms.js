@@ -47,6 +47,19 @@ export const TSNE_MAX_MEMBERS = 6000;
 export const MAX_EPOCHS = 2000;
 
 /**
+ * The largest neighbourhood the slider offers.
+ *
+ * Exported so the preview session builds its graph at the SAME ceiling — a
+ * preview capped lower than the slider would show one map while Apply produced
+ * another, which is the #325 failure family (a view quietly presenting itself
+ * as something it is not).
+ *
+ * `worker.js` clamps to `n - 1` regardless, so this is a ceiling on the
+ * control rather than a promise about any particular library.
+ */
+export const MAX_N_NEIGHBORS = 300;
+
+/**
  * How many faces a person needs before they are worth a dot (#255).
  *
  * Exported so the server's own fallbacks (`personCentroids`, `runStaleness`)
@@ -110,7 +123,7 @@ export const ALGORITHMS = Object.freeze([
         key: "nNeighbors",
         label: "Neighbours",
         min: 2,
-        max: 200,
+        max: MAX_N_NEIGHBORS,
         step: 1,
         // 30, measured (#326) — and the paragraph below is the part that
         // matters more than the number.

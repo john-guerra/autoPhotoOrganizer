@@ -6,6 +6,19 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.20.9
+
+- **The Face Map's settings now sit beside the map, and the sliders move it as
+  you drag.** They used to be a popover over the map, so you could not see what
+  a setting did to the thing you were changing it for. On a library this size a
+  change lands in under a tenth of a second; on a much larger one the panel says
+  so and waits for Apply instead of pretending (#327).
+- **You can type a number again.** The settings were number boxes that clamped
+  on every keystroke, so getting from 5 to 50 by typing a 0 was impossible.
+  Every setting is now a slider with an editable number beside it (#327).
+- **The map remembers your settings.** They no longer reset every time you
+  reload (#287).
+
 ## 2.20.8
 
 - **You can now start a scan on your selection while a whole-library run is
