@@ -6,6 +6,7 @@ import {
   scopeRequestFor,
   formatEstimate,
   DEFAULT_SCOPE,
+  isWholeLibraryRequest,
 } from "./scopeControl.js";
 
 const sets = { selectedIds: [1, 2, 3], filteredCount: 5 };
@@ -186,5 +187,40 @@ describe("the default scope", () => {
     const chosen = activeScope(scopes, DEFAULT_SCOPE);
     expect(scopes.map((s) => s.key)).toContain(DEFAULT_SCOPE);
     expect(chosen.n).toBe(9);
+  });
+});
+
+describe("isWholeLibraryRequest — the client's copy of the server's rule (#279)", () => {
+  it("calls only the bare sweep whole-library", () => {
+    expect(isWholeLibraryRequest(scopeRequestFor("all", {}))).toBe(true);
+    expect(isWholeLibraryRequest({})).toBe(true);
+    expect(isWholeLibraryRequest(undefined)).toBe(true);
+  });
+
+  it("does NOT call a scoped request whole-library, so the button stays live", () => {
+    // The regression itself: while a sweep runs, each of these must remain
+    // pressable, because the server accepts them and the scheduler parks the
+    // running sweep in their favour. Disabling them is #279's UI half.
+    expect(
+      isWholeLibraryRequest(
+        scopeRequestFor("selected", { selectedIds: [1, 2] })
+      )
+    ).toBe(false);
+    expect(
+      isWholeLibraryRequest(
+        scopeRequestFor("filtered", { filterSpec: { rating: 3 } })
+      )
+    ).toBe(false);
+    expect(isWholeLibraryRequest(scopeRequestFor("keep", {}))).toBe(false);
+  });
+
+  it("treats an EMPTY selection as scoped, not as the sweep", () => {
+    // `{ids: []}` means "no photos" and the server answers it with a specific
+    // 400. Reading it as the sweep here would re-create the failure
+    // UI-CONTRACTS calls out by name: an empty selection silently widened into
+    // an hour of inference over the library.
+    expect(
+      isWholeLibraryRequest(scopeRequestFor("selected", { selectedIds: [] }))
+    ).toBe(false);
   });
 });

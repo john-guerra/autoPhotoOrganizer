@@ -176,3 +176,31 @@ export function formatEstimate(n, msPerPhoto) {
   if (mins < 60) return `about ${mins} min`;
   return `about ${(mins / 60).toFixed(1)} h`;
 }
+
+/**
+ * Is this scope request the whole-library sweep?
+ *
+ * The client-side statement of the SERVER's rule, and it exists so the two
+ * cannot drift apart again (#279). `POST /api/ml/faces` and `POST /api/ml/embed`
+ * refuse a request carrying no scope while a pass is already live — it is the
+ * same worklist — and let a scoped one through to the scheduler, which parks
+ * the running sweep in its favour.
+ *
+ * A UI that disables its button for the whole of any running pass therefore
+ * makes the accepted request impossible to compose. That is exactly what
+ * happened: the server half of #279 shipped, and John reported "I cannot start
+ * the scoped find faces because the ui is disabled when running the previous
+ * one" — nothing he could see had changed.
+ *
+ * **Ask the REQUEST, not the choice.** `choice === "all"` is not the same
+ * predicate: "Filtered" with nothing filtered produces `{filter: {}}`, which
+ * `resolveScope` collapses to the sweep, so the server sees an unscoped ask
+ * from a choice that does not look like one.
+ *
+ * @param {{ids?: unknown[], filter?: object}} request as built by
+ *   {@link scopeRequestFor}
+ * @returns {boolean} true when the request scopes nothing — i.e. it IS "All"
+ */
+export function isWholeLibraryRequest(request) {
+  return !request?.ids && !request?.filter;
+}

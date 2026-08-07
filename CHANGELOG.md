@@ -10,12 +10,12 @@ user-facing — what you can now do, not how it's built.
 
 - **You can now start a scan on your selection while a whole-library run is
   going.** Asking to find faces (or compute similarity) in a selection used to
-  do nothing at all while a big background pass was running — the button
-  answered "already running" and no job appeared. The scoped request now takes
-  priority: the big run parks at its next batch boundary, yours runs, and the
-  big one picks up where it left off with nothing recomputed. Both are visible
-  in the jobs panel throughout, and a parked one says what it is waiting for
-  (#279, #257).
+  do nothing at all while a big background pass was running — the scope
+  picker and the button were both greyed out, so the request could not even be
+  composed. The scoped request now takes priority: the big run parks at its
+  next batch boundary, yours runs, and the big one picks up where it left off
+  with nothing recomputed. Both are visible in the jobs panel throughout, and a
+  parked one says what it is waiting for (#279, #257).
 - Kicking off a second whole-library pass while one is already running still
   answers immediately instead of queueing a duplicate — it would scan exactly
   the same photos.
