@@ -280,6 +280,51 @@ describe("runPipeline — one process, every enabled stage", () => {
     expect(hashed).toBe(r.counts.hash.done);
   });
 
+  it("stops at the checkpoint when the cancel arrived while it was parked (#344)", async () => {
+    // What this actually costs is worth stating precisely, because it is NOT
+    // the same as sweep.js's version of the same fix. A third abort check
+    // inside the stage loop (`for (const stage of live)`) already stops the
+    // runners, so no photo is processed either way. What the missing check
+    // costs is a `nextCohort` query nobody wanted and, worse, `cohorts` and
+    // `photos` incremented for a cohort that never ran — numbers the job
+    // REPORTS. A cancelled scan claiming it got through 10 photos it never
+    // touched is the "reported success" shape this repo keeps finding.
+    //
+    // So the assertions are on the returned counts, not on the runner: with
+    // the check removed the runner is still never called, and a test watching
+    // only that would pass while the counts lied.
+    seed(10);
+    const controller = new AbortController();
+    let cohorts = 0;
+    const r = await runPipeline({
+      db,
+      stageIds: ["hash"],
+      runners: {
+        hash: async ({ ids }) => {
+          finishHash(ids);
+          cohorts += 1;
+          return { done: ids.length };
+        },
+      },
+      cost: { hash: 5000 },
+      // Stands in for "the user pressed Stop while this was parked": the
+      // scheduler returns from a park rather than throwing, so this loop has to
+      // notice for itself.
+      checkpoint: async () => controller.abort(),
+      signal: controller.signal,
+      ...MODELS,
+    });
+    // The counts it REPORTS describe work it actually did.
+    expect(r.cohorts).toBe(0);
+    expect(r.photos).toBe(0);
+    expect(r.counts.hash.done).toBe(0);
+    expect(cohorts).toBe(0);
+    // ...and it still reports the cooperative outcome with its counts, rather
+    // than throwing — the property that made a returning checkpoint the right
+    // choice for this loop.
+    expect(r.canceled).toBe(true);
+  });
+
   it("reports progress in MILLISECONDS of work, not photos", async () => {
     seed(4);
     const seen = [];

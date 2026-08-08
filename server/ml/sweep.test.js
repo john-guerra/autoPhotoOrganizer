@@ -379,6 +379,35 @@ describe("checkpoint — preemption's one seam (#257)", () => {
     ]);
   });
 
+  it("stops at the checkpoint when the cancel arrived while it was parked (#344)", async () => {
+    // The scheduler's checkpoint RETURNS rather than throwing when a parked run
+    // is cancelled — deciding what a cancellation MEANS belongs to the body,
+    // which is why this check has to be here. Without it, cancelling a parked
+    // sweep costs a whole further batch (idle -> nextBatch -> process) before
+    // the abort check at the top of the loop comes round again, so cancelling a
+    // parked job would be unbounded where cancelling a running one is not.
+    const job = liveJob();
+    const order = [];
+    let n = 0;
+    await expect(
+      runSweep(job, {
+        nextBatch: () => (n++ < 3 ? [{ id: n }] : []),
+        process: async (rows) => {
+          order.push(`process:${rows[0].id}`);
+          return rows.length;
+        },
+        markFailed: () => {},
+        idle: async () => {},
+        // Stands in for "the user pressed Stop while this was parked".
+        checkpoint: async () => {
+          order.push("checkpoint");
+          job.controller.abort();
+        },
+      })
+    ).rejects.toThrow(/canceled/);
+    expect(order).toEqual(["checkpoint"]);
+  });
+
   it("runs unchanged when no checkpoint is supplied", async () => {
     // Defaulting to a no-op is what lets every existing caller stay untouched
     // and keeps this file runnable with no scheduler at all.

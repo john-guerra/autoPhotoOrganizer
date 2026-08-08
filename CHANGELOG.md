@@ -6,18 +6,36 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
-## 2.21.6
+## 2.21.7
 
 - **The face map's resize handle now works for screen readers too**, and the
   merge name-conflict prompt, the resize handle, the dot-size sliders and the
   panel's memory are all covered by tests that press them rather than just
   checking they appear (#346).
 
-## 2.21.4
+## 2.21.6
 
 - **The face map's settings panel says when its numbers are stale.** If the
   member count and "about Ns" estimate fail to refresh, you now get a message
   saying so instead of a number that has quietly stopped being true (#347).
+
+## 2.21.5
+
+- **Stop actually stops a job that is waiting its turn.** A background scan
+  that had stood aside for something you asked for would accept the Stop
+  button and then keep waiting — indefinitely, if you kept asking for things —
+  with face grouping, purge and retry-failed refusing to run behind it. It now
+  stops when you press Stop, without finishing another batch first, and its
+  row can be dismissed (#344).
+- **The Face Map stays live after Apply.** The first seconds after building a
+  map could turn live preview off by themselves: a second slider move landing
+  while the map was still being prepared was timed as if the preparation were
+  free, so the app concluded previews were too slow to keep up (#345).
+- **The map preview no longer refuses libraries it can map.** With three or
+  four people on the map, Apply worked but the preview failed every time.
+  Preview and Apply now accept exactly the same libraries (#345).
+- **A preview interrupted by a change of settings says so**, instead of
+  reporting an internal worker error for something that is not an error (#345).
 
 ## 2.21.3
 

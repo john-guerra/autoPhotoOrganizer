@@ -98,6 +98,10 @@ export const RESOURCE = Object.freeze({
  * @property {string} [label] what this run IS, in the user's words ("Finding
  *   faces"). Passed to whatever it blocks, so a parked job can say what it is
  *   waiting FOR rather than only that it is waiting.
+ * @property {AbortSignal} [signal] the job's cancellation signal. Without it a
+ *   parked run cannot be stopped at all (#344): the park's only other exit is
+ *   "nothing outranks me", which under sustained scoped requests may never
+ *   come. Optional, because a run with no job behind it has nothing to cancel.
  * @property {(blockedBy: string|null) => void} [onPause] called when this run
  *   parks; `blockedBy` is the label of the run ahead, or null if it had none
  * @property {() => void} [onResume] called when it is let go
@@ -178,6 +182,41 @@ export class Scheduler {
   }
 
   /**
+   * Wait until something changes — OR until this run is cancelled (#344).
+   *
+   * Resolving on abort rather than rejecting is deliberate, and it is the whole
+   * interface between the scheduler and cancellation. The scheduler's job is to
+   * decide when a run may PROCEED; what a cancellation MEANS belongs to the
+   * body, and the bodies genuinely disagree: `runSweep` throws an AbortError,
+   * `runPipeline` breaks and returns `{canceled: true}` with its partial
+   * counts. A scheduler that threw would flatten the second into the first and
+   * discard exactly the counts `registry.stopped`'s doc-comment exists to
+   * preserve. So this returns, and every caller's own abort check — which
+   * already sits immediately after `await checkpoint()` — decides.
+   *
+   * @param {Run} run
+   */
+  #park(run) {
+    const signal = run.signal;
+    return new Promise((resolve) => {
+      if (!signal) {
+        this.#waiters.push(resolve);
+        return;
+      }
+      const onAbort = () => resolve();
+      // The waiter stays queued when an abort wins the race; `#wake()` drains
+      // it later and resolves an already-settled promise, which is a no-op.
+      // Removing the listener matters more: a long-lived run parks and wakes
+      // many times, and `once` only covers the abort that never comes.
+      this.#waiters.push(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      });
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  /**
    * Run `body` under this scheduler.
    *
    * `body` receives `{ checkpoint }` and is expected to await it at a point
@@ -205,6 +244,21 @@ export class Scheduler {
       // an await that may never resolve is the deadlock.
       this.#release(run);
       for (;;) {
+        // A cancelled run stops waiting for its turn — there is no turn it
+        // still wants (#344). Checked at the TOP so it also covers the run that
+        // was cancelled while running, which must not take the lease and pay
+        // for another batch on the way out.
+        if (run.signal?.aborted) {
+          // Leave the lease alone: it was released above and taking it now
+          // would hand the next waiter a holder that is already unwinding.
+          // `onResume` still fires, because this run is no longer PARKED and a
+          // job left flagged parked can never be dismissed (jobs/registry.js).
+          if (parked) {
+            parked = false;
+            run.onResume?.();
+          }
+          return;
+        }
         // Two reasons to wait, one loop: someone more urgent is outstanding, or
         // someone else holds the resource this run needs.
         const blocker = this.#blocker(run) ?? this.#leaseHolder(run);
@@ -213,7 +267,7 @@ export class Scheduler {
           parked = true;
           run.onPause?.(blocker.label ?? null);
         }
-        await new Promise((resolve) => this.#waiters.push(resolve));
+        await this.#park(run);
       }
       // NO AWAIT between the check above and the take below, and that is the
       // whole of the mutual exclusion. JavaScript is single-threaded, so two
