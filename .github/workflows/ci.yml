@@ -73,7 +73,7 @@ jobs:
       # The browser binary is ~130MB and was re-downloaded on every single run.
       # Keyed on the lockfile, since that is what pins the Playwright version —
       # a key that ignored it would serve a cached browser to a bumped client.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
