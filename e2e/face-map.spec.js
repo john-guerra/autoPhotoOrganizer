@@ -200,6 +200,57 @@ test.describe("face map @p1", () => {
     expect(errors).toEqual([]);
   });
 
+  test("says so when the panel cannot refresh that count (#347)", async ({
+    page,
+  }) => {
+    // The count above is the whole reason the panel meets contract 1 — so a
+    // refresh that fails and says nothing leaves the user planning a rebuild
+    // around a number that is no longer true.
+    //
+    // It failed in BOTH directions and neither was visible. All three
+    // `onoptions` call sites fire without awaiting, so a thrown fetch became an
+    // unhandled rejection; and `loadMapOptions` guarded its assignment with a
+    // bare `if (res.ok)`, so a non-2xx was swallowed without even that.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+
+    // Break it only AFTER the view has loaded: what is under test is the
+    // gear's own unawaited call, not the working-set loader's awaited one.
+    await page.route("**/api/projections/options*", (route) => route.abort());
+    await faceMap.openGear(page);
+
+    // Specific over generic (CLAUDE.md): the message names what is now
+    // untrustworthy and what to do, rather than "Error".
+    await expect(faceMap.notice(page)).toContainText(
+      /couldn't refresh the map settings/i
+    );
+    await expect(faceMap.notice(page)).toContainText("out of date");
+
+    // Now the other half — a server that answers, badly. This one used to be
+    // the quieter of the two, because `if (res.ok)` is not an error path.
+    await page.unroute("**/api/projections/options*");
+    await page.route("**/api/projections/options*", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "no" }),
+      })
+    );
+    await faceMap.gear(page).click(); // close
+    await faceMap.openGear(page); // and reopen, which refreshes
+    await expect(faceMap.notice(page)).toContainText("(503)");
+
+    // The failed requests are this test's own doing — never assert a bare []
+    // in a spec that stubs a failure (docs/AGENT-NOTES.md).
+    expect(
+      errors.filter(
+        (e) =>
+          !/projections\/options|ERR_FAILED|Failed to load resource/i.test(e)
+      )
+    ).toEqual([]);
+  });
+
   test("the gear opens on the SERVER's defaults, not a copy of them", async ({
     page,
   }) => {
@@ -573,6 +624,51 @@ test.describe("face map @p1", () => {
     expect(errors.filter((e) => !/409/.test(e))).toEqual([]);
   });
 
+  test("...and the name you pick then goes through (#346)", async ({
+    page,
+  }) => {
+    // The refusal above stops at "the prompt appears". The path a user
+    // actually takes — pick a name, press Merge again — was proven only at the
+    // API (`projectionRoutes.test.js`). A chip that renders and does nothing
+    // when clicked is the exact bug docs/TESTING.md was written about, and
+    // there is nothing between the prompt and the merge but that click.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+
+    await page.request.put("/api/ml/people/1", { data: { name: "Mafe" } });
+    await page.request.put("/api/ml/people/2", { data: { name: "John" } });
+    await page.reload();
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+
+    await faceMap.lasso(page, [
+      [0.05, 0.05],
+      [0.95, 0.05],
+      [0.95, 0.95],
+      [0.05, 0.95],
+    ]);
+    const picked = (await faceMap.chipIds(page)).length;
+    await faceMap.merge(page).click();
+    await expect(faceMap.conflict(page)).toBeVisible();
+
+    // Choose one of the two names it offered, and the prompt gets out of the
+    // way — a resolved conflict that stays on screen reads as unresolved.
+    await faceMap.conflictChoice(page, "Mafe").click();
+    await expect(faceMap.conflict(page)).toHaveCount(0);
+    await expect(faceMap.name(page)).toHaveValue("Mafe");
+
+    await faceMap.merge(page).click();
+
+    // It really merged: everyone in the lasso is now one person, under the
+    // name that was chosen — and the merge is undoable, which is the other
+    // half of "destructive things are recoverable".
+    await expect(faceMap.undo(page)).toContainText("Mafe", { timeout: 30_000 });
+    expect(await personCount(page)).toBe(PEOPLE - picked + 1);
+    expect(errors.filter((e) => !/409/.test(e))).toEqual([]);
+  });
+
   test("stays reachable by keyboard when it has not earned a button", async ({
     page,
   }) => {
@@ -671,6 +767,197 @@ test.describe("face map @p1", () => {
     await expect(
       overlay.getByText("Clear the lasso and empty the tray")
     ).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("the panel is as wide as you drag it, by mouse or by key (#346)", async ({
+    page,
+  }) => {
+    // "The panel is as wide as you drag it" is a line in the 2.21.0 changelog
+    // and had no test at any tier. `mapSettings.test.js` unit-tests
+    // `clampPanelWidth`, but `startResize` binds pointermove/pointerup to
+    // WINDOW — so the handle could have been wired to nothing at all and every
+    // suite would have stayed green. That is `docs/TESTING.md`'s founding
+    // example: a control verified to APPEAR and never verified to WORK.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.openGear(page);
+
+    const start = await faceMap.panelWidth(page);
+    await faceMap.dragResizer(page, 120);
+    const wider = await faceMap.panelWidth(page);
+    // Not `start + 120` exactly: the handle has width of its own and the drag
+    // is measured from its centre. What matters is that it followed the mouse.
+    expect(wider).toBeGreaterThan(start + 90);
+
+    // It clamps rather than eating the map. PANEL_MAX is 640 (mapSettings.js),
+    // and that is the flex-basis — the measured box carries the panel's own
+    // padding and border on top, which is why the CLAMP is asserted on
+    // `aria-valuenow` (the intent) and the DRAG on the box (the outcome).
+    await faceMap.dragResizer(page, 2000);
+    await expect(faceMap.resizer(page)).toHaveAttribute("aria-valuenow", "640");
+    const maxed = await faceMap.panelWidth(page);
+    // A second drag past the ceiling must not move it again.
+    await faceMap.dragResizer(page, 2000);
+    expect(await faceMap.panelWidth(page)).toBe(maxed);
+    // And the map keeps a real viewport on the other side of the clamp —
+    // measured against the view's own width, not the canvas, which does not
+    // exist until a map has been built.
+    //
+    // A RATIO, not a pixel floor, and the difference is a finding: PANEL_MAX
+    // is an absolute 640px, so at this viewport (1280 less the sidebar) the
+    // widest panel leaves the map **285px**. That is a quarter of the view for
+    // the thing the view is named after. It is not what this test is about, so
+    // it is filed rather than changed here.
+    const room = (await faceMap.root(page).boundingBox()).width - maxed;
+    expect(
+      room / (await faceMap.root(page).boundingBox()).width
+    ).toBeGreaterThan(0.25);
+
+    // Reachable without a mouse: 16px a press, and the same clamp applies.
+    await faceMap.resizer(page).focus();
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await expect(faceMap.resizer(page)).toHaveAttribute("aria-valuenow", "608");
+    expect(await faceMap.panelWidth(page)).toBe(maxed - 32);
+    expect(errors).toEqual([]);
+  });
+
+  test("the dot-size sliders redraw the map without rebuilding it (#346)", async ({
+    page,
+  }) => {
+    // The panel promises these "apply straight away — they do not rebuild the
+    // map". Both halves are assertions: the drawing changes, and the run does
+    // not. Neither is reachable from any other tier — the map is a canvas.
+    const errors = trackPageErrors(page);
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.build_(page);
+    await faceMap.openGear(page);
+    await expect(faceMap.count(page)).toContainText(String(PEOPLE));
+
+    const before = await faceMap.ink(page);
+    // Everyone in the fixture is in the same number of photos, so the SMALLEST
+    // radius is the one that moves every dot. Driving the largest alone would
+    // change nothing and the test would pass by drawing the same picture.
+    await faceMap.minRadius(page).fill("14");
+    await faceMap.minRadius(page).dispatchEvent("input");
+    await expect.poll(() => faceMap.ink(page)).toBeGreaterThan(before * 1.5);
+
+    // No rebuild: the count is the same map, not a new one.
+    await expect(faceMap.count(page)).toContainText(String(PEOPLE));
+    expect(errors).toEqual([]);
+  });
+
+  test("the panel opens the way you left it (#346)", async ({ page }) => {
+    // Every control in the panel writes through a `$effect` to localStorage,
+    // and NONE of that wiring was tested — an effect that never fires is the
+    // house failure mode: it does nothing and reports success.
+    //
+    // Deliberately NOT `openApp`. It registers an init script that calls
+    // `localStorage.clear()` on EVERY navigation, so the very reload meant to
+    // prove persistence wipes what is being proved. The same trap
+    // `applyMinRating` above documents, from the other side.
+    const errors = trackPageErrors(page);
+    await page.goto("/");
+    await expect(page.locator(".thumb").first()).toBeVisible();
+    await views.show(page, "face-map");
+    await faceMap.openGear(page);
+
+    // The defaults first, since `autoApply`'s matters: on a library too big to
+    // preview, ON would start a job for every change.
+    await expect(faceMap.autoApply(page)).not.toBeChecked();
+    await expect(faceMap.autoFit(page)).toBeChecked();
+
+    // Four settings, three mechanisms (pointer drag, range input, checkbox),
+    // one reload — one clever fixture beats five specs (docs/TESTING.md).
+    await faceMap.dragResizer(page, -60);
+    const width = await faceMap.panelWidth(page);
+    await faceMap.minRadius(page).fill("9");
+    await faceMap.minRadius(page).dispatchEvent("input");
+    await faceMap.autoApply(page).check();
+    await faceMap.autoFit(page).uncheck();
+
+    await page.reload();
+    await expect(page.locator(".thumb").first()).toBeVisible();
+    await views.show(page, "face-map");
+    await faceMap.openGear(page);
+
+    expect(await faceMap.panelWidth(page)).toBe(width);
+    await expect(faceMap.minRadius(page)).toHaveValue("9");
+    await expect(faceMap.autoApply(page)).toBeChecked();
+    await expect(faceMap.autoFit(page)).not.toBeChecked();
+
+    // What is NOT asserted, on purpose: that `autoApply` changes behaviour.
+    // At this fixture's size the map is always fast enough to be `live`, so a
+    // tuning slider previews and never reaches the rebuild branch whatever the
+    // checkbox says. Asserting it here would be asserting nothing. The branch
+    // it does govern is covered by "changing the minimum faces rebuilds by
+    // itself", which reaches it through NEEDS_REBUILD instead.
+    expect(errors).toEqual([]);
+  });
+
+  test("a selection follows the PEOPLE when the map re-indexes (#346)", async ({
+    page,
+  }) => {
+    // This is the test #348 shipped without, and the reason it could not be
+    // written was the fixture rather than the app.
+    //
+    // The selection was keyed by array INDEX. `pointsForRun` orders by
+    // `ref_id` and `seedFaces`'s thin cohort was numbered AFTER the main one,
+    // so a threshold change only ever APPENDED — no index ever moved, and four
+    // attempts at this test passed with the bug fully present.
+    //
+    // `sparseEvery` interleaves instead: every third person is thin, so
+    // raising the minimum removes people from the MIDDLE and shifts every
+    // index after them.
+    const errors = trackPageErrors(page);
+    await seedFaces(PEOPLE, FACES_EACH, { sparseEvery: 3, sparseFaces: 2 });
+
+    await openApp(page);
+    await views.show(page, "face-map");
+    await faceMap.openGear(page);
+
+    // Below every threshold in play, so the map starts with all 120 — thin
+    // people interleaved among the rest.
+    await faceMap.minFacesNum(page).fill("2");
+    await faceMap.minFacesNum(page).blur();
+    await faceMap.build_(page);
+    await expect(faceMap.count(page)).toContainText(String(PEOPLE));
+
+    // HALF the map, not all of it — and that is the whole trick. A selection
+    // of everyone is invariant under re-indexing: indices 0..79 still name all
+    // 80 survivors, and the fifth version of this test passed with the bug
+    // present for exactly that reason. Only a PARTIAL selection can tell
+    // "these people" from "these positions".
+    await faceMap.lasso(page, [
+      [0.02, 0.02],
+      [0.5, 0.02],
+      [0.5, 0.98],
+      [0.02, 0.98],
+    ]);
+    const before = await faceMap.chipIds(page);
+    expect(before.length).toBeGreaterThan(10);
+    expect(before.length).toBeLessThan(PEOPLE - 10);
+
+    // Raise the threshold: the 40 thin people leave, from the middle.
+    await faceMap.minFacesNum(page).fill(String(FACES_EACH));
+    await faceMap.minFacesNum(page).blur();
+    await expect(faceMap.count(page)).toContainText(String(PEOPLE - 40), {
+      timeout: 60_000,
+    });
+
+    // The tray must now hold exactly the people it held, minus the ones no
+    // longer on the map — never someone else who inherited their index.
+    const gone = new Set(
+      Array.from({ length: PEOPLE }, (_, i) => i + 1)
+        .filter((id) => id % 3 === 0)
+        .map(String)
+    );
+    const after = await faceMap.chipIds(page);
+    expect(after).toEqual(before.filter((id) => !gone.has(id)));
+    expect(after.length).toBeGreaterThan(0);
     expect(errors).toEqual([]);
   });
 });

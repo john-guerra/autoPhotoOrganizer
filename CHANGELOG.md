@@ -6,6 +6,19 @@ minor (second) number is bumped only when a new package is generated, and the
 `-alpha` suffix stays until a stable release is cut. Entries are short and
 user-facing — what you can now do, not how it's built.
 
+## 2.21.7
+
+- **The face map's resize handle now works for screen readers too**, and the
+  merge name-conflict prompt, the resize handle, the dot-size sliders and the
+  panel's memory are all covered by tests that press them rather than just
+  checking they appear (#346).
+
+## 2.21.6
+
+- **The face map's settings panel says when its numbers are stale.** If the
+  member count and "about Ns" estimate fail to refresh, you now get a message
+  saying so instead of a number that has quietly stopped being true (#347).
+
 ## 2.21.5
 
 - **Stop actually stops a job that is waiting its turn.** A background scan

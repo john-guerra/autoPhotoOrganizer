@@ -456,6 +456,27 @@
   const currentParams = () => ({ ...draft, algorithm: algo });
 
   /**
+   * Ask App to refresh the panel's counts for the parameters as they stand.
+   *
+   * Deliberately not awaited by any of its three callers — opening the gear,
+   * moving the minimum-faces slider, switching algorithm — because none of
+   * them should stall on it. **The user-visible failure is App's job** and it
+   * does it (`loadMapOptions` sets `notice`); this wrapper exists only so an
+   * unawaited promise can never escape as an unhandled rejection, which is
+   * console-only noise here and a `trackPageErrors` failure in any spec that
+   * provokes it (#347).
+   */
+  function refreshOptions() {
+    try {
+      Promise.resolve(onoptions?.(currentParams())).catch((e) => {
+        console.error("face map: options refresh failed", e);
+      });
+    } catch (e) {
+      console.error("face map: options refresh failed", e);
+    }
+  }
+
+  /**
    * A tuning control moved (#327).
    *
    * `live` means the slider is still being dragged. The map follows only when
@@ -761,7 +782,7 @@
       aria-expanded={gearOpen}
       onclick={() => {
         gearOpen = !gearOpen;
-        if (gearOpen) onoptions?.(currentParams());
+        if (gearOpen) refreshOptions();
       }}
     >
       ⚙ Map settings
@@ -824,7 +845,7 @@
             draft = { ...draft, minFaces: v };
             saveSettings(draft);
             // Refresh the member count shown beside the control...
-            onoptions?.(currentParams());
+            refreshOptions();
             // ...and rebuild, which the threshold does by itself: it cannot be
             // previewed, so without this it silently did nothing until Rebuild
             // was pressed.
@@ -854,7 +875,7 @@
                   algo = a.id;
                   // Refetch so the panel below shows THIS algorithm's
                   // parameters; the schema is per-algorithm.
-                  onoptions?.(currentParams());
+                  refreshOptions();
                   // And route through the same scheduler as every other
                   // setting, so switching algorithm animates like the rest
                   // rather than sitting still until Apply is pressed.
@@ -981,10 +1002,17 @@
       </aside>
       <!-- Drag to resize. A separate element rather than a CSS `resize`,
            which cannot persist and cannot be clamped. -->
+      <!-- `role="separator"`, not the implicit `button` role: a focusable
+           separator is the window-splitter pattern, and it is the ONLY role
+           that supports aria-valuenow/min/max. On a button they were ignored
+           by assistive tech and warned about by the compiler on every build —
+           three warnings that had been scrolling past since #327. -->
       <button
         type="button"
         class="resizer"
         data-testid="map-panel-resizer"
+        role="separator"
+        aria-orientation="vertical"
         aria-label="Resize the settings panel"
         aria-valuenow={panelWidth}
         aria-valuemin={PANEL_MIN}
@@ -1111,6 +1139,8 @@
           {#each nameChoices as c (c)}
             <button
               class="link"
+              data-testid="conflict-choice"
+              data-name={c}
               onclick={() => {
                 nameDraft = c;
                 nameChoices = null;

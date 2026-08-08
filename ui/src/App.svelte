@@ -2806,9 +2806,36 @@
     if (viewId === FACE_MAP.id) untrack(() => loadMapVisible());
   });
 
+  /**
+   * Refresh the gear panel's member count, algorithm list and parameter schema.
+   *
+   * **Never throws, and says so when it fails** (#347). Three call sites in
+   * `FaceMapView` fire this WITHOUT awaiting it — opening the gear, moving the
+   * minimum-faces slider, switching algorithm — because none of them wants to
+   * block on it. So a rejection here is an unhandled promise: console-only,
+   * invisible, and the member count and the "about Ns" estimate go quietly
+   * stale while the user plans a rebuild around them. A non-2xx was worse than
+   * a throw, because `if (res.ok)` swallowed it without a sound.
+   *
+   * Same shape as `loadMapVisible` above, deliberately: catch, set `mapNotice`,
+   * leave the stale data visible rather than blanking the panel — a count that
+   * is out of date and labelled as such beats no count at all.
+   */
   async function loadMapOptions(params = mapParams) {
-    const res = await fetch(`/api/projections/options?${mapQuery(params)}`);
-    if (res.ok) mapOptions = await res.json();
+    const stale =
+      "the member count and time estimate may be out of date — reopen the panel to retry";
+    try {
+      const res = await fetch(`/api/projections/options?${mapQuery(params)}`);
+      if (!res.ok) {
+        mapNotice = `Couldn't refresh the map settings (${res.status}) — ${stale}.`;
+        return false;
+      }
+      mapOptions = await res.json();
+      return true;
+    } catch (e) {
+      mapNotice = `Couldn't refresh the map settings: ${e.message} — ${stale}.`;
+      return false;
+    }
   }
 
   /**
