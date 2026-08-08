@@ -8,6 +8,10 @@ user-facing — what you can now do, not how it's built.
 
 ## 2.21.7
 
+**First packaged build since 2.20.1** — everything below down to 2.20.2 ships
+in it. The headline is the Face Map you can explore (2.21.0), and photos no
+longer piling into 1984 when you sort by Created (2.21.3).
+
 - **The face map's resize handle now works for screen readers too**, and the
   merge name-conflict prompt, the resize handle, the dot-size sliders and the
   panel's memory are all covered by tests that press them rather than just
@@ -57,8 +61,16 @@ user-facing — what you can now do, not how it's built.
 
 ## 2.21.0
 
-First packaged build since 2.20.1. Mostly the Face Map, which went from a
-feature you had to already understand to one you can explore.
+Mostly the Face Map, which went from a feature you had to already understand
+to one you can explore.
+
+> This entry used to open "First packaged build since 2.20.1." It was not one.
+> The minor bump was taken in anticipation and no `v2.21.0` tag was ever
+> pushed, so no artifact was ever built — which meant the version that claimed
+> to be a release was, for three weeks, the one version nobody could install.
+> **2.21.7 is the first packaged build since 2.20.1.** The lesson is the same
+> one this project keeps relearning: a claim written before the fact reads
+> exactly like a record of it afterwards.
 
 - **The Face Map's settings sit beside the map, and the sliders move it as you
   drag.** They used to be a popover on top of the map, so you could not see
