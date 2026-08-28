@@ -49,7 +49,7 @@
     "i18n-iso-countries": "^7.14.0",
     "ml-pca": "^4.1.1",
     "multi-auto-select": "^0.0.13",
-    "onnxruntime-node": "^1.27.0",
+    "onnxruntime-node": "^1.29.0",
     "reactive-widget-helper": "^0.0.4",
     "sharp": "^0.35.3",
     "smart-labels": "^0.0.14",
